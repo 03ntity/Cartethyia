@@ -108,6 +108,12 @@ export function useShareApiKey() {
       }),
     onSuccess: async (_result, { keyId }) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.shareLink(keyId) });
+      // The overview renders the key from the same list the panel does, and a
+      // regenerated link leaves that row's share state changed. Invalidating
+      // only the link cached the key list as it was before the rotate, so the
+      // overview kept showing pre-regeneration data for the key that had just
+      // changed.
+      await queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.all });
     },
   });
 }
