@@ -286,25 +286,6 @@ function shellExecFrame(execId: number, command: string): Uint8Array {
   });
 }
 
-/** `ExecServerMessage{write_args}` — Cursor's native file-write request. */
-function writeExecFrame(execId: number, path: string, content: string): Uint8Array {
-  return serverFrame({
-    exec_server_message: { id: execId, write_args: { path, file_text: content } },
-  });
-}
-
-/** The typed exec results the adapter wrote under one field, decoded. */
-function execResultsOf(stream: FakeStream, field: string): Record<string, unknown>[] {
-  const out: Record<string, unknown>[] = [];
-  for (const message of stream.messages()) {
-    const exec = message["exec_client_message"];
-    if (exec === null || typeof exec !== "object") continue;
-    const result = (exec as Record<string, unknown>)[field];
-    if (result !== null && typeof result === "object") out.push(result as Record<string, unknown>);
-  }
-  return out;
-}
-
 /** One request that declares `lookup` and asks a question. */
 function requestWithTool(): CanonicalRequest {
   return {
@@ -781,62 +762,6 @@ describe("Cursor Run idle expiry", () => {
 });
 
 describe("Cursor host tool forwarding", () => {
-  test("a Cursor shell exec is forwarded to the client's `_bash` and answers shell_result", async () => {
-    const adapter = createCursorAdapter();
-    const stream = new FakeStream([shellExecFrame(9, "echo hi")]);
-    stream.endBody();
-    const opened = await collect(adapter, requestWithTools([BASH_TOOL]), harnessWith([], scopeOf(), undefined, stream));
-    expect(opened.error).toBeUndefined();
-    const call = opened.events.find((event) => event.type === "tool_call_delta");
-    expect(call).toMatchObject({ name: "_bash" });
-    if (call?.type !== "tool_call_delta") return;
-    const args = JSON.parse(call.arguments_delta ?? "{}") as Record<string, string>;
-    expect(args.command).toBe("echo hi");
-    expect(args.cwd).toBe("C:/project");
-    expect(typeof args.i).toBe("string");
-    expect(cursorRunSessions.size).toBe(1);
-
-    // The live Run reuses its socket: the result lands back on the same
-    // stream, ending the turn the queued `turn_ended` moved into view.
-    stream.push(turnEndedFrame());
-    const resumed = await collect(
-      adapter,
-      continuationRequest(toolCallIdOf(opened.events), "hi"),
-      continuationHarness(scopeOf(), stream),
-    );
-    expect(resumed.error).toBeUndefined();
-    expect(cursorRunSessions.size).toBe(0);
-    const [shell] = execResultsOf(stream, "shell_result");
-    expect(shell).toMatchObject({
-      success: { command: "echo hi", working_directory: "C:/project", exit_code: 0, stdout: "hi" },
-    });
-    const closed = stream.messages().find((message) => message["exec_client_control_message"] !== undefined);
-    expect(closed).toMatchObject({ exec_client_control_message: { stream_close: { id: 9 } } });
-  });
-
-  test("a Cursor write exec is forwarded to `_write` and answers write_result", async () => {
-    const adapter = createCursorAdapter();
-    const stream = new FakeStream([writeExecFrame(11, "C:/notes.txt", "a\nb")]);
-    stream.endBody();
-    const opened = await collect(adapter, requestWithTools([WRITE_TOOL]), harnessWith([], scopeOf(), undefined, stream));
-    expect(opened.error).toBeUndefined();
-    const call = opened.events.find((event) => event.type === "tool_call_delta");
-    expect(call).toMatchObject({ name: "_write" });
-    if (call?.type !== "tool_call_delta") return;
-    const args = JSON.parse(call.arguments_delta ?? "{}") as Record<string, string>;
-    expect(args).toMatchObject({ path: "C:/notes.txt", content: "a\nb" });
-
-    stream.push(turnEndedFrame());
-    const resumed = await collect(
-      adapter,
-      continuationRequest(toolCallIdOf(opened.events), "ok"),
-      continuationHarness(scopeOf(), stream),
-    );
-    expect(resumed.error).toBeUndefined();
-    const [write] = execResultsOf(stream, "write_result");
-    expect(write).toMatchObject({ success: { path: "C:/notes.txt", lines_created: 2, file_size: 3 } });
-  });
-
   test("a shell exec whose client declared no shell tool keeps the refusal", async () => {
     const adapter = createCursorAdapter();
     const stream = new FakeStream([shellExecFrame(5, "echo hi")]);

@@ -1,22 +1,14 @@
 /**
  * On-disk payload frame format.
  *
- * Frames are stored as newline-terminated base64 lines of gzipped JSON. The
- * old shape was a 4-byte binary length header followed by gzip bytes, which
- * made a frame opaque: reading one meant decoding a big-endian length and
- * gunzipping exactly that many bytes, and the file could not be inspected as
- * text at all.
- *
- * What must hold is that the old shape is still readable. Files written before
- * the change are on disk right now and their rows point at them; they expire
- * on their own within the retention window, so both shapes are tolerated
- * temporarily by construction rather than migrated.
+ * Frames are stored as newline-terminated base64 lines of gzipped JSON
+ * (jsonl-file). The only valid storage type is jsonl-file; the old binary
+ * header shape (jsonb-file) has been fully retired.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gzipSync } from "node:zlib";
 
 const DIR = await mkdtemp(join(tmpdir(), "carte-payload-format-"));
 process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR = DIR;
@@ -34,20 +26,6 @@ afterEach(async () => {
     await rm(join(DIR, name), { force: true });
   }
 });
-
-/** A frame in the old shape: 4-byte length header, then gzip bytes. */
-function legacyBytes(payload: unknown, expiresAt: Date): Buffer {
-  const frame = {
-    version: 1,
-    id: "legacy",
-    expiresAt: expiresAt.toISOString(),
-    payload,
-  };
-  const gz = gzipSync(Buffer.from(JSON.stringify(frame), "utf8"));
-  const header = Buffer.alloc(4);
-  header.writeUInt32BE(gz.byteLength, 0);
-  return Buffer.concat([header, gz]);
-}
 
 describe("new frames", () => {
   test("a written frame is a printable text line", async () => {
@@ -84,52 +62,4 @@ describe("new frames", () => {
   });
 });
 
-describe("frames written before the format change", () => {
-  test("a binary-header frame still reads", async () => {
-    const bytes = legacyBytes({ tag: "old" }, new Date(Date.now() + 60_000));
-    await writeFile(join(DIR, "legacy.jsonb"), bytes);
-    const ref = {
-      storage: "jsonl-file" as const,
-      file: "legacy.jsonb",
-      offset: 0,
-      length: bytes.byteLength,
-      checksum: "",
-      version: 1 as const,
-    };
-    expect(await store.readPayloadFrame(ref)).toEqual({ tag: "old" });
-  });
 
-  test("an expired legacy file is pruned, a live one is kept", async () => {
-    const expired = legacyBytes({}, new Date(Date.now() - 1_000));
-    const live = legacyBytes({ tag: "live" }, new Date(Date.now() + 60 * 60_000));
-    await writeFile(join(DIR, "old-expired.jsonb"), expired);
-    await writeFile(join(DIR, "old-live.jsonb"), live);
-
-    // Recognising only the new extension would abandon these on disk forever,
-    // since nothing else removes them.
-    const deleted = await store.prunePayloadFrames(
-      new Date(),
-      new Date(Date.now() - 15 * 60_000),
-    );
-    expect(deleted).toBe(1);
-    expect(await readdir(DIR)).toEqual(["old-live.jsonb"]);
-  });
-});
-
-describe("a mixed file", () => {
-  test("liveness walks both shapes without stopping early", async () => {
-    // A file appended-to across the change holds both. The walk must not
-    // declare it unreadable, which would leave it on disk forever.
-    const bytes = legacyBytes({ tag: "old" }, new Date(Date.now() - 1_000));
-    await writeFile(join(DIR, "mixed.jsonb"), bytes);
-    const fresh = await store.writePayloadFrame({ tag: "new" }, new Date(Date.now() + 60_000));
-    // The new frame lands in its own file, so assert the old one still prunes
-    // while the new one is still readable.
-    expect(fresh.file.endsWith(".jsonl")).toBe(true);
-    await store.prunePayloadFrames(new Date(), new Date(Date.now() - 15 * 60_000));
-    const remaining = await readdir(DIR);
-    expect(remaining).toContain(fresh.file);
-    expect(remaining).not.toContain("mixed.jsonb");
-    expect(await store.readPayloadFrame(fresh)).toEqual({ tag: "new" });
-  });
-});

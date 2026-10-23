@@ -69,7 +69,7 @@ dbDescribe("default gateway API key", () => {
     });
   });
 
-  test("recognizes and promotes an unflagged legacy default key", async () => {
+  test("a key with isDefault:false is not treated as default regardless of label", async () => {
     await withRollback(async (client) => {
       const tenant = await createTenant(client, RUN_ID);
       const key = await createApiKey(client, {
@@ -84,20 +84,11 @@ dbDescribe("default gateway API key", () => {
         admissionService: { purgeKey: async () => undefined },
       });
 
+      // isDefault is determined solely by the persisted flag — label no longer used.
       expect((await operations.listKeys(owner(tenant.tenantId))).find((item) => item.id === key.id)?.isDefault)
-        .toBe(true);
-      await expect(operations.revokeKey(owner(tenant.tenantId), key.id)).rejects.toThrow(
-        /cannot be deleted/i,
-      );
-      const updated = await operations.updateKey(owner(tenant.tenantId), key.id, {
-        label: "Production gateway",
-      });
-      expect(updated.isDefault).toBe(true);
-      const stored = await client.query<{ label: string; is_default: boolean }>(
-        `select label, is_default from api_keys where id = $1`,
-        [key.id],
-      );
-      expect(stored.rows[0]).toEqual({ label: "Production gateway", is_default: true });
+        .toBe(false);
+      // Revoke succeeds because it is not flagged as default.
+      await operations.revokeKey(owner(tenant.tenantId), key.id);
     });
   });
 
@@ -253,7 +244,7 @@ dbDescribe("default gateway API key", () => {
     });
   });
 
-  test("share templates default to sh-carte- and migrate the old rk_ prefix", async () => {
+  test("share templates default to sh-carte-; rk_ prefix is kept as-is (no migration)", async () => {
     await withRollback(async (client) => {
       const tenant = await createTenant(client, RUN_ID);
       const db = drizzle(client as never, { schema: fullSchema });
@@ -275,7 +266,7 @@ dbDescribe("default gateway API key", () => {
         keyPrefix: "rk_",
         scopes: [...TENANT_KEY_SCOPES],
       });
-      expect(legacy.keyPrefix).toBe("sh-carte-");
+      expect(legacy.keyPrefix).toBe("rk_");
     });
   });
 });
