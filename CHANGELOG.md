@@ -8,6 +8,123 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.5.5] - 2026-10-23
+
+### Added
+
+- **Payload retention is a per-tenant choice.** Captured bodies used to be kept
+  for 15 minutes for every tenant, in a resolver the configuration spec did not
+  even declare. Settings -> Privacy now offers 15 minutes, 30 minutes, 1 hour,
+  6 hours, 12 hours, 1 day, and 7 days, and the deployment variable
+  (`CARTETHYIA_TELEMETRY_PAYLOAD_RETENTION_MS`) becomes the default rather than
+  the only value. Seven days is the ceiling.
+
+  A longer window costs disk, and the panel says so from one hour up: every
+  captured request keeps a gzipped copy of up to four bodies, so a week of
+  retention is a week of bodies on disk.
+
+- **Model-abuse bans can be scoped and timed.** A ban used to be address-only
+  and always one duration. It is now keyed on the address **and** the API key
+  that was used, so banning one caller behind a shared address or a share link
+  leaves every other caller on that address working. Durations are 1 hour,
+  6 hours, 12 hours, 1 day, 7 days, and Permanent; the request-detail button
+  bans for one hour and the caret beside it opens the rest.
+
+  "Ban every key from this IP" is still available, and is now an explicit
+  choice rather than the only behaviour — which is what an operator wants when
+  the address, not the credential, is the problem. The ban list names the key
+  each ban is scoped to and says "This key only" or "All keys from this IP".
+
+  **One gap, stated rather than hidden:** a share key's children are issued per
+  recipient, so a banned recipient can enroll a new child key from the same
+  address and continue. Closing that would ban every recipient behind the same
+  NAT — the exact collateral this scoping exists to avoid.
+
+- **The request list updates as requests finish.** The Usage page request list
+  polls no more: each completed request pushes to the open dashboard over SSE
+  and the list refetches immediately.
+
+- **Usage cards open on millions.** The four token cards defaulted to raw
+  counts, which overflowed the card on a busy tenant. They now open on `M`, and
+  a value too small for the chosen unit falls back to its exact count instead of
+  reading `0M`.
+
+### Fixed
+
+- **`forceDisableCooldown` reaches hard cooldowns.** The override was stamping
+  the very flags the eligibility evaluator uses to exclude a hard cooldown, so
+  it only ever affected soft cooldowns — which were already eligible. An account
+  parked for a spent quota or a policy block is now reachable, which is the case
+  an operator actually wants to override.
+
+- **A saved setting takes effect immediately.** Two preferences are read on the
+  request path from the cached route snapshot, and a save did not invalidate it:
+  the row was correct while `/v1/*` kept using the revision built before the
+  save, so the toggle looked broken. Settings now invalidate on save.
+
+- **Cursor's exhausted accounts cool down.** `quota_exceeded` was wrapped as a
+  transport failure regardless of what Cursor put in `stop_details`, so the
+  classifier never saw it and an out-of-quota account was never parked. The
+  real code is now read and promoted, so quota and authentication failures cool
+  the account they came from.
+
+- **Share child keys get their own rate window.** RPM and concurrency ran on the
+  parent's counter, so one recipient hitting its limit cooled every other
+  recipient of the same link. Each child now has an independent window and
+  slot. Token budgets stay on the parent — that shared pool is the operator's
+  control.
+
+- **A captured body is no longer dropped on write.** The frame's key list named
+  four body surfaces while the record builds five, so the fifth was serialized
+  and then discarded: a capture whose client response sat in the legacy slot
+  came back with that panel empty.
+
+- **Disk housekeeping reports what is really there.** The panel counted payload
+  frames reclaimable after 15 minutes even when a tenant had chosen a longer
+  window, so it offered a reclaim that always reported nothing to reclaim. It
+  now judges against the longest retention a tenant may choose. The same bound
+  covers the prune pass, which could otherwise delete a file still holding
+  frames their rows addressed.
+
+### Changed
+
+- **Compatibility shims are gone.** Backward-compat paths removed across the
+  board: the `jsonb-file` payload storage type and its binary length header,
+  the legacy backup rewrites (user-agent mapping, `bypass_proxy`,
+  `model_allowlist`/`model_denylist`, label-based default-key promotion), and
+  the resolver prefs behind the retired telemetry compaction. Two environment
+  variables (`CARTETHYIA_TELEMETRY_WINDOW_MINUTES`,
+  `CARTETHYIA_TELEMETRY_COMPACT_MAX_FILES`) are no longer accepted — they were
+  inert, so a deployment still setting them boots unchanged only if it drops
+  them.
+
+- **The disk panel's buckets are renamed to what the files are.** `Hourly
+  request files` and `Daily summaries` are now `Request event files` and `Day
+  indexes`, matching the per-day index. Event files were never individually
+  reclaimable; they go with their index at retention.
+
+- **The gateway's 401 no longer tells you to rotate.** Rotation moved to the
+  public model surface, where the seeded default key is what normally fails. On
+  a proxy request it sent operators to rotate a key they were never using.
+
+### Performance
+
+- **Environment resolvers are read once.** Ten cooldown resolvers read
+  `process.env` on every call, and several hot paths called them twice for one
+  value — including the classifier that runs on every failed upstream request.
+  Each now caches per process. The model catalog also fetches providers and
+  accounts in parallel instead of sequentially.
+
+### Documentation
+
+- **One index, one skill set.** The documentation is deduplicated onto single
+  owning pages, the skill folders are consolidated from twelve to nine with
+  their unique material folded into the pages that own it, and historical
+  narrative that had drifted from the code is pruned. `documentation/archive/`
+  is now marked off-limits and says why: those records were true when written
+  and are not kept in sync, so reading one as current is worse than reading
+  nothing.
+
 ## [2.5.4] - 2026-10-22
 
 ### Added
