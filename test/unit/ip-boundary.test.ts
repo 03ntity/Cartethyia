@@ -36,7 +36,7 @@ const PLATFORM: TrustedProxyBoundary = { mode: "platform" };
 const LOOPBACK = trusted(["127.0.0.1/32"]);
 
 /** Builds a request carrying only the headers a case cares about. */
-function request(headers: Record<string, string>): Request {
+function request(headers: Record<string, string> = {}): Request {
   return new Request("http://localhost/", { headers });
 }
 
@@ -489,15 +489,50 @@ describe("resolveClientIdentity", () => {
     );
   });
 
-  test("disabled mode ignores the chain", () => {
+  test("disabled mode ignores the chain from a non-loopback peer", () => {
     // This is the shape `resolveTrustedProxyBoundary` produces for `disabled`:
-    // the mode alone, with no allowlist. The peer is the client.
+    // the mode alone, with no allowlist. A public peer is not a tunnel, so its
+    // headers stay untrusted and the peer is the client — this is the property
+    // that closes header spoofing, and it is the half that must never move.
+    expect(resolveClientIdentity(request({ "cf-connecting-ip": "203.0.113.7" }), DISABLED, "198.51.100.7")).toBe(
+      "198.51.100.7",
+    );
+    expect(resolveClientIdentity(request({ "x-forwarded-for": "203.0.113.7" }), DISABLED, "198.51.100.7")).toBe(
+      "198.51.100.7",
+    );
+  });
+
+  test("an unconfigured boundary trusts a loopback peer's headers", () => {
+    // The tunnel fix. A loopback peer carrying forwarded headers is the shape of
+    // cloudflared / an SSH forward / a local Caddy: the edge observed the real
+    // client and its TCP peer is 127.0.0.1. Ignoring the headers there collapsed
+    // every caller behind the tunnel onto one address, and per-IP abuse limits
+    // and model bans are keyed on that value — so one caller reaching the limit
+    // banned every other caller behind the same tunnel.
     expect(resolveClientIdentity(request({ "cf-connecting-ip": "203.0.113.7" }), DISABLED, "127.0.0.1")).toBe(
-      "127.0.0.1",
+      "203.0.113.7",
     );
     expect(resolveClientIdentity(request({ "x-forwarded-for": "203.0.113.7" }), DISABLED, "127.0.0.1")).toBe(
-      "127.0.0.1",
+      "203.0.113.7",
     );
+    // The mapped form Bun reports on Windows, and the IPv6 loopback.
+    expect(
+      resolveClientIdentity(request({ "cf-connecting-ip": "203.0.113.7" }), DISABLED, "::ffff:127.0.0.1"),
+    ).toBe("203.0.113.7");
+    expect(resolveClientIdentity(request({ "cf-connecting-ip": "203.0.113.7" }), DISABLED, "::1")).toBe(
+      "203.0.113.7",
+    );
+    // The preference order still applies: `cf-connecting-ip` wins.
+    expect(
+      resolveClientIdentity(
+        request({ "cf-connecting-ip": "203.0.113.7", "x-forwarded-for": "1.2.3.4" }),
+        DISABLED,
+        "127.0.0.1",
+      ),
+    ).toBe("203.0.113.7");
+    // No forwarded header at all: the loopback peer is still the client, and
+    // that is correct — a genuine local caller is one address.
+    expect(resolveClientIdentity(request(), DISABLED, "127.0.0.1")).toBe("127.0.0.1");
   });
 
   test("disabled mode ignores the chain even when an allowlist is present", () => {

@@ -86,6 +86,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   covers the prune pass, which could otherwise delete a file still holding
   frames their rows addressed.
 
+- **Provider max-inflight and API-key concurrency no longer share an error
+  code.** Both rejections arrived as `capacity_exhausted`, so the two settings
+  that cause them were indistinguishable on the wire: an operator who raised
+  the provider's max-inflight saw no change when the ceiling that fired was the
+  API key's own `max_concurrent`, and the other way around. Routing exhaustion
+  is now `provider_capacity_exhausted`, and the key's message names the key
+  rather than the provider.
+
+  The routing error also carries `providerId`, `model`, `maxInflight`, and
+  `candidate_count`. A plan that held a single candidate now says so, because
+  that is a routing or eligibility fact — raising the ceiling does not fix it.
+
+- **Max inflight says what it bounds.** The routing card labelled the field
+  "Max inflight / account" and then described it as a "Shared provider
+  ceiling". It is per account: each account enforces its own limit, so a full
+  account spills to the next. The subtext now says that.
+
+- **A tunnel's forwarded client address is no longer thrown away.** With
+  `TRUSTED_PROXY_CIDRS` unset, a request arriving from a loopback peer
+  (`127.0.0.1`, `::1`, or the mapped `::ffff:127.0.0.1` Bun reports on Windows)
+  now has its forwarded client headers believed. That is the shape of
+  cloudflared, an SSH forward, and a local Caddy or Nginx — and when their
+  headers were ignored, every caller behind one was recorded as the loopback
+  address.
+
+  That collapse was the dangerous direction: per-IP abuse throttling and
+  model-abuse bans are keyed on this address, so one caller reaching the limit
+  banned every other caller behind the same tunnel. The audit trail also showed
+  one address for everyone.
+
+  A **public** peer's headers are still ignored, so a client cannot name its own
+  address. Setting `TRUSTED_PROXY_CIDRS` overrides the loopback arm entirely: a
+  configured boundary is `trusted` or `platform`, and neither reaches it.
+
+- **A misconfigured tunnel now says so.** A forwarded client header arriving from
+  a loopback peer that the boundary will not trust logs one warning naming the
+  fix and the shared-fate consequence, instead of silently degrading.
+
 ### Changed
 
 - **Compatibility shims are gone.** Backward-compat paths removed across the

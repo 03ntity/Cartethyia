@@ -76,6 +76,11 @@ proxy_set_header X-Real-IP $remote_addr;
 
 And set `TRUSTED_PROXY_CIDRS=127.0.0.1/32,10.0.0.0/8` in `.env`.
 
+If every request still shows `127.0.0.1` or `::1`, the forwarded headers are
+being ignored and every caller shares one address — so per-IP abuse limits and
+model bans apply to all of them together. Name the ranges your proxy connects
+from; for cloudflared or a local proxy that is `127.0.0.1/32,::1/128`.
+
 ### Auto-deploy
 
 Use [`scripts/install/lite.sh`](#one-shot-install-script) rather than writing

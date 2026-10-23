@@ -23,7 +23,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   canonicalClientIpKey,
+  isLoopbackAddress,
+  isSuspectedProxyCollapse,
   isTrustedProxyPeer,
+  resetProxyCollapseWarningForTests,
   resolveClientIdentity,
 } from "../../src/security/ip-boundary";
 import type { TrustedProxyBoundary } from "../../src/config/network";
@@ -388,6 +391,169 @@ describe("resolveClientIdentity — the trusted path", () => {
     expect(
       resolveClientIdentity(request({ "cf-connecting-ip": "not-an-ip" }), LOOPBACK, "127.0.0.1"),
     ).toBe("not-an-ip");
+  });
+});
+
+describe("isLoopbackAddress", () => {
+  test("every spelling of the loopback host is recognised", () => {
+    // Structural, not a prefix test: `::ffff:127.0.0.1` is the form a Bun peer
+    // actually arrives as on Windows, and a `startsWith("127.")` check would
+    // call it a public address — the miss that hid this whole class of bug.
+    for (const address of [
+      "127.0.0.1",
+      "127.5.5.5",
+      "::1",
+      "::ffff:127.0.0.1",
+      "::ffff:7f00:1",
+      "0:0:0:0:0:ffff:7f00:1",
+      "::1%lo0",
+    ]) {
+      expect(isLoopbackAddress(address)).toBe(true);
+    }
+  });
+
+  test("an address just outside the loopback block is not loopback", () => {
+    // 127.0.0.0/8, not "starts with 127": both neighbours must be excluded, or
+    // the arm would trust a peer that is not the local host.
+    expect(isLoopbackAddress("126.255.255.255")).toBe(false);
+    expect(isLoopbackAddress("128.0.0.1")).toBe(false);
+  });
+
+  test("a public or private address is not loopback", () => {
+    for (const address of ["198.51.100.7", "10.0.0.1", "::ffff:10.0.0.1", "2001:db8::1"]) {
+      expect(isLoopbackAddress(address)).toBe(false);
+    }
+  });
+
+  test("a value that is not an address is not loopback", () => {
+    // Fail-closed: an unparseable peer must never gain trust from this check.
+    for (const address of ["", "localhost", "not-an-ip", "/var/run/sock"]) {
+      expect(isLoopbackAddress(address)).toBe(false);
+    }
+  });
+});
+
+describe("isSuspectedProxyCollapse — the tunnel signature", () => {
+  test("a loopback peer with forwarded headers is a collapse", () => {
+    // The reported incident: cloudflared connects from 127.0.0.1 and forwards
+    // the real client. Before the fix these headers were ignored and every
+    // caller behind the tunnel was recorded as the loopback address.
+    expect(
+      isSuspectedProxyCollapse(
+        request({ "cf-connecting-ip": "203.0.113.9" }),
+        { mode: "trusted", allowlist: ["10.0.0.0/8"] },
+        "127.0.0.1",
+      ),
+    ).toBe(true);
+  });
+
+  test("a public peer with forwarded headers is NOT a collapse", () => {
+    // Any client can send `X-Forwarded-For`. Ignoring it from a public peer is
+    // correct, not a defect — so this must not warn. Calling it a collapse
+    // would spray warnings for ordinary internet traffic.
+    expect(
+      isSuspectedProxyCollapse(
+        request({ "x-forwarded-for": "203.0.113.9" }),
+        DISABLED,
+        "198.51.100.7",
+      ),
+    ).toBe(false);
+  });
+
+  test("a trusted peer is never a collapse, whatever the headers", () => {
+    // The resolver believes these headers, so there is nothing to warn about.
+    expect(
+      isSuspectedProxyCollapse(request({ "x-forwarded-for": "203.0.113.9" }), LOOPBACK, "127.0.0.1"),
+    ).toBe(false);
+  });
+
+  test("an unconfigured boundary with a loopback peer is not a collapse", () => {
+    // The fix: the headers are believed now, so the callers keep their own
+    // addresses. Asserted here so the warning and the resolver cannot disagree
+    // about the same request.
+    expect(
+      isSuspectedProxyCollapse(request({ "cf-connecting-ip": "203.0.113.9" }), DISABLED, "127.0.0.1"),
+    ).toBe(false);
+  });
+
+  test("a blank forwarded header is not a collapse", () => {
+    // An edge that sends the header empty has nothing to report; that is not the
+    // signature of a tunnel hiding a client.
+    expect(isSuspectedProxyCollapse(request({ "cf-connecting-ip": "  " }), DISABLED, "127.0.0.1")).toBe(
+      false,
+    );
+  });
+
+  test("the warning fires once, then stays quiet", () => {
+    // The condition is unchanged on every later request, so repeating it would
+    // be thousands of identical paragraphs a minute on a busy gateway. Spied
+    // rather than assumed: `resolveClientIdentity` is the only caller, so the
+    // count is driven through it, and the seam resets the guard so the
+    // assertion is about once-only and not about which suite ran first.
+    resetProxyCollapseWarningForTests();
+    const original = console.warn;
+    const messages: string[] = [];
+    console.warn = (message?: unknown) => {
+      messages.push(String(message));
+    };
+    try {
+      // A boundary that trusts a non-loopback range: the tunnel's headers are
+      // ignored, which is the condition worth warning about.
+      const boundary: TrustedProxyBoundary = { mode: "trusted", allowlist: ["10.0.0.0/8"] };
+      const headers = { "cf-connecting-ip": "203.0.113.9" };
+      for (let i = 0; i < 4; i += 1) {
+        expect(resolveClientIdentity(request(headers), boundary, "127.0.0.1")).toBe("127.0.0.1");
+      }
+    } finally {
+      console.warn = original;
+    }
+    expect(messages.length).toBe(1);
+    // It names the fix, so the operator is not left with a diagnosis and no
+    // remedy — a warning that says only "something is wrong" gets ignored.
+    expect(messages[0]).toContain("TRUSTED_PROXY_CIDRS");
+  });
+
+  test("a public peer's headers never warn", () => {
+    // Ordinary internet traffic carrying its own `X-Forwarded-For` is expected
+    // and safe; warning on it would spray logs for every client.
+    resetProxyCollapseWarningForTests();
+    const original = console.warn;
+    const messages: string[] = [];
+    console.warn = (message?: unknown) => {
+      messages.push(String(message));
+    };
+    try {
+      for (let i = 0; i < 3; i += 1) {
+        expect(
+          resolveClientIdentity(request({ "x-forwarded-for": "203.0.113.9" }), DISABLED, "198.51.100.7"),
+        ).toBe("198.51.100.7");
+      }
+    } finally {
+      console.warn = original;
+    }
+    expect(messages.length).toBe(0);
+  });
+
+  test("a loopback peer with no forwarded header is not a collapse", () => {
+    // A genuine local caller: one address, correctly.
+    expect(isSuspectedProxyCollapse(request(), DISABLED, "127.0.0.1")).toBe(false);
+  });
+
+  test("every documented header triggers it", () => {
+    for (const header of [
+      "cf-connecting-ip",
+      "true-client-ip",
+      "x-forwarded-for",
+      "x-real-ip",
+    ]) {
+      expect(
+        isSuspectedProxyCollapse(
+          request({ [header]: "203.0.113.9" }),
+          { mode: "trusted", allowlist: ["10.0.0.0/8"] },
+          "127.0.0.1",
+        ),
+      ).toBe(true);
+    }
   });
 });
 
