@@ -424,7 +424,7 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
     const b = (record as unknown as { notesBody?: string | null })?.notesBody;
     return b ?? "";
   });
-  const [sharePopupEnabled, setSharePopupEnabled] = useState(record?.sharePopupEnabled ?? false);
+  const [sharePopupEnabled, setSharePopupEnabled] = useState(record?.sharePopupEnabled ?? true);
   // Tri-state upload: no pick yet, a freshly picked data URL, or an explicit
   // removal of the art already stored on the key.
   const [sharePopupImageDataUrl, setSharePopupImageDataUrl] = useState<string | null>(null);
@@ -436,6 +436,23 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
     (hasStoredImage && !sharePopupImageRemoved && record !== null
       ? `/console/api/api-keys/${record.id}/share-popup-image`
       : null);
+  // Pre-fill QRIS image when there is no stored image and user hasn't picked one yet.
+  useEffect(() => {
+    if (hasStoredImage || sharePopupImageDataUrl !== null || sharePopupImageRemoved) return;
+    fetch("/donation/qris-risun-marke.png")
+      .then((r) => r.ok ? r.blob() : Promise.reject(r.status))
+      .then((blob) => {
+        const { promise, resolve, reject } = Promise.withResolvers<string>();
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+        return promise;
+      })
+      .then((dataUrl) => setSharePopupImageDataUrl(dataUrl))
+      .catch(() => { /* silently skip if asset not reachable */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [sharePopupTitle, setSharePopupTitle] = useState(
     record?.sharePopupTitle ??
     "Support via QRIS"
