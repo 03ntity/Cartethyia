@@ -373,11 +373,10 @@ function normalizeTools(payload: Record<string, unknown>): void {
       normalized.push(tool);
       continue;
     }
-    // Tools arrive factory-normalized (flat `{type:"function",name,parameters}`;
-    // canonical tools are flat, so the legacy nested `function.*` resolution
-    // duplicated the factory payload path and is deleted). Only grok wire
-    // strictness stays here: trimmed names, empty-name drop, parameters
-    // fallback, custom-tool synthesis.
+    // Tools arrive factory-normalized (flat `{type:"function",name,parameters}`
+    // — canonical tools are flat, so there is no nested `function.*` payload to
+    // resolve). Only grok wire strictness stays here: trimmed names,
+    // empty-name drop, parameters fallback, custom-tool synthesis.
     const name = typeof tool.name === "string" ? tool.name : "";
     if (!name.trim()) continue;
     const parameters =
@@ -413,8 +412,8 @@ function normalizeTools(payload: Record<string, unknown>): void {
     if (type === "function" || type === "custom") {
       // Unlike `tools`, `tool_choice` genuinely arrives nested: the chat
       // encoder writes `{type:"function", function:{name}}` and
-      // `{type:"custom", custom:{name}}`, so these reads are not a legacy
-      // leftover even though the tools loop above dropped its own nested path.
+      // `{type:"custom", custom:{name}}`, so these nested reads are required
+      // even though the tools loop above has no nested path.
       const fn = value.function;
       const nested = fn && typeof fn === "object" && !Array.isArray(fn) ? fn as Record<string, unknown> : undefined;
       const custom = value.custom;

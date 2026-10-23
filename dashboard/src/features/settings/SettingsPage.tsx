@@ -230,7 +230,8 @@ function PrivacyPanel(): ReactNode {
 }
 
 /**
- * Operational overrides that used to be deployment-only env vars.
+ * Operational overrides, exposed as per-tenant runtime settings rather than
+ * deployment-only env vars.
  *
  * These are the knobs an operator reaches for while an install is running — a
  * provider misbehaving, a timeout that no longer fits — so they are editable

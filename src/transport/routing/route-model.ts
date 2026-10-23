@@ -255,8 +255,8 @@ export interface AdmissionController {
  * Translates the evaluator's internal reason codes into operator English.
  *
  * These names are the vocabulary the routing layers use with each other —
- * `model_cooldown`, `cooldown_hard`, `locked` — and they used to be printed
- * verbatim into the public message, so the client read an enum instead of an
+ * `model_cooldown`, `cooldown_hard`, `locked` — not something to print into the
+ * public message, where the client would read an enum instead of an
  * explanation. The codes stay in the envelope's `reasons` field for anyone who
  * wants them; the sentence carries what they mean.
  *
@@ -423,10 +423,10 @@ export class InMemoryRouteSnapshotService implements RouteSnapshotService {
    *
    * The tag is what keeps a mutation from being lost. A build reads the catalog
    * over ten Postgres round-trips, so a dashboard write can land while one is
-   * in flight. Without the tag two things went wrong: a reader that arrived
-   * *after* the mutation was handed the still-running pre-mutation build, and
-   * that build then overwrote the cache the mutation had just cleared — so the
-   * data plane served the old routing until some later write invalidated it
+   * in flight. Without the tag two things go wrong: a reader that arrives
+   * *after* the mutation is handed the still-running pre-mutation build, and
+   * that build then overwrites the cache the mutation has just cleared — so the
+   * data plane serves stale routing until some later write invalidates it
    * again. A build may only be reused by readers at its own revision, and may
    * only populate the cache if no mutation happened while it ran.
    */
@@ -491,9 +491,9 @@ export class InMemoryRouteSnapshotService implements RouteSnapshotService {
           ]),
         )
       : undefined;
-    // One literal for both routing modes. These used to be two verbatim copies
-    // that differed only by the `providerRouting` key, so a snapshot field added
-    // to one branch would silently vanish on the other.
+    // One literal for both routing modes: two verbatim copies differing only by
+    // the `providerRouting` key would mean a snapshot field added to one branch
+    // silently vanishes on the other.
     const snapshot = deepFreeze({
       revision,
       candidates: Object.freeze([...built.candidates]) as readonly RouteCandidate[],
@@ -508,8 +508,8 @@ export class InMemoryRouteSnapshotService implements RouteSnapshotService {
     });
     // A mutation during the build means this snapshot describes a catalog that
     // has already been superseded. Returning it is fine — the caller asked
-    // before the mutation — but caching it would strand the data plane on the
-    // old routing until the next write.
+    // before the mutation — but caching it would strand the data plane on stale
+    // routing until the next write.
     if (revision === this.revision) this.snapshot = snapshot;
     return snapshot;
   }

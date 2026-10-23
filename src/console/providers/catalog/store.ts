@@ -184,8 +184,8 @@ export function parsePastedOAuthCredential(raw: string): {
  * The account configuration a pasted export carries beside its tokens.
  *
  * Kiro refuses a generation request that omits the profile the account is bound
- * to, and legacy exports carry that profile under a different key. Reading
- * neither is how an imported account probes with no
+ * to, and exports from older installs carry that profile under a different key.
+ * Reading neither is how an imported account probes with no
  * profile and is answered `400 profileArn is required`.
  */
 function pastedAuthState(
@@ -266,7 +266,7 @@ function firstStringFrom(
  *
  * Expired entries are dropped rather than returned: the sweep that clears them
  * runs on a timer, so between the deadline passing and the sweep a raw read
- * would report a cooldown that no longer applies.
+ * would report a cooldown that is not in force.
  */
 function liveModelCooldowns(
   raw: unknown,
@@ -494,9 +494,9 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
       .returning({ id: providers.id });
     if (deleted.length === 0) return false;
     this.providerRegistry.unregister(providerId);
-    // The provider left the registry, so the compiled catalog no longer
-    // contains it — the snapshot's re-seed is gated on that revision, and a
-    // delete that did not bump it would leave the provider's model rows behind.
+    // The provider left the registry, so the compiled catalog is now missing it
+    // — the snapshot's re-seed is gated on that revision, and a delete that did
+    // not bump it would leave the provider's model rows behind.
     bumpCatalogRevision();
     return true;
   }
@@ -641,12 +641,12 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
       staticEndpoint === undefined ? undefined : { [family]: staticEndpoint },
     );
     if (modelIds.length === 0) return;
-    // Single multi-row insert (was N sequential round-trips) and upsert the
-    // capability flags so a re-registration repairs a row whose `tool_call`
-    // (and `reasoning`) was seeded false — a manual add previously persisted
-    // schema defaults, which capability preflight reads as "route cannot use
-    // tools" and silently strips `tools` from every request. `enabled` stays
-    // operator-owned; `source` is refreshed to `manual`.
+    // Single multi-row insert and upsert of the capability flags so a
+    // re-registration repairs a row whose `tool_call` (and `reasoning`) was
+    // seeded false — a manual add persists schema defaults, which capability
+    // preflight reads as "route cannot use tools" and silently strips `tools`
+    // from every request. `enabled` stays operator-owned; `source` is refreshed
+    // to `manual`.
     await this.db
       .insert(models)
       .values(

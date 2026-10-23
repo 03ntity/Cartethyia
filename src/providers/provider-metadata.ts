@@ -415,18 +415,14 @@ const RAW_BUNDLED_PROVIDER_METADATA = [
 /**
  * Web search is a route of its own, never a model capability.
  *
- * There used to be a manual list of providers "whose hosted search had been
- * proven", and a `providerSupportsWebSearch` helper that consulted it. Both are
- * gone. A model row no longer advertises search, and a provider serves search
+ * A model row does not advertise search, and a provider serves search
  * purely by declaring a `serviceKind: "websearch"` catalog row — which is what
  * Exa, Parallel, and Gemini do. Those rows answer `POST /v1/search` and are
  * never reached from a chat turn.
  *
- * The reason is that the flag was never a capability gate: `deriveRequiredCapabilities`
- * deliberately does not derive `web_search`, so no chat request was ever
- * filtered or degraded by it. Its only real effect was to smuggle `llm` rows
- * (Codex, Antigravity) into the fallback candidate list as if they were search
- * routes, and to show a badge in the console. The fallback is gone too: a chat
+ * A search flag is not a capability gate: `deriveRequiredCapabilities`
+ * deliberately does not derive `web_search`, so no chat request is
+ * filtered or degraded by it. A chat
  * turn is dispatched once to the route its model selects, and a hosted search
  * declaration is answered by that upstream, not executed by the gateway.
  */

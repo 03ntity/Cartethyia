@@ -95,15 +95,16 @@ let _authRejectedCooldown: number | undefined;
  *
  * A bare `401`/`403` is weak evidence: it covers clock skew, a key rotated
  * upstream a moment ago, an edge cache, and a load balancer that answers before
- * the credential is loaded. None of those is the credential's death, and this
- * outcome used to be `disabled` — the one state no sweep recovers, so the
- * account left rotation until an operator noticed. A cooldown costs the same
+ * the credential is loaded. None of those is the credential's death, and
+ * `disabled` is the one state no sweep recovers — the account would leave
+ * rotation until an operator noticed. A cooldown costs the same
  * requests for five minutes and comes back on its own.
  *
  * Only a *named* revocation (`token revoked`, `invalidated oauth token`) still
  * parks the account: the upstream stated the credential itself is dead, there is
  * no expiry to wait out and no refresh to run, so a cooldown would only return
- * it to rotation to fail again. Set this to `0` to restore the old behavior.
+ * it to rotation to fail again. Set this to `0` to return the account to
+ * rotation immediately, with no backoff to wait out.
  */
 export function resolveAccountAuthRejectedCooldownMs(): number {
   if (_authRejectedCooldown === undefined)
@@ -143,11 +144,11 @@ let _disabledRecovery: number | undefined;
 /**
  * How long an **automatically** disabled account stays out of rotation (default 24h).
  *
- * `disabled` used to be terminal: nothing recovered it, so a credential rejected
- * once — a revoked key, a definitively dead refresh grant — left rotation until an
- * operator noticed and clicked Recover by hand. That is the wrong default for a
- * credential that may come back on its own: keys get re-issued, grants get
- * re-authorized, and an upstream's notion of "invalid" can outrun ours.
+ * A credential rejected once — a revoked key, a definitively dead refresh grant —
+ * would otherwise leave rotation until an operator noticed and clicked Recover by
+ * hand. That is the wrong default for a credential that may come back on its own:
+ * keys get re-issued, grants get re-authorized, and an upstream's notion of
+ * "invalid" can outrun ours.
  *
  * The deadline is what makes this safe to automate rather than a policy guess. A row
  * this gateway disables **by itself** carries the deadline; a row an **operator**
@@ -156,7 +157,7 @@ let _disabledRecovery: number | undefined;
  * extra column and no way to confuse the two.
  *
  * Long on purpose: the states that reach here are the ones where retrying sooner
- * only reproduces the refusal. Set to `0` to restore the old terminal behavior.
+ * only reproduces the refusal. Set to `0` to make an automatic disable terminal.
  */
 export function resolveAccountDisabledRecoveryMs(): number {
   if (_disabledRecovery === undefined)

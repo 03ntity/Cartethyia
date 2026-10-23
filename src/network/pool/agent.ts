@@ -239,7 +239,7 @@ function createProxyConnection(
     // The CONNECT exchange itself costs bytes on this pool's egress. It is tens
     // of bytes per tunnel, so it barely moves a quota on its own — but a pool
     // that churns tunnels without ever establishing one spends real traffic and
-    // previously metered as zero.
+    // would otherwise meter as zero.
     if (poolId) {
       const requestLine = `CONNECT ${targetHost}:${targetPort} HTTP/1.1\r\n`;
       const headerText = Object.entries(proxyOptions.headers ?? {})

@@ -11,11 +11,11 @@ import { clinePlatform, clinePlatformVersion } from "../../operations/cli-platfo
  * `x-client-version` is the Cline CLI the operator is running (`cline` on npm),
  * from the shared pooler. `x-core-version` is the `@cline/sdk` version — a
  * separate npm package with its own release line, though one the CLI pins as a
- * dependency. This used to send the *client* version in both slots, so the
- * billing surface was told our core was `4.1.23`, a vscode extension version
+ * dependency — sending the client version in both slots would tell the billing
+ * surface our core was `4.1.23`, a vscode extension version
  * that `@cline/sdk` never published.
  *
- * Both surfaces now send the same pairing (`cliVersion` / `sdkVersion`) and the
+ * Both surfaces send the same pairing (`cliVersion` / `sdkVersion`) and the
  * same `cline-cli` client type. A header the upstream can validate is not
  * cosmetic: an implausible core version is exactly what a "please update and
  * re-authenticate" refusal is shaped like, and it is indistinguishable from a

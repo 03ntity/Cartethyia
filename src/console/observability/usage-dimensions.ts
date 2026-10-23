@@ -7,11 +7,11 @@
  * dashboard offers one breakdown tab per member (kept in sync by hand).
  *
  * This module is intentionally free of Elysia / node:crypto so the dashboard
- * can re-export the tuple as a value. The dashboard previously reached it
- * through `./contracts`, which imports Elysia and — through
+ * can re-export the tuple as a value. Reaching it through `./contracts` would
+ * import Elysia and — through
  * `console/shared/errors` → `protocol/codecs` → `security/outbound-headers`
- * — `node:crypto`, so the browser bundle externalized a Node builtin and
- * carried a slice of the backend graph for one string list.
+ * — `node:crypto`, so the browser bundle would externalize a Node builtin and
+ * carry a slice of the backend graph for one string list.
  */
 export const USAGE_DIMENSIONS = ["model", "provider", "key", "client", "client_ip"] as const;
 

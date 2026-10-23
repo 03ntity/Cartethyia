@@ -247,15 +247,15 @@ export class ClaudeAdapter implements ProviderAdapter {
     const profileId = request.generation_controls["extension:user_profile_id"];
     // A profile id travels two ways on the same request: the `user-profiles`
     // beta that unlocks profile scoping, and the header that names *which*
-    // profile. Carrying only the beta (the state before this change) declares
-    // the capability without ever addressing a profile, so a profile-scoped
-    // credential could not be selected.
+    // profile. Carrying only the beta declares the capability without ever
+    // addressing a profile, so a profile-scoped credential could not be
+    // selected.
     if (typeof profileId === "string" && profileId.length > 0) {
       // Dated, not bare: the donor sends `user-profiles-2026-09-04`
       // (the reference client `packages/ai/src/providers/anthropic-user-profiles.ts:4`).
-      // `ensureAnthropicBeta` takes any string, so the bare "user-profiles"
-      // this used to send passed every check while being a beta Anthropic has
-      // never published — an undocumented value the upstream ignores.
+      // `ensureAnthropicBeta` takes any string, so a bare "user-profiles" would
+      // pass every check while being a beta Anthropic has never published — an
+      // undocumented value the upstream ignores.
       ensureAnthropicBeta(headers, CLAUDE_USER_PROFILES_BETA);
       if (!HEADER_CONTROL.test(profileId)) {
         headers["anthropic-user-profile-id"] = profileId;

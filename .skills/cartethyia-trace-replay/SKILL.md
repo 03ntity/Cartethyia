@@ -1,6 +1,6 @@
 ---
 name: cartethyia-trace-replay
-description: "Attribute a failing request to one field: replay it verbatim, bisect until it turns 200, fix the owning layer, prove the flip. Use for a Request Detail, error envelope, 4xx/5xx trace, or payload dump — plus remote debugging against a live gateway with the default API key."
+description: "Attribute a failing request to one field: replay it verbatim, bisect until it turns 200, fix the owning layer, prove the flip. Use for a Request Detail, error envelope, 4xx/5xx trace, or payload dump — plus pulling the evidence off a remote deployment you cannot read from disk."
 ---
 
 # Trace replay and bisection
@@ -158,8 +158,11 @@ Two things block a probe before any application code sees it:
   It says nothing about the payload. Resolve edge auth with the instance owner
   first.
 
-For pulling the recorded request off the instance, use
-[`cartethyia-remote-debugging`](../cartethyia-remote-debugging/SKILL.md).
+**Getting the recorded request off an instance you cannot read from disk** —
+the console endpoints that list and export it, the two auth domains, and the
+egress-IP rule for a 403 that survives every payload change — is
+[`references/remote-debugging.md`](references/remote-debugging.md). Export the
+payload from there rather than retyping it; a retyped body is not the failure.
 
 ## Prove the flip
 

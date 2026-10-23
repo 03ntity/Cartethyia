@@ -87,11 +87,10 @@ export async function fetchQuotaOverview(signal?: AbortSignal): Promise<QuotaOve
 /**
  * Loads the tenant's providers/accounts joined with quota + health.
  *
- * Loads once and then only on an explicit refresh. The page used to poll
- * adaptively — every 2s while accounts were warming, every 60s otherwise — and
- * every one of those reads re-entered the server's quota path, which is what
- * made opening the page update every account at once. A periodic worker already
- * keeps quota warm server-side; the page is a viewer, not a second scheduler.
+ * Loads once and then only on an explicit refresh. Polling is off because
+ * every read re-enters the server's quota path, which is what made opening the
+ * page update every account at once. A periodic worker already keeps quota warm
+ * server-side; the page is a viewer, not a second scheduler.
  *
  * `placeholderData` keeps the previous accounts on screen while a manual
  * refresh is in flight, so the list does not flash empty.

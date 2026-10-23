@@ -272,11 +272,11 @@ async function disableAccount(
         lastErrorCategory: "auth_invalidated",
         lastErrorAt: new Date(),
         // Carries a recovery deadline so `sweepExpiredCooldowns` can bring this
-        // account back once it elapses. `disabled` used to be terminal, which
-        // parked a credential for good on one definitive rejection; the deadline
-        // is also what distinguishes this (machine-disabled) from an operator's
-        // own disable, which leaves `cooldownUntil` null and is therefore never
-        // swept. See `resolveAccountDisabledRecoveryMs`.
+        // account back once it elapses; without one, one definitive rejection
+        // parks the credential for good. The deadline is also what distinguishes
+        // this (machine-disabled) from an operator's own disable, which leaves
+        // `cooldownUntil` null and is therefore never swept. See
+        // `resolveAccountDisabledRecoveryMs`.
         ...(disabledRecoveryMs > 0
           ? { cooldownUntil: new Date(Date.now() + disabledRecoveryMs) }
           : {}),

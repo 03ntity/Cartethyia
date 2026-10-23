@@ -141,9 +141,7 @@ export function requireGlobalAdmin(access: AccessDecision | undefined): AccessDe
 /**
  * Builds the console's catch-all error handler for an Elysia route group.
  *
- * Every console route group used to wrap each handler in its own try/catch
- * calling `errorResponse` with a group-specific fallback message — 95 copies,
- * 22 of them in one file. Elysia's global `error(handler)` hook receives any
+ * Elysia's global `error(handler)` hook receives any
  * throw from the group (including a `.use()`d child), so one hook per group
  * produces the identical envelope with the identical fallback text.
  *

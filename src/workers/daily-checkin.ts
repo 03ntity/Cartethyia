@@ -120,9 +120,8 @@ export function ledgerKey(dayKey: string, accountId: string): string {
  * With Redis the `SET NX EX` is the cross-process guard (two gateway instances
  * cannot both attempt the same account). Without it the ledger *table* is the
  * guard, and its composite PK makes the insert atomic — so Lite records the
- * attempt it just made instead of silently returning `true`, which is what left
- * the console unable to answer "attempted today" and showing "Check-in due"
- * forever.
+ * attempt it just made instead of silently returning `true`, which leaves the
+ * console unable to answer "attempted today" and shows "Check-in due" forever.
  */
 async function reserveDaySlot(
   db: CartethyiaDatabase | undefined,
@@ -160,8 +159,8 @@ async function reserveDaySlot(
  * Releases today's slot for many accounts in one round-trip.
  *
  * The sweep reserves a slot per account as it walks the wave; releasing them
- * one at a time on the error path turned every failed pass into a Redis RTT per
- * failed account. A pass that budgets out with twenty failures paid twenty
+ * one at a time on the error path turns every failed pass into a Redis RTT per
+ * failed account. A pass that budgets out with twenty failures pays twenty
  * round-trips for bookkeeping that has no bearing on the claim itself.
  *
  * A pipeline is used when Redis is present (one `MULTI/DEL` for the whole
@@ -246,8 +245,8 @@ export async function markCheckinAttempted(args: {
  * The read belongs next to the writes because there are two places the marker
  * can live — the Redis key when Redis is present, the `daily_checkin_ledger`
  * row when it is not — and only this module knows which one its own writes
- * used. A caller that read the Redis key directly answered "not attempted" on
- * every Lite deployment, where the sweep had written the row.
+ * used. A caller that reads the Redis key directly answers "not attempted" on
+ * every Lite deployment, where the sweep writes the row.
  *
  * Absent or unreadable means unknown, never "not claimed": the sweep may
  * simply not have reached the account yet.
@@ -355,9 +354,9 @@ export function supportsDailyCheckin(providerId: string): boolean {
  * Wraps a proxy-bound fetcher so a 403 falls back to a direct connection once.
  *
  * A proxy that answers 403 (auth, expired pool credential, a provider that
- * rejects the egress) used to fail the whole claim even though the account's
- * own credential was fine — the proxy was the only thing wrong. One direct
- * retry costs nothing when the proxy was healthy (the first attempt already
+ * rejects the egress) would fail the whole claim even though the account's own
+ * credential was fine — the proxy is the only thing wrong. One direct retry
+ * costs nothing when the proxy was healthy (the first attempt already
  * succeeded) and rescues the claim when it was not.
  *
  * The fallback only fires on 403, not on every error: a 401 means the account
@@ -375,15 +374,10 @@ export function withDirectFallback(fetcher: typeof fetch): typeof fetch {
   return wrapped;
 }
 /**
- * The outcome of one daily check-in pass: the claim alone.
- *
- * The growth-activity report is no longer part of this pass — it moved to its
- * own once-a-day growth task (`buddy-activity-report`) with its own ledger, so
-/**
- * Runs the full daily growth pass for one account, once per calendar day: the
- * check-in claim alone. The growth-activity report moved to its own once-a-day
- * growth task (`buddy-activity-report`) with its own ledger, so it is not
- * re-POSTed on every sweep. See `buddy-growth-tasks.ts`.
+ * The outcome of one daily check-in pass: the claim alone. The
+ * growth-activity report runs as its own once-a-day growth task
+ * (`buddy-activity-report`) with its own ledger, so it is not re-POSTed on
+ * every sweep. See `buddy-growth-tasks.ts`.
  */
 export type DailyGrowthPassResult = {
   readonly checkin: DailyCheckinResult;
@@ -448,10 +442,10 @@ export async function attemptDailyGrowthPass(args: {
 
   // Only a transient `error` releases the slot so a later pass today can retry
   // (network, 5xx). `unavailable` is the status probe answering that no
-  // activity is running — retrying that every pass spent the account's daily
-  // slot on a door the provider had closed, and releasing the marker was also
-  // what erased the evidence that anything had been attempted: the console then
-  // read "Check-in due" forever while the sweep retried once a minute.
+  // activity is running — retrying that every pass spends the account's daily
+  // slot on a door the provider has closed, and releasing the marker also
+  // erases the evidence that anything was attempted: the console then reads
+  // "Check-in due" forever while the sweep retries once a minute.
   // `already_claimed`, `not_eligible`, and `event_ended` are terminal for the
   // day and keep the slot.
   return { checkin };

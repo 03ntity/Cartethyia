@@ -6,15 +6,8 @@
  * answer is a layered merge — operator overrides, the discovery module's own
  * definition, the provider's static catalog, then a generic default — and it
  * lives here so `probing-service.ts` owns orchestration rather than merge
- * precedence.
- *
- * This module used to carry its own `DISCOVERY_CONFIG_BY_PROVIDER` table of
- * endpoint paths. It was a byte-identical second copy of
- * `PROVIDER_CAPABILITIES[id].endpointPathsByWireFamily` in the provider
- * registry, and it had already drifted: `ollamacloud` was listed here with four
- * paths while the registry map was the only one the catalog service validated
- * against. `discoveryPathsFor` now reads the registry, so a provider declares
- * its endpoint paths once.
+ * precedence. Endpoint paths come from the provider registry, so a provider
+ * declares its endpoint paths once rather than in a second table here.
  */
 import type { WireFamily } from "../../protocol/canonical-model";
 import type { CompatibilityProfile } from "../provider-metadata";
@@ -176,10 +169,10 @@ export function staticEndpointForWire(
  * Compiled-pattern memo.
  *
  * `matchModelWireFamily` runs per model on every discovery pass and on every
- * manual registration, and it used to compile each rule's `RegExp` inside that
- * loop — so the same handful of patterns were recompiled once per model per
- * pass. Keyed by the pattern source, which is exactly what `new RegExp(source)`
- * derives from.
+ * manual registration, so patterns are compiled once here instead of inside
+ * that loop — otherwise the same handful of patterns are recompiled once per
+ * model per pass. Keyed by the pattern source, which is exactly what
+ * `new RegExp(source)` derives from.
  *
  * A pattern that fails to compile is not memoized; the tolerance stays at read
  * time because an invalid pattern is rejected at write time, and a stored one

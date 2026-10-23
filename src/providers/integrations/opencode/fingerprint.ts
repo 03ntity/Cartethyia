@@ -23,11 +23,11 @@ const SESSION_COUNTER_MAX = 63;
  * `ses_` + 12-char hex (bitwise inverted millisecond timestamp * 4096 + seq) + 14-char base62.
  *
  * The counter is capped rather than left to grow. Sixty-four dispatches inside
- * one millisecond used to emit ids the gate refuses, so a burst — exactly what
- * a proxy pool produces — 403'd on its own headers while every other field was
+ * one millisecond emit ids the gate refuses, so a burst — exactly what a proxy
+ * pool produces — would 403 on its own headers while every other field was
  * correct. On overflow the timestamp advances by one millisecond instead: the
  * id stays inside the window, and the only cost is that ids minted in the same
- * real millisecond no longer sort as the client's would.
+ * real millisecond do not sort as the client's would.
  */
 export function generateOpenCodeSessionId(now = Date.now()): string {
   if (now !== lastTimestamp) {

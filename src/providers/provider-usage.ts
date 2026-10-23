@@ -195,7 +195,7 @@ export function normalizeUsage(input: Record<string, unknown>): UsageRecord {
   // the zeroed `*_tokens_details.cached_tokens` those bridges also emit.
   // Flat `cached_tokens` is the intermediate shape `mapGeminiUsage`
   // (Gemini/Antigravity) and CommandCode emit; `cachedContentTokenCount` is
-  // Gemini's raw `usageMetadata` field. Both were previously dropped.
+  // Gemini's raw `usageMetadata` field. Both are consumed here.
   if (
     cached_input_tokens === "unavailable" &&
     typeof input.cached_tokens === "number"

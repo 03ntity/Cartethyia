@@ -508,9 +508,9 @@ function QuotaCard({
           <Button
             variant="ghost"
             size="sm"
-            // The card no longer carries a status pill, so this is where the
-            // status is read: the account's own state, then where to inspect it.
-            // A healthy account still just says "Health & Error Log".
+            // This is where the status is read: the account's own state, then
+            // where to inspect it. A healthy account still just says
+            // "Health & Error Log".
             title={
               healthStatus === "active"
                 ? "Health & Error Log"

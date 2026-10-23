@@ -116,7 +116,7 @@ echo | openssl s_client -connect <domain>:443 -servername <domain> 2>/dev/null \
 `local_certs` is somehow set.
 
 Then `https://<domain>/health` must return 200. See
-[`verification.md`](verification.md) for why that alone is not proof.
+[`proving-a-deployment.md`](proving-a-deployment.md) for why that alone is not proof.
 
 ## Verified instance
 

@@ -442,8 +442,8 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
   // template to a personal key (or back) revokes its children and links, so the
   // edit form shows the mode but never lets it change.
   const modeLocked = mode === "edit";
-  // Used to persist the routing scope the instant the Remote routing switch
-  // flips, rather than deferring it to "Save changes".
+  // Persists the routing scope the instant the Remote routing switch flips,
+  // rather than deferring it to "Save changes".
   const updateKey = useUpdateApiKey();
   const toggleScope = (scope: string) =>
     setScopes((cur) => (cur.includes(scope) ? cur.filter((s) => s !== scope) : [...cur, scope]));

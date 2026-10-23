@@ -6,7 +6,7 @@
  * plans are served by different hosts and their keys are not interchangeable,
  * and which plan a key belongs to is per-account state stored with it. A spec
  * declares one `base_url` at construction, so the host is resolved from the
- * credential at dispatch time and a stored region that no longer resolves is a
+ * credential at dispatch time and a stored region that does not resolve is a
  * dispatch-time error rather than a silent fallback to the default host.
  */
 import { createApiKeyAdapter } from "../../configured-provider";

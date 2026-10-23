@@ -298,8 +298,8 @@ export function StudioPage(): ReactNode {
         : { ...current, imageWorkerModel, updatedAt: Date.now() });
       return;
     }
-    // A worker this catalog no longer offers is a stale selection — a model the
-    // provider dropped, or one that was never synced here. Left alone it made
+    // A worker this catalog does not offer is a stale selection — a model the
+    // provider dropped, or one that was never synced here. Left alone it makes
     // every later image request fail, because the worker is what gates the
     // tool's declaration. Re-point it at a model that exists.
     if (models.length > 0 && !models.includes(session.imageWorkerModel)) {

@@ -65,9 +65,8 @@ export function statusTone(status: number): "ok" | "warn" | "err" {
 /**
  * Applies the level and search filters to the live tail.
  *
- * Extracted from the panel so the predicate is directly testable: the level
- * check was previously computed but never consulted, which made the level
- * buttons inert.
+ * Extracted from the panel so the predicate is directly testable and the level
+ * buttons cannot go inert: the level check must be both computed and consulted.
  */
 export function filterLogLines(
   lines: readonly ConsoleLogEntry[],

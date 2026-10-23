@@ -182,7 +182,7 @@ export const providers = pgTable(
 // `tenant_id` null means the account is shared pool-wide; populated means
 // tenant-owned/BYOK. The concurrency ceiling lives in provider routing
 // (`provider_routing_settings.max_inflight`) and network pools
-// (`network_pools.max_inflight`); the per-account override no longer exists.
+// (`network_pools.max_inflight`); there is no per-account override.
 export const providerAccounts = pgTable("provider_accounts", {
   id: uuid("id").primaryKey().defaultRandom(),
   providerId: text("provider_id")
@@ -469,11 +469,11 @@ export const networkPools = pgTable("network_pools", {
    * (`egress_ip`, `last_latency_ms`, the speed-test columns) rather than in the
    * browser.
    *
-   * It lived in `localStorage` first, and that made it decorative: the verdict
-   * was visible to the operator who ran it and to nobody else — not to another
-   * machine, not to the gateway, and not to admission. A pool could read
-   * "OpenCode blocked" on screen while dispatch kept sending traffic through
-   * it, because nothing outside that one browser had ever heard the verdict.
+   * Browser storage is not enough: a verdict held only there is visible to the
+   * operator who ran it and to nobody else — not to another machine, not to the
+   * gateway, and not to admission. A pool would read "OpenCode blocked" on
+   * screen while dispatch kept sending traffic through it, because nothing
+   * outside that one browser had heard the verdict.
    *
    * `null` means never probed. These describe the *address* recorded in
    * `egress_ip` at the time, so a changed endpoint clears them.
@@ -544,8 +544,7 @@ export const healthEvents = pgTable(
 );
 
 
-// Model aliasing & combos: replaces the dormant, disconnected
-// `routing_policies` scaffolding. Aliases resolve a client-facing name to a
+// Model aliasing & combos. Aliases resolve a client-facing name to a
 // real model; combos back a client-facing name with >=1 real models,
 // auto-selected via `fallback` or `round_robin`.
 export const modelComboStrategy = pgEnum("model_combo_strategy", [
@@ -556,7 +555,7 @@ export const modelComboStrategy = pgEnum("model_combo_strategy", [
 /** Canonical `ComboStrategy` union, derived from the enum above. Console
  * domain and routing layers import this instead of hand-typing their own mirror.
  * `ProviderRoutingStrategy` covers the same two values but persists on
- * `provider_routing_settings` beside `rotateCount`; sticky routing is gone. */
+ * `provider_routing_settings` beside `rotateCount`. */
 export type ComboStrategy = (typeof modelComboStrategy.enumValues)[number];
 
 export const modelAliases = pgTable(
@@ -635,9 +634,8 @@ export const providerRoutingSettings = pgTable(
      * provider; this one bounds one provider's share of one pool. All three
      * are enforced together — none replaces another.
      *
-     * `null` = unlimited, and that is the default: a provider nobody has
-     * configured behaves exactly as it did before this column existed, with no
-     * extra Redis key and no extra round trip.
+     * `null` = unlimited, and that is the default: an unconfigured provider
+     * costs no extra Redis key and no extra round trip.
      */
     maxInflightPerProxy: integer("max_inflight_per_proxy"),
     /**
@@ -752,7 +750,7 @@ export const apiKeys = pgTable(
     /**
      * `whitelist` = only the names in `modelList` may be used (empty = all);
      * `blacklist` = the names in `modelList` are refused (empty = none). One
-     * list, one mode — the old separate allow/deny columns are retired.
+     * list, one mode.
      */
     modelAccessMode: text("model_access_mode")
       .$type<ApiKeyModelAccessMode>()
@@ -787,11 +785,9 @@ export const apiKeys = pgTable(
     /**
      * One *live* default key per tenant, enforced by the database.
      *
-     * The baseline SQL has always created this; the schema never declared it,
-     * so the two descriptions disagreed and nothing noticed. It is the only
-     * database-level guarantee behind `isDefault`, and
+     * This is the only database-level guarantee behind `isDefault`, and
      * `test/persistence/sqlite-baseline.test.ts` pins it by name — so the
-     * schema was the incomplete side, not the migration.
+     * schema must keep declaring it to match the baseline.
      *
      * Partial on `revoked_at IS NULL` so a tenant can rotate its default key
      * without the old, revoked row blocking the new one.
@@ -879,8 +875,7 @@ export const shareLinks = pgTable(
       .references(() => apiKeys.id, { onDelete: "cascade" }),
     tokenHash: text("token_hash").notNull(),
     // Encrypted bearer token. Present so the console can re-display a stable
-    // link; historical rows written before this column carry NULL and simply
-    // cannot be shown again.
+    // link; nullable, and a NULL row simply cannot be shown again.
     tokenEncrypted: bytea("token_encrypted"),
     /**
      * The public slug this page is reachable at, in the clear.
@@ -891,7 +886,7 @@ export const shareLinks = pgTable(
      * unencrypted keeps every restored share page reachable under the address
      * it was created with.
      *
-     * Nullable: rows written before this column have no slug, and inventing one
+     * Nullable: a row without a slug has no address, and inventing one
      * would publish an address the page never had.
      */
     slug: text("slug"),
@@ -903,8 +898,8 @@ export const shareLinks = pgTable(
   },
   (table) => [
     uniqueIndex("share_links_token_hash_idx").on(table.tokenHash),
-    // Partial: rows without a slug (written before the column) are not
-    // constrained, so backfilling is never blocked by a uniqueness collision.
+    // Partial: rows without a slug are not constrained, so backfilling is never
+    // blocked by a uniqueness collision.
     uniqueIndex("share_links_slug_uidx").on(table.slug).where(sql`${table.slug} IS NOT NULL`),
     index("share_links_api_key_idx").on(table.apiKeyId),
     index("share_links_active_kind_expires_idx").on(table.active, table.kind, table.expiresAt),
@@ -1289,9 +1284,8 @@ export const telemetryPayloads = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     /**
      * Typed index into the on-disk frame store. Prompt/response bodies live
-     * only in the frame file these columns name — never in Postgres. The
-     * previous `request_body jsonb` column is gone so a body cannot be
-     * written here by accident.
+     * only in the frame file these columns name — never in Postgres, which is
+     * why this table carries no body column to write one into by accident.
      */
     storage: text("storage").notNull(),
     file: text("file").notNull(),
@@ -1306,8 +1300,8 @@ export const telemetryPayloads = pgTable(
      * reads it off the indexed row.
      *
      * Bits: 1=request, 2=provider_request, 4=provider_response,
-     * 8=client_response. Nullable: NULL means the row predates this column,
-     * which renders as all icons greyed rather than inventing presence.
+     * 8=client_response. Nullable: NULL renders as all icons greyed rather
+     * than inventing presence.
      */
     stages: integer("stages"),
   },

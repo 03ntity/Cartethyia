@@ -83,4 +83,4 @@ Then confirm with `git log --oneline -1` that the commit is the one you expect.
 
 Some providers expose `oauthFlows.import: false`, so a stored token cannot be
 enrolled — only a browser device flow. See
-[`verification.md`](verification.md).
+[`proving-a-deployment.md`](proving-a-deployment.md).

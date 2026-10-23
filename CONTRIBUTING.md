@@ -27,9 +27,10 @@ migrations, and verification, use the single source of truth:
   names, routing policy, and dashboard mirrors.
 - Use concrete role filenames such as `contracts.ts`, `routes.ts`, `store.ts`,
   `service.ts`, and `errors.ts`. Avoid `index.ts` barrels.
-- Keep scripts organized by purpose under `scripts/cli`, `scripts/operations`,
-  `scripts/install`, `scripts/build`, `scripts/generate`, `scripts/dev`,
-  `scripts/test`, and `scripts/shared`.
+- Keep scripts organized by purpose under the existing `scripts/`
+  subdirectories — currently `binary`, `ci`, `cli`, `dev`, `generate`,
+  `install`, `operations`, `ops`, `perf`, and `qa`. Check the directory before
+  adding one; the set changes.
 - Use strict TypeScript: no `any`, suppressions, needless assertions, or weakened
   compiler settings. Narrow `unknown` at boundaries and use `import type` for types.
 - Comments explain policy, security, protocol behavior, or non-obvious tradeoffs;

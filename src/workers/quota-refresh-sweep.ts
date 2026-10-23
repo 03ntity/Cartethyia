@@ -91,11 +91,11 @@ const DEFAULT_MAX_CHECKINS_PER_PASS = 10;
  *
  * The provider filter is applied *before* the slot count is consulted, and
  * that ordering is the whole point of the function: the sweep's batch is
- * oldest-first across every provider, so a cap checked first was spent on
- * non-buddy accounts the ride-along would have skipped anyway. A buddy
- * account sitting behind them (a `cbcn` row past the tenth older non-buddy
- * row) then never got its automatic check-in — only a manual press, which
- * bypasses the cap, ever reached it.
+ * oldest-first across every provider, so a cap checked first is spent on
+ * non-buddy accounts the ride-along would skip anyway. A buddy account sitting
+ * behind them (a `cbcn` row past the tenth older non-buddy row) then never gets
+ * its automatic check-in — only a manual press, which bypasses the cap, ever
+ * reaches it.
  */
 export function checkinSlotAvailable(
   providerId: string,
@@ -114,7 +114,7 @@ export function checkinSlotAvailable(
  *
  * Module scope, not per-call: suppression must survive across passes, and one
  * `quotaRefreshSweep` call is one pass. Bounded because it is keyed by account
- * id and was never pruned, so accounts deleted years ago still held an entry;
+ * id and is never pruned, so an account deleted years ago still holds an entry;
  * the oldest keys are the ones least likely to be announced again.
  */
 const LAST_SWEEP_LINE_MAX = 512;
@@ -159,7 +159,7 @@ function quotaPhrase(outcome: QuotaRefreshOutcome): string {
  * nothing to report.
  *
  * Only providers that expose the check-in route appear here at all: the sweep
- * skips the rest, and `daily unsupported` on every non-WorkBuddy account was
+ * skips the rest, and `daily unsupported` on every non-WorkBuddy account is
  * pure noise. The routine "nothing to claim today" states collapse to one
  * short phrase so the line stays scannable; only a real grant or a failure
  * carries detail.
@@ -238,11 +238,11 @@ function logSweepAccounts(
 /**
  * How stale a cached quota reading must be before it is refreshed again.
  *
- * Half the cache TTL. The sweep runs every 60 s, so at the old 4 min every
- * account was refreshed roughly three times per 15 min TTL window — two of
- * those three passes hit the provider and learned nothing the cache did not
- * already know. 8 min is still comfortably inside the TTL, so a reading never
- * goes stale while it waits.
+ * Half the cache TTL. The sweep runs every 60 s, so a 4 min threshold refreshes
+ * every account roughly three times per 15 min TTL window — two of those three
+ * passes hit the provider and learn nothing the cache did not already know.
+ * 8 min is still comfortably inside the TTL, so a reading never goes stale
+ * while it waits.
  */
 const DEFAULT_MIN_AGE_MS = 8 * 60_000;
 const DEFAULT_MAX_PER_PASS = 40;
@@ -296,7 +296,7 @@ export async function quotaRefreshSweep(deps: QuotaRefreshSweepDeps): Promise<vo
         ? await deps.listTargets()
         : await listQuotaRefreshTargets(deps.db);
       // Read cache ages in one batched pass per lens: the sweep runs over
-      // dozens of accounts each minute, so a `get` per account made the age
+      // dozens of accounts each minute, so a `get` per account makes the age
       // scan's latency scale with the account count. `getCachedQuotaEntries`
       // is the cache's own batched reader, so the key format stays owned by
       // the cache module.
@@ -406,10 +406,10 @@ export async function quotaRefreshSweep(deps: QuotaRefreshSweepDeps): Promise<vo
         // The check-in ride-along still runs: the daily credit grant is the
         // *remedy* for an account that just reported an exhausted or unreadable
         // quota, and it is a different upstream call that does not depend on the
-        // quota leg. Returning here meant an account sitting at 0 credits — the
-        // one that most needs the grant — never had its check-in attempted, so
-        // the Quota page read "Check-in due" while the sweep believed it had
-        // done its job. Only a credential we could not resolve at all rules the
+        // quota leg. Returning here leaves an account sitting at 0 credits — the
+        // one that most needs the grant — with no check-in attempted, so the
+        // Quota page reads "Check-in due" while the sweep believes it has done
+        // its job. Only a credential we could not resolve at all rules the
         // check-in out; that is the one input both legs share.
         if (outcome.failure === "missing_credential") return;
       }
@@ -420,16 +420,16 @@ export async function quotaRefreshSweep(deps: QuotaRefreshSweepDeps): Promise<vo
       // pass after the first of the day.
       //
       // The provider filter comes *before* the slot is consumed. The batch is
-      // oldest-first across every provider, so checking the cap first spent the
+      // oldest-first across every provider, so checking the cap first spends the
       // whole per-pass budget on non-buddy accounts that the next line would
-      // have skipped anyway — a buddy account past the cap (a cbcn row behind
-      // ten older non-buddy rows) was never checked in automatically, only when
-      // an operator pressed the button, which bypasses this cap entirely.
+      // skip anyway — a buddy account past the cap (a cbcn row behind ten older
+      // non-buddy rows) is never checked in automatically, only when an operator
+      // presses the button, which bypasses this cap entirely.
       if (!checkinSlotAvailable(entry.target.providerId, checkins, maxCheckins)) return;
       // Claim the slot before the first await. The wave runs its items
       // concurrently, and reading `checkins` only after the growth pass
-      // resolved let every item in the wave pass the cap check against the
-      // same stale count — the cap then bounded nothing.
+      // resolves lets every item in the wave pass the cap check against the
+      // same stale count — the cap then bounds nothing.
       checkins += 1;
       try {
         // is only for the `preconnect` static Bun adds to its own fetch (the
@@ -489,9 +489,9 @@ export async function quotaRefreshSweep(deps: QuotaRefreshSweepDeps): Promise<vo
   logSweepAccounts(attemptedTargets, quotaOutcomes, checkinOutcomes, failed, claimed);
 
   // Release the slots for the accounts whose check-in errored, in one
-  // round-trip. The pass used to release inline per account, so a pass that
-  // budgeted out with twenty failures paid twenty Redis round-trips for
-  // bookkeeping that has no bearing on the claim itself.
+  // round-trip. Releasing inline per account makes a pass that budgets out with
+  // twenty failures pay twenty Redis round-trips for bookkeeping that has no
+  // bearing on the claim itself.
   const releasedAccountIds: string[] = [];
   for (const outcome of checkinOutcomes.values()) {
     if (outcome.state === "error") releasedAccountIds.push(outcome.accountId);

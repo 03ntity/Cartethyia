@@ -33,10 +33,9 @@ interface AntigravityQuotaFamily {
  * resulting id, so a quota row exists for exactly the models the operator can
  * select.
  *
- * This replaced a hand-kept list plus a permissive id pattern, which let a
- * deployment the catalog no longer serves (`gemini-2.5-pro`) report a quota row
- * for a model that cannot be chosen. Deriving the set means removing a catalog
- * model removes its quota row in the same change.
+ * Deriving the set means removing a catalog model removes its quota row in the
+ * same change — a hand-kept list would let a deployment the catalog does not
+ * serve report a quota row for a model that cannot be chosen.
  */
 const CATALOG_MODEL_IDS: ReadonlySet<string> = new Set(
   ANTIGRAVITY_MODELS.filter((model) => model.serviceKind !== "websearch").map((model) => model.modelId),
@@ -83,9 +82,8 @@ const SUMMARY_WINDOW_LABELS: Readonly<Record<SummaryWindowKind, string>> = Objec
  *
  * The upstream names the window in `window` (`5h`, `daily`, `weekly`) and
  * repeats it in the display name. Daily must be tested before the 5-hour
- * session: an older spelling put `daily` on the session bucket, but a bucket
- * whose own text says "daily" is the daily allowance, and treating it as the
- * session is what dropped the daily row.
+ * session: a bucket whose own text says "daily" is the daily allowance, and
+ * treating it as the session is what drops the daily row.
  */
 function summaryWindowKind(bucket: Record<string, unknown>): SummaryWindowKind | undefined {
   const source = `${text(bucket.window) ?? ""} ${text(bucket.bucketId) ?? ""} ${text(bucket.displayName) ?? ""}`.toLowerCase();

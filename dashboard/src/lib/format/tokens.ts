@@ -1,12 +1,10 @@
 /**
  * Token-count display, in one place.
  *
- * Three spellings of the same idea used to live apart — the compact scale, a
- * `compactTokens` copy, and a model-window formatter — so a 3,441-token account
- * read `3.4K` in one row and `3.44K` in the next. They sit side by side here
- * rather than being merged, because each one's rounding is what a surface is
- * built around; changing one to match another is a behavior change, not a
- * rename.
+ * Three spellings of the same idea sit side by side here — the compact scale,
+ * a `compactTokens` copy, and a model-window formatter. They are not merged,
+ * because each one's rounding is what a surface is built around; changing one
+ * to match another is a behavior change, not a rename.
  *
  * Pick by what the surface shows:
  *
@@ -124,9 +122,9 @@ export const FALLBACK_OUTPUT_TOKENS = 131_072;
  * model routable — a different claim, and one an operator has to be able to
  * tell apart from a real measurement.
  *
- * The numbers are interpolated, not spelled out: a fallback that changed on the
- * backend while the tooltip still quoted the old pair would describe a model's
- * limits wrongly.
+ * The numbers are interpolated, not spelled out: if the backend's fallback
+ * changes, the tooltip must keep describing the same numbers it actually
+ * applied.
  */
 export const ESTIMATED_LIMITS_TOOLTIP =
   `No catalog row files this model, so these limits are a fallback ` +

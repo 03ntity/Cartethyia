@@ -102,11 +102,11 @@ export function isExpiringSoon(token: string, thresholdSeconds = TOKEN_EXPIRY_TH
 /**
  * The account identity Cursor itself asserts, from the access token's `sub`.
  *
- * Cursor publishes no email on this grant, so the login used to fall back to the
- * provider id — every account of the provider then looked identical, and adding
- * a second one replaced the first. `sub` (`auth0|user_01…`) is stable across
- * every login of one account and differs between accounts, which is exactly
- * what an account identity has to do.
+ * Cursor publishes no email on this grant, so falling back to the provider id
+ * makes every account of the provider look identical — adding a second one
+ * replaces the first. `sub` (`auth0|user_01…`) is stable across every login of
+ * one account and differs between accounts, which is exactly what an account
+ * identity has to do.
  */
 export function cursorAccountIdentity(token: string): string | undefined {
   const payload = decodeJwtPayload(token);

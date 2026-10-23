@@ -412,8 +412,8 @@ function errorMessageFor(errorKind: string | undefined): string {
     capability_unsupported: "the route does not support this request",
     admission_unavailable: "gateway dependencies were unavailable",
     unknown_error: "the upstream failure could not be classified",
-    // Codes that previously had no entry and fell through to a mechanical
-    // underscore-to-space rendering of the raw code.
+    // Without an entry these fall through to a mechanical underscore-to-space
+    // rendering of the raw code.
     accounts_unavailable: "no account for this route was available",
     accounts_rate_limited: "every account for this route is rate limited or cooling down",
     ambiguous_model: "the model id matched more than one route",
@@ -1290,12 +1290,11 @@ function RequestsStatCard({
  * not flash a "—" row before real numbers arrive.
  *
  * One row, four figures of the same size: `RESOLVE 367 ms · P50 … · P95 … ·
- * P99 …`. The average used to be larger and labelled "Route latency AVG",
- * which read as a heading sitting on top of the percentiles, then "Latency" —
- * which put it in the same series as the percentiles beside it when it is a
- * different measurement entirely (pre-dispatch delay, not response time).
- * "Resolve" says which one it is. It wraps rather than overflows when there is
- * no room.
+ * P99 …`. "Resolve" names the measurement: a larger label such as "Route
+ * latency AVG" reads as a heading sitting on top of the percentiles, and
+ * "Latency" puts it in the same series as the percentiles beside it when it is
+ * a different measurement entirely (pre-dispatch delay, not response time).
+ * It wraps rather than overflows when there is no room.
  *
  * Each figure carries a native `title` explaining the metric, the window, and
  * how many requests it was computed from — a percentile over twenty requests

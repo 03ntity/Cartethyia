@@ -236,14 +236,13 @@ function jsonResponse(body: unknown): Response {
  *
  * Key fetching, caching, in-flight deduplication, the minimum refresh interval
  * on an unknown `kid`, and `kid`-rotation pickup are all delegated to
- * `jose`'s `createRemoteJWKSet` — the same algorithm this class used to
- * reimplement by hand. `jose` additionally honours each JWK's `use` and
- * `key_ops`, so an encryption key published alongside the signing keys cannot
- * be selected for verification.
+ * `jose`'s `createRemoteJWKSet`. `jose` additionally honours each JWK's `use`
+ * and `key_ops`, so an encryption key published alongside the signing keys
+ * cannot be selected for verification.
  *
  * The algorithm is checked against `SUPPORTED_ALGORITHMS` *before* any key is
- * resolved, so the asymmetric-only allowlist (no `none`, no HMAC) is
- * unchanged by the migration.
+ * resolved, so the asymmetric-only allowlist (no `none`, no HMAC) holds
+ * regardless of what the JWKS publishes.
  */
 export class JwksVerifier {
   readonly #keys: RemoteJWKSet;
@@ -317,10 +316,10 @@ export class JwksVerifier {
 /**
  * One verifier per URL, bounded and time-limited.
  *
- * The registry used to be an unbounded, never-evicted `Map`: every JWKS URL
- * ever seen pinned its verifier — and its key cache — for the process
- * lifetime. A TTL plus a hard entry cap keeps a fleet of issuers from growing
- * it without limit while still sharing a verifier's key cache across calls.
+ * An unbounded, never-evicted registry would pin every JWKS URL ever seen —
+ * and its verifier's key cache — for the process lifetime. A TTL plus a hard
+ * entry cap keeps a fleet of issuers from growing it without limit while still
+ * sharing a verifier's key cache across calls.
  */
 const JWKS_VERIFIER_TTL_MS = 5 * 60 * 1_000;
 const JWKS_VERIFIER_MAX_ENTRIES = 64;

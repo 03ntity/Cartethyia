@@ -255,14 +255,12 @@ function recommendedModels(
           ...(limits?.contextLimit === undefined ? {} : { ctx: limits.contextLimit }),
           ...(limits?.outputLimit === undefined ? {} : { out: limits.outputLimit }),
           reasoning: true,
-          // `free` follows the free bucket, not "not a subscription".
-          //
-          // This used to read `!subscription`, which made every `recommended`
-          // row free: that bucket is billed, and the flag is not cosmetic —
+          // `free` follows the free bucket, not "not a subscription": the
+          // `recommended` bucket is billed, and the flag is not cosmetic —
           // `defineModel` prices a `free` row at zero, so the cost surface
-          // reported paid models as free. The upstream settles it: dispatching
-          // `anthropic/claude-sonnet-5.5` from `recommended` answers 402
-          // `insufficient_credits`, while a `free` bucket id answers 200. A
+          // would report paid models as free. The upstream settles it:
+          // dispatching `anthropic/claude-sonnet-5.5` from `recommended` answers
+          // 402 `insufficient_credits`, while a `free` bucket id answers 200. A
           // subscription row is also not free — it bills a subscription — so
           // only the free bucket carries the flag.
           free: freeTier,

@@ -2,11 +2,10 @@
  * OpenAI-family in-stream error frames → typed `GatewayError`.
  *
  * A `200 OK` whose SSE body carries an explicit error envelope is an upstream
- * failure that arrived *after* the status line. The chat, responses, and codex
- * decoders used to record it only as a terminal `state: "failed"`, which left
- * the client with no `error.code`, no message, and telemetry with the
- * `unknown_error` category — while the Claude (`messages.ts`) and Gemini
- * decoders already threw for the identical event. This module is the one
+ * failure that arrived *after* the status line. Recording it only as a terminal
+ * `state: "failed"` leaves the client with no `error.code`, no message, and
+ * telemetry with the `unknown_error` category — while the Claude (`messages.ts`)
+ * and Gemini decoders throw for the identical event. This module is the one
  * classifier those surfaces share.
  *
  * Classification reads **structured identifiers only** (`error.type`,

@@ -354,12 +354,12 @@ export function registerAccountQuotaTenantRoutes(
       const accounts = rows.map((row) => {
         const entry =
           row.tenantId === null ? globalCache.get(row.id) : ownedCache.get(row.id);
-        // No background refresh is enqueued here. Opening the page used to
-        // enqueue one for every account whose cached value had aged out, so a
-        // single page open hit every provider's quota endpoint at once — and
-        // because the page also polled, the operator saw that fan-out as "the
-        // page refreshes everything when I open it". The periodic sweep owns
-        // freshness; this route renders what is cached.
+        // No background refresh is enqueued here: enqueuing one for every
+        // account whose cached value had aged out means a single page open hits
+        // every provider's quota endpoint at once — and because the page also
+        // polls, the operator sees that fan-out as "the page refreshes
+        // everything when I open it". The periodic sweep owns freshness; this
+        // route renders what is cached.
         //
         // `refreshing` still counts accounts with no cached value, so the client
         // can show them as pending while the sweep fills them.

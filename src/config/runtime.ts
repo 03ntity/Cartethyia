@@ -20,8 +20,8 @@ export function resolveDashboardDist(): string {
 /**
  * Resolves the configured default gateway API key (`CARTETHYIA_API_KEY`), if
  * one is set. Consumers that need the raw secret — first-boot seeding and the
- * console's legacy-key recovery — read it here instead of probing
- * `process.env` directly.
+ * console's key recovery from existing installations — read it here instead of
+ * probing `process.env` directly.
  */
 export function resolveDefaultGatewayApiKey(): string | undefined {
   return readOptionalText("CARTETHYIA_API_KEY", CONFIG_SPEC.CARTETHYIA_API_KEY);

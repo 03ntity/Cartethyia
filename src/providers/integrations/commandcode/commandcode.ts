@@ -31,9 +31,8 @@ export const COMMANDCODE_MESSAGES_PATH = "/messages" as const;
  *
  * Generated from the live `/provider/v1/models` listing (95 rows). Each row
  * carries the wire that serves it and the context window the API states, which
- * is the whole point: the previous list was 36 ids with no limits and one wire
- * for everything, so every `claude-*` id — served on `/messages` only — was
- * filed as chat and could never be dispatched.
+ * is the whole point: dispatch is per-row, and every `claude-*` id is served on
+ * `/messages` only — filed as chat, it could never be dispatched.
  *
  * `vision: true` on every row is the catalog's own declaration for this
  * provider; a model that rejects an image answers for itself.
@@ -619,8 +618,8 @@ export async function* transformNdjson(body: ReadableStream<Uint8Array>, signal:
 // `/provider/v1` answers `/chat/completions`, `/responses` and `/messages`, and
 // the model row states which one serves it. The bespoke `/alpha/generate`
 // envelope is the CLI's own surface and stays reachable through
-// `buildRequest` for callers that still speak it, but routing no longer forces
-// every model onto it — which is what left all nine `claude-*` ids unroutable.
+// `buildRequest` for callers that still speak it, while routing follows the
+// wire each model row declares rather than forcing every model onto it.
 
 interface CommandCodeAdapterOptions {
   readonly fetch?: typeof fetch;

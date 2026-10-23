@@ -31,7 +31,7 @@ const MAX_DISCOVERED_MODELS = 500;
 const KIRO_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
 
 /**
- * Ids the seed catalog deliberately no longer carries.
+ * Ids the seed catalog deliberately excludes.
  *
  * Discovery adds every id the upstream lists, so without this a retired row
  * comes back the moment an account fetches its models. The seed is the owner

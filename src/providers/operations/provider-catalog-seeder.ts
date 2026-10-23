@@ -16,9 +16,9 @@ export async function seedBundledModels(
     // provider that moved from `/chat/completions` to `/v2/chat/completions`).
     // The unique key is (provider, model, endpoint), so a changed endpoint
     // would otherwise insert a second row and leave the stale route behind —
-    // the model list would then show duplicates and probes could hit the dead
-    // path. Composite `NOT IN` keeps exactly the (model, endpoint) pairs the
-    // catalog owns.
+    // the model list then shows duplicates and probes can hit the dead path.
+    // Composite `NOT IN` keeps exactly the (model, endpoint) pairs the catalog
+    // owns.
     const pairs = definitions.map(
       (definition) => sql`(${definition.modelId}, ${definition.endpointPath})`,
     );

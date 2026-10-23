@@ -342,9 +342,9 @@ export async function* decodeResponsesSseStream(
     const eventType = event["type"];
     // An explicit failure inside a 200 OK. Two shapes carry one: a top-level
     // `type: "error"` frame (the error object itself), and a `response.failed`
-    // terminal whose `response.error` explains why. Both used to be recorded
-    // only as a `failed` terminal, so the client got no code and telemetry got
-    // `unknown_error`; the Claude and Gemini decoders already raised.
+    // terminal whose `response.error` explains why. Recording either only as a
+    // `failed` terminal would leave the client with no code and telemetry with
+    // `unknown_error`; the Claude and Gemini decoders already raise.
     const failedResponse = eventType === "response.failed" && isRecord(event["response"]) ? event["response"] : undefined;
     const streamError = gatewayErrorFromStreamError(
       eventType === "error" ? event : failedResponse?.["error"],

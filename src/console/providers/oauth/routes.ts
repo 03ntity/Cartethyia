@@ -102,8 +102,7 @@ export class DrizzleOAuthAccountStore implements OAuthAccountStore {
               lastErrorAt: null,
               lastRecoveredAt: null,
               // A fresh login supplies a refresh token, so the account returns
-              // to normal OAuth refresh handling — a static-token flag set on
-              // the previous (refresh-less) credential no longer applies.
+              // to normal OAuth refresh handling and is not a static token.
               staticToken: false,
               // Only what this login reported: a flow that learned no profile or
               // region leaves the stored configuration alone rather than blanking it.
@@ -164,16 +163,13 @@ export class DrizzleOAuthAccountStore implements OAuthAccountStore {
  * and device-code start/poll — driven by whichever `OAuthLoginClient` is
  * registered for a given provider id.
  *
- * > **Koreksi.** An earlier comment here read "Cartethyia hosts the callback
- * > itself (it's a server process, not a local CLI), so there is no
- * > loopback-listener/port-selection problem." That was wrong, and it is the
- * > premise that produced the bug. The redirect URIs these clients advertise
- * > are loopback (`localhost:1455`, `127.0.0.1:54549`, …), which name the
- * > machine the *operator's browser* is on — not this process. Advertising one
- * > without binding the port leaves the code in the browser's address bar, so
- * > every browser login needed the redirect pasted back by hand. The gateway
- * > is a server process, but it is not *the* server the redirect arrives at;
- * > `callback-listener.ts` is what makes those the same endpoint.
+ * The redirect URIs these clients advertise are loopback (`localhost:1455`,
+ * `127.0.0.1:54549`, …), which name the machine the *operator's browser* is on
+ * — not this process. Advertising one without binding the port leaves the code
+ * in the browser's address bar, so every browser login needs the redirect
+ * pasted back by hand. The gateway is a server process, but it is not *the*
+ * server the redirect arrives at; `callback-listener.ts` is what makes those
+ * the same endpoint.
  */
 export interface PersistedOAuthAccount {
   readonly accountId: string;

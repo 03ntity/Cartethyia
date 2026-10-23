@@ -79,12 +79,11 @@ function parseToolObject(item: Record<string, unknown>, dialect: ToolDialect): T
     }
   } else if (dialect === "responses") {
     // A Responses caller may still send the Chat-shaped envelope — the two
-    // spellings are interchangeable in the wild, and a client that posts
-    // `{"type":"function","function":{"parameters":…}}` here previously fell
-    // through to `schema = item`, which shipped the whole tool object upstream
-    // as the parameter schema and came back as
-    // `invalid_function_parameters` (CodeBuddy 11129). Unwrap it the way the
-    // Chat dialect does before falling back to the flat Responses spelling.
+    // spellings are interchangeable in the wild. Unwrap it the way the Chat
+    // dialect does before falling back to the flat Responses spelling; taking
+    // `schema = item` instead ships the whole tool object upstream as the
+    // parameter schema and comes back as `invalid_function_parameters`
+    // (CodeBuddy 11129).
     const wrapped = isRecord(item["function"]) ? item["function"] : undefined;
     schema =
       item["input_schema"] ??

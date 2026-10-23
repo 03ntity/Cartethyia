@@ -4,9 +4,8 @@ The reasoning behind this project: what problem it was built for, what it does
 differently from the gateways around it, and which behaviors exist here and
 nowhere else.
 
-This page is the story. For indexes and procedures, use
-[reference](reference/README.md), [features](features/README.md), and
-`.skills/`.
+This page is the story. For indexes and procedures, use the
+[documentation index](README.md) and `.skills/`.
 
 ## The problem
 
@@ -128,7 +127,4 @@ telemetry, and the console API — is this project's own.
 ## Where to go next
 
 - [Getting started](getting-started.md) — install and choose a database mode.
-- [Reference](reference/README.md) — one page per layer.
-- [Features](features/README.md) — one page per user-facing feature.
-- [Agent context](agent-context.md) — orientation for a new contributor or
-  agent.
+- [Documentation index](README.md) — one page per layer and per feature.

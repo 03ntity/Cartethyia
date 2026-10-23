@@ -278,7 +278,7 @@ export class NetworkPoolSelector {
         // One script, not `SET` then `SADD`: a crash between the two left the
         // marker unindexed (invisible to the pool listing) or the index
         // pointing at a marker that expired. The script also arms the index
-        // set's own TTL, which previously had none and so grew without bound.
+        // set's own TTL, which must be armed or the index grows without bound.
         await redisEvalNumber(
           this.redis,
           COOLDOWN_FLAG_SCRIPT,
@@ -458,9 +458,10 @@ export class NetworkPoolSelector {
   /**
    * Removes one cooldown marker and its index entry in one atomic step.
    *
-   * The two writes used to be separate `DEL` + `SREM`, so a crash between them
-   * left the index listing a provider whose marker was gone — a pool would
-   * report a cooldown that no longer applied until the index entry expired.
+   * The two writes must not be separate `DEL` + `SREM`: a crash between them
+   * would leave the index listing a provider whose marker is gone — a pool
+   * would report a cooldown that no longer applies until the index entry
+   * expires.
    */
   private async clearRedisCooldown(poolId: string, providerId: string): Promise<void> {
     if (!this.redis) return;

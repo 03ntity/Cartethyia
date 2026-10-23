@@ -42,7 +42,7 @@ export async function resolvePayloadCapture(
     // A preference read that fails must not invent capture. Off keeps nothing.
     // Reported as its own state rather than silently as `none`: an operator
     // whose capture is off by choice and one whose preference read is failing
-    // need different fixes, and both used to look like "not configured".
+    // need different fixes, and both would otherwise look like "not configured".
     return { ok: false };
   }
 }
@@ -214,10 +214,10 @@ function payloadSignals(values: readonly unknown[]): PayloadSignals {
  * Drawer order is the allocation order, and that is deliberate: the cap is a
  * single shared budget, so whatever is accounted first is what survives a
  * large request. `response_body` is the legacy alias of the client response
- * and names no panel of its own, so it is accounted **last** — while it was
- * second, a large client request plus its own duplicate consumed the whole
- * budget before the Provider Request and Provider Response panels were
- * reached, and those two read empty for a request that did reach an upstream.
+ * and names no panel of its own, so it is accounted **last** — accounting it
+ * earlier lets a large client request plus its own duplicate consume the whole
+ * budget before the Provider Request and Provider Response panels are reached,
+ * and those two then read empty for a request that did reach an upstream.
  */
 export function buildPayloadRecord(
   input: PayloadCaptureInput,
@@ -226,11 +226,11 @@ export function buildPayloadRecord(
 ): Omit<StoredPayload, "id"> {
   const expiresAt = new Date(now.getTime() + payloadRetentionMs());
   // Each body is serialized once, in drawer order, and only while the running
-  // total still fits the cap. The old path serialized every body up front to
-  // measure them and then serialized the whole record again to store it, so a
-  // capture held two copies of every body at once — measured at 23 MB of heap
-  // for 8 MB of bodies. A body that would cross the cap is never touched: its
-  // text is not built and its object is not walked for signals.
+  // total still fits the cap. Serializing every body up front to measure them
+  // and then serializing the whole record again to store it holds two copies of
+  // every body at once — measured at 23 MB of heap for 8 MB of bodies. A body
+  // that would cross the cap is never touched: its text is not built and its
+  // object is not walked for signals.
   const surfaces: ReadonlyArray<readonly [keyof StoredPayload, unknown]> = [
     ["request_body", input.requestBody],
     ["provider_request_body", input.providerRequestBody],
@@ -270,11 +270,11 @@ export function buildPayloadRecord(
     serialized.push(text);
     kept.push(body);
   }
-  // Only a surface that *had* a body and lost it to the cap is marked. The
-  // previous form stamped the marker onto every null surface, including ones
-  // that never carried anything — a request that never reached an upstream
-  // then reported "truncated" for a provider panel that was never captured,
-  // and the stage bitmask counted a marker as captured content.
+  // Only a surface that *had* a body and lost it to the cap is marked.
+  // Stamping the marker onto every null surface would also mark surfaces that
+  // never carried anything — a request that never reached an upstream then
+  // reports "truncated" for a provider panel that was never captured, and the
+  // stage bitmask counts a marker as captured content.
   const marker = (originalBytes: number): unknown => ({
     _truncated: true,
     _original_bytes: originalBytes,

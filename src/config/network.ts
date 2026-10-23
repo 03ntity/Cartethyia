@@ -83,20 +83,15 @@ export function resolveProxyMaxFreeSockets(): number {
 }
 
 // Proxy pool egress is dialed in-process by `network/pool/agent.ts` (http,
-// https, socks5). The former child-process pool flavor — generated config
-// files, a binary path, a local SOCKS port range, and a uid/gid drop — was
-// removed with that feature; do not reintroduce its resolvers without the
-// daemon that consumed them.
+// https, socks5). Add a resolver here only alongside the consumer it feeds.
 
 // ─── Process-wide resource bounds ───────────────────────────────────────────
 
 /**
  * Live process-wide resource bounds. Only bounds with a production consumer
  * live here: `maxPostgresPoolSize` feeds `poolMaxFromEnv()`, and
- * `maxTelemetryQueueBytes` caps `TelemetryBatchBuffer`. Everything else
- * that used to live in this module (`maxRedisPoolSize`, provider/network/
- * catalog/replay bounds, `BoundedConfig` + its validators) had zero callers
- * and was removed — re-add a bound only with its consumer in the same change.
+ * `maxTelemetryQueueBytes` caps `TelemetryBatchBuffer`. Re-add a bound only
+ * with its consumer in the same change.
  */
 export const DEFAULT_BOUNDS = {
   maxTelemetryQueueBytes: 10 * 1024 * 1024,
@@ -105,12 +100,11 @@ export const DEFAULT_BOUNDS = {
    *
    * This is a *ceiling*, not a reservation: the pool opens connections on
    * demand and returns them to idle, so a value the workload never reaches
-   * costs nothing today — it only bounds the worst case. The old value (60)
-   * was justified in a comment as "bursty 10k-inflight traffic", which is a
-   * property of the proxy path. The proxy path is *mostly* database-free —
-   * routing comes from `InMemoryRouteSnapshotService` and admission counters
-   * live in Redis — but not entirely: a dispatch attempt resolves its
-   * credential with a per-attempt read, health transitions write, and tenant
+   * costs nothing today — it only bounds the worst case. The proxy path is
+   * *mostly* database-free — routing comes from `InMemoryRouteSnapshotService`
+   * and admission counters live in Redis — but not entirely: a dispatch attempt
+   * resolves its credential with a per-attempt read, health transitions write,
+   * and tenant
    * preferences are read behind a short cache. Those are small, bounded reads
    * on the request's own attempt, not a per-request fan-out. The larger
    * database consumers remain the console API, one telemetry flush at a time,

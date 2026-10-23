@@ -302,8 +302,8 @@ export function DeviceCodeDialog({
   useEffect(() => {
     // StrictMode mounts, unmounts, and remounts this dialog in development, and
     // this effect starts a device flow on every mount. Both requests reach the
-    // provider. Whichever resolves last used to win `setSession`, so the code on
-    // screen and the code being polled could belong to a flow the operator never
+    // provider. Letting whichever resolves last win `setSession` would put the
+    // code on screen and the code being polled in a flow the operator never
     // approved — the provider then answers "still pending" forever. The first
     // start is the one shown and polled; a later one is dropped.
     let cancelled = false;
@@ -370,8 +370,8 @@ export function DeviceCodeDialog({
     // to the session that sent it. Applying it anyway showed "connected" for a
     // login whose row was never written.
     let stale = false;
-    // One timer, ever. Rescheduling used to add a fresh interval beside the one
-    // already running, so two polls left per cadence. GitHub's device flow
+    // One timer, ever. Rescheduling must not add a fresh interval beside the one
+    // already running, or two polls leave per cadence. GitHub's device flow
     // answers `slow_down` the moment a poll arrives inside its minimum, and
     // keeps answering it — the code the operator approves then never yields a
     // token. The next poll is always scheduled from the answer, not piled on.

@@ -45,9 +45,8 @@ function stopReason(events: readonly CanonicalEvent[]): string | null {
 }
 
 /**
- * Completion wire usage. Delegates to the chat builder (same wire family) —
- * completion responses now carry cache/reasoning details instead of dropping
- * them (intended fix; previously only the three totals were forwarded).
+ * Completion wire usage. Delegates to the chat builder (same wire family), so
+ * completion responses carry cache/reasoning details, not just the three totals.
  */
 function usage(events: readonly CanonicalEvent[]): OpenAiUsage | undefined {
   const terminal = [...events].reverse().find((event) => event.type === "terminal");

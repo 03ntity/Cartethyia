@@ -154,7 +154,7 @@ export class StreamFinalizer {
    *
    * Once the upstream has produced anything — even surface-invisible
    * reasoning deltas — it is alive: the stall bound governs and the tighter
-   * first-chunk bound no longer applies.
+   * first-chunk bound does not apply.
    *
    * The request deadline is a fixed ceiling measured from ingress, and a
    * stream that keeps sending past it is not stalled. A live WorkBuddy stream

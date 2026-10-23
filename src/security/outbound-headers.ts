@@ -24,10 +24,9 @@ export const BADGE_IMAGE_ORIGIN = "https://img.shields.io";
 /**
  * Security headers on every `/v1` response, whichever path produced it.
  *
- * Three paths used to hand-copy this list — the request-context middleware,
- * the error encoder, and the upstream success projection — and they had
- * already drifted: the success path was missing the CSP pair. One list means a
- * future hardening cannot land on one path and miss the others.
+ * One list for the three paths that emit it — the request-context middleware,
+ * the error encoder, and the upstream success projection — means a future
+ * hardening cannot land on one path and miss the others.
  *
  * Carrying the CSP pair on the success path is safe because every surface
  * adapter emits `application/json` or `text/event-stream`, never a renderable

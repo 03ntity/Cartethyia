@@ -73,10 +73,8 @@ export interface Http2BidiOpenOptions {
  * The dialer contract a provider adapter is handed.
  *
  * Declared here rather than in the provider layer so the dependency runs one
- * way: `provider-contracts` imports this module, never the reverse. It used to
- * be declared there and re-exported from here, which made the two import each
- * other — type-only, so it never deadlocked, but it meant this
- * transport-neutral contract had to know about providers.
+ * way: `provider-contracts` imports this module, never the reverse, and this
+ * transport-neutral contract stays free of any knowledge of providers.
  */
 export type ValidatedOutboundHttp2Bidi = (
   url: URL,

@@ -160,8 +160,8 @@ export class FirstBootSetupService {
     // First boot creates the default tenant, the platform-admin user, and the
     // gateway key. The advisory lock is what stops two concurrent boots from
     // both passing the "no admin yet" check and racing to create them, so a
-    // handle that cannot take the lock must fail closed — the previous
-    // `typeof` probe skipped the lock and ran the setup unserialized.
+    // handle that cannot take the lock must fail closed — running the setup
+    // unserialized lets two boots both pass the check.
     await this.db.transaction(async (transaction) => {
       await transaction.execute(firstBootSetupLock());
       await create(transaction as unknown as CartethyiaDatabase);

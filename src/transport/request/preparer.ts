@@ -241,8 +241,8 @@ export class ProxyRequestPreparer {
     // than dispatched: a provider rejects the whole request for one corrupt
     // attachment, and the buddy family reports it with no field named, so the
     // caller gets a 400 it cannot act on. Running this before capability
-    // derivation also means a request whose only image was defective no longer
-    // requires the `image` capability — it plans like the text request it has
+    // derivation also means a request whose only image was defective does not
+    // require the `image` capability — it plans like the text request it has
     // become, instead of being routed to a vision route for nothing.
     const requestWithAttachments = dropCorruptAttachments(request).request;
     // Continuation affinity is resolved before anything else: a request

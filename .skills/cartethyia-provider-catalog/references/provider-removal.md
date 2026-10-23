@@ -1,9 +1,8 @@
----
-name: cartethyia-provider-removal
-description: "Remove a bundled Cartethyia provider, including its persisted global row, so it cannot linger as an undeletable custom card."
----
-
 # Provider removal
+
+Reference for `cartethyia-provider-catalog`. Use when removing a bundled
+provider, including its persisted global row, so it cannot linger as an
+undeletable custom card.
 
 Removing a bundled provider is a catalog cutover plus a persisted-row cleanup.
 Deleting the metadata is not enough: an old global `providers` row may remain

@@ -353,10 +353,10 @@ export function buddyTrialTask(deps: BuddyTaskDeps) {
  * Growth-activity report: the `/v2/report` batch that lights the login streak and
  * scores the daily growth event.
  *
- * It used to ride the quota sweep with no ledger of its own, which meant eight
- * POSTs per account *per sweep* (two rounds of four events) because the sweep
- * ran every minute. It is its own once-a-day task here, gated by the same
- * (day, account, task) ledger as every other growth task.
+ * It is a once-a-day task with its own ledger, gated by the same
+ * (day, account, task) ledger as every other growth task: running it on the
+ * quota sweep would post two rounds of four events per account per sweep, and
+ * the sweep runs every minute.
  *
  * The report is not a credit claim, so its failure never marks an account
  * unhealthy — the result is logged and the ledger is stamped either way.

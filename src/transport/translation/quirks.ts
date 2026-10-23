@@ -180,9 +180,9 @@ export function applyParamQuirks(
   const quirk = findParamQuirk(providerId, request.model);
   // The thinking-sampling strip is universal, not quirk-gated: extended
   // thinking rejects temperature/top_p/top_k on every Messages-wire upstream.
-  // Previously the early return below skipped it for any provider without a
-  // PARAM_QUIRKS row (only anthropic/claude had one), so strict upstreams got
-  // a 400 the strip exists to prevent. Declarative rows still apply after.
+  // It runs before the early return below so a provider with no PARAM_QUIRKS
+  // row still gets it — otherwise a strict upstream takes a 400 the strip
+  // exists to prevent. Declarative rows still apply after.
 
   let controls = request.generation_controls;
   let changed = false;

@@ -445,9 +445,9 @@ function qoderStableRecordId(modelId: string, messages: CanonicalRequest["messag
 
 function qoderRequestedMaxTokens(request: CanonicalRequest, modelConfig: QoderModelConfig): number {
   /**
-   * The ceiling is the roster's stated one. The 32k this used to fall back to
-   * clamped every model alike, so a request asking for more was silently
-   * lowered no matter which model it named.
+   * The ceiling is the roster's stated one. A fixed 32k fallback would clamp
+   * every model alike, so a request asking for more would be silently lowered
+   * no matter which model it named.
    */
   const configured = typeof modelConfig.max_output_tokens === "number" ? modelConfig.max_output_tokens : 65_536;
   const controls = request.generation_controls as Record<string, unknown>;
@@ -564,9 +564,9 @@ export function buildQoderRequest(
       is_vl: modelConfig.is_vl,
       is_reasoning: modelConfig.is_reasoning,
       max_input_tokens: modelConfig.max_input_tokens,
-      // Mirrors the roster's stated ceiling. The 32k this used to fall back to
-      // was sent for every model alike, so the request declared a cap the
-      // catalog no longer publishes.
+      // Mirrors the roster's stated ceiling. A fixed 32k fallback would be sent
+      // for every model alike, so the request would declare a cap the catalog
+      // does not publish.
       max_output_tokens: modelConfig.max_output_tokens ?? 65_536,
       source: modelConfig.source ?? "system",
     },
@@ -679,12 +679,12 @@ async function* qoderBodyToCanonicalEvents(
 /**
  * The intl catalog this provider publishes.
  *
- * Previously built from the legacy `QODER_MODEL_CONFIGS`, which froze most
- * rows at 180k while the upstream reports 1M for the same keys. That number is
- * not cosmetic: it is sent upstream as `model_config.max_input_tokens`, so a
- * stale low value told Qoder the conversation window was small and made it
- * behave that way. Both the published catalog and the dispatched request now
- * come from the realm's roster, which carries the upstream's own numbers.
+ * `QODER_MODEL_CONFIGS` is not the source here: it freezes most rows at 180k
+ * while the upstream reports 1M for the same keys. That number is not
+ * cosmetic: it is sent upstream as `model_config.max_input_tokens`, so a stale
+ * low value tells Qoder the conversation window is small and makes it behave
+ * that way. Both the published catalog and the dispatched request come from the
+ * realm's roster, which carries the upstream's own numbers.
  */
 export const QODER_MODELS: readonly ModelDefinition[] = QODER_INTL_MODELS;
 

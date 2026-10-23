@@ -9,7 +9,7 @@ import { withTimeout } from "../boot/timeout";
 /**
  * Memoized readiness: the first caller runs the real `SELECT 1`/`PING`/
  * migration checks, and every subsequent caller within the TTL window reuses
- * that result — so a burst of concurrent requests no longer each spend a
+ * that result — so a burst of concurrent requests does not each spend a
  * Postgres pool checkout plus a Redis PING on readiness validation.
  */
 

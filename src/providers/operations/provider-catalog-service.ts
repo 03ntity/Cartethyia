@@ -134,7 +134,7 @@ export async function seedBundledProviders(db: CartethyiaDatabase): Promise<void
  * console-created provider carries a tenant — so an unowned id absent from the
  * bundle is an orphan by construction, and a tenant-owned BYOK row is never in
  * scope. The model seeder prunes its retired rows the same way; this is the
- * provider-level half that was missing.
+ * provider-level half.
  *
  * Separate from {@link seedBundledProviders} rather than folded into it: the
  * harness calls that seeder on import to converge a shared database, and a
@@ -226,9 +226,8 @@ export async function bundledModelCatalog(
 
 /**
  * Re-seeds the compiled catalogs, called when a provider gains an account after
- * boot. Seeding is no longer account-gated, so this is now simply the same walk
- * as at boot; it exists because an account makes the rows routable and the
- * snapshot must reflect that without waiting for a restart.
+ * boot. It runs the same walk as at boot: an account makes the rows routable and
+ * the snapshot must reflect that without waiting for a restart.
  *
  * Gated on {@link currentCatalogRevision}: this is the seeder the snapshot
  * builder calls on every rebuild, and the invalidation that triggers it is a

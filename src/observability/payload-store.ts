@@ -57,7 +57,7 @@ export function payloadReferenceFromRow(row: {
   return isPayloadFileReference(candidate) ? candidate : undefined;
 }
 
-/** Extension for newly written frame files. Old `.jsonb` files are still read. */
+/** Extension for frame files. */
 const FRAME_FILE_SUFFIX = ".jsonl";
 
 function isFrameFileName(name: string): boolean {
@@ -139,15 +139,13 @@ async function appendFrame(frame: PayloadFrame, parts?: readonly Buffer[]): Prom
 /**
  * One frame as a stored line: base64 of the gzipped JSON, newline-terminated.
  *
- * The 4-byte binary length header is gone. A header made every frame opaque —
- * you could not `cat` the file or read a frame without first decoding a
- * big-endian length and then gunzipping exactly that many bytes. A newline is
- * the delimiter instead, so the file is a text file of base64 lines and a
- * frame's extent is found by reading to the next `\n`.
+ * A newline is the frame delimiter, so the file is a text file of base64 lines
+ * and a frame's extent is found by reading to the next `\n` — a binary length
+ * header would make every frame opaque, unreadable without first decoding a
+ * big-endian length and then gunzipping exactly that many bytes.
  *
  * base64 rather than raw gzip bytes because gzip contains newlines, which
- * would make the delimiter ambiguous. The row still names `jsonl-file`, so no
- * schema change and no migration: readers tell old from new off the bytes.
+ * would make the delimiter ambiguous.
  */
 function toLine(compressed: Buffer): Buffer {
   return Buffer.from(`${compressed.toString("base64")}\n`, "utf8");
@@ -274,17 +272,12 @@ function gunzipFrame(stored: Buffer): Buffer | undefined {
 }
 
 /**
- * The JSON of one frame read out of a file, in either on-disk shape.
+ * The JSON of one frame read out of a file.
  *
- * Old frames carry a 4-byte big-endian length header, so their first byte is
- * `0x00` for any frame under 16 MB. New frames are a base64 line, which never
- * begins with a null byte. That one byte separates the two without a version
- * field, a schema change, or a migration — the same trick `frameJson` already
- * uses to tell gzip from plain JSON by its magic.
- *
- * Old frames are still read because they exist on disk right now and their
- * rows point at them; they expire on their own within the retention window, so
- * tolerating both is temporary by construction.
+ * A frame is a base64 line — base64 because gzip contains newlines, which would
+ * make the newline delimiter ambiguous. The bytes are gunzipped only if they
+ * are gzip; `gunzipFrame` returning `undefined` is what marks a slice as not a
+ * frame.
  */
 function frameJsonFromSlice(
   slice: Buffer,
@@ -324,7 +317,7 @@ function frameLiveness(data: Buffer, before: Date): FrameLiveness {
     if (new Date(frame.expiresAt).getTime() >= before.getTime()) return "live";
     offset = end;
   }
-  // Bytes left over that are too short to hold a header are an unreadable tail.
+  // Bytes left over that are too short to hold a frame are an unreadable tail.
   return offset === data.byteLength ? "none" : "unknown";
 }
 
@@ -346,10 +339,11 @@ function frameLiveness(data: Buffer, before: Date): FrameLiveness {
  * supply that bound leaves the default, which keeps damaged files rather than
  * risk dropping a frame a row still addresses.
  *
- * One damaged file must not abort the pass. A single corrupt frame used to
- * throw straight out of the loop, so every other expired file stayed on disk
- * forever and the volume only grew — and because a container restart is the
- * usual way a half-written tail appears, the failure looked Docker-specific.
+ * One damaged file must not abort the pass. If a single corrupt frame threw
+ * straight out of the loop, every other expired file would stay on disk
+ * forever and the volume would only grow — and because a container restart is
+ * the usual way a half-written tail appears, the failure would look
+ * Docker-specific.
  */
 export async function prunePayloadFrames(
   before: Date,
@@ -386,9 +380,8 @@ async function fileReclaimable(
   unparseableWrittenBefore: Date,
 ): Promise<boolean> {
   const data = await readFile(path);
-  // Nothing written yet, so nothing to lose. The old test was "shorter than a
-  // binary header", which the line format has no need of; a real frame — old
-  // or new — is far longer than that anyway.
+  // Nothing written yet, so nothing to lose. A real frame is far longer than
+  // any header this format could carry.
   if (data.byteLength === 0) return true;
   const liveness = frameLiveness(data, before);
   if (liveness === "live") return false;

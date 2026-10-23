@@ -3,8 +3,7 @@
  * `src/protocol/`. This is the single home for the generic guards, UTF-16
  * well-formedness coercion, JSON/argument helpers, hash helpers, endpoint
  * URL construction, image-source resolution, and custom-header validation
- * that the per-wire request/response codecs build on — previously duplicated
- * across the Claude/Codex protocol modules and `providers/compatible-adapter`.
+ * that the per-wire request/response codecs build on.
  *
  * Provider-specific primitives that depend on provider identity (e.g. Codex
  * identity headers) deliberately live with their provider, not here.

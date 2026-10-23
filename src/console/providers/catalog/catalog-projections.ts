@@ -46,13 +46,12 @@ export function endpointPathForProviderModel(
   // Operator profile > the provider's own static catalog > the generic
   // per-wire default.
   //
-  // The path is returned as declared. It used to be rewritten against the
-  // base URL, stripping a segment the base already carried so a versioned root
-  // would not join into `/v1/v1/chat/completions`. That machinery hid the
-  // mistake it was papering over: a provider whose base is already versioned
-  // has to declare its own path, exactly as `cline` and `qianfan` do. A wrong
-  // URL should reach the operator as the wrong URL, not be quietly corrected
-  // into a different address that may or may not be the one they meant.
+  // The path is returned as declared, never rewritten against the base URL.
+  // Stripping a segment the base already carried would paper over the mistake
+  // instead of surfacing it: a provider whose base is already versioned has to
+  // declare its own path, exactly as `cline` and `qianfan` do. A wrong URL
+  // should reach the operator as the wrong URL, not be quietly corrected into
+  // a different address that may or may not be the one they meant.
   const endpointPath =
     profile?.endpoint_paths_by_wire_family?.[wireFamily] ??
     staticEndpoints?.[wireFamily] ??

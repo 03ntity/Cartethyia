@@ -9,18 +9,20 @@ Entry point for repo work. Most tasks belong to a focused skill — pick it firs
 
 | Work | Use |
 |---|---|
-| A failing request to attribute to a field; payload/wire bytes; remote debugging | `cartethyia-trace-replay` |
+| A failing request to attribute to a field; payload/wire bytes | `cartethyia-trace-replay` |
+| Getting the evidence off a remote deployment you cannot read from disk | `cartethyia-trace-replay` → `references/remote-debugging.md` |
 | A 403 `FreeTierError` (check the egress IP first, then the `tools` gate) | `cartethyia-trace-replay` → `references/opencode-free-tier.md` |
 | Schema change, migration, new usage/telemetry field | `cartethyia-schema-telemetry` |
-| Add/remove/authenticate a provider; catalog, `/v1/models`, capabilities | `cartethyia-provider-catalog` |
-| What a model can do — vision, tools, reasoning, free tier — and proving it | `cartethyia-provider-capabilities` |
+| Add/remove/authenticate a provider; catalog, `/v1/models` | `cartethyia-provider-catalog` |
+| What a model can do — vision, tools, reasoning, free tier — and proving it | `cartethyia-provider-catalog` → `references/capabilities.md` |
+| Remove a bundled provider and its leftover global row | `cartethyia-provider-catalog` → `references/provider-removal.md` |
 | Understand undocumented behavior by tracing this repo's own code | `cartethyia-reverse-engineering` |
 | Image generation wires, catalog rows, and account entitlement | `cartethyia-provider-catalog` |
-| Remove a bundled provider and its leftover global row | `cartethyia-provider-removal` |
 | Account health, cooldown class, pool selection, retries, leases | `cartethyia-health-routing` |
 | Add/change a `src/console/` domain; contract→store→dashboard mirror | `cartethyia-console-api` |
 | `dashboard/` React, layout, social meta, toasts, `agent-browser` verification | `cartethyia-dashboard` |
-| Repo invariants, deadness, legacy-era checks | `references/guards.md` |
+| Deploying to a server — regular VPS, NAT VPS, Docker | `cartethyia-deployment` |
+| Repo invariants, deadness, legacy-era checks, skill upkeep | `references/guards.md` |
 | How to write the change: shape, names, types, errors | `references/taste.md` |
 | Bug-fix loop, proof, gates | `references/verification.md` |
 | Orientation, add a feature, first install, console boot | `references/development.md` |

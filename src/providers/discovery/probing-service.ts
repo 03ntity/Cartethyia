@@ -1031,10 +1031,9 @@ export class ProviderProbingService {
             ...request,
             accountId: account.id,
           });
-          // No health write here: this used to regex the model's own answer text
-          // for "202" and degrade the account on a match. A probe that genuinely
-          // fails already reports through `recordAccountFailure`, which classifies
-          // the real status; matching answer text is not a health signal.
+          // No health write here: a probe that genuinely fails already reports
+          // through `recordAccountFailure`, which classifies the real status;
+          // matching answer text is not a health signal.
           return { ...result, accountId: account.id };
         }),
       );

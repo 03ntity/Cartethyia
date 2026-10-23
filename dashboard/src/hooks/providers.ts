@@ -33,8 +33,7 @@ export interface ModelMetadataPayload {
  * Lazy by design: the cached list renders instantly on revisit and revalidates
  * in the background (the default 60 s freshness + 60 s poll). Mutations
  * invalidate this key, so a longer stale window can never strand a
- * create/update/delete. `staleTime` is left at the shared default — the
- * explicit override here used to be *above* it, and is now the same value.
+ * create/update/delete. `staleTime` is left at the shared default.
  */
 export function useProviders() {
   return useQuery({
@@ -303,8 +302,8 @@ export function useCreateProviderAccount() {
  *
  * The server returns a per-item outcome, so a partial paste still lands the
  * accounts that were fine. Invalidation happens once, after the whole batch —
- * the old client-side loop invalidated per account, which is what made a large
- * paste re-fetch the account list dozens of times.
+ * invalidating per account would re-fetch the account list once per row in a
+ * large paste.
  */
 export function useCreateProviderAccountsBatch() {
   const queryClient = useQueryClient();
@@ -392,9 +391,9 @@ async function invalidateAccountHealthFamily(
 
 /**
  * Invalidates every cached query a provider-account mutation can stale: the
- * account list, the health-event family, and the provider list itself. Four
- * mutations used to spell this trio out separately, so a fifth could silently
- * forget one and leave a stale list on screen.
+ * account list, the health-event family, and the provider list itself. Every
+ * account mutation goes through this one helper, so none can silently forget
+ * one of the three and leave a stale list on screen.
  */
 async function invalidateProviderAccounts(
   queryClient: QueryClient,

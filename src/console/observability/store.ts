@@ -198,9 +198,9 @@ const HEALTH_WINDOW_MS = 24 * 3_600_000;
 const TOP_N = 50;
 /**
  * How long a parsed window is shared. A dashboard poll fires ~8 usage
- * endpoints at once, and a slow parse used to outlive a 1.5 s window — so the
- * endpoints that missed it each re-read and re-parsed the same files, which is
- * how one page load became several full parses of the retention window.
+ * endpoints at once, and a slow parse outlives a 1.5 s window — so the
+ * endpoints that miss it each re-read and re-parse the same files, which is how
+ * one page load becomes several full parses of the retention window.
  */
 const PERIOD_MEMO_TTL_MS = 5_000;
 
@@ -340,9 +340,8 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
   ) {}
 
   async health(tenantId: string): Promise<CachedResult<SystemHealthResponse>> {
-    // The only usage-family read that used to bypass both the 5 s in-process
-    // memo and the Redis read-through, so it re-parsed 24 hourly files every
-    // page load. Same 10 s TTL as `/system/usage`.
+    // Cached like its siblings: reading this directly re-parses 24 hourly files
+    // every page load. Same 10 s TTL as `/system/usage`.
     return this.readThroughWithEtag(
       this.usageCacheKey(tenantId, "24h", "health"),
       () => this.computeHealth(tenantId),
@@ -424,8 +423,8 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
       p99 = percentile(latencies, 0.99);
       // Cached share of the prompt: cached/input, the same honest definition
       // usageSummary uses, so the health card and the Usage page cannot
-      // disagree. (This used to be prompt-share input/(input+output), which
-      // read ~99% and was mislabeled a cache hit rate.)
+      // disagree. (Cached share, not prompt share: input/(input+output) reads
+      // ~99% and mislabels it a cache hit rate.)
       cacheHitRate = inputTokens > 0 ? Math.round((cachedTokens / inputTokens) * 10000) / 100 : 0;
       avgTokensPerSec = tokensPerSecCount > 0 ? tokensPerSecSum / tokensPerSecCount : 0;
     } catch {
@@ -983,9 +982,9 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
   ): Promise<TelemetryEventListPage> {
     const before = decodeDatedCursor(cursor);
     // The cursor becomes an `until` bound inside the query, so `limit` applies
-    // to every page and not only the first. Filtering after the read forced the
-    // previous shape: a cursor page had to fetch the whole window to know where
-    // it ended, so `limit` was dropped the moment a cursor appeared.
+    // to every page and not only the first. Filtering after the read would force
+    // a cursor page to fetch the whole window to know where it ended, dropping
+    // `limit` the moment a cursor appears.
     //
     // `until` is inclusive while the cursor is exclusive, so rows at the exact
     // cursor timestamp are still compared by id here — the cheap part of the

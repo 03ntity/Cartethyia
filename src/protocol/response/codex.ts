@@ -235,9 +235,9 @@ export function parseCodexResponsesJsonToEvents(
       | undefined);
   // An incomplete response that produced a tool call is always a tool-use
   // stop; every other incomplete response is a length stop. There is no
-  // separate executability gate — the branch that used to scan tool arguments
-  // for parseable JSON returned `tool_use` on both outcomes, so the scan and
-  // the `incomplete_details.reason` read could not change the result.
+  // separate executability gate — scanning tool arguments for parseable JSON
+  // returns `tool_use` on both outcomes, so the scan and the
+  // `incomplete_details.reason` read could not change the result.
   const stopReason = mapCodexStopReason(status, hasToolCall, endTurn);
   let finalStopReason = stopReason;
   if (endTurn === false && stopReason === "stop") {

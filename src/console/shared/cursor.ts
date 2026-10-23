@@ -13,8 +13,8 @@ const decodeCache = new Map<string, unknown>();
  * Maximum nesting depth a decoded cursor may have.
  *
  * `JSON.parse` accepts arbitrary nesting (it is iterative in this runtime), but
- * every traversal of the result is not: `deepFreeze` used to recurse once per
- * level, and `structuredClone` recurses again. A payload past the stack limit
+ * every traversal of the result is not: `structuredClone` recurses once per
+ * level. A payload past the stack limit
  * therefore threw `RangeError: Maximum call stack size exceeded` out of a function
  * that documents returning `undefined` for a malformed value — failing OPEN into a
  * 500 where the contract is "fall back to the first page", and leaving a partially
@@ -116,8 +116,8 @@ function copyDecoded<T>(value: unknown): T {
       // `structuredClone` recurses, so a value past its own budget throws. The
       // depth limit makes this unreachable for anything `decodeCursor` accepts, but
       // the documented contract is `undefined` for a value that cannot be decoded,
-      // and a cache hit on an entry written before the limit existed could still
-      // reach here.
+      // and the documented contract is `undefined` for a value that cannot be
+      // decoded.
       return undefined as T;
     }
   }
@@ -133,10 +133,10 @@ export interface DatedCursor {
 /**
  * Decodes a `(createdAt, id)` keyset cursor, rejecting anything malformed.
  *
- * Both the audit log and the telemetry event listing paginate on the same pair
- * and both had written the same validation locally — a shape check plus a
- * parseable timestamp. It lives here so the two listings cannot drift: a cursor
- * the audit store accepts must be one the stats store accepts.
+ * Both the audit log and the telemetry event listing paginate on the same pair,
+ * so the shape check plus parseable-timestamp validation lives here and the two
+ * listings cannot drift: a cursor the audit store accepts must be one the stats
+ * store accepts.
  *
  * Deliberately not generic over `T extends DatedCursor`: a caller could then
  * instantiate it with a wider type and read fields that were never validated.

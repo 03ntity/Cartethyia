@@ -472,10 +472,10 @@ export function textRemove(text: string, selector: TextSelector): string {
       );
       const removed = text.replace(re, "");
       // Collapse the gap the block left behind. The blank lines that separated
-      // it from its neighbours are not part of it, so `# top\n\n\n[a]\n…` used to
-      // come back as `# top\n\n\n` — trailing blanks where a section used to be.
-      // Only a gap at the very start or the very end is collapsed; anywhere else
-      // it still separates two real lines.
+      // it from its neighbours are not part of it, so removing `[a]` from
+      // `# top\n\n\n[a]\n…` would otherwise leave `# top\n\n\n` — trailing blanks
+      // where the section was. Only a gap at the very start or the very end is
+      // collapsed; anywhere else it still separates two real lines.
       const leadingGap = /^(?:[ \t]*\r?\n)+/.exec(removed)?.[0] ?? "";
       const body = removed.slice(leadingGap.length).replace(/(?:\r?\n[ \t]*)+$/, "");
       return body.length === 0 ? "" : `${body}\n`;

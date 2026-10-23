@@ -1,12 +1,9 @@
 /**
  * Packed binary layout for the offline model catalog.
  *
- * The catalog used to be a JSON file of 8090 positional arrays, materialised
- * into 8090 live JS objects plus two `Map`s at import — before the server could
- * answer anything. 89% of that JSON was the `rows` array, and the per-row
- * objects were what actually cost memory and boot time. This replaces it with
- * one flat binary blob read as columnar typed arrays: zero objects per row,
- * zero `JSON.parse`, and no index built at import.
+ * The catalog is one flat binary blob read as columnar typed arrays: zero
+ * objects per row, zero `JSON.parse`, and no index built at import — so nothing
+ * is materialised before the server can answer its first request.
  *
  * Layout (little-endian; every section is 4-byte aligned):
  *

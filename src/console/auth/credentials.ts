@@ -28,9 +28,9 @@ export class ConsoleCredentialService {
    * undecodable hashes: a corrupted `password_hash` row must surface as an
    * ordinary failed login (counted by the lockout service), never as a 500
    * that lets an attacker probe hash integrity or bypass the failure counter.
-   * Legacy/migrated hashes are rejected here rather than verified — a hash
-   * that does not start with `$argon2id$` can only originate from a foreign
-   * scheme this deployment never issued.
+   * A hash that does not start with `$argon2id$` is rejected here rather than
+   * verified — it can only originate from a foreign scheme this deployment
+   * never issued.
    */
   async verifyPassword(password: string, hash: string): Promise<boolean> {
     if (

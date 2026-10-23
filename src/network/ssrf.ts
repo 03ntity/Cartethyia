@@ -73,10 +73,11 @@ function cidrContains(address: string, cidr: string): boolean {
   const [network, prefixText] = cidr.split("/");
   if (!network || prefixText === undefined) return false;
   // A present-but-blank prefix (`"10.0.0.0/"`) must be refused, not coerced.
-  // `Number("")` is 0 and `""` is not `undefined`, so the guard below used to fall
-  // through with `prefix = 0` — and a /0 admits every address of its family. An
-  // operator's typo therefore silently widened the allowlist to the whole IPv4
-  // space, including the link-local metadata endpoint this guard exists to refuse.
+  // `Number("")` is 0 and `""` is not `undefined`, so a plain truthiness check
+  // here would leave `prefix = 0` — and a /0 admits every address of its family.
+  // An operator's typo would therefore silently widen the allowlist to the whole
+  // IPv4 space, including the link-local metadata endpoint this guard exists to
+  // refuse.
   //
   // Requiring a run of digits (after trimming) also refuses the exotic spellings
   // `Number` accepts for zero — `-0`, `+0`, `0x0`, `0b0`, `0o0`, `0.0` — all of

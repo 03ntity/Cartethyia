@@ -51,8 +51,9 @@ export function classifyPoolConnectError(
   error: unknown,
   latencyMs: number,
 ): HealthCheckResult | undefined {
-  // The agent throws a typed refusal carrying the status, so this no longer
-  // re-parses the message text (which a wording change would silently break).
+  // The agent throws a typed refusal carrying the status, so this reads the
+  // status rather than re-parsing message text (which a wording change would
+  // silently break).
   if (!(error instanceof ProxyConnectRefusalError)) return undefined;
   if (error.statusCode !== 402 && error.statusCode !== 407) return undefined;
   return classifyPoolProbeResponse(poolId, { ok: false, status: error.statusCode }, latencyMs);

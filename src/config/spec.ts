@@ -165,8 +165,7 @@ export const CONFIG_SPEC = {
    * Age at which a request's detail is described as no longer stored.
    *
    * Retention itself is `CARTETHYIA_TELEMETRY_RETENTION_DAYS`; this only words
-   * the message shown when a request that old is asked for. Kept because the
-   * message is operator-facing and was written against this knob.
+   * the operator-facing message shown when a request that old is asked for.
    */
   CARTETHYIA_TELEMETRY_COMPACT_AFTER_DAYS: { kind: "int", default: 7, min: 1, max: 365 },
   /**
@@ -225,10 +224,10 @@ export const CONFIG_SPEC = {
   /**
    * An unmapped upstream failure cools the account down for 15 minutes.
    *
-   * It used to be 60s, which put the account straight back into rotation and
-   * re-dialled an upstream that had just answered something this gateway does
-   * not understand — so the same unknown error was retried every minute, and
-   * an account that was actually broken contributed a steady stream of failed
+   * A shorter window puts the account straight back into rotation and re-dials
+   * an upstream that has just answered something this gateway does not
+   * understand — so the same unknown error is retried every minute, and an
+   * account that is actually broken contributes a steady stream of failed
    * attempts instead of one. Fifteen minutes is long enough for a transient
    * provider condition to clear on its own and short enough that no operator
    * action is needed to recover it. It is still a cooldown with a deadline,
@@ -274,9 +273,9 @@ export const CONFIG_SPEC = {
   /**
    * Loopback port the browser-OAuth callback listener binds.
    *
-   * Configurable because the default is a fixed number and a busy port used to
-   * strand the operator: the login could not start and there was no way to move
-   * it. Codex's authorization server still expects 59653, so changing this
+   * Configurable because the default is a fixed number: a busy port would strand
+   * the operator, since the login could not start and there would be no way to
+   * move it. Codex's authorization server still expects 59653, so changing this
    * only helps the providers whose redirect URI is not allowlisted upstream.
    */
   CARTETHYIA_OAUTH_CALLBACK_PORT: { kind: "int", default: 59_653, min: 1_024, max: 65_535 },

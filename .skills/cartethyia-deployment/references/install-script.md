@@ -54,6 +54,6 @@ is mounted writable in the unit, which is what
 ## After it finishes
 
 1. Open `/console` and finish the first-boot wizard.
-2. Enroll an account — see [`verification.md`](verification.md).
+2. Enroll an account — see [`proving-a-deployment.md`](proving-a-deployment.md).
 3. Dispatch one real request. The script's health check proves the process is
    up; it does not prove upstream reachability.

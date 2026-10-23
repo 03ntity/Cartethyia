@@ -499,8 +499,8 @@ export interface TerminalOutcome {
  * Derives a failed attempt's status, error category, and error origin **from
  * one decision**, so the three can never contradict each other.
  *
- * They used to be computed independently at each dispatch call site, and they
- * drifted: a request that failed on an upstream condition could be recorded
+ * Computing them independently at a dispatch call site lets them
+ * drift: a request that failed on an upstream condition could be recorded
  * `cancelled` (499) while its category said `transport_unavailable` and its
  * http status said 502 — a row no operator could trust. Bundling them here
  * makes the inconsistency unrepresentable: a cancel always carries
@@ -895,8 +895,7 @@ export function isRetryableFailure(error: unknown): boolean {
  * timeout.
  *
  * Owned here so the attempt loop, the empty-stream replay, and the Codex
- * retry budget cannot drift apart; each previously declared its own copy of
- * the constant.
+ * retry budget cannot drift apart.
  */
 export const MIN_RETRY_BUDGET_MS = 15_000;
 

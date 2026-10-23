@@ -247,13 +247,13 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
         ...(isDefaultGatewayApiKey(current) ? { isDefault: true } : {}),
         ...credentialPatch,
         ...(scopes === undefined ? {} : { scopes }),
-        // Rename. The label was accepted by the body schema and validated, but
-        // never copied into the patch — so "save" silently kept the old name and
-        // the key looked unrenamable. Blank falls back to the existing label
-        // rather than wiping it, since `label` is NOT NULL. The default key is
-        // renameable like any other (c2a93545); gating on `isDefault` dropped
-        // exactly the one patch that changes a name, and left the store with an
-        // empty `set(...)` that threw.
+        // Rename. The label must be copied into the patch explicitly — it is
+        // accepted and validated by the body schema but is not the credential,
+        // so omitting it here leaves the name unchanged. Blank falls back to the
+        // existing label rather than wiping it, since `label` is NOT NULL. The
+        // default key is renameable like any other (c2a93545); gating on
+        // `isDefault` would drop exactly the one patch that changes a name and
+        // leave the store with an empty `set(...)` that throws.
         ...(patchRequest.label === undefined
           ? {}
           : { label: patchRequest.label.trim() === "" ? current.label : patchRequest.label.trim() }),
@@ -329,7 +329,7 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
         tightened(patchRequest.maxConcurrentRequests, current.maxConcurrentRequests);
       if (limitsChanged) {
         // Drop stale admission counters so a newly lowered one-time/recurring
-        // budget cannot be bypassed by a counter seeded under the old limit.
+        // budget cannot be bypassed by a counter seeded under the looser limit.
         // Share children admit under the parent id, so purge the parent too.
         await Promise.all([
           config.admissionService.purgeKey(keyId),
@@ -340,7 +340,8 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
       // current bucket must not hand it a full fresh budget: seed the counter
       // from the spend already recorded, so the limit covers the whole bucket.
       // Only a *newly added* ceiling needs this — a lowered one was just
-      // purged above, and re-seeding there would restore the old baseline.
+      // purged above, and re-seeding there would restore the baseline the purge
+      // removed.
       const dailyAdded = isNewLimit(patchRequest.dailyTokenLimit, current.dailyTokenLimit);
       const monthlyAdded = isNewLimit(patchRequest.monthlyTokenLimit, current.monthlyTokenLimit);
       if ((dailyAdded || monthlyAdded) && config.bucketSpend && config.admissionService.seedBuckets) {

@@ -127,9 +127,9 @@ function mapRuntimeSettingsRow(
     // RTK above works. `ponyTailLevel` selects the intensity and is kept while
     // the feature is off so a re-enable restores it, but a stored level is NOT
     // consent: the dashboard lets an operator choose a strength with the toggle
-    // still off, which writes a level and no flag. Reading that as enabled made
-    // the console report the directive as on while the dispatch gate — which
-    // requires the flag — never injected it.
+    // still off, which writes a level and no flag. Reading that as enabled
+    // would report the directive as on while the dispatch gate — which requires
+    // the flag — never injects it.
     ponyTailEnabled: prefs.ponyTailEnabled === true,
     ponyTailLevel: normalizePonyTailLevel(prefs.ponyTailLevel),
     forceDisableCooldown: prefs.forceDisableCooldown === true,

@@ -157,12 +157,11 @@ function applyImageClamp(
  * the upstream rejects anything else. A canonical image part is an opaque
  * origin payload, so it can arrive in a vocabulary that is *not* Anthropic's:
  * a Responses part carries `type: "input_image"` with a top-level `image_url`
- * string, and a Chat part carries a nested `image_url` object. Both used to be
- * forwarded with their own `type` intact (or with no `source` at all), so a
- * Responses- or Chat-origin image sent to a Claude model produced
- * `source.type: "input_image"` — an invalid block the provider refused.
+ * string, and a Chat part carries a nested `image_url` object. Forwarding either
+ * with its own `type` intact (or with no `source` at all) sends a Claude model
+ * `source.type: "input_image"` — an invalid block the provider refuses.
  *
- * Every shape now collapses to a valid source, preferring the cheapest
+ * Every shape collapses to a valid source, preferring the cheapest
  * transport: a Files API reference, then a URL, then base64 bytes (a `data:`
  * URL is split rather than embedded, because Anthropic has no data-URL field).
  */

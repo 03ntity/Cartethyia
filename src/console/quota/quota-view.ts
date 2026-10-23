@@ -154,7 +154,7 @@ export function toQuotaAccountHealth(row: {
     cooldownUntil: row.cooldownUntil ? row.cooldownUntil.toISOString() : null,
     // Only deadlines still in force are returned: the sweep prunes the column
     // on a timer, so a raw read can carry an entry that has already elapsed and
-    // would render as a cooldown that no longer applies.
+    // would render as a cooldown that is not in force.
     modelCooldowns: liveModelCooldowns(row.modelCooldowns),
   };
 }

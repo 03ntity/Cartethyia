@@ -5,9 +5,9 @@ import { resolveDataDir } from "../persistence/db-mode";
 
 /**
  * Per-request telemetry lives in hourly JSONL files, not in Postgres. The
- * database keeps only the durable aggregate. Every reader that used to query
- * `telemetry_events` reads through here, so the file is the single source for
- * recent requests and the table is no longer written.
+ * database keeps only the durable aggregate; the files are the single source
+ * for recent requests and readers must go through this module, not a
+ * `telemetry_events` table.
  */
 /**
  * Where hourly event files and their compacted summaries live.
@@ -325,7 +325,7 @@ export async function queryTelemetryEvents(query: EventQuery): Promise<Telemetry
   //
   // The lower bound is the retention window, not just `since`: a caller that
   // asks for all time still must not scan files that have already been aged
-  // out, and one that passes no `since` at all used to read every file ever
+  // out, and one that passes no `since` at all must not read every file ever
   // written. Files older than retention are gone or compacted; either way they
   // are not here.
   const retentionFloor = hourStamp(

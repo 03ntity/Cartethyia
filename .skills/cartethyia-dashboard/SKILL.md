@@ -39,8 +39,8 @@ the backend.
   defensively for SSR, unavailable storage, invalid values, and junk. Issued
   share keys are stored in IndexedDB rather than localStorage.
 
-Read `references/dashboard.md` for the social-metadata and share-page
-procedure, and the verification choice matrix.
+Read `references/dashboard-map.md` for the page map, the social-metadata and
+share-page procedure, the styling migration order, and the console sign-in.
 
 ## Styling contract
 
@@ -98,8 +98,8 @@ overflow that was not measured with `eval` is unverified, whatever else is green
 **Console surfaces need a sign-in.** `bun run dev:console-auth` does it from
 `CARTETHYIA_DEV_ADMIN_PASSWORD` through the real form, after which plain
 `agent-browser` commands share that browser already signed in. See
-`references/dashboard.md` "Authenticated console session" — it also covers the
-fresh-database `/console/setup` wizard and which origin serves what.
+`references/dashboard-map.md` "Authenticated console session" — it also covers
+the fresh-database `/console/setup` wizard and which origin serves what.
 
 Pick the tool that can actually answer:
 

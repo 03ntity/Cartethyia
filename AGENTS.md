@@ -142,10 +142,56 @@ until the files were restored from a backup.
 - `documentation/` — getting started, reference indexes, and feature guides.
 - `.skills/` — focused, repository-specific procedures and domain guidance.
 
-For a new contributor or agent, start with
-[`documentation/agent-context.md`](documentation/agent-context.md) after this
-file. It maps verified subsystem ownership, current architecture, and important
-behavior to the authoritative code and feature guides.
+## Where to work
+
+One behavior, one owner. Find it before editing; the nearest matching file is
+how symptoms get suppressed instead of fixed.
+
+| Concern | Owner | Start with |
+| --- | --- | --- |
+| Request parsing, protocol translation, streaming, errors | `src/protocol/`, `src/transport/`, `src/providers/` | `.skills/cartethyia-trace-replay/references/protocol-and-translation.md` |
+| Candidate matching, eligibility, cooldowns, failover | `src/transport/routing/` | `documentation/reference/architecture.md`, `.skills/cartethyia-health-routing/SKILL.md` |
+| Quota reads, cache, Usage floor, quota UI | `src/console/quota/`, `src/providers/quota/`, `src/workers/`, provider-detail dashboard | `documentation/features/usage-floor.md`, `documentation/reference/providers.md` |
+| Provider catalog, auth, discovery, adapters | `src/providers/` | `documentation/reference/providers.md`, `.skills/cartethyia-provider-catalog/SKILL.md` |
+| Egress, proxy pools, SSRF | `src/network/`, `src/console/routing/pools/` | `documentation/features/network-pools.md`, `.skills/cartethyia-health-routing/SKILL.md` |
+| Console API | `src/console/<domain>/` | `.skills/cartethyia-console-api/references/console-api.md` |
+| Browser UI | `dashboard/src/` | `.skills/cartethyia-dashboard/references/dashboard-map.md` |
+| Schema or persistence behavior | `src/persistence/`, `migrations/`, `scripts/generate/` | `documentation/reference/sqlite-parity.md`, `.skills/cartethyia-schema-telemetry/SKILL.md` |
+| Startup, lifecycle, scheduled work | `src/boot/`, `src/workers/` | `.skills/cartethyia-engineering/references/backend.md` |
+| Environment variables | `src/config/spec.ts` | `documentation/reference/configuration.md` (generated — regenerate, do not hand-edit) |
+
+## Confirmed behavior worth knowing
+
+- **Usage floor is live routing policy.** The provider-detail UI stores a
+  per-provider threshold, evaluated per account before dispatch. Accounts at or
+  below the threshold are skipped so routing can continue to another account.
+  Missing quota readings are unknown, not proof that the floor was crossed;
+  exhausted quota windows are still excluded. See
+  `documentation/features/usage-floor.md`.
+- **Quota cache freshness is explicit.** Cache entries distinguish the last
+  attempt from the last successful reading. A refresh failure retains a
+  successful reading for a bounded period, and the dashboard exposes refresh
+  state. The in-process cache is bounded and Redis is optional. Verify the
+  current constants in `src/console/quota/cache.ts` before relying on timing
+  details.
+- **Startup has phase-level tracing.** `buildProductionDeps()` logs named
+  startup phases with elapsed time and memory observations. These logs help
+  attribute startup cost; they are not a promise that every phase is lazy or
+  that memory use is below a particular threshold.
+- **BYOK and bundled providers are different paths.** BYOK rows use the generic
+  OpenAI-compatible adapter and derive their wire contract from
+  `resolveByokWireProfile`. Bundled providers can have dedicated adapters and
+  authentication. DeepSeek is bundled and dispatches through its Messages
+  adapter while keeping OpenAI-compatible model discovery.
+- **Admission leases are acquired separately from eligibility.** A request is
+  normalized into the canonical protocol model, planned against a route
+  snapshot, filtered for account eligibility, and only then dispatched.
+  Eligibility says an account may be tried; admission says a concurrency slot
+  is free. They are not one decision.
+- **Per-request events are files, not rows.** Telemetry appends one file per
+  UTC day under the data dir's `telemetry-events/`; usage, breakdown, and chart
+  reads go to that day's index, and only the request list and detail drawer read
+  the event file. See `.skills/cartethyia-schema-telemetry/SKILL.md`.
 
 Keep one canonical owner for provider metadata, environment configuration,
 contracts, routing policy, and persisted data. When changing a shared contract,
@@ -169,10 +215,12 @@ every skill for every task. The committed skill source lives under `.skills/`.
 |---|---|
 | Repository conventions, verification, or a cross-cutting change | `.skills/cartethyia-engineering/SKILL.md` |
 | Reverse-engineer an undocumented behavior or reconstruct an internal flow | `.skills/cartethyia-reverse-engineering/SKILL.md` |
-| Reproducing a failing request, payloads, or provider wire behavior | `.skills/cartethyia-trace-replay/SKILL.md` |
+| A failing request, wire bytes, or a payload dump | `.skills/cartethyia-trace-replay/SKILL.md` |
+| Pulling evidence off a remote deployment | `.skills/cartethyia-trace-replay/references/remote-debugging.md` |
 | Schema, migrations, usage, or telemetry | `.skills/cartethyia-schema-telemetry/SKILL.md` |
-| Adding or authenticating a provider, catalog, or capabilities | `.skills/cartethyia-provider-catalog/SKILL.md` |
-| Removing a bundled provider | `.skills/cartethyia-provider-removal/SKILL.md` |
+| Providers and models: add, remove, authenticate, capabilities, catalog | `.skills/cartethyia-provider-catalog/SKILL.md` |
+| What a model can do — vision, tools, reasoning, free tier | `.skills/cartethyia-provider-catalog/references/capabilities.md` |
+| Removing a bundled provider | `.skills/cartethyia-provider-catalog/references/provider-removal.md` |
 | Account health, cooldowns, retries, leases, or routing | `.skills/cartethyia-health-routing/SKILL.md` |
 | Console API domain or contract | `.skills/cartethyia-console-api/SKILL.md` |
 | Dashboard, React, layout, or browser behavior | `.skills/cartethyia-dashboard/SKILL.md` |
@@ -206,10 +254,30 @@ follow it instead of restating the rules here.
 
 ## Documentation
 
-Use `documentation/getting-started.md` for installation and local setup.
-`documentation/reference/` explains system layers; `documentation/features/`
-describes individual features. Prefer updating the existing owner page instead
+Use `documentation/getting-started.md` for installation and local setup,
+including the server install. `documentation/README.md` is the index for
+`documentation/reference/` (system layers) and `documentation/features/`
+(individual features). Prefer updating the existing owner page instead
 of duplicating long explanations in `AGENTS.md`.
+
+**Source code and tests are the authority for current behavior.** Documentation
+explains that behavior and can lag behind it. When they disagree, verify the
+implementation and correct the owning page. Check the current worktree and
+current source before relying on a prior session summary, an example, a
+measurement, or a page's implementation details.
+
+### `documentation/archive/` is off-limits
+
+`documentation/archive/` holds point-in-time records that are no longer tied to
+the code: investigations that were open when they were written, and snapshots
+that are stale by nature. **Do not read it to answer a question about current
+behavior, and never cite it as evidence.** Its `file:line`, symbol, path, and
+measurement claims were true when written and have not been kept in sync —
+reading one as current is worse than reading nothing, because it looks
+authoritative. Read it only when a person asks for the historical record by
+name, and treat every claim in it as unverified. If something there matters
+again, write the current behavior into the page that owns it; do not restore
+the archive.
 
 Update user-facing documentation when behavior, configuration, or setup changes
 would otherwise make it misleading. Avoid documenting transient implementation

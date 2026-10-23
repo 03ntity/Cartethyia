@@ -51,10 +51,11 @@ export interface TokenSpeedInput {
 export function computeTokensPerSec(input: TokenSpeedInput): number | undefined {
   const outputTokens = input.outputTokens;
   // `!Number.isFinite` rather than `<= 0`: a NaN token count fails `NaN <= 0`
-  // (`false`), so it used to pass through and the division produced a NaN speed —
-  // which reaches the telemetry row and renders as a literal "NaN tok/s" in the
-  // Requests table. That is the case where a wrong number is least welcome, since
-  // the row that produced it is the one an operator is investigating.
+  // (`false`), so it would pass through and the division would produce a NaN
+  // speed — which reaches the telemetry row and renders as a literal
+  // "NaN tok/s" in the Requests table. That is the case where a wrong number is
+  // least welcome, since the row that produced it is the one an operator is
+  // investigating.
   if (outputTokens === undefined || !Number.isFinite(outputTokens) || outputTokens <= 0) {
     return undefined;
   }

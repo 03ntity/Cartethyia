@@ -8,12 +8,12 @@ export type DbMode = "full" | "lite";
 /**
  * Reads `CARTETHYIA_DB_MODE`, which is required and has no default.
  *
- * It used to default to `full`, which left the same key carrying three
- * different answers: `.env.example` shipped `lite`, the `bun setup` prompt
- * offered `lite`, and an environment that set nothing at all booted `full`.
- * The third one is the one that bit — a clone without a `.env` came up in Full
- * mode and then failed on a missing `DATABASE_URL`, when the documented intent
- * was the self-contained Lite path.
+ * It must not default to `full`: that leaves the same key carrying three
+ * different answers, since `.env.example` ships `lite`, the `bun setup` prompt
+ * offers `lite`, and an environment that sets nothing at all would boot
+ * `full`. The third one is the one that bites — a clone without a `.env` comes
+ * up in Full mode and then fails on a missing `DATABASE_URL`, when the
+ * documented intent is the self-contained Lite path.
  *
  * Failing closed is the honest fix: the two modes are different databases with
  * different migration sets (`migrations/lite-sqlite3/` vs

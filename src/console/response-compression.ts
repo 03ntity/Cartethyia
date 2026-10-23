@@ -18,9 +18,6 @@
  * only". A path test can, and it lives inside `gzipResponse` — the one place
  * that runs on every request.
  *
- * Consequence: `/v1/models` was previously compressed as a side effect of
- * that `hoc` propagation. It deliberately is not now.
- *
  * ## Why this is scoped to the console, not the proxy
  *
  * `/v1/*` is deliberately excluded, for two independent reasons:

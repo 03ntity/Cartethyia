@@ -332,9 +332,9 @@ export const VERSION_SOURCES = {
     fallback: "1.3.11",
     sources: [
       {
-        // Kiro's downloads page no longer exposes a stable version string.
-        // Homebrew tracks the official installer URL and exposes its version
-        // as JSON; keep the product page parser as a fallback.
+        // Kiro's downloads page exposes no stable version string. Homebrew
+        // tracks the official installer URL and exposes its version as JSON;
+        // keep the product page parser as a fallback.
         url: "https://formulae.brew.sh/api/cask/kiro.json",
         extract: kiroCaskVersion,
       },
@@ -488,8 +488,8 @@ const PROVIDER_VERSION_RESOLVERS: Readonly<Record<string, ClientVersionResolver>
   "opencode-zen": resolvers.opencode,
   "opencode-go": resolvers.opencode,
   // The identity this provider is dispatched under is the CLI's, so the route
-  // identity reports the CLI version. `clineClient` (the VS Code extension
-  // manifest) is no longer the client this provider claims to be.
+  // identity reports the CLI version, not the VS Code extension manifest
+  // (`clineClient`).
   cline: resolvers.clineCli,
   codex: resolvers.codex,
   qoder: resolvers.qoder,
@@ -670,7 +670,7 @@ export function buildCodeBuddyUserAgent(
 ): string {
   // 1:1 with codebuddy2api's identity_headers(): the CLI profile uses ONE version
   // (the npm CLI package pin) for both halves, and the IDE profile uses the other
-  // product's version. This previously always used `version`, so "CLI" produced
+  // product's version. Using `version` for both would make "CLI" produce
   // `CLI/<ide> CodeBuddy/<ide>` — a CLI claiming the desktop build.
   const resolved = identity === "CLI" ? cnVersion : version;
   return `${identity}/${resolved} CodeBuddy/${resolved}`;

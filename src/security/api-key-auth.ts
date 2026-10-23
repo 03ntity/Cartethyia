@@ -69,7 +69,7 @@ export class ApiKeyStoreUnavailableError extends Error {
  * Injected rather than imported: this module is on the auth path and must not
  * depend on the persistence/write layer it would otherwise pull in. Set once at
  * boot (`boot/dependencies.ts`); until then it reads as zero, which is the
- * value the code has always used.
+ * value the code uses when no source is installed.
  */
 let pendingUsage: (apiKeyId: string) => number = () => 0;
 
@@ -85,11 +85,11 @@ export function setPendingUsageSource(source: (apiKeyId: string) => number): voi
   pendingUsage = source;
 }
 /**
- * Negative-result fast path. Unknown/revoked tokens previously hit the DB on
- * every request; now a repeat miss within 1.5 s costs one HMAC + one map
- * lookup and no query. Keyed by the full HMAC: a cheap pre-hash would let a
- * crafted collision reject someone else's valid key, while the HMAC key can
- * only match its own token. Bound below beside the positive cache.
+ * Negative-result fast path. A repeat miss for an unknown/revoked token within
+ * 1.5 s costs one HMAC + one map lookup and no query. Keyed by the full HMAC: a
+ * cheap pre-hash would let a crafted collision reject someone else's valid key,
+ * while the HMAC key can only match its own token. Bound below beside the
+ * positive cache.
  */
 
 /**
@@ -136,8 +136,8 @@ function evictAuthNegativeOldest(): void {
  * mutation that changes a key's scopes, limits, or revoked state.
  */
 export function invalidateApiKeyCache(keyId?: string): void {
-  // A mutation may mint the previously-unknown token, so negative entries
-  // must go with the positive ones.
+  // A mutation may mint a token the negative cache has already rejected, so
+  // negative entries must go with the positive ones.
   authNegativeCache.clear();
   if (keyId === undefined) {
     authCache.clear();
@@ -440,9 +440,9 @@ export async function resolveApiKeyAuthorization(
     row.parentKeyId !== null ? await store.findActiveById(row.parentKeyId) : undefined;
   // Share children authenticate as themselves but inherit the template's live
   if (row.parentKeyId !== null && parent === undefined) return undefined;
-  // policy. Copy-on-issue alone went stale the moment an operator tightened a
-  // limit or blocked a client router on the parent — existing recipients kept
-  // the old row values forever. Reading the parent here makes denylist /
+  // policy. Copy-on-issue alone goes stale the moment an operator tightens a
+  // limit or blocks a client router on the parent — existing recipients would
+  // keep the issued row values forever. Reading the parent here makes denylist /
   // one-time / recurring edits apply on the next cache miss.
   const policy = parent ?? row;
   // Only a `share` parent can have children, and children are the only thing
@@ -498,7 +498,7 @@ export async function resolveApiKeyAuthorization(
   // That figure moves constantly, and the module already documents the snapshot
   // as advisory on that axis (spending is enforced by the admission counter),
   // so a peer serving it stale for up to the TTL is the same tradeoff the
-  // in-process cache has always made.
+  // in-process cache makes.
   void writeShared("auth", hash, JSON.stringify(value), AUTH_CACHE_TTL_MS);
   return value;
 }

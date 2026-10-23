@@ -61,9 +61,9 @@ tenant data.
 
 - `src/data/contracts.ts` is the dashboard's API mirror. Backend DTOs remain the
   authority; update the mirror in the same change.
-- Provider display names in `src/shared/provider-names.ts` mirror the canonical
-  bundled provider registry. Keep the exact bundled count and ids synchronized;
-  BYOK providers are runtime data, not bundled registry entries.
+- Provider display names come from the API (`/console/api/providers`), not from
+  a bundled mirror in the browser bundle. Do not add one: the bundled registry
+  is backend data, and BYOK providers are runtime rows with no bundled entry.
 - `src/components/ProviderIcon.tsx`'s `iconAssets` map and `features/providers/ProvidersPage.tsx`'s
   `FREE_LIMITED_IDS` / `FREE_AVAILABLE_IDS` / `FOUNDING_IDS` sets are the same
   kind of hand-copied provider-id list. The icon map may carry extra keys for
@@ -113,5 +113,5 @@ bun run dashboard:typecheck
 bun run dashboard:build
 ```
 
-`dev`, `typecheck`, and `build` run the usage-period code generator
-first. Use `dashboard:build` before live-verifying a backend-served console.
+Use `dashboard:build` before live-verifying a backend-served console, since the
+backend serves the built bundle.

@@ -1,12 +1,12 @@
 // Cursor quota.
 //
-// Two surfaces, and the second exists because the first is no longer
-// authoritative on its own:
+// Two surfaces, and the second exists because the first is not authoritative
+// on its own:
 //
-// - `{baseUrl}/auth/usage` is Cursor's request-count API from before
-//   usage-based plans. Current plans answer it with an uncapped, always-zero
-//   `gpt-4` bucket, so a naive read of it reports "no usage" for an account
-//   that is in fact spending against a dollar cap.
+// - `{baseUrl}/auth/usage` is Cursor's request-count API. Current plans answer
+//   it with an uncapped, always-zero `gpt-4` bucket, so a naive read of it
+//   reports "no usage" for an account that is in fact spending against a
+//   dollar cap.
 // - `cursor.com/api/usage-summary` is the current surface: `individualUsage`
 //   with `overall`, `plan` and `onDemand` buckets, in **USD cents**.
 //
@@ -80,7 +80,7 @@ function resetsAt(source: Record<string, unknown>): string | null {
  *
  * An absent limit is a real shape, not a broken one — some plans carry no cap
  * and only report what has been spent. Those are emitted used-only rather than
- * dropped, which is what used to collapse an account to "no usage data".
+ * dropped, which would collapse an account to "no usage data".
  */
 function centsWindow(
   kind: string,
@@ -108,9 +108,9 @@ function parseLegacyUsage(payload: unknown): readonly ProviderQuotaWindow[] {
     if (!window) continue;
     // A bucket with no cap and nothing used is not a balance. Usage-based plans
     // answer this surface with `gpt-4: {numRequests: 0, maxRequestUsage: null}`
-    // while their real spend sits on the summary — showing the empty row put a
-    // meaningless "gpt-4 requests" window above the number that matters, on
-    // exactly the accounts denominated in dollars.
+    // while their real spend sits on the summary — showing the empty row would
+    // put a meaningless "gpt-4 requests" window above the number that matters,
+    // on exactly the accounts denominated in dollars.
     if (window.limit === null && (window.used ?? 0) === 0) continue;
     windows.push(window);
   }
@@ -138,7 +138,7 @@ function parseUsageSummary(payload: unknown): {
   // The plan bucket is denominated two ways and the reference reads the
   // percentages, not the dollar figures: an included plan carries `limit: 0`
   // because there is no dollar cap to spend against, so reading `used`/`limit`
-  // reported every such account as `0 / 0` — a balance that looks empty and
+  // reports every such account as `0 / 0` — a balance that looks empty and
   // means nothing.
   const plan = record(individual["plan"]);
   const limitCents = number(plan?.["limit"]);
@@ -217,14 +217,13 @@ function authStateUserId(context: QuotaCollectionContext | undefined): string | 
  * A stable display identity derived from the credential.
  *
  * Cursor's access token carries the account's real subject
- * (`google-oauth2|user_01K3...`), and that was being shown as the account
- * label — an identity, not a name. It is reduced to a short opaque tag here so
- * the console can tell two Cursor accounts apart without publishing either
- * one's subject.
+ * (`google-oauth2|user_01K3...`), which is an identity, not a name. It is
+ * reduced to a short opaque tag here so the console can tell two Cursor
+ * accounts apart without publishing either one's subject.
  *
  * Derived rather than random, so the same account keeps the same tag across
- * refreshes; a tag that changed every read would be worse than the identity it
- * replaced.
+ * refreshes; a tag that changed every read would be worse than showing the
+ * subject it replaces.
  */
 function cursorAccountTag(credential: string): string {
   let hash = 0x811c9dc5;
@@ -266,7 +265,7 @@ export async function fetchCursorQuota(
 
   // Attempted for every credential kind, not just OAuth. The legacy surface is
   // the only one an api-key account is *guaranteed*, but gating the summary on
-  // `credential_kind` left api-key accounts showing only `gpt-4 requests` — a
+  // `credential_kind` leaves api-key accounts showing only `gpt-4 requests` — a
   // bucket that reads zero on exactly the plans that have a dollar cap. If the
   // summary answers, it is the better reading whatever kind the row claims.
   const userId = cursorAccountIdentity(credential) ?? authStateUserId(context);

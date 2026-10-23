@@ -1,7 +1,7 @@
 /**
- * Provider-specific knobs config.ts formerly owned: Kimi OAuth/quota hosts,
- * the GitHub Enterprise domain for the Copilot device login, and the OAuth
- * callback URL builders built on the public origin.
+ * Provider-specific knobs: Kimi OAuth/quota hosts, the GitHub Enterprise domain
+ * for the Copilot device login, and the OAuth callback URL builders built on the
+ * public origin.
  */
 
 import { CONFIG_SPEC, readInt, readRequired, readText } from "./spec";

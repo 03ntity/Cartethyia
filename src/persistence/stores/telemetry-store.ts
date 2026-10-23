@@ -80,9 +80,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * every usage read.
  *
  * The cutoff is a whole day, so today's file — still being appended to — is
- * never a candidate. It used to compare filenames hour by hour, which for a day
- * file compared the `.events` suffix against an hour stamp and could drop the
- * open file.
+ * never a candidate. Comparing filenames hour by hour would match a day file's
+ * `.events` suffix against an hour stamp and could drop the open file.
  */
 async function pruneEventFiles(before: Date): Promise<void> {
   const files = await readdir(TELEMETRY_EVENT_DIR).catch(() => [] as string[]);
@@ -99,10 +98,10 @@ async function pruneEventFiles(before: Date): Promise<void> {
  * Appends one JSON line per event to the day's event file.
  *
  * One file per UTC day, appended to and never rewritten while the day is open.
- * It used to be one file per `windowMinutes` window — 96 a day at the default —
- * which the reader then had to find, open and parse one by one on every usage
- * query. Which of those files was still being written had to be inferred from
- * the name, and that inference is what let the open one be deleted mid-write.
+ * A file per `windowMinutes` window — 96 a day at the default — would have to be
+ * found, opened and parsed one by one on every usage query, and which of those
+ * files was still being written could only be inferred from the name, which is
+ * what lets the open one be deleted mid-write.
  *
  * A single growing file has no such ambiguity, and the day index tracks how much
  * of it has been counted by byte offset.

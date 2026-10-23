@@ -92,10 +92,9 @@ const DEFAULT_LIMIT_PER_ACCOUNT = 30;
 /**
  * Reads each account's stored usage, newest day first.
  *
- * Bounded on both axes, because it used to be bounded on neither: with no day
- * filter and no `LIMIT`, an account fetched every bucket it had ever stored
- * (~1500 rows for a 30-day window) to render 30 of them, on the route the
- * dashboard polls.
+ * Bounded on both axes: with no day filter and no `LIMIT`, an account would
+ * fetch every bucket it had ever stored (~1500 rows for a 30-day window) to
+ * render 30 of them, on the route the dashboard polls.
  *
  * - The day window is semantic, not a truncation: {@link pruneBuddyUsageSnapshots}
  *   already drops everything older, so no row it excludes could have been

@@ -8,15 +8,13 @@
  *
  * Gemini ids are listed below on the `gemini` wire family.
  *
- * Settled from the reference client source: the
- * research was right and the old rows were wrong. Factory serves Gemini on a
+ * Factory serves Gemini on a
  * native generateContent wire at `/api/llm/g/v1/generate`
  * (`packages/catalog/src/wire/factory-droid.ts:83-84`,
  * `packages/ai/src/providers/factory-droid/gemini.ts:28`) with
  * `x-api-provider: google` (`packages/ai/test/factory-droid-gemini.test.ts:25`).
- * The rows used to say `chat`, which posted Gemini requests to an endpoint that
- * does not serve them — so they failed at the endpoint, not at routing, which
- * is why nothing caught it.
+ * A Gemini id routed onto `chat` posts to an endpoint that does not serve it —
+ * so it fails at the endpoint, not at routing, which is why nothing catches it.
  *
  * `garnet-07-15`, `gemini-3.1-pro-preview` and `gemini-3.8-flash` remain absent:
  * the donor's catalog does not list them either.

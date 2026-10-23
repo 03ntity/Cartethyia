@@ -105,10 +105,8 @@ export type GenericApiKeyProviderId = (typeof GENERIC_API_KEY_PROVIDER_IDS)[numb
 
 function genericApiKeySpec(providerId: GenericApiKeyProviderId): ApiKeyProviderSpec {
   // These roots are *not* bare hosts — every one of them already ends at `/v1`
-  // — so the path is declared below that root. It used to be pinned from
-  // `BARE_ROOT_ENDPOINTS` and silently corrected at dispatch, which meant the
-  // declared path was wrong for all of them and nothing said so. Both spec
-  // shapes now declare the same thing, so this is the one implementation.
+  // — so the path is declared below that root. Both spec shapes declare the same
+  // thing, so this is the one implementation.
   return versionedRootApiKeySpec(providerId);
 }
 

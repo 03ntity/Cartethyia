@@ -71,8 +71,9 @@ const TRAE_CN_ROWS: readonly TraeModelRow[] = [
  * are rejected here with `4001 param is invalid`, and the agent ids are
  * rejected there with `4023 model is unknown`. There is no call that serves
  * both, so a single-surface catalog is the only honest one; offering the chat
- * ids would advertise models this provider's dispatch cannot reach. See
- * `documentation/research/trae-agent-vs-chat-surface.md`.
+ * ids would advertise models this provider's dispatch cannot reach. (The
+ * original investigation is archived under
+ * `documentation/archive/research/` — historical, not current spec.)
  *
  * `ctx` is the **selectable maximum** (`context_window_tokens.max`), not the
  * active `dev` window. Upstream advertises both and they differ by up to 5x

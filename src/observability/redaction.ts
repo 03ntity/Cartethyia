@@ -1,13 +1,12 @@
 // Client-IP presentation masking.
 //
-// This module used to also carry a telemetry redactor that rewrote any string
-// containing a credential-shaped token into a placeholder. It was meant for
-// display, but `***REDACTED***` in a captured body is indistinguishable from
+// This module carries no string-sniffing payload redactor, and must not grow
+// one: `***REDACTED***` in a captured body is indistinguishable from
 // `***REDACTED***` in a payload that was actually sent — so a memory-review
-// turn quoting one JWT rendered as a fully redacted message, and a 400 from
-// the provider looked like the gateway had mangled the request.
+// turn quoting one JWT would render as a fully redacted message, and a 400 from
+// the provider would look like the gateway had mangled the request.
 //
-// Payload bodies are stored verbatim now. The upstream already refuses and
+// Payload bodies are stored verbatim. The upstream already refuses and
 // reports credentials on its own; a second, string-sniffing layer only
 // destroys the evidence needed to read a failure.
 

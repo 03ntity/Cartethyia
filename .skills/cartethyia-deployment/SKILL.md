@@ -52,7 +52,7 @@ Supporting references, independent of shape:
 | Packages, Postgres, env file, systemd unit, first boot | [`references/shared-provisioning.md`](references/shared-provisioning.md) |
 | Egress and DNS — **read this before blaming a payload** | [`references/egress-and-dns.md`](references/egress-and-dns.md) |
 | Host and runtime gotchas | [`references/gotchas.md`](references/gotchas.md) |
-| Proving a deployment, enrolling accounts | [`references/verification.md`](references/verification.md) |
+| Proving a deployment, enrolling accounts | [`references/proving-a-deployment.md`](references/proving-a-deployment.md) |
 | One-shot install script | [`references/install-script.md`](references/install-script.md) |
 
 ## Order of work
@@ -66,7 +66,7 @@ Supporting references, independent of shape:
 4. The shape reference — TLS ownership is the only real difference.
 5. [`egress-and-dns.md`](references/egress-and-dns.md) — before any upstream
    dispatch.
-6. [`verification.md`](references/verification.md) — prove it with a real request.
+6. [`proving-a-deployment.md`](references/proving-a-deployment.md) — prove it with a real request.
 
 ## Non-negotiables
 

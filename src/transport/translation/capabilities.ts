@@ -334,9 +334,8 @@ export function deriveRequiredCapabilities(
   for (const key of Object.keys(request.generation_controls)) {
     // `extension:*` keys are passthrough hints to the wire codec, not route
     // capabilities: the codec reads the names it understands and drops the
-    // rest. Gating them here used to strip every hint (this set was never
-    // populated), degrading `include_usage`, `prompt_cache_key`, `user`,
-    // `metadata`, etc. and re-warning per request.
+    // rest. Gating them here would strip `include_usage`, `prompt_cache_key`,
+    // `user`, `metadata`, etc. and re-warn per request.
     if (key.startsWith("extension:")) continue;
     capabilities.push(`generation_control:${key}`);
   }

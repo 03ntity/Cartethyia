@@ -31,12 +31,12 @@ const FRAME_BUFFER_SPARE_BYTES = 1024 * 1024;
 /**
  * Growable byte buffer for reassembling Connect frames across stream reads.
  *
- * Streaming callers used to prepend the unconsumed tail to every read with
- * `Buffer.concat([pending, chunk])`, which copies the entire partial frame on
- * every chunk. A frame that spans many reads (the payload cap allows up to 16 MiB)
- * therefore cost O(n²) copying and peaked at twice the frame size. Appending
- * into spare capacity costs one copy per byte instead, and `consume` only
- * advances an offset, so dropping parsed bytes moves nothing.
+ * Appending into spare capacity costs one copy per byte, where prepending the
+ * unconsumed tail to every read (`Buffer.concat([pending, chunk])`) copies the
+ * entire partial frame on every chunk. A frame that spans many reads (the
+ * payload cap allows up to 16 MiB) therefore costs O(n²) copying and peaks at
+ * twice the frame size. `consume` only advances an offset, so dropping parsed
+ * bytes moves nothing.
  *
  * The view returned by {@link view} is a subarray of the backing store and
  * stays valid until the next {@link append}, which may relocate the bytes.

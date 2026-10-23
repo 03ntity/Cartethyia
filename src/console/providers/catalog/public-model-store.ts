@@ -359,11 +359,9 @@ export class PublicModelCatalogStore {
   /**
    * Lists the models this key may see.
    *
-   * `modelPrefix` is accepted and currently has NO effect on the result. It
-   * used to feed a `matchesModelPrefix(...) || isModelAllowed(...)` disjunct
-   * that was immediately followed by `isModelAllowed(...)` on its own — so the
-   * prefix could never add a row, and dropping it changes nothing. The
-   * parameter is kept so the call sites and the auth shape stay stable; if a
+   * `modelPrefix` is accepted and has NO effect on the result — a prefix
+   * disjunct fed into `isModelAllowed(...)` on its own could never add a row.
+   * The parameter is kept so the call sites and the auth shape stay stable; if a
    * real prefix filter is wanted later it needs to be an AND, not the OR it
    * was written as.
    */
@@ -449,12 +447,11 @@ export class PublicModelCatalogStore {
         tenantId === null ? row.providerRequiresAccount === false : activeProviderIds.has(row.providerId);
       if (!listed) continue;
       const qualified = `${row.providerId}/${row.modelId}`;
-      // The prefix test is deliberately gone from this path: the chain used to
-      // be `(prefixMatch || isAllowed)` followed by `isAllowed`, which reduces
-      // to `isAllowed` alone — the prefix disjunct could never change the
-      // outcome, only cost a second full pass over the catalog. Collapsing the
-      // four chained filters into one loop also drops the three intermediate
-      // arrays they materialized.
+      // The prefix test is deliberately gone from this path: `(prefixMatch ||
+      // isAllowed)` followed by `isAllowed` reduces to `isAllowed` alone — the
+      // prefix disjunct could never change the outcome, only cost a second full
+      // pass over the catalog. Collapsing the four chained filters into one loop
+      // also drops the three intermediate arrays they materialized.
       if (!isModelAllowed(snapshot, row.modelId, row.providerId)) continue;
       if (shadowsAliasOrCombo(row, aliasTargets, comboNames, snapshot)) continue;
       const capabilities = normalizeModalities(row.modalities);

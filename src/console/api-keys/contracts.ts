@@ -359,8 +359,8 @@ export function sanitizeApiKeyResponse(record: ApiKeyRecord): ApiKeyResponse {
     keyMode: record.keyMode,
     scopes: record.scopes,
     /**
-     * Current keys use the persisted flag. The canonical label is a compatibility
-     * marker for legacy restores and is promoted to the flag on the next update.
+     * The persisted flag alone decides this: the label is display text, so
+     * renaming the key cannot change which key is the default.
      */
     isDefault: isDefaultGatewayApiKey(record),
     ...(keyPrefix === undefined ? {} : { keyPrefix }),

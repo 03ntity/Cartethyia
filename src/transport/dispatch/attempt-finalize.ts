@@ -123,8 +123,8 @@ function captureDepthMaxBytes(depth: TelemetryPayloadDepth): number {
  * What the client received for a failed terminal attempt, in the same public
  * envelope the error middleware sends on the wire (`{ error: { origin, code,
  * message, details } }`). Stored so Request Detail's "Client Response"
- * panel can trace an error exactly as the client saw it — failures used to
- * leave that panel empty.
+ * panel can trace an error exactly as the client saw it, including for failures
+ * that never produced a response body.
  */
 export function errorClientResponseBody(error: unknown): string {
   if (error instanceof GatewayError) {
@@ -344,7 +344,8 @@ async function resolvedProviderResponse(
     new Promise<null>((resolve) => setTimeout(() => { timedOut = true; resolve(null); }, PROVIDER_CAPTURE_AWAIT_MS)),
   ]);
   if (settled === null || settled === undefined) {
-    // Distinguish "slow payload" from "no payload": a null used to mean both.
+    // Distinguish "slow payload" from "no payload": a bare null cannot tell the
+    // two apart, so the timeout is reported explicitly.
     return timedOut ? { _truncated: true, _reason: "provider_capture_timeout" } : null;
   }
   return settled;

@@ -100,19 +100,18 @@ export interface ProxyRequestState {
    * Remote-diagnosis field: the drawer reads empty for reasons invisible from
    * the client — the tenant's capture mode, a missing tenant, a non-terminal
    * attempt — and without the reason an operator cannot tell "not configured"
-   * from "broken". The four panels are the only surface that could previously
-   * hint at it, and they look identical in both cases.
+   * from "broken". The four panels are the only surface that could hint at it,
+   * and they look identical in both cases.
    */
   payloadCaptureState?: PayloadCaptureState;
   /**
    * This request's resolved payload-capture preference, memoized on the request.
    *
    * The preference is a tenant setting, so it cannot change between attempts of
-   * one request. It was resolved twice — once per attempt to decide whether to
-   * tee the provider body, and again on the terminal attempt to decide what to
-   * store — so a request with several attempts paid for it several times.
-   * Memoized here, the second read is free and the two cannot disagree about
-   * whether capture is on.
+   * one request. It is read twice — once per attempt to decide whether to tee
+   * the provider body, and again on the terminal attempt to decide what to
+   * store — so memoizing it here makes the second read free and keeps the two
+   * from disagreeing about whether capture is on.
    */
   payloadCapturePreference?:
     | { readonly ok: true; readonly mode: TelemetryPayloadMode; readonly depth: TelemetryPayloadDepth }

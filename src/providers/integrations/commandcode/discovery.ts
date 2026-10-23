@@ -1,12 +1,13 @@
 /**
  * Command Code model discovery, read from the Provider API.
  *
- * The adapter used to carry a hand-copied list of 36 ids with no limits and one
- * wire for all of them. The Provider API publishes the real roster — 95 rows,
- * each stating `context_length` and `supported_endpoints` — so this replaces
- * that snapshot with what the provider actually serves.
+ * The Provider API publishes the real roster — 95 rows, each stating
+ * `context_length` and `supported_endpoints` — so this reads what the provider
+ * actually serves rather than a hand-copied snapshot, which would carry no
+ * limits and one wire for every id.
  *
- * Two facts the snapshot could not express, and both change what is routable:
+ * Two facts a hand-copied id list cannot express, and both change what is
+ * routable:
  *
  *   * Every `claude-*` id is served on `/messages` only. A catalog that filed
  *     them as chat posted to an endpoint that does not answer them, so all nine

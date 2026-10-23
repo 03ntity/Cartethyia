@@ -14,12 +14,12 @@ const ADMISSION_LEASE_PATTERN = "admission:lease:*";
 /**
  * Bounds for one pass.
  *
- * The scan walks the whole keyspace and the loop used to follow the cursor
- * until it wrapped, reaping every expired lease it found. On a keyspace that
- * has grown for months that is one pass with no ceiling: it holds the timer
- * slot for as long as the backlog takes and starves every other sweep. A
- * backlog drains over successive passes instead; leases the cap leaves behind
- * are still expired on the next tick.
+ * The scan walks the whole keyspace, so following the cursor until it wraps and
+ * reaping every expired lease it finds is one pass with no ceiling on a
+ * keyspace that has grown for months: it would hold the timer slot for as long
+ * as the backlog takes and starve every other sweep. A backlog drains over
+ * successive passes instead; leases the cap leaves behind are still expired on
+ * the next tick.
  */
 export const MAX_LEASE_SCAN_ITERATIONS = 50;
 export const MAX_LEASE_REAPS_PER_PASS = 500;

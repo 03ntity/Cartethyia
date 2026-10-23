@@ -12,17 +12,15 @@ import { TELEMETRY_EVENT_DIR, type TelemetryEventRecord } from "./event-log";
  * One sidecar index per day, beside that day's append-only event file.
  *
  * The event file grows all day and is never rewritten while it is open. The
- * index is the thing the dashboard reads: it holds the same totals and the same
- * breakdown counts the old per-day compaction produced, but they are maintained
- * incrementally from a byte watermark rather than rebuilt by folding and
- * deleting source files.
+ * index is the thing the dashboard reads: it holds the totals and the breakdown
+ * counts, maintained incrementally from a byte watermark rather than rebuilt by
+ * folding and deleting source files.
  *
- * That watermark is the whole reason this replaces the old scheme. Which file
- * was still being written used to be decided by comparing file *names*, so the
- * open file was periodically folded and unlinked mid-write, and its requests
- * never reached the summary. A byte offset has no such ambiguity: everything
- * below it is counted, everything above it is not, and re-reading the tail is
- * idempotent.
+ * The watermark is what makes that possible. Deciding which file was still
+ * being written by comparing file *names* lets the open file be folded and
+ * unlinked mid-write, so its requests never reach the summary. A byte offset
+ * has no such ambiguity: everything below it is counted, everything above it is
+ * not, and re-reading the tail is idempotent.
  */
 
 /**
@@ -58,16 +56,16 @@ export function utcDay(at: Date): string {
  * One hour's share of a bucket.
  *
  * The Traffic chart asks how a day was spent, which the totals alone cannot
- * answer. Twenty-four slots per bucket is small — four numbers each — and is
- * held *inside* the index rather than as the per-hour files this replaced.
+ * answer. Twenty-four slots per bucket is small — four numbers each — so it is
+ * held *inside* the index rather than as separate per-hour files.
  */
 /**
  * One named dimension's share of a bucket.
  *
  * The breakdown asks for tokens, errors and cost per model/provider/client/IP,
- * not merely how many requests each took. Counts alone were enough for the old
- * per-day totals, but the breakdown columns would all have read zero, so each
- * named entry carries the same running sums the bucket does.
+ * not merely how many requests each took. Counts alone would leave every
+ * breakdown column reading zero, so each named entry carries the same running
+ * sums the bucket does.
  */
 export interface IndexedDimension {
   readonly requests: number;

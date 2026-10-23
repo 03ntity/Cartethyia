@@ -42,7 +42,7 @@ export function useReclaimDisk() {
         body: JSON.stringify({ action }),
       }),
     onSuccess: async () => {
-      // The sizes changed, so the panel must not keep showing the old totals.
+      // The sizes changed, so the panel must not keep showing stale totals.
       await queryClient.invalidateQueries({ queryKey: queryKeys.settings.diskUsage });
     },
   });
@@ -72,7 +72,7 @@ export function usePurgeHealthEvents() {
         body: JSON.stringify({ target: "health_events" }),
       }),
     onSuccess: async () => {
-      // The purge row's count must not keep showing the old total.
+      // The purge row's count must not keep showing a stale total.
       await queryClient.invalidateQueries({ queryKey: queryKeys.settings.diskUsage });
     },
   });

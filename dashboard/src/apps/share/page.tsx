@@ -343,8 +343,9 @@ export function SharePage(): ReactElement {
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
-        // The card keeps the status: a toast alone disappears, and the button
-        // used to revert to "Test", so a 403 looked identical to never tested.
+        // The card keeps the status: a toast alone disappears, and a button
+        // that reverts to "Test" would make a 403 look identical to never
+        // tested.
         setProbeResults((current) => new Map(current).set(model, { ok: false, status: response.status }));
         toast.error("Model probe failed", `Request failed with HTTP ${response.status}`);
         return;

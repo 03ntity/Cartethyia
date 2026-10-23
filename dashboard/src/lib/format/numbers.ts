@@ -1,15 +1,14 @@
 /**
  * Numeric display, in one place.
  *
- * These values used to be formatted by per-route copies that disagreed: four
- * `formatBytes` implementations chose different unit thresholds, decimal
- * counts and placeholders, so the same byte count rendered as "0 MB" on
- * Overview and "—" in Usage. One owner, one policy.
+ * One owner, one policy: per-route copies disagree on unit thresholds, decimal
+ * counts and placeholders, so the same byte count would render as "0 MB" on
+ * Overview and "—" in Usage.
  *
  * Policy: an absent or non-finite value is `—`; zero is a real measurement.
  *
  * Numbers group by the viewer's locale, so the separators read unambiguously:
- * a hardcoded `en-US` renders `4,093.36`, whose comma a reader used to
+ * a hardcoded `en-US` renders `4,093.36`, whose comma a reader of
  * `.`-thousands / `,`-decimals reads as either four thousand or four million.
  * The viewer's locale renders `4.093,36` for them instead. Every formatter
  * takes an optional explicit `locale` so a test can pin one reading; production

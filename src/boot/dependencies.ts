@@ -139,8 +139,8 @@ const OAUTH_REFRESH_INTER_ITEM_DELAY_MS = 1_500;
  * Client identities are refreshed out of band so provider dispatch never waits
  * on npm/provider version endpoints. Resolver TTLs deduplicate the sources.
  */
-// Matched to the resolver's own 30 min cache TTL: at 15 min every second pass
-// was a pure cache read that could not discover anything new.
+// Matched to the resolver's own 30 min cache TTL: a shorter interval makes
+// every second pass a pure cache read that cannot discover anything new.
 const CLIENT_VERSION_MONITOR_INTERVAL_MS = 30 * 60_000;
 const CLIENT_VERSION_INITIAL_DELAY_MS = 10_000;
 
@@ -222,7 +222,7 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
   // spent, worst exactly when the key is busiest.
   setPendingUsageSource((apiKeyId) => usageFlush.pendingFor(apiKeyId));
   // Health audit rows are append-only and read by nobody in dispatch, so they
-  // no longer land inside the request. The status write they accompany stays
+  // are buffered out of the request. The status write they accompany stays
   // synchronous — routing reads it.
   const healthEventFlush = new HealthEventFlushBuffer(db);
   setHealthEventBuffer(healthEventFlush);
@@ -374,17 +374,17 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
   });
   scheduledTasks.register({
     name: "pool-agent-sweep",
-    // `resolveAgent` already self-sweeps every 30 s, so a 1 min timer added a
-    // second pass that almost always found nothing to release. 5 min is well
+    // `resolveAgent` already self-sweeps every 30 s, so a 1 min timer adds a
+    // second pass that almost always finds nothing to release. 5 min is well
     // inside the idle timeout this exists to enforce, and outside the path
     // that already runs.
     intervalMs: 5 * 60_000,
     run: () => poolAgentResolver.sweepIdleAgents(),
   });
   const oauthRefreshService = new OAuthRefreshService(db);
-  // Converge accounts an earlier build parked on a dead refresh grant: an
-  // account whose stored access token is still usable becomes a static token
-  // (and returns to rotation) instead of staying disabled for re-auth.
+  // Converge accounts parked on a dead refresh grant: an account whose stored
+  // access token is still usable becomes a static token (and returns to
+  // rotation) instead of staying disabled for re-auth.
   await measureStartupPhase("static-token-reconciliation", () =>
     reconcileStaticTokenAccounts(db),
   );
@@ -395,10 +395,10 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
   scheduledTasks.register({
     name: "account-enrichment-sweep",
     // Converges via `identity_checked_at`: once every stored credential has
-    // been parsed, the listing query returns nothing — and a 30 s timer kept
-    // running that empty query forever, two million times a year. 10 min is
-    // still instant for the case that matters (a batch import, where the label
-    // and email show up on the next tick) and costs nothing when idle.
+    // been parsed, the listing query returns nothing — a 30 s timer would run
+    // that empty query forever, two million times a year. 10 min is still
+    // instant for the case that matters (a batch import, where the label and
+    // email show up on the next tick) and costs nothing when idle.
     intervalMs: 10 * 60_000,
     run: () => accountIdentitySweep({ db }),
   });
@@ -454,11 +454,10 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
   // the same pass (one attempt per account per day, guarded by a day
   // marker), so no second timer duplicates the credential resolution.
   //
-  // Registered in **every** mode, not only when Redis is present. It used to
-  // sit behind `if (redis)`, which quietly cost Lite two things: proactive
-  // quota warming, and the check-in ride-along above that claims the
-  // once-per-day WorkBuddy/CodeBuddy credit grant. The whole sweep chain
-  // already accepts `RedisClient | undefined` and falls back to the
+  // Registered in **every** mode, not only when Redis is present: gating it on
+  // Redis would cost Lite proactive quota warming and the check-in ride-along
+  // above that claims the once-per-day WorkBuddy/CodeBuddy credit grant. The
+  // whole sweep chain accepts `RedisClient | undefined` and falls back to the
   // in-process TTL cache and an in-process day marker, so Redis is an
   // optimization here rather than a precondition — which is exactly what
   // Lite is for.
@@ -475,13 +474,13 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
         providerRegistry: registry,
         resolveCredential: quotaResolveCredential,
         snapshotInvalidator: snapshotService,
-        // Without this the sweep handed each collector the raw stored secret.
-        // For `cline` that meant an `sk_...` key reaching the OAuth branch,
+        // Without this the sweep hands each collector the raw stored secret.
+        // For `cline` that means an `sk_...` key reaching the OAuth branch,
         // which prepends `workos:` and is refused with "please make sure
         // you're using the latest version of Cline and re-authenticate" — so
-        // every sweep cooled a working account with `quota_fetch_failed`
-        // while the same account refreshed fine from the console, which
-        // binds the same marker through `createQuotaRefreshDeps`.
+        // every sweep cools a working account with `quota_fetch_failed` while
+        // the same account refreshes fine from the console, which binds the
+        // same marker through `createQuotaRefreshDeps`.
         markApiKeyCredential: markProviderApiKeyCredential,
         // Below the 60 s interval: a budget longer than the tick guarantees
         // skip/burst under load instead of steady progress.
@@ -504,8 +503,8 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
   // dispatch failure.
   //
   // Daily, not hourly: each claim is once per account per day and is
-  // ledger-guarded, so at an hourly cadence 23 of every 24 passes were a full
-  // scan of active accounts plus a ledger read per account that resolved to
+  // ledger-guarded, so at an hourly cadence 23 of every 24 passes are a full
+  // scan of active accounts plus a ledger read per account that resolves to
   // nothing. Once a day is the shortest interval where a pass can still find
   // work, which is the only reason to run at all.
   const buddyTaskDeps = {

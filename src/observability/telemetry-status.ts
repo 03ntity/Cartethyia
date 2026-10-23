@@ -1,13 +1,12 @@
 /**
  * The single definition of which requests count as *gateway* errors.
  *
- * Six independent sites used to answer this question with their own copy of
- * `status in ('failed', 'truncated')`: the usage summary, the health window,
- * the usage breakdown, the retained-usage rollup (`telemetry_usage_totals`),
- * the public share page, and the client-IP breakdown. A definition spread over
- * six predicates is not a definition — it is six chances to drift, and the
- * rollup made the drift durable: once a request is counted into
- * `telemetry_usage_totals.errors` it stays counted after the raw row is pruned.
+ * One definition keeps the six sites that ask this — the usage summary, the
+ * health window, the usage breakdown, the retained-usage rollup
+ * (`telemetry_usage_totals`), the public share page, and the client-IP
+ * breakdown — from drifting apart, which matters because the rollup makes any
+ * drift durable: once a request is counted into `telemetry_usage_totals.errors`
+ * it stays counted after the raw row is pruned.
  *
  * The rule, stated as a principle rather than a list of codes:
  *
@@ -23,8 +22,8 @@
  *   an unregistered `/v1/*` path, a `429` from the caller's own quota, and a
  *   `413` from an oversized body all cost the sender nothing and reach no
  *   provider, so counting any of them hands an abuser a free way to inflate
- *   the error rate. Enumerating "the bad ones" was the previous approach and it
- *   missed `401`/`429`; excluding the class cannot miss one.
+ *   the error rate. Enumerating "the bad ones" misses `401`/`429`; excluding the
+ *   class cannot miss one.
  * - **`499`** is a client abort (`transport_closed`). The client leaving is
  *   expected behavior — the request may even have been served — and it is
  *   tracked as its own count. Being below `500`, it is excluded by the class

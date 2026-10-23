@@ -232,10 +232,9 @@ export async function dispatchStreamingAttempt(input: StreamingDispatchInput): P
   });
   // `ProviderAdapter.dispatch` is declared to return a non-nullable
   // `AsyncIterable`, so an adapter that returned `undefined` would be a
-  // type violation rather than a state this code could handle. The guard
-  // that used to sit here (`if (!iterable) throw ...`) was therefore
-  // unreachable, and it advertised a contract the interface does not
-  // have. Enforcing it belongs at the adapter boundary, not here.
+  // type violation rather than a state this code could handle — no null check
+  // is needed here, and adding one would advertise a contract the interface
+  // does not have. Enforcing it belongs at the adapter boundary.
   const createUpstreamIterable = () =>
     adapter.dispatch(
       dispatchRequest,
@@ -375,8 +374,8 @@ export async function dispatchStreamingAttempt(input: StreamingDispatchInput): P
           // reasoning item when the client is Chat Completions). Keep
           // pulling until at least one wire chunk is enqueued; returning
           // from pull with an empty queue can leave Web Streams waiting
-          // forever, which is why real clients previously saw one
-          // assistant header and then a 60s socket reset.
+          // forever — a client then sees one assistant header and then a
+          // 60s socket reset.
           for (;;) {
             // Re-arm on every upstream read: the watchdog fires only
             // when the provider stays silent longer than the bound.

@@ -404,7 +404,7 @@ class RouteCatalogRepository {
         // The cooldown override is a console_settings preference, read inside
         // the same fan-out rather than per request: one more row set on a
         // query that already runs, instead of a Postgres round trip on every
-        // admitted request the way `tenantConcurrencyLimit` once did.
+        // admitted request.
         this.db
           .select({ tenantId: consoleSettings.tenantId, preferences: consoleSettings.preferences })
           .from(consoleSettings),

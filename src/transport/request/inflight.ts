@@ -4,12 +4,11 @@
  * provider-dispatch leases, keyed by `requestId`, carrying the client IP
  * captured at ingress and the hard deadline the flight must not outlive.
  *
- * This used to be a process-global module that kept its own counter alongside
- * the request state store's `liveControllers` map — two registries that could
- * disagree, and did: a flight the store had already torn down could stay
- * counted here forever because nothing tied the two together. The registry is
- * now *owned* by the `ProxyRequestStateStore` (`state.ts`), which is also the
- * one place that evicts a request, so a flight can no longer outlive its state.
+ * The registry is *owned* by the `ProxyRequestStateStore` (`state.ts`), which
+ * is also the one place that evicts a request, so a flight cannot outlive its
+ * state. A separate process-global counter alongside the store's
+ * `liveControllers` map would be a second registry able to disagree with it: a
+ * flight the store had already torn down would stay counted there forever.
  *
  * The store hands each entry an `expiresAtMs` (the request's hard deadline). A
  * periodic backstop sweep reads `overdue()` and force-releases any flight whose

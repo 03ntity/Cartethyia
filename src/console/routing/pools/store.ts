@@ -166,8 +166,8 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
       ...(row.lastSpeedtestAt ? { lastSpeedtestAt: row.lastSpeedtestAt.toISOString() } : {}),
       ...(() => {
         // A verdict describes the address recorded beside it. Once the pool is
-        // re-pointed, that address is gone and the verdict is a claim about a
-        // proxy that no longer exists — report "never probed" instead of
+        // re-pointed, that address is gone and the verdict is a claim about an
+        // address the pool no longer uses — report "never probed" instead of
         // showing a colour the operator cannot trust.
         const probe = storedProviderProbe(row, endpoint ?? "");
         return probe === undefined ? {} : { providerProbe: probe };
@@ -350,10 +350,10 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
   /**
    * Banks a probe verdict on the pool row.
    *
-   * The verdict used to live in the operator's browser, which made it
-   * decorative: another machine saw nothing, the gateway saw nothing, and
-   * admission kept choosing the pool the badge called blocked. Storing it here
-   * is what makes the badge a fact about the pool rather than about one tab.
+   * The verdict is stored here rather than per-viewer so every reader agrees:
+   * another machine, the gateway, and the operator alike. Otherwise admission
+   * keeps choosing the pool the badge calls blocked. Storing it here is what
+   * makes the badge a fact about the pool rather than about one tab.
    *
    * `poolId` is the pool row; `endpoint` is what the verdict was measured
    * against, so a later edit invalidates it on read. A probe against an unsaved
@@ -458,8 +458,8 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
       .set({
         endpointConfig,
         kind: effectiveKind === "https" ? "http" : effectiveKind,
-        // Fields default to `undefined` when omitted from the patch; that
-        // used to overwrite the current row with `undefined` and clobber
+        // Fields default to `undefined` when omitted from the patch, which
+        // would overwrite the current row with `undefined` and clobber
         // existing values. Fall back to the current record so a partial
         // PATCH truly leaves un-mentioned fields alone.
         maxInflight: patch.maxInflight ?? current.maxInflight,

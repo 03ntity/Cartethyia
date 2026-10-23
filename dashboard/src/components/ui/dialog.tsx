@@ -8,7 +8,7 @@ import { cn } from "../../lib/classnames";
 const TRAFFIC_LIGHT =
   "traffic-light grid size-7 cursor-pointer place-items-center rounded-pill border-none p-0 transition-transform duration-(--dur-micro) ease-standard hover:scale-112 focus-visible:outline-2 focus-visible:outline-current focus-visible:outline-offset-2";
 
-/** Named panel size. One of the four scale steps; arbitrary px is legacy. */
+/** Named panel size. One of the four scale steps. */
 export type DialogSize = "sm" | "md" | "lg" | "xl";
 
 const DIALOG_SIZE_WIDTH: Record<DialogSize, number> = {

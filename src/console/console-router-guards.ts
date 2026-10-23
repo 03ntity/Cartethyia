@@ -14,7 +14,7 @@ import { parseCookieValue, SESSION_COOKIE_NAME, isCsrfValid } from "../security/
 /**
  * Stateless double-submit CSRF guard for unsafe `/console/api/*` mutations.
  * Compares the `x-csrf-token` header against the readable `csrf_token`
- * cookie — zero database I/O, so dashboard writes no longer pay a token
+ * cookie — zero database I/O, so dashboard writes pay no token
  * SELECT + UPDATE on top of the session lookup, and there is no token
  * store whose outage could masquerade as an auth failure.
  */

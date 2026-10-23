@@ -38,8 +38,8 @@ export interface ProviderModule {
  * `upstream_host` is the SSRF-validated network-binding target for this
  * provider — carried on the same registration object as the adapter loader
  * so adding a provider touches one call-site instead of a second map kept
- * in sync by hand elsewhere (`transport/dispatch/proxy-request.ts` used to hardcode this
- * separately; `providers/operations/provider-catalog-service.ts` now derives it from here).
+ * in sync by hand elsewhere; `providers/operations/provider-catalog-service.ts`
+ * derives it from here.
  */
 export interface ProviderRegistration {
   readonly provider_id: ProviderId;
@@ -240,11 +240,10 @@ export class ProviderRegistry {
    * check — no module is loaded — for list projections that must hide the
    * "Fetch models" control from providers with no discovery endpoint.
    *
-   * This is the question the projection should be asking. "Is this a builtin?"
-   * was a proxy for it that was true for every provider when the catalog had no
-   * discovery-backed builtins, and wrong for every one added since: a builtin
-   * that registers a resolver cannot list any model until an operator runs a
-   * sync, so hiding the control leaves it permanently empty.
+   * This is the question the projection should be asking; "is this a builtin?"
+   * is not a proxy for it. A builtin that registers a resolver cannot list any
+   * model until an operator runs a sync, so hiding the control on the strength
+   * of builtin status alone leaves it permanently empty.
    */
   hasModelDiscovery(providerId: string): boolean {
     return this.#registrations.get(parseProviderId(providerId))?.loadModelDiscovery !== undefined;

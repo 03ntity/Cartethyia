@@ -1,8 +1,9 @@
----
-name: cartethyia-provider-capabilities
-description: "Add, change, or verify what a provider model can do — vision, reasoning, tool calling, document/audio input, free tier, plan gating — and test those capabilities end to end."
----
 # Provider capabilities
+
+Reference for `cartethyia-provider-catalog`. Use when adding, changing, or
+verifying what a provider model can do — vision, reasoning, tool calling,
+document/audio input, free tier, plan gating — and when proving those
+capabilities end to end.
 
 Capabilities are the claims a catalog row makes about what a request to that
 model may contain and what it may expect back. They are not cosmetic: capability

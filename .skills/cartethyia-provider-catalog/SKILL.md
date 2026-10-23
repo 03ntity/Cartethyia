@@ -251,10 +251,18 @@ the reported quota was about two videos then HTTP 429 — neither is verified. A
 
 ## Remove a provider
 
-Use the [provider-removal skill](../cartethyia-provider-removal/SKILL.md). It
-owns the cutover and persisted-row cleanup. Boot retires unbundled global rows;
-the catalog also hides any orphan immediately and lets tenant delete remove
-it without exposing a current builtin to deletion.
+Removing one is a catalog cutover **plus** a persisted-row cleanup: deleting the
+metadata is not enough, because an old global `providers` row can survive and
+show up as a custom card the console cannot delete. The cutover steps and the
+retirement safeguards are
+[`references/provider-removal.md`](references/provider-removal.md).
+
+## What a model can do
+
+Capabilities are not cosmetic — preflight reads them and **silently strips**
+unsupported parts of a request, so a false negative looks like a working route
+that quietly dropped the caller's tools or images. Setting, publishing, and
+proving a capability is [`references/capabilities.md`](references/capabilities.md).
 
 ## Verify
 

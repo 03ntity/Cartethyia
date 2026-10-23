@@ -1,16 +1,12 @@
----
-name: cartethyia-remote-debugging
-description: "Pull failing requests off a live Cartethyia instance and replay them: console endpoints to find the record, how to authenticate, how to export a verbatim payload, and how to replay it against the same instance. Use when the bug is on a remote deployment you cannot read from disk."
----
-
 # Remote debugging a live instance
 
-Use when the failure is on a deployment you do not have filesystem access to —
-a Railway/Render/VPS gateway, a shared staging box — and you need the actual
-failing request before you can fix anything.
+Reference for `cartethyia-trace-replay`. Use when the failure is on a
+deployment you do not have filesystem access to — a Railway/Render/VPS gateway,
+a shared staging box — and you need the actual failing request before you can
+fix anything.
 
-This skill is about **getting the evidence out of the instance**. Once you have
-a verbatim payload, hand off to `cartethyia-trace-replay` for the bisect. Do not
+This page is about **getting the evidence out of the instance**. Once you have
+a verbatim payload, bisect with the parent skill's method. Do not
 bisect on a guess; do not bisect on a payload you retyped.
 
 ## The two surfaces, and which one to use
@@ -34,8 +30,7 @@ the way in, not `curl`.
 
 - A credential for a throwaway debug environment is disposable and may be
   echoed and reused when the user explicitly asks. The one absolute is **git**:
-  never in source, env files, commits, logs, or telemetry. `AGENTS.md`
-  "Git, data, and credentials" is the owner.
+  never in source, env files, commits, logs, or telemetry. `AGENTS.md` ("Git, data, and credentials") is the owner.
 - **Re-state the credential in the command that uses it.** An exported shell
   variable does not survive between tool calls; `curl` then sends an empty
   header and returns `000` with exit 43, which reads as "host unreachable" and
@@ -86,7 +81,7 @@ Send the exported body unchanged, with the failing client's `user-agent` so the
 gateway takes the same path. Repeat it two or three times: a single 4xx may be
 transient, and a baseline that does not repeat is not a baseline.
 
-Then go to `cartethyia-trace-replay` for the bisect — remove one thing at a time
+Then bisect with the parent skill's method: remove one thing at a time
 until it turns 200, and prove the flip after fixing.
 
 ## Triage by status
@@ -118,7 +113,7 @@ round on the payload:
 Confirmed against OpenCode's free tier on 2026-10-17: 403 direct, 200 through a
 proxy, with the request unchanged. A datacenter egress was refused outright, so
 the provider needed an egress proxy rather than a header fix. Details:
-[`cartethyia-trace-replay` → `references/opencode-free-tier.md`](../cartethyia-trace-replay/references/opencode-free-tier.md).
+[`opencode-free-tier.md`](opencode-free-tier.md).
 
 ## Hygiene
 

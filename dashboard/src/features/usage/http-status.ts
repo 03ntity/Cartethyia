@@ -1,12 +1,6 @@
 /**
  * HTTP reason phrases for the statuses the gateway can return.
  *
- * The Requests filter buttons and the status cell previously hardcoded
- * `"200 OK"` and `"500 ERR"` as literals, and only `200` ever received a
- * reason phrase — every other code rendered as a bare number (`404`, `503`),
- * so the label told an operator nothing they could not already read off the
- * digits, and the two literals could drift from the codes the backend emits.
- *
  * The phrases are the standard ones (`node:http`'s `STATUS_CODES` agrees for
  * every code below), kept as a local table rather than imported from
  * `node:http` because this is browser code. `499` is not in the standard and

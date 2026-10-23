@@ -319,7 +319,7 @@ export async function runAttemptLoop<TResult, TAdapter>(
       // A drain is a *server* close, not a client cancel: it must be recorded
       // as a failure with the shutdown code, and it is never retryable.
       // Status, category, and origin come from one classifier so they cannot
-      // disagree (a `cancelled` row used to carry `transport_unavailable`/502).
+      // disagree and mark a `cancelled` row `transport_unavailable`/502.
       const terminal = classifyTerminalOutcome(error, state.abortController.signal);
       const cancelled = terminal.status === "cancelled";
       // A failure the *pool* caused retires that pool, not the candidate: the
@@ -477,20 +477,21 @@ export async function runAttemptLoop<TResult, TAdapter>(
       try {
         await sleep(retryDelayMs, state.abortController.signal);
       } catch {
-        // Abort during backoff used to escape as the sleep's own error with
-        // no counter increment: attempts already recorded their telemetry,
-        // but `proxy_requests_total` missed the request. Fail with the last
-        // attempt's error so the client sees the real cause, counted once.
+        // Fail with the last attempt's error so the client sees the real cause,
+        // counted once: attempts already recorded their telemetry, but escaping
+        // as the sleep's own error would leave `proxy_requests_total` missing
+        // the request.
         metrics.proxy_requests_total.inc(1, { status: "cancelled" });
         throw lastError;
       }
     }
   }
   // The loop can fall out with a retryable error still in hand (every attempt
-  // was retryable, so the terminal branch in the catch never fired). That used
-  // to throw with no completion: no telemetry row, no payload capture, and
-  // `state.completed` left clear — so a request that genuinely exhausted its
-  // attempts was invisible in Request Detail. Record it as terminal here.
+  // was retryable, so the terminal branch in the catch never fired). Throwing
+  // here instead of recording it would leave no telemetry row, no payload
+  // capture, and `state.completed` clear — so a request that genuinely
+  // exhausted its attempts would be invisible in Request Detail. Record it as
+  // terminal here.
   if (!state.completed) {
     const terminal = classifyTerminalOutcome(lastError, state.abortController.signal);
     const lastCandidate = candidates[Math.min(index, candidates.length - 1)];

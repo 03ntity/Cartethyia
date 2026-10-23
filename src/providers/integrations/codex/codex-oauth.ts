@@ -254,7 +254,7 @@ export class CodexOAuthClient extends OAuthDeviceFlow {
   override async refresh(refreshToken: string, signal?: AbortSignal): Promise<OAuthTokenRefreshResult> {
     // Codex omits `content-type` and answers non-JSON error bodies — the
     // shared helper throws with the status code, which names the failure
-    // better than the bare truncated body this used to return.
+    // better than a bare truncated body would.
     const payload = (await postFormTokenRequest({
       url: CODEX_TOKEN_URL,
       fetchFn: this.fetchFn,

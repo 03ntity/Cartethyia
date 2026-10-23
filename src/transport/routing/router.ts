@@ -226,10 +226,10 @@ function spreadDeadline(cooldownUntil: number | undefined): { cooldown_until?: n
  * The soonest moment a quota window the caller is blocked on refills.
  *
  * A usage-floor exclusion is time-bounded by construction — the floor compares
- * the *remaining* allowance, and the window states when that allowance resets —
- * but the exclusion used to carry no deadline, so `plan()` could not tell a
- * client how long to wait and `earliestResetMs` reported nothing. The minimum
- * across windows, for the same reason `earliestResetMs` takes it: the account
+ * the *remaining* allowance, and the window states when that allowance resets.
+ * The exclusion carries a deadline so `plan()` can tell a client how long to
+ * wait and `earliestResetMs` reports a value. The minimum across windows, for
+ * the same reason `earliestResetMs` takes it: the account
  * can serve again as soon as its first window refills, so quoting the slowest
  * would hold the client off longer than necessary.
  *
@@ -317,9 +317,8 @@ export class EligibilityEvaluator {
       return { eligible: false, reason: "model_cooldown", candidate, ...spreadDeadline(state.cooldown_until) };
     if (state.health_status === "cooldown" && state.cooldown_kind === "hard")
       return { eligible: false, reason: "cooldown_hard", candidate, ...spreadDeadline(state.cooldown_until) };
-    // The floor is checked here, not after selection: the old minimum-balance
-    // feature computed the number and never consulted it, so an account below
-    // its floor still won the route. An account with no reading is left
+    // The floor is checked here, not after selection: an account below its
+    // floor must not win the route. An account with no reading is left
     // eligible — a missing quota fetch is not proof the allowance is gone.
     if (belowUsageFloor(state))
       return {
@@ -487,8 +486,8 @@ export class RoutingEngine {
    * Stamps each account with its provider's usage floor and the quota reading
    * the console last fetched, so eligibility can reject an account that has
    * spent down to the floor. The reading is the live cache, not the route
-   * snapshot: a snapshot rebuilt every few minutes would route on a stale
-   * balance, which is how the old floor let a spent account through.
+   * snapshot: a snapshot rebuilt every few minutes routes on a stale balance
+   * and lets a spent account through.
    */
   private async applyUsageFloor(
     candidates: readonly RouteCandidate[],
@@ -598,10 +597,10 @@ export class RoutingEngine {
           d.reason === "model_cooldown" ||
           // A usage-floor exclusion whose window states a reset is the same
           // shape as the two above: the account is resting until a named
-          // instant, not broken. It used to fall through to 503, which told
-          // the client the model was down while every account serving it was
-          // merely waiting for its window to refill — the "503 DOWN while the
-          // model is allowed" report again. Only a floor with *no* stated
+          // instant, not broken. Falling through to 503 tells the client the
+          // model is down while every account serving it is merely waiting for
+          // its window to refill — the "503 DOWN while the model is allowed"
+          // report again. Only a floor with *no* stated
           // reset stays unavailable: there is nothing to retry against yet.
           (d.reason === "quota_exhausted" && typeof d.cooldown_until === "number"),
       );

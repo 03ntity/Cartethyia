@@ -409,8 +409,8 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
             : {}),
           // Scopes are validated once, in `validateApiKeyRequest`, against the
           // tenant scope set; the store writes what it is handed. Omitting the
-          // field here meant an update was type-checked, accepted, and then
-          // silently dropped — a grant like `routing:cli_mapping` could be
+          // field here means an update is type-checked, accepted, and then
+          // silently dropped — a grant like `routing:cli_mapping` can be
           // turned on and never stick.
           ...(patch.scopes === undefined ? {} : { scopes: patch.scopes }),
         })

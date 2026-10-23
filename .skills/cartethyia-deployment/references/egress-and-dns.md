@@ -67,7 +67,9 @@ a stale process.
 - `0.0.0.1` is not `127.0.0.1`. Do not read a `0.0.0.1` connection error as
   "the app is misconfigured to talk to itself".
 - If a provider's own client fails from the same host, the contract is not yours
-  to satisfy — see `cartethyia-remote-debugging` on varying the egress IP.
+  to satisfy — see
+  `cartethyia-trace-replay` → `references/remote-debugging.md` on varying the
+  egress IP.
 
 ## Related: verifying HTTPS from Windows
 

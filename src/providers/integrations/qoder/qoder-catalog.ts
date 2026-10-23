@@ -149,8 +149,8 @@ export const QODER_INTL_MODEL_CONFIGS: Readonly<Record<string, QoderModelConfig>
  * it returns for any row mentions output — so these come from the static
  * roster, set to what the same model is filed at elsewhere in the catalog
  * (DeepSeek-V4 at 384k, GLM/Qwen/Kimi/MiniMax at 131k, the GPT-class slots at
- * 128k). The 32k that used to be hardcoded here applied to every row alike,
- * which is what made the whole catalog look capped at one number.
+ * 128k). Hardcoding one ceiling here would apply it to every row alike and make
+ * the whole catalog look capped at that number.
  *
  * A row with no stated ceiling leaves `out` unset so `defineModel` can still
  * consult the base catalog rather than publishing a guess.

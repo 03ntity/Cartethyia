@@ -218,12 +218,12 @@ export function finalizeRequestTelemetry(
     return;
   }
 
-  // An early rejection never reaches `completeAttempt`, which is the only
-  // caller that used to write a payload frame — so a 400 from ingress, auth,
-  // parse, or the preparer produced a request row whose four capture panels
-  // were all empty, and the one case an operator most wants to read (what did
-  // the client actually send?) had nothing to read. Capture the ingress body
-  // and the error the client saw, keyed to the same request id as the row.
+  // An early rejection never reaches `completeAttempt`, the caller that writes
+  // a payload frame — so a 400 from ingress, auth, parse, or the preparer would
+  // produce a request row whose four capture panels were all empty, and the one
+  // case an operator most wants to read (what did the client actually send?)
+  // would have nothing to read. Capture the ingress body and the error the
+  // client saw, keyed to the same request id as the row.
   if (requestData === undefined && state.ingressBody !== undefined) {
     void captureEarlyRejectionPayload(state, authorization);
   }

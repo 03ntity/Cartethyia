@@ -6,12 +6,12 @@ const MISTRAL_PROVIDER_ID = "mistral" as const;
 /**
  * Mistral's own current generalist tiers.
  *
- * The provider is registered as a generic OpenAI-compatible API-key provider, so
- * it carried no catalog at all and every model it serves was absent until a
- * discovery run happened to fetch them. These are the two `latest` aliases
- * Mistral keeps pointed at its current generalist models — `mistral-large-latest`
- * (Large 4) and `mistral-medium-latest` (Medium 3.5), per the Mistral model
- * overview.
+ * The provider is registered as a generic OpenAI-compatible API-key provider,
+ * which carries no catalog of its own: without this list, every model it serves
+ * stays absent until a discovery run happens to fetch them. These are the two
+ * `latest` aliases Mistral keeps pointed at its current generalist models —
+ * `mistral-large-latest` (Large 4) and `mistral-medium-latest` (Medium 3.5),
+ * per the Mistral model overview.
  *
  * Limits and pricing come from the base catalog via `providerId`: `defineModel`
  * resolves `mistral:<id>` and falls back to the majority row, so no number is

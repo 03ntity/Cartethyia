@@ -91,7 +91,6 @@ export function buddyConversationHeaders(
   };
   // Always sent, invented when the caller gave none.
   //
-  // This used to be omitted unless the client supplied one. That was wrong:
   // `x-conversation-id` is mandatory, and a chat request without it is refused
   // with `400 · 11-128 "request illegal"` — an error that names neither the
   // header nor the channel, and which reads like a block rather than a missing

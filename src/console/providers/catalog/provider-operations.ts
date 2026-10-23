@@ -470,8 +470,8 @@ export function createProviderCatalogOperations(config: ProviderCatalogConfig) {
      * uses, so a batch cannot accept a shape the single create rejects. The
      * expensive per-account bookkeeping — the audit row and the routing snapshot
      * invalidation that forces a 10-table catalog rebuild — is done ONCE for the
-     * whole batch instead of once per account, which is most of why the old
-     * client-side loop scaled linearly with paste size.
+     * whole batch instead of once per account, so cost does not scale linearly
+     * with paste size the way a client-side loop over single creates would.
      *
      * Email/label enrichment is deliberately NOT done here. Persisting the
      * credential is local work (encrypt + hash + insert) and needs no upstream;
@@ -516,8 +516,8 @@ export function createProviderCatalogOperations(config: ProviderCatalogConfig) {
         if (created.account !== undefined) queueNewAccountCheckin(providerId, created.account);
       }
 
-      // One audit row per successful account, but written after the batch lands
-      // rather than inside the request path that used to await it per account.
+      // One audit row per batch, written after the batch lands rather than
+      // awaited per account inside the request path.
       if (result.created > 0) {
         await config.auditSink?.record({
           access: a,

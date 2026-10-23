@@ -84,11 +84,14 @@ on Linux). Override it with `CARTETHYIA_CONFIG_DIR`. Generated config and SQLite
 data stay outside the npm package. Setup does not install PostgreSQL.
 
 `carte` starts the gateway and opens an arrow-key menu: **Open Console**,
-**Settings**, **Hide to background**, **Check for updates**, and **Exit**. It
-needs no desktop environment, so it works over SSH and on a headless box.
-`carte --tray` starts a system-tray icon instead — versions, **Open Console**,
-**Reset password**, **Backup**, and **Exit** — and needs a graphical
-session; the launcher then releases the terminal once the gateway is ready.
+**Reset console password**, **Backup**, an update entry, **Hide to tray**, and
+**Exit**. It needs no desktop environment, so it works over SSH and on a
+headless box. The update entry is labelled **Check for updates** only when no
+release has been fetched yet; otherwise it reads **Up to date (v)** or
+**Update to v**. `carte --tray` starts a system-tray icon instead —
+versions, **Open Console**, **Reset console password**, **Backup**, and
+**Exit** — and needs a graphical session; the launcher then releases the
+terminal once the gateway is ready.
 `cartethyia start` stays in the foreground. Exit drains the gateway through its
 authenticated loopback endpoint before stopping. This does not install a
 login/startup service.
@@ -282,3 +285,158 @@ as `NODE_EXTRA_CA_CERTS`. Bun reads that variable only at process start, so a
 direct `bun test` has no extra CA and the outbound HTTP/2 suites fail on the
 handshake. Use `bun run test`, or `bun run test:backend` / `bun run
 dashboard:test` for one scope.
+
+## 12. Server install (VPS, systemd, reverse proxy)
+
+Everything above covers a local install. This section is the server path.
+
+> [!WARNING]
+> Cartethyia holds provider credentials and API keys on the machine you run it
+> on. Restrict who can reach the console, and keep backups somewhere you control.
+
+### 12.1 VPS — Lite (native, no Docker)
+
+Verified on Debian 13, 1 vCPU / 2 GB, Bun 1.4.2.
+
+```bash
+# 1. Dependencies
+apt-get update && apt-get install -y git curl unzip ca-certificates openssl
+
+# 2. Bun
+curl -fsSL https://bun.sh/install | bash
+export PATH="/root/.bun/bin:$PATH"
+
+# 3. Source
+mkdir -p /opt/cartethyia/data
+cd /opt/cartethyia
+git clone -b dev https://github.com/risunCode/Cartethyia.git repo
+cd repo
+
+# 4. Configure
+cp .env.example .env
+cat >> .env <<EOF
+CARTETHYIA_DB_MODE=lite
+NODE_ENV=production
+LOG_LEVEL=warn
+PORT=8080
+CARTETHYIA_ENCRYPTION_KEY=$(openssl rand -hex 32)
+CARTETHYIA_PUBLIC_ORIGIN=https://your.domain
+CARTETHYIA_DATA_DIR=/opt/cartethyia/data
+CARTETHYIA_TELEMETRY_PAYLOAD_DIR=/opt/cartethyia/data/telemetry-payloads
+CARTETHYIA_INSTALL_ID_DIR=/opt/cartethyia/data/.cartethyia
+EOF
+
+# 5. Build
+bun install --linker isolated
+bun run build
+```
+
+### 12.2 systemd
+
+`/etc/systemd/system/cartethyia.service`, then `systemctl enable --now cartethyia`:
+
+```ini
+[Service]
+Type=simple
+WorkingDirectory=/opt/cartethyia/repo
+EnvironmentFile=/opt/cartethyia/repo/.env
+Environment=PATH=/root/.bun/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/cartethyia/repo/dist/cartethyia
+Restart=always
+RestartSec=5
+```
+
+Check it with `curl http://127.0.0.1:8080/health/ready`.
+
+### 12.3 Reverse proxy
+
+Caddy: `your.domain { reverse_proxy 127.0.0.1:8080 }`.
+
+Nginx must forward the client IP or every request looks like one IP:
+
+```nginx
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Real-IP $remote_addr;
+```
+
+And set `TRUSTED_PROXY_CIDRS=127.0.0.1/32,10.0.0.0/8` in `.env`.
+
+### 12.4 Auto-deploy
+
+Use `scripts/install/lite.sh` rather than writing your own (see below). If you
+do poll for updates, a build takes 3–5 minutes on 1 vCPU, so a 1-minute cron
+stacks builds until the box runs out of memory. Poll every 5 minutes, take a
+`flock` before fetching, and roll back to the previous commit if
+`/health/ready` never comes up after the restart.
+
+### 12.5 Port
+
+`PORT` is the one public port; the default is 12800. A VPS whose NAT does not
+forward it should set `PORT` to a forwarded port and set
+`CARTETHYIA_PUBLIC_ORIGIN` to the same port, or OAuth callbacks miss. The
+dashboard dev server on 5173 is local only. The app binds `0.0.0.0`; Docker
+maps `${PORT:-12800}` to the container's 12800, so changing `PORT` changes the
+host side only.
+
+### 12.6 VPS — Full (native)
+
+Same as VPS Lite through step 5, then:
+
+```dotenv
+CARTETHYIA_DB_MODE=full
+DATABASE_URL=postgres://user:password@host:5432/cartethyia
+REDIS_URL=redis://localhost:6379
+```
+
+Install PostgreSQL:
+
+```bash
+apt-get install -y postgresql
+sudo -u postgres createdb cartethyia
+```
+
+`bun doctor` validates `.env`, backend reachability, optional Redis, and
+readiness. Run it after any Full-mode change.
+
+Multiple instances are supported in Full mode. Put them behind a load balancer
+and keep `REDIS_URL` shared.
+
+### 12.7 Docker — bundling PostgreSQL
+
+Section 8 covers the default Compose stack, which is Full mode with bundled
+Redis and an external PostgreSQL reached through `DATABASE_URL`. To bundle
+PostgreSQL in Compose instead of pointing at an external one, add a
+`docker-compose.override.yml` with a `postgres:16-alpine` service, a
+`pg_isready` healthcheck, and `app.depends_on` waiting for it. Mount its data
+on a named volume.
+
+### 12.8 One-shot install script
+
+`scripts/install/lite.sh` — one command, Lite mode, no manual steps.
+Idempotent; safe to re-run.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/risunCode/Cartethyia/dev/scripts/install/lite.sh | bash
+# or, from a checkout:
+bash scripts/install/lite.sh
+```
+
+That script is the canonical one-shot installer: it installs system packages
+and Bun, installs the `cartethyia` npm package globally, writes `.env`, and
+starts the gateway. With `--topology regular` it also installs Caddy and a
+`caddy.service` unit; it writes no unit for Cartethyia itself. An existing
+`.env` is never overwritten.
+
+It takes flags, not environment overrides: `--mode lite|full`,
+`--topology regular|nat`, `--domain <fqdn>`, `--port <n>`,
+`--non-interactive`, and `--skip <packages,bun,postgres,redis,node,npm,caddy,env,start>`.
+
+**NEXT after install:** the console first-boot wizard has not run yet. Open
+`$ORIGIN/console`, or seed it non-interactively:
+
+```bash
+curl -s http://127.0.0.1:$PORT/console/api/auth/first-boot
+curl -s -X POST http://127.0.0.1:$PORT/console/api/auth/setup \
+  -H 'content-type: application/json' \
+  -d '{"password":"CHANGE-ME","username":"admin"}'
+```

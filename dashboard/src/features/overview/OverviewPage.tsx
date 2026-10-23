@@ -12,10 +12,10 @@ import { toast } from "../../lib/toast";
 function ApiEndpointCard() {
   const { copied, copy } = useClipboard(2000);
   // The endpoint is served from the same origin the dashboard is, so the origin
-  // is used exactly as the browser sees it. It used to be rewritten to the
-  // gateway's default port, which broke every deployment that listens on
-  // another port or sits behind a TLS-terminating proxy — the dashboard loads
-  // over one authority and the card advertised a different one.
+  // is used exactly as the browser sees it. Rewriting it to the gateway's
+  // default port breaks every deployment that listens on another port or sits
+  // behind a TLS-terminating proxy — the dashboard loads over one authority and
+  // the card would advertise a different one.
   const endpoint = `${window.location.origin}/v1`;
   const copyEndpoint = async () => {
     if (await copy(endpoint)) {

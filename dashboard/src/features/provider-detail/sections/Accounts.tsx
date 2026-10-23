@@ -77,9 +77,9 @@ function credentialExpiryLabel(expiresAt: string | undefined): string | undefine
  *
  * A model-scoped throttle excludes only the (account, model) pair in the
  * routing catalog, so it is independent of the account-wide status: it can be
- * in force while the account reads `active`, `cooldown`, or `disabled`. Each
- * arm used to render its own chip list, which is how the `disabled` arm lost
- * the operator's last known health of the account.
+ * in force while the account reads `active`, `cooldown`, or `disabled`, so it
+ * is shared by every arm — including `disabled`, where it is the operator's
+ * last known health of the account.
  */
 function ModelCooldownChip({
   cooldowns,
@@ -512,7 +512,7 @@ function AccountRow({
             <QuotaPill windows={quota} />
             <span
               className="inline-flex items-center gap-2.5 max-w-full px-3.5 py-1 border border-inner-border rounded-chip bg-surface-1 text-text-secondary text-badge leading-normal whitespace-nowrap"
-              title="Concurrency comes from this provider’s Routing Strategy; accounts no longer carry manual ceilings."
+              title="Concurrency comes from this provider’s Routing Strategy; accounts carry no manual ceilings."
             >
               <span className="text-text-tertiary text-micro font-semibold uppercase tracking-label">In flight</span>
               {inflight?.toLocaleString() ?? "—"}
@@ -1070,9 +1070,8 @@ const TEST_ALL_CONCURRENCY = 3;
       </div>
 
       <div className="account-list flex flex-col gap-3 max-h-230 overflow-y-auto pr-1 [container-type:inline-size] [container-name:account-list]" role="list" aria-label="Provider accounts">
-        {/* A filter that matches nothing used to render zero rows with only
-            the footer counter to explain why. Say it in the space the rows
-            would have occupied. */}
+        {/* Say why nothing matched in the space the rows would have occupied,
+            rather than leaving only the footer counter to explain it. */}
         {sorted.length === 0 ? (
           <EmptyState
             compact

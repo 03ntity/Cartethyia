@@ -6,14 +6,14 @@
  * Every action the backend emits has an explicit entry here; unknown future
  * actions fall back to {@link prettifyAuditAction} so the column never renders a
  * blank. That coverage is asserted by
- * `dashboard/test/features/logs/audit-labels.test.ts`, which holds the backend's emit
+ * `dashboard/test/shared/audit-labels.test.ts`, which holds the backend's emit
  * vocabulary as a literal and fails when a new action appears without a label —
  * the two lists are otherwise free to drift, because the `action` field is a plain
  * string with no enum behind it.
  *
- * Entries are also kept for actions no longer emitted (`filter_rule.*`,
- * `backup.reset`, `provider_account.circuit_force_closed`): the map labels ROWS,
- * and a historical row outlives the emit site that wrote it.
+ * Entries are also kept for actions not emitted by the current build
+ * (`filter_rule.*`, `backup.reset`, `provider_account.circuit_force_closed`):
+ * the map labels ROWS, and a stored row outlives the emit site that wrote it.
  */
 
 const ACTION_LABELS: Readonly<Record<string, string>> = {

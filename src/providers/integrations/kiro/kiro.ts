@@ -8,7 +8,7 @@
 // Two upstream behaviours drive the header and endpoint logic:
 //
 //  * There is exactly one generation surface, `q.{region}.amazonaws.com`. The
-//    legacy `codewhisperer.*` host and the vendor's own path-style gateway are
+//    `codewhisperer.*` host and the vendor's own path-style gateway are
 //    not what the real client talks to, and reaching for them is actively
 //    harmful: an account that has just been refused would immediately probe two
 //    other service entries with the same token, which is the shape of credential
