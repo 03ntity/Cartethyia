@@ -124,6 +124,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   a loopback peer that the boundary will not trust logs one warning naming the
   fix and the shared-fate consequence, instead of silently degrading.
 
+- **Error codes and messages are unambiguous.** A scan of every rejection site
+  found codes doing double duty, and messages a client could not act on:
+
+  - `model_abuse_banned` answered in Indonesian — the only non-English message
+    on a client-facing surface. It is now English, and names that the ban is
+    scoped to this address **with this key**.
+  - Two `/admin` and backup-export refusals answered `invalid_request` when
+    nothing was wrong with the body: a loopback-only endpoint refused a
+    well-formed request (`policy_rejected`), and a bad drain token is a
+    credential failure (`authentication_failed`).
+  - Z.AI authentication answered `400` where every other authentication
+    failure is `401`, sending clients to fix a body that was never the problem.
+  - Every IP-abuse refusal carried `details.reason: "admission-unavailable"`,
+    which is the label for an unreachable store — so a ban, a rate limit, and
+    an outage were indistinguishable. They are now `ip-banned` and
+    `ip-rate-limited`.
+  - Seventeen codes had no plain-English definition in the Usage page and fell
+    through to a mechanical underscore-to-space rendering. All are defined;
+    `quota_exceeded` now says which layers can produce it and points at
+    `details.reason` to tell them apart.
+
+  Two guards now hold this: a table asserting one code means one status, and a
+  scan of every public message for non-English text. Both read `src/` directly,
+  so a new inconsistent site is caught the day it is written rather than
+  whenever someone re-reads a hand-collected list.
+
 ### Changed
 
 - **Compatibility shims are gone.** Backward-compat paths removed across the

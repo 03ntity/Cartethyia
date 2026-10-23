@@ -47,10 +47,14 @@ export function createBackupExportHandler(
   deps: BackupExportDeps,
 ): (context: { request: Request; body: unknown }) => Promise<Response> {
   return async ({ request, body }) => {
+    // `policy_rejected` / `authentication_failed`, not `invalid_request` for
+    // both: neither refusal is about the body. The first is where the request
+    // came from, the second is the credential it carried — and `invalid_request`
+    // told an operator to fix a body that was never the problem.
     if (!isLoopbackPeer(deps.resolvePeerAddress(request)))
-      throw new GatewayError("invalid_request", 403, "backup export is only available from loopback");
+      throw new GatewayError("policy_rejected", 403, "backup export is only available from loopback");
     if (!tokenMatches(request.headers.get("x-drain-token"), deps.token))
-      throw new GatewayError("invalid_request", 401, "invalid export token");
+      throw new GatewayError("authentication_failed", 401, "invalid export token");
 
     const directory =
       body !== null && typeof body === "object" && "directory" in body

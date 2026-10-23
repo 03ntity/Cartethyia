@@ -421,7 +421,12 @@ export class IpAbuseProtectionService {
 
       if (outcome.banned) {
         throw new GatewayError("quota_exceeded", 429, "This address is temporarily banned for too many failed requests. Wait for the ban to lift, then slow down.", {
-          reason: "admission-unavailable",
+          // Distinguishes this from the rate-limited 429 below and from an API
+          // key's own budget. It used to be "admission-unavailable", which is
+          // the label for an *unreachable* store — so every refusal from this
+          // layer claimed an outage that had not happened, and a client could
+          // not tell "banned" from "over the window" from "store is down".
+          reason: "ip-banned",
           ip,
           route: input.route,
           // Measured by the store: the ban marker's remaining TTL. Carried as
@@ -433,7 +438,7 @@ export class IpAbuseProtectionService {
 
       if (outcome.count > this.maxRequestsPerWindow) {
         throw new GatewayError("quota_exceeded", 429, "This address is sending requests faster than the abuse limit allows. Back off and retry after the window rolls over.", {
-          reason: "admission-unavailable",
+          reason: "ip-rate-limited",
           ip,
           route: input.route,
           count: outcome.count,

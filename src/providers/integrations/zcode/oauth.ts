@@ -73,7 +73,12 @@ function unwrapEnvelope(body: unknown, operation: string): unknown {
       const message = nonEmptyTrimmedString(root.msg) ?? `${operation} failed`;
       // `cartethyia` origin so the dialog shows the provider's own reason
       // instead of the generic "check the console log" fallback.
-      throw new GatewayError("authentication_failed", 400, `Z.AI ${message}`, { providerId: "zcode" });
+      // 401, not the 400 this used to send: an authentication failure is not a
+      // malformed request, and every other `authentication_failed` in the
+      // codebase is 401. A 400 told the client to fix its body when the real
+      // action is to fix the credential — and HTTP itself reserves 401 for
+      // exactly this, so a standard client reads the class from the status.
+      throw new GatewayError("authentication_failed", 401, `Z.AI ${message}`, { providerId: "zcode" });
     }
   }
   return root.data ?? body;

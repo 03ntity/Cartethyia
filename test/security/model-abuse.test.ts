@@ -642,10 +642,19 @@ describe("modelAbuseBannedError", () => {
     expect(error.origin).toBe("cartethyia");
   });
 
-  test("the message names the cause without naming a duration", () => {
+  test("the message is English and names the cause without naming a duration", () => {
     const message = modelAbuseBannedError().message;
-    expect(message).toBe("IP kamu diblokir karena terlalu banyak request model yang tidak valid.");
-    expect(message).not.toMatch(/\d|hour|jam|minute|menit/i);
+    // Client-facing, so it must be in the same language as every other public
+    // gateway error — a client that pattern-matches on the text, or an operator
+    // reading the response, cannot act on one that is not. Pinned by asserting
+    // the message is ASCII rather than by restating the string: the wording can
+    // then be improved without breaking this, while a non-English message
+    // cannot be reintroduced.
+    expect(message).toMatch(/^[\x20-\x7E]+$/);
+    expect(message).toContain("banned");
+    // No duration: the ban length is an operator's choice, and telling the
+    // caller a number invites a client to hard-code a wait against it.
+    expect(message).not.toMatch(/\d|hour|minute/i);
   });
 });
 

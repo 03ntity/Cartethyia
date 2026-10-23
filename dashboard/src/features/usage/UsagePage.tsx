@@ -405,7 +405,11 @@ function errorMessageFor(errorKind: string | undefined): string {
     platform_unavailable: "upstream provider was unavailable",
     proxy_unreachable: "network proxy was unreachable",
     proxy_auth_required: "network proxy rejected the credential",
-    quota_exceeded: "upstream rate limit or quota was exceeded",
+    // `quota_exceeded` is produced by four layers — an API key's rpm/daily/
+    // monthly/lifetime budget, the per-IP abuse limit, the console mutation
+    // limit, and upstream itself. Read `details.reason` before assuming which;
+    // the plain-English text here is the shared thread, not the diagnosis.
+    quota_exceeded: "a rate limit or budget was exhausted",
     authentication_failed: "upstream rejected the credential",
     capacity_exhausted: "the API key's concurrency limit was reached",
     provider_capacity_exhausted: "every account was at its max-inflight ceiling",
@@ -433,6 +437,24 @@ function errorMessageFor(errorKind: string | undefined): string {
     unsupported_field: "the request carried a field this route rejects",
     shutting_down: "the gateway was draining for a restart",
     restart_for_update: "the gateway was restarting for an update; retry shortly",
+    upstream_not_found: "the upstream route did not exist",
+    request_too_large: "the request body exceeded the size limit",
+    proxy_pool_provider_capacity_exceeded:
+      "this provider reached its ceiling on the selected proxy pool",
+    proxy_pool_blocked: "the proxy pool refused this destination",
+    policy_rejected: "gateway policy refused this request",
+    link_not_found: "that share link does not exist",
+    link_expired: "that share link has expired",
+    link_revoked: "that share link was revoked",
+    link_disabled: "that share link is disabled",
+    invalid_sequence: "the request arrived out of sequence",
+    invalid_lifecycle: "the request is not valid in its current state",
+    unsupported_media_type: "the request's content type is not accepted",
+    upstream_conflict: "upstream reported a conflict",
+    upstream_unprocessable: "upstream could not process the request",
+    overloaded: "the gateway was overloaded; retry shortly",
+    client_router_denied: "the client router denied this request",
+    model_abuse_banned: "this address is banned for this key after repeated invalid model requests",
   };
   if (errorKind && messages[errorKind]) return messages[errorKind];
   if (errorKind) return errorKind.replaceAll("_", " ");

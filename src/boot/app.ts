@@ -614,10 +614,14 @@ export function createGatewayApp(deps: GatewayAppDeps) {
       const tasks = deps.scheduledTasks;
       const token = deps.drainToken;
       app.post("/admin/tasks/:name/run", async ({ request, params }) => {
+        // `policy_rejected`, not `invalid_request`: the request may be perfectly
+        // well-formed. What refused it is where it came from — the client asked
+        // for something only the local host may ask. `invalid_request` told an
+        // operator to fix the body, when the body was never the problem.
         if (!isLoopbackPeer(peerAddresses.get(request) ?? null))
-          throw new GatewayError("invalid_request", 403, "task trigger is only available from loopback");
+          throw new GatewayError("policy_rejected", 403, "task trigger is only available from loopback");
         if (!tokenMatches(request.headers.get("x-drain-token"), token))
-          throw new GatewayError("invalid_request", 401, "invalid drain token");
+          throw new GatewayError("authentication_failed", 401, "invalid drain token");
         const name = params.name;
         if (!tasks.names().includes(name))
           throw new GatewayError("invalid_request", 404, `no such task: ${name}`);

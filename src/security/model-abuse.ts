@@ -667,10 +667,16 @@ export class ModelStrikeService {
  * The message names the reason without the ban duration.
  */
 export function modelAbuseBannedError(): GatewayError {
+  // English, because this is a client-facing wire message: the gateway's other
+  // public errors are English, and a client that pattern-matches on the text
+  // (or an operator reading a foreign-language response) cannot act on one that
+  // is not. It also names the scope — the ban is this address *with this key*,
+  // not the address outright — so a caller behind a shared address knows a
+  // different key from the same address may still work.
   return new GatewayError(
     "model_abuse_banned",
     403,
-    "IP kamu diblokir karena terlalu banyak request model yang tidak valid.",
+    "This address is temporarily banned for this API key after too many requests for models this key cannot use. Wait for the ban to lift, then list models to see which ones this key may call.",
   );
 }
 

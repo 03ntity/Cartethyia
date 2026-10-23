@@ -22,6 +22,8 @@
  * front of the upstream.
  */
 import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   explainGatewayError,
   formatPublicErrorMessage,
@@ -29,6 +31,135 @@ import {
   publicGatewayErrorDetails,
   type GatewayErrorCode,
 } from "../../src/protocol/gateway-error";
+
+/**
+ * Which HTTP status each code means, and the sites allowed to differ.
+ *
+ * A client branches on the code first and the status second, so one code
+ * answering two unrelated statuses makes the code useless: `authentication_failed`
+ * at 400 told a client to fix its request body when it needed to fix its
+ * credential. This table is what "consistent" means here.
+ *
+ * The exemptions are real and deliberate, not debt: a code whose status is
+ * derived from an upstream response (`transport_unavailable`,
+ * `platform_unavailable`, `invalid_request` at the console's HTTP surface)
+ * legitimately spans a range, because the upstream chose the status. Pinning
+ * those to one value would be pinning a lie.
+ */
+const EXPECTED_STATUS: Readonly<Record<string, readonly number[]>> = {
+  authentication_failed: [401],
+  capacity_exhausted: [429],
+  provider_capacity_exhausted: [429],
+  tenant_capacity_exhausted: [429],
+  quota_exceeded: [429],
+  accounts_rate_limited: [429],
+  accounts_unavailable: [503],
+  admission_unavailable: [503],
+  model_abuse_banned: [403],
+  policy_rejected: [403],
+  model_not_found: [404],
+  ambiguous_model: [400],
+  capability_unsupported: [400],
+};
+
+/**
+ * Reads every `new GatewayError(<literal>, <literal>` in `src/` and groups the
+ * statuses each code is constructed with.
+ *
+ * Scans source text rather than importing and exercising each producer: there
+ * are hundreds of sites across providers, guards, and console routes, and a
+ * table of hand-collected cases would silently stop covering new ones. A new
+ * inconsistent site is caught the day it is written.
+ */
+function scannedStatuses(): Map<string, Set<number>> {
+  const root = new URL("../../src/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+  const found = new Map<string, Set<number>>();
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(path);
+        continue;
+      }
+      if (!path.endsWith(".ts")) continue;
+      const lines = readFileSync(path, "utf8").split(/\r?\n/);
+      for (let i = 0; i < lines.length; i += 1) {
+        if (!lines[i]!.includes("new GatewayError(")) continue;
+        // The code and status are usually on the line after the constructor.
+        const match = lines
+          .slice(i, i + 3)
+          .join(" ")
+          .match(/new GatewayError\(\s*"([a-z_]+)"\s*,\s*(\d+)/);
+        if (!match) continue;
+        const set = found.get(match[1]!) ?? new Set<number>();
+        set.add(Number(match[2]));
+        found.set(match[1]!, set);
+      }
+    }
+  };
+  walk(root);
+  return found;
+}
+
+describe("error code consistency", () => {
+  test("one code means one status, except where upstream chooses it", () => {
+    const found = scannedStatuses();
+    for (const [code, expected] of Object.entries(EXPECTED_STATUS)) {
+      const actual = [...(found.get(code) ?? [])].sort((a, b) => a - b);
+      // Only the codes this test claims to know about; a code absent from
+      // `src` entirely is not a consistency question.
+      if (actual.length === 0) continue;
+      expect(actual, `code ${code}`).toEqual([...expected].sort((a, b) => a - b));
+    }
+  });
+
+  test("no public error message is written in another language", () => {
+    // Client-facing text, so it must be readable without knowing this
+    // deployment's locale. One message was Indonesian ("IP kamu diblokir…");
+    // this is the guard that keeps another from landing.
+    //
+    // Two checks, because either alone is blind to a different case:
+    //
+    // 1. **Script.** A message whose letters are not Latin (Cyrillic, CJK,
+    //    Arabic, Greek) is certainly not English. This does NOT reject
+    //    typographic punctuation — the codebase writes em dashes, arrows and
+    //    middots in its prose, and banning those would ban the house style
+    //    rather than a translation.
+    // 2. **Stopwords.** Indonesian is written in Latin script, so the script
+    //    check passes right over it — the exact miss that let the original
+    //    message through. These are the common function words no English
+    //    message contains; they are also not substrings of English words, so
+    //    "banned" and "invalid" stay clean.
+    const ALLOWED_PUNCTUATION = /[—–…·→←↔≤≥²³§│─┌┐└┘]/g;
+    const NON_ENGLISH_STOPWORDS = /\b(kamu|anda|tidak|diblokir|dengan|untuk|karena|yang|ini|itu|silakan|hingga|terlalu|banyak|atau|dari|kepada|adalah|akan|sudah|bisa|jika|mohon|maaf|permintaan|kunci|waktu|menit|jam|hari)\b/i;
+    const root = new URL("../../src/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(path);
+          continue;
+        }
+        if (!path.endsWith(".ts")) continue;
+        const lines = readFileSync(path, "utf8").split(/\r?\n/);
+        for (let i = 0; i < lines.length; i += 1) {
+          if (!lines[i]!.includes("new GatewayError(")) continue;
+          const chunk = lines.slice(i, i + 4).join(" ");
+          // Only the string literal on the constructor's message argument, so a
+          // non-English *comment* nearby is not reported.
+          const message = chunk.match(/new GatewayError\([^)]*?,\s*\d+,\s*"([^"]*)"/);
+          if (!message) continue;
+          const text = message[1]!;
+          const notLatin = /[^\x20-\x7E]/.test(text.replace(ALLOWED_PUNCTUATION, ""));
+          if (notLatin || NON_ENGLISH_STOPWORDS.test(text)) offenders.push(`${path}:${i + 1}`);
+        }
+      }
+    };
+    walk(root);
+    expect(offenders).toEqual([]);
+  });
+});
 
 describe("GatewayError", () => {
   test("carries its code, status, origin, and details", () => {
