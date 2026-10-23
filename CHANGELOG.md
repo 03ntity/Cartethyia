@@ -166,6 +166,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
   This is the classification and the label; no console surface renders it yet.
 
+- **Buddy accounts send their enterprise identity.** An enterprise account is
+  billed from its organization's credit assignment rather than a personal
+  package, and the upstream reads that from the request: `X-Enterprise-Id` and
+  `X-Tenant-Id` name the organization, and `X-Private-Data` says the account is
+  not personal. Both were missing on chat — `X-Private-Data` was hardcoded to
+  `false`, which the code already flagged as unfinished.
+
+  The enterprise is resolved from `auth_state.enterpriseId` first, then from a
+  claim on the access token, so accounts authorized before this existed are
+  picked up too. An account with no evidence stays personal: claiming an
+  enterprise it does not belong to is the kind of mismatch that draws a channel
+  check, and personal is what the gateway already sent.
+
+  The token claim is read from a list of plausible spellings rather than one
+  name, because the upstream's token shape is not pinned anywhere this codebase
+  can verify.
+
 - **Error codes and messages are unambiguous.** A scan of every rejection site
   found codes doing double duty, and messages a client could not act on:
 

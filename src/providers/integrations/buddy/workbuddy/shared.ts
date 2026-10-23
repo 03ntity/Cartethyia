@@ -8,7 +8,7 @@ import type { ProviderDispatchContext, ProviderDispatchTarget, ProviderId } from
 import { resolveInboundSessionId } from "../../../operations/session-resolution";
 import { buddyConversationHeaders } from "../buddy-conversation-headers";
 import { buddyCliHeaders, buddyCliTraceHeaders } from "../buddy-cli-headers";
-import { buddyUserId, resolveBuddyIdentity } from "../buddy-identity";
+import { buddyEnterprise, buddyUserId, resolveBuddyIdentity } from "../buddy-identity";
 import {
   buildWorkBuddyUserAgent,
   getWorkBuddyClientVersion,
@@ -91,7 +91,10 @@ export async function workbuddyHeaders(
       "x-no-enterprise-id": "1",
       ...conversation,
       ...buddyCliTraceHeaders(conversation),
-      ...buddyCliHeaders({ userId: buddyUserId(context) }),
+      ...buddyCliHeaders({
+        userId: buddyUserId(context),
+        enterpriseId: buddyEnterprise(context),
+      }),
     };
   }
   const headers: Record<string, string> = {

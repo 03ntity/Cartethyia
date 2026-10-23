@@ -3,7 +3,7 @@ import type { CanonicalRequest } from "../../../../protocol/canonical-model";
 import type { ProviderDispatchContext, ProviderDispatchTarget, ProviderId } from "../../../provider-contracts";
 import { resolveInboundSessionId } from "../../../operations/session-resolution";
 import { buddyConversationHeaders } from "../buddy-conversation-headers";
-import { buddyUserId, resolveBuddyIdentity } from "../buddy-identity";
+import { buddyEnterprise, buddyUserId, resolveBuddyIdentity } from "../buddy-identity";
 import { buildCodeBuddyUserAgent, getCodeBuddyCnVersion, getCodeBuddyVersion } from "../../../operations/client-versions";
 import { readBuddyDeviceToken } from "../workbuddy/shared";
 import { buddyCliHeaders, buddyCliTraceHeaders } from "../buddy-cli-headers";
@@ -60,7 +60,10 @@ export async function codebuddyHeaders(
       "X-Agent-Purpose": "conversation",
       ...conversation,
       ...buddyCliTraceHeaders(conversation),
-      ...buddyCliHeaders({ userId: buddyUserId(context) }),
+      ...buddyCliHeaders({
+        userId: buddyUserId(context),
+        enterpriseId: buddyEnterprise(context),
+      }),
     };
   }
   return {

@@ -69,7 +69,14 @@ export function buddyCliTraceHeaders(
  * conversation family, because those vary by provider and realm: only the
  * headers that are the same for every CLI dispatch are built here.
  */
-export function buddyCliHeaders(args: { readonly userId: string }): Record<string, string> {
+export function buddyCliHeaders(args: {
+  readonly userId: string;
+  readonly enterpriseId?: string | undefined;
+}): Record<string, string> {
+  const enterpriseId =
+    args.enterpriseId !== undefined && args.enterpriseId.trim().length > 0
+      ? args.enterpriseId.trim()
+      : undefined;
   return {
     "X-Agent-Intent": "craft",
     "X-Agent-Type": "main",
@@ -78,11 +85,21 @@ export function buddyCliHeaders(args: { readonly userId: string }): Record<strin
     // of the three, so "other" is the honest value rather than a guess.
     "X-Agent-Runtime": "other",
     "X-User-Id": args.userId,
-    // Personal accounts are not an enterprise and the reference sends the flag
-    // either way (`true` only for an enterprise id), so the non-enterprise
-    // default goes out here. Step 3 replaces this with the account's real
-    // enterprise id once discovery carries one.
-    "X-Private-Data": "false",
+    // The reference sends the flag either way, `true` only for an enterprise
+    // id. A personal account stays `false`; an enterprise account flips to
+    // `true` and names the enterprise, because the two travel together — a
+    // `true` with no id, or an id under `false`, is a combination no real
+    // client produces.
+    "X-Private-Data": enterpriseId === undefined ? "false" : "true",
+    ...(enterpriseId === undefined
+      ? {}
+      : {
+          "X-Enterprise-Id": enterpriseId,
+          // The tenant falls back to the enterprise: the two are the same value
+          // for an account that belongs to one enterprise, and the upstream
+          // reads both.
+          "X-Tenant-Id": enterpriseId,
+        }),
     ...buddyStainlessHeaders(),
   };
 }
