@@ -925,128 +925,146 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
               />
             </section>
 
-            {/* ── Right column: Routing, Blocked routers, Remote routing, Dashboard scopes ── */}
+            {/* ── Right column: 2 bordered cards ── */}
             <div className="flex flex-col gap-4 min-w-0">
-              {/* Routing scopes */}
-              <section aria-labelledby="routing-scopes-heading" className="flex flex-col gap-2">
-                <h4 id="routing-scopes-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
-                  <Route size={15} className="text-accent" aria-hidden="true" />
-                  Routing
-                </h4>
-                {/* routing:cli_mapping is intentionally absent here: it is the scope
-                    half of the Remote routing switch below, which grants it and
-                    enables the routes together. Listing it separately let the two
-                    disagree. */}
-                {TENANT_KEY_SCOPES.filter((scope) => scope === "routing:invoke").map((scope) => (
-                  <div
-                    key={scope}
-                    className="flex items-center justify-between gap-4 py-1.5 px-4 rounded-inset"
-                    style={{
-                      minHeight: "38px",
-                      border: "1px solid var(--inner-border)",
-                      background: scopes.includes(scope) ? "var(--accent-soft)" : "var(--surface-1)",
-                    }}
-                  >
-                    <div className="flex items-start gap-3">
-                      <Route size={15} className="mt-1 shrink-0 text-accent" aria-hidden="true" />
-                      <div className="min-w-0">
-                        <div className="text-caption font-semibold text-text-primary">{scope}</div>
-                        <p className="mt-0.5 text-badge text-text-tertiary">{SCOPE_DESCRIPTIONS[scope]}</p>
-                      </div>
-                    </div>
-                    <Switch checked={scopes.includes(scope)} onChange={() => toggleScope(scope)} disabled={busy} aria-label={`Grant ${scope}`} />
-                  </div>
-                ))}
-              </section>
 
-              {/* Remote routing */}
-              <RemoteRoutingSection
-                keyId={mode === "edit" && record ? record.id : ""}
-                busy={busy}
-                scopeGranted={scopes.includes("routing:cli_mapping")}
-                onScopeChange={(next) => {
-                  if (next === scopes.includes("routing:cli_mapping")) return;
-                  toggleScope("routing:cli_mapping");
-                }}
-                persistScope={(next) => {
-                  if (mode !== "edit" || !record) return;
-                  const nextScopes = next
-                    ? [...new Set([...scopes, "routing:cli_mapping"])]
-                    : scopes.filter((scope) => scope !== "routing:cli_mapping");
-                  updateKey.mutate(
-                    { keyId: record.id, request: { scopes: nextScopes } },
-                    {
-                      onError: (error) =>
-                        toast.error(getErrorMessage(error, "Could not update the key's routing scope.")),
-                    },
-                  );
-                }}
-              />
-
-              {/* Blocked client routers */}
-              <section aria-labelledby="blocked-routers-heading" className="flex flex-col gap-2">
-                <div>
-                  <h4 id="blocked-routers-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
-                    <Ban size={15} className="text-accent" aria-hidden="true" />
-                    Blocked client routers
+              {/* ── Card 1: Routing & Client Blocking ── */}
+              <section aria-labelledby="routing-blocking-heading" className="flex flex-col gap-0 min-w-0 rounded-card border border-inner-border bg-surface-1 overflow-hidden">
+                <div className="px-4 pt-4 pb-3 border-b border-inner-border">
+                  <h4 id="routing-blocking-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
+                    <Route size={15} className="text-accent" aria-hidden="true" />
+                    Routing &amp; Client Blocking
                   </h4>
-                  <p className="mt-1 text-badge text-text-tertiary">
-                    Matching fingerprints are rejected with 403 before routing. Detection is best-effort; clients without a fingerprint are not matched.
+                  <p className="mt-1 mb-0 text-badge text-text-tertiary">
+                    Control which gateway routes this key can call and which client apps are blocked before routing.
                   </p>
                 </div>
-                <div className="flex flex-col gap-2">
-                  {CLIENT_ROUTERS.map((router) => (
+
+                <div className="flex flex-col divide-y divide-inner-border">
+                  {/* Gateway routing */}
+                  <div className="flex flex-col gap-2 px-4 py-3">
+                    <p className="text-badge font-semibold text-text-secondary m-0">Gateway routing</p>
+                    {TENANT_KEY_SCOPES.filter((scope) => scope === "routing:invoke").map((scope) => (
+                      <div
+                        key={scope}
+                        className="flex items-center justify-between gap-4 py-1.5 px-4 rounded-inset"
+                        style={{
+                          minHeight: "38px",
+                          border: "1px solid var(--inner-border)",
+                          background: scopes.includes(scope) ? "var(--accent-soft)" : "var(--surface-2)",
+                        }}
+                      >
+                        <div className="flex items-start gap-3">
+                          <Route size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+                          <div className="min-w-0">
+                            <div className="text-caption font-semibold text-text-primary">{scope}</div>
+                            <p className="mt-0.5 mb-0 text-badge text-text-tertiary">{SCOPE_DESCRIPTIONS[scope]}</p>
+                          </div>
+                        </div>
+                        <Switch checked={scopes.includes(scope)} onChange={() => toggleScope(scope)} disabled={busy} aria-label={`Grant ${scope}`} />
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Remote routing */}
+                  <div className="px-4 py-3">
+                    <p className="text-badge font-semibold text-text-secondary mb-2">Remote routing</p>
+                    <RemoteRoutingSection
+                      keyId={mode === "edit" && record ? record.id : ""}
+                      busy={busy}
+                      scopeGranted={scopes.includes("routing:cli_mapping")}
+                      onScopeChange={(next) => {
+                        if (next === scopes.includes("routing:cli_mapping")) return;
+                        toggleScope("routing:cli_mapping");
+                      }}
+                      persistScope={(next) => {
+                        if (mode !== "edit" || !record) return;
+                        const nextScopes = next
+                          ? [...new Set([...scopes, "routing:cli_mapping"])]
+                          : scopes.filter((scope) => scope !== "routing:cli_mapping");
+                        updateKey.mutate(
+                          { keyId: record.id, request: { scopes: nextScopes } },
+                          {
+                            onError: (error) =>
+                              toast.error(getErrorMessage(error, "Could not update the key's routing scope.")),
+                          },
+                        );
+                      }}
+                    />
+                  </div>
+
+                  {/* Blocked client apps */}
+                  <div className="flex flex-col gap-2 px-4 py-3">
+                    <div>
+                      <p className="text-badge font-semibold text-text-secondary m-0">Blocked client apps</p>
+                      <p className="mt-1 mb-2 text-badge text-text-tertiary">
+                        Fingerprinted requests from these apps are rejected with 403 before routing. Detection is best-effort; unrecognised clients are never matched.
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {CLIENT_ROUTERS.map((router) => (
+                        <div
+                          key={router.id}
+                          className="flex items-center justify-between gap-4 py-1.5 px-4 rounded-inset"
+                          style={{
+                            minHeight: "38px",
+                            border: "1px solid var(--inner-border)",
+                            background: blockedRouters.includes(router.id) ? "var(--accent-soft)" : "var(--surface-2)",
+                          }}
+                        >
+                          <div className="flex min-w-0 items-center gap-3">
+                            <Ban size={14} className="shrink-0 text-orange" aria-hidden="true" />
+                            <span className="text-caption text-text-primary">Block {router.label} Client</span>
+                          </div>
+                          <Switch
+                            checked={blockedRouters.includes(router.id)}
+                            onChange={(checked) =>
+                              setBlockedRouters((current) =>
+                                checked ? [...current, router.id] : current.filter((entry) => entry !== router.id),
+                              )
+                            }
+                            disabled={busy}
+                            aria-label={`Block ${router.label} client`}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* ── Card 2: Dashboard / Resources ── */}
+              <section aria-labelledby="dashboard-scopes-heading" className="flex flex-col gap-0 min-w-0 rounded-card border border-inner-border bg-surface-1 overflow-hidden">
+                <div className="px-4 pt-4 pb-3 border-b border-inner-border">
+                  <h4 id="dashboard-scopes-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
+                    <LayoutDashboard size={15} className="text-accent" aria-hidden="true" />
+                    Dashboard / Resources
+                  </h4>
+                  <p className="mt-1 mb-0 text-badge text-text-tertiary">
+                    Grants read or write access to console data — providers, models, configuration, and usage stats. No routing is implied by these scopes.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2 p-4">
+                  {TENANT_KEY_SCOPES.filter((scope) => !scope.startsWith("routing:")).map((scope) => (
                     <div
-                      key={router.id}
+                      key={scope}
                       className="flex items-center justify-between gap-4 py-1.5 px-4 rounded-inset"
                       style={{
                         minHeight: "38px",
                         border: "1px solid var(--inner-border)",
-                        background: blockedRouters.includes(router.id) ? "var(--accent-soft)" : "var(--surface-1)",
+                        background: scopes.includes(scope) ? "var(--accent-soft)" : "var(--surface-2)",
                       }}
                     >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <Ban size={14} className="shrink-0 text-orange" aria-hidden="true" />
-                        <span className="text-caption text-text-primary">Block {router.label} Client</span>
-                      </div>
-                      <Switch
-                        checked={blockedRouters.includes(router.id)}
-                        onChange={(checked) =>
-                          setBlockedRouters((current) =>
-                            checked ? [...current, router.id] : current.filter((entry) => entry !== router.id),
-                          )
-                        }
-                        disabled={busy}
-                        aria-label={`Block ${router.label} client`}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              {/* Dashboard / Resources scopes — 2 col inside right column */}
-              <section aria-labelledby="dashboard-scopes-heading" className="flex flex-col gap-2">
-                <h4 id="dashboard-scopes-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
-                  <LayoutDashboard size={15} className="text-accent" aria-hidden="true" />
-                  Dashboard / Resources
-                </h4>
-                <div className="grid grid-cols-2 gap-2 max-medium:grid-cols-1">
-                  {TENANT_KEY_SCOPES.filter((scope) => !scope.startsWith("routing:")).map((scope) => (
-                    <div
-                      key={scope}
-                      className="flex items-center justify-between gap-3 py-1.5 px-3 rounded-inset"
-                      style={{
-                        minHeight: "38px",
-                        border: "1px solid var(--inner-border)",
-                        background: scopes.includes(scope) ? "var(--accent-soft)" : "var(--surface-1)",
-                      }}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-start gap-3 min-w-0">
                         {(() => {
                           const ScopeIcon = SCOPE_ICONS[scope];
-                          return <ScopeIcon size={14} className="shrink-0 text-accent" aria-hidden="true" />;
+                          return <ScopeIcon size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />;
                         })()}
-                        <span className="text-badge font-semibold text-text-primary truncate">{scope}</span>
+                        <div className="min-w-0">
+                          <div className="text-caption font-semibold text-text-primary">{scope}</div>
+                          <p className="mt-0.5 mb-0 text-badge text-text-tertiary">{SCOPE_DESCRIPTIONS[scope]}</p>
+                        </div>
                       </div>
                       <Switch checked={scopes.includes(scope)} onChange={() => toggleScope(scope)} disabled={busy} aria-label={`Grant ${scope}`} />
                     </div>
