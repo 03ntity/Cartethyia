@@ -14,12 +14,12 @@ describe("API key prefixes", () => {
     expect(generated.secret).toMatch(/^pn-carte-[A-Za-z0-9_-]{16}$/);
   });
 
-  test("share credentials use sh-carte- and upgrade the legacy default", () => {
+  test("share credentials use sh-carte- by default; arbitrary prefix is kept as-is", () => {
     expect(resolveShareKeyPrefix(undefined)).toBe(DEFAULT_SHARE_API_KEY_PREFIX);
-    expect(resolveShareKeyPrefix("rk_")).toBe(DEFAULT_SHARE_API_KEY_PREFIX);
+    expect(resolveShareKeyPrefix("rk_")).toBe("rk_");
     expect(resolveShareKeyPrefix("custom_")).toBe("custom_");
 
-    const generated = generateApiKeySecret(resolveShareKeyPrefix("rk_"));
+    const generated = generateApiKeySecret(resolveShareKeyPrefix(undefined));
     expect(generated.secret).toMatch(/^sh-carte-[A-Za-z0-9_-]{16}$/);
   });
 
