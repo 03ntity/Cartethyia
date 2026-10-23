@@ -359,8 +359,12 @@ export function oneTimeSecretForMode(keyMode: ApiKeyResponse["keyMode"], secret:
 export function initialApiKeyScopes(
   record: { readonly isDefault?: boolean; readonly scopes?: readonly string[] } | null,
 ): string[] {
-  if (record?.isDefault) return [...TENANT_KEY_SCOPES];
+  // For the default key: use whatever is stored on the record (so removals
+  // survive re-open); fall back to the full set only when no scopes are saved yet.
   const savedScopes = record?.scopes;
+  if (record?.isDefault) {
+    return savedScopes && savedScopes.length > 0 ? [...savedScopes] : [...TENANT_KEY_SCOPES];
+  }
   return savedScopes && savedScopes.length > 0
     ? [...savedScopes]
     : ["routing:invoke", "search:invoke"];
@@ -432,8 +436,14 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
     (hasStoredImage && !sharePopupImageRemoved && record !== null
       ? `/console/api/api-keys/${record.id}/share-popup-image`
       : null);
-  const [sharePopupTitle, setSharePopupTitle] = useState(record?.sharePopupTitle ?? "");
-  const [sharePopupBody, setSharePopupBody] = useState(record?.sharePopupBody ?? "");
+  const [sharePopupTitle, setSharePopupTitle] = useState(
+    record?.sharePopupTitle ??
+    "Support via QRIS"
+  );
+  const [sharePopupBody, setSharePopupBody] = useState(
+    record?.sharePopupBody ??
+    "Scan the QR code above with any QRIS-compatible banking or e-wallet app to support this gateway's upkeep. Every contribution helps keep the service running — thank you! 🙏"
+  );
   const [keyMode, setKeyMode] = useState<ApiKeyResponse["keyMode"]>(
     record?.keyMode ?? "personal",
   );
@@ -818,232 +828,216 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
               </p>
             </div>
           ) : null}
-        <div className="grid grid-cols-2 gap-4 min-w-0 max-medium:grid-cols-1">
-        <div>
-          <label className="inline-flex items-center gap-2 text-badge font-semibold text-text-secondary block mb-2">
-            <Boxes size={14} className="text-accent" aria-hidden="true" />
-            Model access
-          </label>
-          <div
-            role="group"
-            aria-label="Model access mode"
-            className="flex gap-2 mb-3"
-          >
-            {(["whitelist", "blacklist"] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                aria-pressed={modelAccessMode === option}
-                disabled={busy}
-                onClick={() => setModelAccessMode(option)}
-                title={
-                  option === "whitelist"
-                    ? "Only the listed models may be used. An empty list allows every model."
-                    : "The listed models are refused. Everything else is allowed."
-                }
-                className="flex-1 py-2.5 px-4 text-badge font-semibold"
-                style={{
-                  borderRadius: "7px",
-                  border: `1px solid ${modelAccessMode === option ? "var(--accent)" : "var(--inner-border)"}`,
-                  background: modelAccessMode === option ? "var(--accent-soft)" : "var(--surface-2)",
-                  color: modelAccessMode === option ? "var(--accent)" : "var(--text-secondary)",
-                  cursor: busy ? "not-allowed" : "pointer",
-                  opacity: busy ? 0.6 : 1,
-                }}
-              >
-                {option === "whitelist" ? "Whitelist" : "Blacklist"}
-                {option === "whitelist"
-                  ? <ShieldCheck size={13} className="ml-2 inline" aria-hidden="true" />
-                  : <ShieldX size={13} className="ml-2 inline" aria-hidden="true" />}
-              </button>
-            ))}
-          </div>
-          <label
-            className="text-badge font-semibold text-text-secondary block mb-2"
-          >
-            {modelAccessMode === "whitelist" ? "Allowed models" : "Blocked models"}
-          </label>
-          <div className="flex gap-2 flex-wrap mb-3">
-            {models.length === 0 ? (
-              <span className="mt-1 text-badge text-text-tertiary">
-                {modelAccessMode === "whitelist" ? "All models allowed" : "No models blocked"}
-              </span>
-            ) : (
-              models.map((m) => (
-                <span key={m}
-                 className="font-mono tabular-nums inline-flex items-center gap-2 text-badge bg-accent-soft text-accent py-1 px-4 rounded-chip border border-accent">
-                  {m}
+          {/* Two-column layout: Model Access left, everything else right. Collapses to single column on medium screens. */}
+          <div className="grid grid-cols-[1fr_1.4fr] gap-5 min-w-0 max-medium:grid-cols-1">
+            {/* ── Left column: Model access ── */}
+            <section aria-labelledby="model-access-heading" className="flex flex-col gap-3 min-w-0 rounded-card border border-inner-border bg-surface-1 p-4">
+              <h4 id="model-access-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
+                <Boxes size={15} className="text-accent" aria-hidden="true" />
+                Model access
+              </h4>
+              <div role="group" aria-label="Model access mode" className="flex gap-2">
+                {(["whitelist", "blacklist"] as const).map((option) => (
                   <button
+                    key={option}
                     type="button"
-                    aria-label={`Remove ${m} from the model list`}
-                    onClick={() => setModels((prev) => prev.filter((x) => x !== m))}
+                    aria-pressed={modelAccessMode === option}
                     disabled={busy}
-                    className="bg-transparent border-0 cursor-pointer p-0 flex"
+                    onClick={() => setModelAccessMode(option)}
+                    title={
+                      option === "whitelist"
+                        ? "Only the listed models may be used. An empty list allows every model."
+                        : "The listed models are refused. Everything else is allowed."
+                    }
+                    className="flex-1 py-2 px-3 text-badge font-semibold"
+                    style={{
+                      borderRadius: "7px",
+                      border: `1px solid ${modelAccessMode === option ? "var(--accent)" : "var(--inner-border)"}`,
+                      background: modelAccessMode === option ? "var(--accent-soft)" : "var(--surface-2)",
+                      color: modelAccessMode === option ? "var(--accent)" : "var(--text-secondary)",
+                      cursor: busy ? "not-allowed" : "pointer",
+                      opacity: busy ? 0.6 : 1,
+                    }}
                   >
-                    ×
+                    {option === "whitelist" ? "Whitelist" : "Blacklist"}
+                    {option === "whitelist"
+                      ? <ShieldCheck size={13} className="ml-1.5 inline" aria-hidden="true" />
+                      : <ShieldX size={13} className="ml-1.5 inline" aria-hidden="true" />}
                   </button>
-                </span>
-              ))
-            )}
-          </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            type="button"
-            onClick={() => setPickerOpen(true)}
-            disabled={busy}
-          >
-            Browse models
-          </Button>
-          <ModelPickerModal
-            open={pickerOpen}
-            onClose={() => setPickerOpen(false)}
-            selected={models}
-            onToggle={(v) =>
-              setModels((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]))
-            }
-            title={modelAccessMode === "whitelist" ? "Select allowed models" : "Select blocked models"}
-            multi
-          />
-        </div>
-        <section aria-labelledby="blocked-routers-heading" className="flex flex-col gap-3">
-          <div>
-            <h4 id="blocked-routers-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
-              <Ban size={15} className="text-accent" aria-hidden="true" />
-              Blocked client routers
-            </h4>
-            <p className="mt-1 text-badge text-text-tertiary">
-              Matching fingerprints are rejected with 403 before routing. Detection is best-effort; clients without a fingerprint are not matched. This may also block bazaar probe links that share the same fingerprint.
-            </p>
-          </div>
-          <div className="flex flex-col gap-3">
-            {CLIENT_ROUTERS.map((router) => (
-              <div
-                key={router.id}
-                className="flex items-center justify-between gap-4 py-1.5 px-4 rounded-inset"
-                style={{
-                  minHeight: "38px",
-                  border: "1px solid var(--inner-border)",
-                  background: blockedRouters.includes(router.id) ? "var(--accent-soft)" : "var(--surface-1)",
-                }}
-              >
-                <div className="flex min-w-0 items-start gap-3">
-                  <Ban size={15} className="mt-1 shrink-0 text-orange" aria-hidden="true" />
-                  <div className="min-w-0">
-                  <div className="text-caption text-text-primary">
-                    Block {router.label} Client
+                ))}
+              </div>
+              <p className="text-badge text-text-tertiary m-0">
+                {modelAccessMode === "whitelist"
+                  ? "Only these models may be called. Empty = all allowed."
+                  : "These models are refused. Everything else is allowed."}
+              </p>
+              <div className="flex gap-1.5 flex-wrap min-h-6">
+                {models.length === 0 ? (
+                  <span className="text-badge text-text-tertiary">
+                    {modelAccessMode === "whitelist" ? "All models allowed" : "No models blocked"}
+                  </span>
+                ) : (
+                  models.map((m) => (
+                    <span key={m} className="font-mono tabular-nums inline-flex items-center gap-1.5 text-badge bg-accent-soft text-accent py-1 px-3 rounded-chip border border-accent">
+                      {m}
+                      <button
+                        type="button"
+                        aria-label={`Remove ${m} from the model list`}
+                        onClick={() => setModels((prev) => prev.filter((x) => x !== m))}
+                        disabled={busy}
+                        className="bg-transparent border-0 cursor-pointer p-0 flex"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+              <Button variant="secondary" size="sm" type="button" onClick={() => setPickerOpen(true)} disabled={busy}>
+                Browse models
+              </Button>
+              <ModelPickerModal
+                open={pickerOpen}
+                onClose={() => setPickerOpen(false)}
+                selected={models}
+                onToggle={(v) =>
+                  setModels((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]))
+                }
+                title={modelAccessMode === "whitelist" ? "Select allowed models" : "Select blocked models"}
+                multi
+              />
+            </section>
+
+            {/* ── Right column: Routing, Blocked routers, Remote routing, Dashboard scopes ── */}
+            <div className="flex flex-col gap-4 min-w-0">
+              {/* Routing scopes */}
+              <section aria-labelledby="routing-scopes-heading" className="flex flex-col gap-2">
+                <h4 id="routing-scopes-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
+                  <Route size={15} className="text-accent" aria-hidden="true" />
+                  Routing
+                </h4>
+                {/* routing:cli_mapping is intentionally absent here: it is the scope
+                    half of the Remote routing switch below, which grants it and
+                    enables the routes together. Listing it separately let the two
+                    disagree. */}
+                {TENANT_KEY_SCOPES.filter((scope) => scope === "routing:invoke").map((scope) => (
+                  <div
+                    key={scope}
+                    className="flex items-center justify-between gap-4 py-1.5 px-4 rounded-inset"
+                    style={{
+                      minHeight: "38px",
+                      border: "1px solid var(--inner-border)",
+                      background: scopes.includes(scope) ? "var(--accent-soft)" : "var(--surface-1)",
+                    }}
+                  >
+                    <div className="flex items-start gap-3">
+                      <Route size={15} className="mt-1 shrink-0 text-accent" aria-hidden="true" />
+                      <div className="min-w-0">
+                        <div className="text-caption font-semibold text-text-primary">{scope}</div>
+                        <p className="mt-0.5 text-badge text-text-tertiary">{SCOPE_DESCRIPTIONS[scope]}</p>
+                      </div>
+                    </div>
+                    <Switch checked={scopes.includes(scope)} onChange={() => toggleScope(scope)} disabled={busy} aria-label={`Grant ${scope}`} />
                   </div>
+                ))}
+              </section>
+
+              {/* Remote routing */}
+              <RemoteRoutingSection
+                keyId={mode === "edit" && record ? record.id : ""}
+                busy={busy}
+                scopeGranted={scopes.includes("routing:cli_mapping")}
+                onScopeChange={(next) => {
+                  if (next === scopes.includes("routing:cli_mapping")) return;
+                  toggleScope("routing:cli_mapping");
+                }}
+                persistScope={(next) => {
+                  if (mode !== "edit" || !record) return;
+                  const nextScopes = next
+                    ? [...new Set([...scopes, "routing:cli_mapping"])]
+                    : scopes.filter((scope) => scope !== "routing:cli_mapping");
+                  updateKey.mutate(
+                    { keyId: record.id, request: { scopes: nextScopes } },
+                    {
+                      onError: (error) =>
+                        toast.error(getErrorMessage(error, "Could not update the key's routing scope.")),
+                    },
+                  );
+                }}
+              />
+
+              {/* Blocked client routers */}
+              <section aria-labelledby="blocked-routers-heading" className="flex flex-col gap-2">
+                <div>
+                  <h4 id="blocked-routers-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
+                    <Ban size={15} className="text-accent" aria-hidden="true" />
+                    Blocked client routers
+                  </h4>
                   <p className="mt-1 text-badge text-text-tertiary">
-                    Reject requests fingerprinted as {router.label}.
+                    Matching fingerprints are rejected with 403 before routing. Detection is best-effort; clients without a fingerprint are not matched.
                   </p>
-                  </div>
                 </div>
-                <Switch
-                  checked={blockedRouters.includes(router.id)}
-                  onChange={(checked) =>
-                    setBlockedRouters((current) =>
-                      checked
-                        ? [...current, router.id]
-                        : current.filter((entry) => entry !== router.id),
-                    )
-                  }
-                  disabled={busy}
-                  aria-label={`Block ${router.label} client`}
-                />
-              </div>
-            ))}
-          </div>
-        </section>
-        <section aria-labelledby="routing-scopes-heading" className="flex flex-col gap-3">
-          <h4 id="routing-scopes-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
-            <Route size={15} className="text-accent" aria-hidden="true" />
-            Routing
-          </h4>
-          <div className="flex flex-col gap-3">
-            {/* routing:cli_mapping is intentionally absent here: it is the scope
-                half of the Remote routing switch below, which grants it and
-                enables the routes together. Listing it separately let the two
-                disagree. */}
-            {TENANT_KEY_SCOPES.filter((scope) => scope === "routing:invoke").map((scope) => (
-              <div
-                key={scope}
-                className="flex items-center justify-between gap-4 py-1.5 px-4 rounded-inset"
-                style={{
-                  minHeight: "38px",
-                  border: "1px solid var(--inner-border)",
-                  background: scopes.includes(scope) ? "var(--accent-soft)" : "var(--surface-1)",
-                }}
-              >
-                <div className="flex items-start gap-3">
-                  <Route size={16} className="mt-1 shrink-0 text-accent" aria-hidden="true" />
-                  <div className="min-w-0">
-                  <div className="text-caption font-semibold text-text-primary">{scope}</div>
-                  <p className="mt-1 text-badge text-text-tertiary">{SCOPE_DESCRIPTIONS[scope]}</p>
-                  </div>
+                <div className="flex flex-col gap-2">
+                  {CLIENT_ROUTERS.map((router) => (
+                    <div
+                      key={router.id}
+                      className="flex items-center justify-between gap-4 py-1.5 px-4 rounded-inset"
+                      style={{
+                        minHeight: "38px",
+                        border: "1px solid var(--inner-border)",
+                        background: blockedRouters.includes(router.id) ? "var(--accent-soft)" : "var(--surface-1)",
+                      }}
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <Ban size={14} className="shrink-0 text-orange" aria-hidden="true" />
+                        <span className="text-caption text-text-primary">Block {router.label} Client</span>
+                      </div>
+                      <Switch
+                        checked={blockedRouters.includes(router.id)}
+                        onChange={(checked) =>
+                          setBlockedRouters((current) =>
+                            checked ? [...current, router.id] : current.filter((entry) => entry !== router.id),
+                          )
+                        }
+                        disabled={busy}
+                        aria-label={`Block ${router.label} client`}
+                      />
+                    </div>
+                  ))}
                 </div>
-                <Switch checked={scopes.includes(scope)} onChange={() => toggleScope(scope)} disabled={busy} aria-label={`Grant ${scope}`} />
-              </div>
-            ))}
-          </div>
-        </section>
-        <RemoteRoutingSection
-          keyId={mode === "edit" && record ? record.id : ""}
-          busy={busy}
-          scopeGranted={scopes.includes("routing:cli_mapping")}
-          onScopeChange={(next) => {
-            if (next === scopes.includes("routing:cli_mapping")) return;
-            toggleScope("routing:cli_mapping");
-          }}
-          persistScope={(next) => {
-            // The scope must take effect now, not on "Save changes": a route
-            // enabled without the scope would never resolve. Persist it right
-            // away so the CLI page and the gateway agree the moment the switch
-            // flips. `scopes` here is still the pre-toggle value.
-            if (mode !== "edit" || !record) return;
-            const nextScopes = next
-              ? [...new Set([...scopes, "routing:cli_mapping"])]
-              : scopes.filter((scope) => scope !== "routing:cli_mapping");
-            updateKey.mutate(
-              { keyId: record.id, request: { scopes: nextScopes } },
-              {
-                onError: (error) =>
-                  toast.error(getErrorMessage(error, "Could not update the key's routing scope.")),
-              },
-            );
-          }}
-        />
-        <section aria-labelledby="dashboard-scopes-heading" className="flex flex-col gap-3">
-          <h4 id="dashboard-scopes-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
-            <LayoutDashboard size={15} className="text-accent" aria-hidden="true" />
-            Dashboard / Resources
-          </h4>
-          <div className="grid grid-cols-2 gap-2 max-medium:grid-cols-1">
-            {TENANT_KEY_SCOPES.filter((scope) => !scope.startsWith("routing:")).map((scope) => (
-              <div
-                key={scope}
-                className="flex items-center justify-between gap-4 py-1.5 px-4 rounded-inset"
-                style={{
-                  minHeight: "38px",
-                  border: "1px solid var(--inner-border)",
-                  background: scopes.includes(scope) ? "var(--accent-soft)" : "var(--surface-1)",
-                }}
-              >
-                <div className="flex items-start gap-3">
-                  {(() => {
-                    const ScopeIcon = SCOPE_ICONS[scope];
-                    return <ScopeIcon size={16} className="mt-1 shrink-0 text-accent" aria-hidden="true" />;
-                  })()}
-                  <div className="min-w-0">
-                  <div className="text-caption font-semibold text-text-primary">{scope}</div>
-                  <p className="mt-1 text-badge text-text-tertiary">{SCOPE_DESCRIPTIONS[scope]}</p>
-                  </div>
+              </section>
+
+              {/* Dashboard / Resources scopes — 2 col inside right column */}
+              <section aria-labelledby="dashboard-scopes-heading" className="flex flex-col gap-2">
+                <h4 id="dashboard-scopes-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
+                  <LayoutDashboard size={15} className="text-accent" aria-hidden="true" />
+                  Dashboard / Resources
+                </h4>
+                <div className="grid grid-cols-2 gap-2 max-medium:grid-cols-1">
+                  {TENANT_KEY_SCOPES.filter((scope) => !scope.startsWith("routing:")).map((scope) => (
+                    <div
+                      key={scope}
+                      className="flex items-center justify-between gap-3 py-1.5 px-3 rounded-inset"
+                      style={{
+                        minHeight: "38px",
+                        border: "1px solid var(--inner-border)",
+                        background: scopes.includes(scope) ? "var(--accent-soft)" : "var(--surface-1)",
+                      }}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {(() => {
+                          const ScopeIcon = SCOPE_ICONS[scope];
+                          return <ScopeIcon size={14} className="shrink-0 text-accent" aria-hidden="true" />;
+                        })()}
+                        <span className="text-badge font-semibold text-text-primary truncate">{scope}</span>
+                      </div>
+                      <Switch checked={scopes.includes(scope)} onChange={() => toggleScope(scope)} disabled={busy} aria-label={`Grant ${scope}`} />
+                    </div>
+                  ))}
                 </div>
-                <Switch checked={scopes.includes(scope)} onChange={() => toggleScope(scope)} disabled={busy} aria-label={`Grant ${scope}`} />
-              </div>
-            ))}
+              </section>
+            </div>
           </div>
-        </section>
-        </div>
         </div>
       </details>
     </div>
