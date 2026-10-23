@@ -50,6 +50,9 @@ const EXPECTED_STATUS: Readonly<Record<string, readonly number[]>> = {
   authentication_failed: [401],
   capacity_exhausted: [429],
   provider_capacity_exhausted: [429],
+  // A queued request is always 503: the upstream accepted it and will serve it,
+  // so the status must not say "forbidden" or "bad request".
+  upstream_queued: [503],
   tenant_capacity_exhausted: [429],
   quota_exceeded: [429],
   accounts_rate_limited: [429],
@@ -581,6 +584,7 @@ describe("the error code vocabulary", () => {
       "accounts_rate_limited",
       "capacity_exhausted",
       "provider_capacity_exhausted",
+      "upstream_queued",
       "proxy_pool_capacity_exceeded",
       "proxy_pool_provider_capacity_exceeded",
       "proxy_pool_blocked",

@@ -3,6 +3,7 @@ import {
   parseQoderExpiry,
   parseQoderOAuthState,
   QoderOAuthClient,
+  readQoderUserInfo,
 } from "../../src/providers/integrations/qoder/qoder-oauth";
 import {
   isQoderPat,
@@ -178,5 +179,57 @@ describe("Qoder dispatch credential branches", () => {
     });
     expect(parseQoderOAuthState({ userId: "u" })).toBeUndefined();
     expect(parseQoderOAuthState(null)).toBeUndefined();
+  });
+});
+
+describe("readQoderUserInfo", () => {
+  test("an organization id alone makes the account an organization", () => {
+    // The case the organization check exists for: an enterprise account whose
+    // `userType` still reads personal is enterprise as soon as it carries one.
+    const info = readQoderUserInfo({ organization_id: "org_1234567890", user_type: "personal" });
+    expect(info.isOrganization).toBe(true);
+    // Only the first 8 characters of the id, so a long one cannot overflow the
+    // badge: `org_1234567890` truncates to `org_1234`.
+    expect(info.organizationLabel).toBe("org org_1234");
+  });
+
+  test("an organization name is preferred for the label", () => {
+    const info = readQoderUserInfo({ organization_name: "Acme Corp", organization_id: "org_1" });
+    expect(info.isOrganization).toBe(true);
+    expect(info.organizationLabel).toBe("Acme Corp");
+  });
+
+  test("the camelCase spellings are read too", () => {
+    // The two login paths (OAuth and PAT import) do not agree on a spelling, so
+    // an account that took the other path would otherwise read as personal.
+    expect(readQoderUserInfo({ organizationId: "org_9" }).isOrganization).toBe(true);
+    expect(readQoderUserInfo({ userType: "enterprise" }).isOrganization).toBe(true);
+  });
+
+  test("a userType naming a team or enterprise is enough", () => {
+    expect(readQoderUserInfo({ user_type: "team" }).isOrganization).toBe(true);
+    expect(readQoderUserInfo({ user_type: "ENTERPRISE" }).isOrganization).toBe(true);
+    expect(readQoderUserInfo({ user_type: "personal" }).isOrganization).toBe(false);
+  });
+
+  test("a shared credit pool is enough", () => {
+    expect(readQoderUserInfo({ credits: { shared: { size: 4 } } }).isOrganization).toBe(true);
+    expect(readQoderUserInfo({ credits: { shared: { unlimited: true } } }).isOrganization).toBe(
+      true,
+    );
+    expect(readQoderUserInfo({ credits: { shared: { size: 0 } } }).isOrganization).toBe(false);
+  });
+
+  test("a personal account is not an organization and has no label", () => {
+    const info = readQoderUserInfo({ name: "Ada", user_type: "personal" });
+    expect(info.isOrganization).toBe(false);
+    expect(info.organizationLabel).toBe("");
+    expect(info.name).toBe("Ada");
+  });
+
+  test("an empty body yields empty fields rather than throwing", () => {
+    const info = readQoderUserInfo({});
+    expect(info.isOrganization).toBe(false);
+    expect(info.id).toBe("");
   });
 });

@@ -144,6 +144,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   are now merged with `allOf` (which accepts boolean schemas, so neither
   constraint is lost) instead of one silently overwriting the other.
 
+- **A queued upstream request is no longer reported as a refusal.** Qoder
+  answers `403` with `{"code":"10605","isQueued":true,"retryAfterSeconds":N}`
+  when it has accepted a request and is holding it until capacity frees up. The
+  status said "forbidden", so the gateway classified it as one and the client
+  ended its turn on a request that was only waiting. It is now
+  `upstream_queued` (503), carrying the interval the upstream stated, and it
+  fails over to another account first — one that is very likely not queued.
+
+  Recognized conservatively: an explicit queue flag, the `10605` code, or a
+  message that is *about* a queue. A body that merely mentions the word does
+  not qualify, so an unrelated failure is never turned into "wait and retry".
+
+- **Qoder accounts report whether they belong to an organization.** Read from
+  the userinfo profile with upstream's own precedence: an organization id or
+  name, a `userType` naming a team or enterprise, or a shared credit pool. Any
+  one is enough, because an enterprise account whose `userType` still reads
+  personal is enterprise as soon as it carries an organization. Both the
+  snake_case and camelCase spellings are read, since the OAuth and PAT login
+  paths do not agree on one.
+
+  This is the classification and the label; no console surface renders it yet.
+
 - **Error codes and messages are unambiguous.** A scan of every rejection site
   found codes doing double duty, and messages a client could not act on:
 

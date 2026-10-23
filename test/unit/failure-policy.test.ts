@@ -31,6 +31,9 @@ import {
   fallbackRetryDelayMs,
   isClientCancellation,
   isContextLengthFailure,
+  isUpstreamQueued,
+  mapUpstreamHttpError,
+  queueRetryAfterMs,
   isRetryableFailure,
   parseAbsoluteResetTimestamp,
   parseProviderResetDuration,
@@ -1997,5 +2000,94 @@ describe("fallbackRetryDelayMs", () => {
     withEnv({ CARTETHYIA_FALLBACK_RETRY_BASE_MS: "400" }, () => fallbackRetryDelayMs(0));
     expect(process.env.CARTETHYIA_FALLBACK_RETRY_BASE_MS).toBeUndefined();
     expect(withRandom(0.5, () => fallbackRetryDelayMs(0))).toBe(50);
+  });
+});
+
+describe("isUpstreamQueued", () => {
+  test("matches Qoder's queued refusal", () => {
+    // The shape that motivated this: a 403 carrying `isQueued`. It is not a
+    // rejection — the request was accepted and will be served — but it arrives
+    // on a failure status, so without this the client read it as "you may not
+    // do this" and ended the turn.
+    expect(
+      isUpstreamQueued({ code: "10605", isQueued: true, retryAfterSeconds: 30 }),
+    ).toBe(true);
+    expect(isUpstreamQueued({ error: { code: "10605", isQueued: true } })).toBe(true);
+  });
+
+  test("matches an explicit queue flag without the code", () => {
+    expect(isUpstreamQueued({ isQueued: true })).toBe(true);
+    expect(isUpstreamQueued({ queued: true })).toBe(true);
+  });
+
+  test("matches a message that is about a queue", () => {
+    expect(isUpstreamQueued({ message: "request is queued, retry in 30s" })).toBe(true);
+    expect(isUpstreamQueued({ error: { msg: "RESOURCE_LIMIT" } })).toBe(true);
+  });
+
+  test("does not fire on a body that merely mentions a queue", () => {
+    // Fail-closed: promoting an unrelated failure to "queued" would make the
+    // client wait and retry when the real answer is that the request is bad.
+    expect(isUpstreamQueued({ error: { code: "invalid_request_error" } })).toBe(false);
+    expect(isUpstreamQueued({ message: "the model queue is closed" })).toBe(false);
+    expect(isUpstreamQueued({ isQueued: false })).toBe(false);
+    expect(isUpstreamQueued({ code: "10604" })).toBe(false);
+  });
+
+  test("does not read a bare string, array, or null body", () => {
+    expect(isUpstreamQueued("10605")).toBe(false);
+    expect(isUpstreamQueued([])).toBe(false);
+    expect(isUpstreamQueued(null)).toBe(false);
+  });
+});
+
+describe("queueRetryAfterMs", () => {
+  test("reads the stated wait in seconds and converts to ms", () => {
+    expect(queueRetryAfterMs({ retryAfterSeconds: 30 })).toBe(30_000);
+    expect(queueRetryAfterMs({ error: { retryAfterSeconds: 5 } })).toBe(5_000);
+  });
+
+  test("accepts the ms spelling and the string form", () => {
+    expect(queueRetryAfterMs({ retryAfterMs: 1500 })).toBe(1500);
+    expect(queueRetryAfterMs({ retryAfterSeconds: "45" })).toBe(45_000);
+  });
+
+  test("returns undefined when no duration is stated", () => {
+    // A queue with no interval is still a queue; the caller bounds its own wait.
+    expect(queueRetryAfterMs({ isQueued: true })).toBeUndefined();
+    expect(queueRetryAfterMs({ retryAfterSeconds: 0 })).toBeUndefined();
+    expect(queueRetryAfterMs({ retryAfterSeconds: "soon" })).toBeUndefined();
+  });
+});
+
+describe("a queued upstream response", () => {
+  test("becomes upstream_queued with the stated wait, not the status code's verdict", async () => {
+    // The whole point: 403 would otherwise classify as a permission refusal.
+    const response = new Response(
+      JSON.stringify({ code: "10605", isQueued: true, retryAfterSeconds: 30 }),
+      { status: 403, headers: { "content-type": "application/json" } },
+    );
+    const error = await mapUpstreamHttpError(response, "qoder").catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(GatewayError);
+    expect((error as GatewayError).code).toBe("upstream_queued");
+    expect((error as GatewayError).status).toBe(503);
+    expect((error as GatewayError).details.retryAfterMs).toBe(30_000);
+  });
+
+  test("a real refusal on the same status is still a refusal", async () => {
+    // The guard against over-matching: 403 without a queue signal must not
+    // become "wait and retry".
+    const response = new Response(JSON.stringify({ code: "permission_error" }), {
+      status: 403,
+      headers: { "content-type": "application/json" },
+    });
+    const error = await mapUpstreamHttpError(response, "qoder").catch((err: unknown) => err);
+    expect((error as GatewayError).code).not.toBe("upstream_queued");
+  });
+
+  test("is retryable onto another account", () => {
+    expect(
+      isRetryableFailure(new GatewayError("upstream_queued", 503, "queued", {}, "upstream")),
+    ).toBe(true);
   });
 });

@@ -31,6 +31,83 @@ import type {
 import type { OAuthTokenRefreshResult } from "../../authentication/oauth-refresh-service";
 import { OAuthDeviceFlow } from "../../authentication/oauth-device-flow";
 
+/** One Qoder account profile, as much of it as the gateway uses. */
+export interface QoderUserInfo {
+  readonly name: string;
+  readonly email: string;
+  readonly id: string;
+  /** Organization the account belongs to; empty when it belongs to none. */
+  readonly organizationId: string;
+  readonly organizationName: string;
+  /** The upstream's own account class, when it states one. */
+  readonly userType: string;
+  readonly isOrganization: boolean;
+  /** Display label for an organization with no name; empty when there is none. */
+  readonly organizationLabel: string;
+}
+
+/** The profile a lookup that learned nothing returns, so callers need no `?.`. */
+const EMPTY_USERINFO: QoderUserInfo = {
+  name: "",
+  email: "",
+  id: "",
+  organizationId: "",
+  organizationName: "",
+  userType: "",
+  isOrganization: false,
+  organizationLabel: "",
+};
+
+/**
+ * Reads one userinfo body into {@link QoderUserInfo}.
+ *
+ * Exported and pure so the organization rule is testable without a network: the
+ * rule is the part that decides how an account is labelled and, downstream,
+ * which quota pool it draws from.
+ *
+ * Every field accepts both spellings the upstream has shipped (`user_type` and
+ * `userType`, `organization_id` and `organizationId`) because the two login
+ * paths — OAuth and PAT import — do not agree on one, and an account that took
+ * the other path would otherwise read as personal.
+ */
+export function readQoderUserInfo(body: Record<string, unknown>): QoderUserInfo {
+  const first = (...keys: readonly string[]): string =>
+    keys.map((key) => nonEmptyTrimmedString(body[key])).find((value) => value !== undefined) ?? "";
+  const organizationId = first("organization_id", "organizationId");
+  const organizationName = first("organization_name", "organizationName");
+  const userType = first("user_type", "userType");
+  const credits = record(body.credits);
+  const shared = credits === undefined ? undefined : record(credits["shared"]);
+  const sharedPool =
+    (shared !== undefined &&
+      (Number(shared["size"]) > 0 || shared["unlimited"] === true)) ||
+    (Array.isArray(body.packages) &&
+      body.packages.some(
+        (pkg) => record(pkg) !== undefined && nonEmptyTrimmedString(record(pkg)!["name"]) === "shared",
+      ));
+  return {
+    name: (nonEmptyTrimmedString(body.name) ?? nonEmptyTrimmedString(body.username) ?? "").trim(),
+    email: (nonEmptyTrimmedString(body.email) ?? "").trim(),
+    id: first("id", "userId", "user_id"),
+    organizationId,
+    organizationName,
+    userType,
+    // An organization is enough on its own: an enterprise account whose
+    // `userType` reads personal is still enterprise once it carries one.
+    isOrganization:
+      organizationId.length > 0 ||
+      organizationName.length > 0 ||
+      /team|enterprise/.test(userType.toLowerCase()) ||
+      sharedPool,
+    organizationLabel:
+      organizationName.length > 0
+        ? organizationName
+        : organizationId.length > 0
+          ? `org ${organizationId.slice(0, 8)}`
+          : "",
+  };
+}
+
 /** Global/intl endpoints. Kept as the default realm's values, unchanged. */
 export const QODER_LOGIN_URL = "https://qoder.com/device/selectAccounts" as const;
 export const QODER_DEVICE_TOKEN_URL = "https://openapi.qoder.sh/api/v1/deviceToken/poll" as const;
@@ -267,8 +344,17 @@ export class QoderOAuthClient extends OAuthDeviceFlow {
     return { status: "complete", result };
   }
 
-  /** Best-effort profile lookup for the account label; never blocks login. */
-  async fetchUserInfo(accessToken: string): Promise<{ name: string; email: string; id: string }> {
+  /**
+   * Best-effort profile lookup for the account label; never blocks login.
+   *
+   * Also reports whether the account belongs to an organization. Upstream
+   * decides that from whichever signal is present, in this order: an
+   * organization id or name, a `userType` naming a team or enterprise, or a
+   * shared credit pool. Any one of them is enough — an enterprise account whose
+   * `userType` reads personal is still enterprise as soon as it carries an
+   * organization, which is the case the organization check exists for.
+   */
+  async fetchUserInfo(accessToken: string): Promise<QoderUserInfo> {
     try {
       const response = await this.fetchFn(qoderOAuthUrls(this.realm).userinfoUrl, {
         method: "GET",
@@ -279,20 +365,12 @@ export class QoderOAuthClient extends OAuthDeviceFlow {
         },
         signal: AbortSignal.timeout(POLL_TIMEOUT_MS),
       });
-      if (!response.ok) return { name: "", email: "", id: "" };
+      if (!response.ok) return EMPTY_USERINFO;
       const body = record(await response.json());
-      if (body === undefined) return { name: "", email: "", id: "" };
-      return {
-        name: (nonEmptyTrimmedString(body.name) ?? nonEmptyTrimmedString(body.username) ?? "").trim(),
-        email: (nonEmptyTrimmedString(body.email) ?? "").trim(),
-        id:
-          nonEmptyTrimmedString(body.id) ??
-          nonEmptyTrimmedString(body.userId) ??
-          nonEmptyTrimmedString(body.user_id) ??
-          "",
-      };
+      if (body === undefined) return EMPTY_USERINFO;
+      return readQoderUserInfo(body);
     } catch {
-      return { name: "", email: "", id: "" };
+      return EMPTY_USERINFO;
     }
   }
 

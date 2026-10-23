@@ -413,6 +413,7 @@ function errorMessageFor(errorKind: string | undefined): string {
     authentication_failed: "upstream rejected the credential",
     capacity_exhausted: "the API key's concurrency limit was reached",
     provider_capacity_exhausted: "every account was at its max-inflight ceiling",
+    upstream_queued: "the upstream queued this request; retry after the stated interval",
     model_not_found: "no route served this model",
     context_length_exceeded: "the request exceeded the model's context window",
     capability_unsupported: "the route does not support this request",
