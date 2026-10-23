@@ -486,7 +486,22 @@ export function terminalFailure(
     if (terminal.provider_stop_reason) details["provider_code"] = terminal.provider_stop_reason;
     if (terminal.stop_details) Object.assign(details, terminal.stop_details);
     const message = typeof details["message"] === "string" ? details["message"] : "upstream request failed";
-    return new GatewayError("transport_unavailable", 502, message, details, "upstream");
+   // Preserve the upstream's error code when the provider embedded it in
+   // `stop_details` (Cursor writes `quota_exceeded` and `authentication_failed`
+   // there). Wrapping every terminal failure as `transport_unavailable` discarded
+   // those codes, so `quota_exceeded` was never seen by the classifier and the
+   // exhausted account was never cooled.
+   const code = typeof details["code"] === "string" ? details["code"] : undefined;
+   const status = typeof details["status"] === "number" ? details["status"] : 502;
+   const gatewayCode =
+     code === "quota_exceeded" ? "quota_exceeded" :
+     code === "authentication_failed" ? "authentication_failed" :
+     "transport_unavailable";
+   const gatewayStatus =
+     gatewayCode === "quota_exceeded" ? 429 :
+     gatewayCode === "authentication_failed" ? 401 :
+     status;
+   return new GatewayError(gatewayCode, gatewayStatus, message, details, "upstream");
   }
   if (terminal.state === "aborted") {
     // A client-initiated cancellation is not an upstream fault; the stream path
