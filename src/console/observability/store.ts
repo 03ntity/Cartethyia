@@ -11,6 +11,7 @@ import { isGatewayError } from "../../observability/telemetry-status";
 import { queryIndexedBuckets, type IndexedBucket } from "../../observability/event-day-index";
 import {
   LATENCY_BUCKETS_MS,
+  numeric,
   percentileFromHistogram,
 } from "../../observability/event-compaction";
 import { cachedReadWithEtag, type CachedResult } from "../shared/read-through-cache";
@@ -264,10 +265,20 @@ export function summarizeBucketPerformance(
 ): UsagePerformanceSummary {
   let latencySum = 0;
   let latencyCount = 0;
+  let resolveSum = 0;
+  let resolveCount = 0;
+  let latencyMaxMs: number | null = null;
   const histogram: number[] = [];
   for (const bucket of buckets) {
     latencySum += bucket.latencySum;
     latencyCount += bucket.latencyCount;
+    // Read defensively: an index written before these fields existed carries
+    // neither, and summing `undefined` poisons the whole period with NaN —
+    // including the days that do have the data.
+    resolveSum += numeric(bucket.resolveSumMs);
+    resolveCount += numeric(bucket.resolveCount);
+    if (bucket.latencyMaxMs !== null)
+      latencyMaxMs = latencyMaxMs === null ? bucket.latencyMaxMs : Math.max(latencyMaxMs, bucket.latencyMaxMs);
     for (let index = 0; index < bucket.latencyHistogram.length; index += 1) {
       histogram[index] = (histogram[index] ?? 0) + (bucket.latencyHistogram[index] ?? 0);
     }
@@ -277,13 +288,17 @@ export function summarizeBucketPerformance(
       ? histogram
       : new Array<number>(LATENCY_BUCKETS_MS.length + 1).fill(0);
   return {
-    avgResolveMs: 0,
+    avgResolveMs: resolveCount > 0 ? resolveSum / resolveCount : 0,
     avgDurationMs: latencyCount > 0 ? latencySum / latencyCount : 0,
-    latencyP50Ms: percentileFromHistogram(fill, 50) ?? 0,
-    latencyP95Ms: percentileFromHistogram(fill, 95) ?? 0,
-    latencyP99Ms: percentileFromHistogram(fill, 99) ?? 0,
+    // `latencyMaxMs` is passed as the overflow answer: a percentile past the
+    // histogram's last edge is at most the slowest request actually recorded.
+    // Without it an overflow returned `null`, and `?? 0` turned a P95 of 40 s
+    // into "0 ms" — the slow tail reported as nothing at all.
+    latencyP50Ms: percentileFromHistogram(fill, 50, latencyMaxMs) ?? 0,
+    latencyP95Ms: percentileFromHistogram(fill, 95, latencyMaxMs) ?? 0,
+    latencyP99Ms: percentileFromHistogram(fill, 99, latencyMaxMs) ?? 0,
     latencySampleCount: latencyCount,
-    resolveSampleCount: 0,
+    resolveSampleCount: resolveCount,
   };
 }
 
@@ -595,6 +610,15 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
     let tokensPerSecCount = 0;
     const statuses = new Map<number, number>();
     for (const row of buckets) {
+      // Folded from the index's own per-status counts. These used to be left
+      // empty: the loop below never filled `statuses`, so every status chip and
+      // the requests-list filters read zero for any day whose events had been
+      // folded — while `requests` beside them read the real total.
+      for (const [status, count] of Object.entries(row.byStatus ?? {})) {
+        const code = Number(status);
+        if (!Number.isFinite(code)) continue;
+        statuses.set(code, (statuses.get(code) ?? 0) + count);
+      }
       requests += row.requests;
       inputTokens += row.inputTokens;
       outputTokens += row.outputTokens;
