@@ -277,9 +277,8 @@ function RemoteRoutingSection({
 }): ReactNode {
   const registry = useToolRegistry();
   const tools = (registry.data ?? []).filter((tool) => tool.mappingSupported);
-  if (keyId.length === 0 || tools.length === 0) return null;
   return (
-    <section aria-labelledby="remote-routing-heading" className="flex flex-col gap-4">
+    <section aria-labelledby="remote-routing-heading" className="flex flex-col gap-3">
       <div>
     <h4 id="remote-routing-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
       <Route size={15} className="text-accent" aria-hidden="true" />
@@ -289,21 +288,31 @@ function RemoteRoutingSection({
           Route this key's CLI model calls through persisted mappings and grant routing:cli_mapping. Applies immediately — no save needed.
         </p>
       </div>
-      <div className="flex flex-col gap-3">
-        {tools.map((tool) => (
-          <RemoteRoutingRow
-            key={tool.id}
-            tool={tool}
-            keyId={keyId}
-            busy={busy}
-            scopeGranted={scopeGranted}
-            onScopeChange={(next) => {
-              onScopeChange(next);
-              persistScope(next);
-            }}
-          />
-        ))}
-      </div>
+      {keyId.length === 0 ? (
+        <p className="text-badge text-text-tertiary m-0">
+          Save the key first to configure per-tool remote routing mappings.
+        </p>
+      ) : tools.length === 0 ? (
+        <p className="text-badge text-text-tertiary m-0">
+          No CLI tools with mapping support are currently registered.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {tools.map((tool) => (
+            <RemoteRoutingRow
+              key={tool.id}
+              tool={tool}
+              keyId={keyId}
+              busy={busy}
+              scopeGranted={scopeGranted}
+              onScopeChange={(next) => {
+                onScopeChange(next);
+                persistScope(next);
+              }}
+            />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -966,33 +975,6 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
                     ))}
                   </div>
 
-                  {/* Remote routing */}
-                  <div className="px-4 py-3">
-                    <p className="text-badge font-semibold text-text-secondary mb-2">Remote routing</p>
-                    <RemoteRoutingSection
-                      keyId={mode === "edit" && record ? record.id : ""}
-                      busy={busy}
-                      scopeGranted={scopes.includes("routing:cli_mapping")}
-                      onScopeChange={(next) => {
-                        if (next === scopes.includes("routing:cli_mapping")) return;
-                        toggleScope("routing:cli_mapping");
-                      }}
-                      persistScope={(next) => {
-                        if (mode !== "edit" || !record) return;
-                        const nextScopes = next
-                          ? [...new Set([...scopes, "routing:cli_mapping"])]
-                          : scopes.filter((scope) => scope !== "routing:cli_mapping");
-                        updateKey.mutate(
-                          { keyId: record.id, request: { scopes: nextScopes } },
-                          {
-                            onError: (error) =>
-                              toast.error(getErrorMessage(error, "Could not update the key's routing scope.")),
-                          },
-                        );
-                      }}
-                    />
-                  </div>
-
                   {/* Blocked client apps */}
                   <div className="flex flex-col gap-2 px-4 py-3">
                       <p className="text-badge font-semibold text-text-secondary m-0">Blocked client apps</p>
@@ -1033,6 +1015,32 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
                     </div>
                   </div>
                 </div>
+
+                  {/* Remote routing */}
+                  <div className="px-4 py-3">
+                    <RemoteRoutingSection
+                      keyId={mode === "edit" && record ? record.id : ""}
+                      busy={busy}
+                      scopeGranted={scopes.includes("routing:cli_mapping")}
+                      onScopeChange={(next) => {
+                        if (next === scopes.includes("routing:cli_mapping")) return;
+                        toggleScope("routing:cli_mapping");
+                      }}
+                      persistScope={(next) => {
+                        if (mode !== "edit" || !record) return;
+                        const nextScopes = next
+                          ? [...new Set([...scopes, "routing:cli_mapping"])]
+                          : scopes.filter((scope) => scope !== "routing:cli_mapping");
+                        updateKey.mutate(
+                          { keyId: record.id, request: { scopes: nextScopes } },
+                          {
+                            onError: (error) =>
+                              toast.error(getErrorMessage(error, "Could not update the key's routing scope.")),
+                          },
+                        );
+                      }}
+                    />
+                  </div>
               </section>
 
               {/* ── Card 2: Dashboard / Resources ── */}
