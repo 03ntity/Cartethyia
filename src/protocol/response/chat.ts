@@ -10,7 +10,7 @@ import { mergeResponsesUsage } from "./responses";
 import { usageFromProvider, readReasoningText } from "../../providers/provider-usage";
 import { createToolEmitLedger } from "../tool-identity";
 import { MimoThinkSplitter, stripThinkingTags } from "../../providers/integrations/xiaomi-mimo/think-stream";
-import { parseDsmlToolCalls } from "./dsml";
+import { DsmlToolCallParser, parseDsmlToolCalls } from "./dsml";
 import {
   OmpToolCallMarkupParser,
   parseOmpToolCallMarkup,
@@ -83,7 +83,7 @@ export function parseChatResponseToEvents(
     const contentWithoutMarkup = recoveredMarkup?.text ?? content;
     const recovered =
       typeof contentWithoutMarkup === "string"
-        ? parseDsmlToolCalls(contentWithoutMarkup)
+        ? parseDsmlToolCalls(contentWithoutMarkup, declaredToolNames)
         : undefined;
     const visible = recovered === undefined ? contentWithoutMarkup : recovered.text;
     if (typeof visible === "string" && visible.includes("<think")) {
@@ -144,6 +144,13 @@ export function parseChatResponseToEvents(
               : undefined;
         return callId && name !== undefined && name.length > 0;
       });
+    // A request that declared no tools carries no allowlist to enforce, so a
+    // recovered block is honoured as-is exactly as before; a request that did
+    // declare them must never execute a name it did not offer.
+    const recoveredCalls =
+      declaredToolNames.size > 0
+        ? (recovered?.calls ?? []).filter((call) => callableToolNames.has(call.name))
+        : (recovered?.calls ?? []);
     const toolCalls = hasStructuredCalls
       ? structuredCalls
       : recoveredMarkup?.calls.some((call) => callableToolNames.has(call.name))
@@ -153,7 +160,7 @@ export function parseChatResponseToEvents(
               id: call.id,
               function: { name: call.name, arguments: call.arguments },
             }))
-        : recovered?.calls ?? [];
+        : recoveredCalls;
     if (!hasStructuredCalls && recoveredMarkup !== undefined) {
       recoveredToolCalls = recoveredMarkup.calls.filter((call) =>
         callableToolNames.has(call.name),
@@ -257,6 +264,8 @@ export async function* decodeChatSseStream(
     (request.tools?.length ?? 0) > 0 ? new OmpToolCallMarkupParser(declaredToolNames) : undefined;
   const reasoningMarkup =
     (request.tools?.length ?? 0) > 0 ? new OmpToolCallMarkupParser(declaredToolNames) : undefined;
+  const dsmlMarkup =
+    (request.tools?.length ?? 0) > 0 ? new DsmlToolCallParser(declaredToolNames) : undefined;
   yield {
     type: "response_start",
     sequence_number: seq++,
@@ -302,7 +311,7 @@ export async function* decodeChatSseStream(
           const raw = delta["content"] as string;
           const markup = contentMarkup?.push(raw);
           if (markup !== undefined) recoveredMarkupCalls.push(...markup.calls);
-          const recovered = parseDsmlToolCalls(markup?.text ?? raw);
+          const recovered = dsmlMarkup?.push(markup?.text ?? raw);
           const visible = recovered?.text ?? markup?.text ?? raw;
           const split = think.push(visible);
           if (split.reasoning.length > 0) {
@@ -477,6 +486,27 @@ export async function* decodeChatSseStream(
         } as CanonicalEvent;
       }
     }
+  }
+  const dsmlMarkupTail = dsmlMarkup?.flush();
+  if (dsmlMarkupTail !== undefined) {
+    if (dsmlMarkupTail.text.length > 0) {
+      const split = think.push(dsmlMarkupTail.text);
+      if (split.reasoning.length > 0) {
+        yield {
+          type: "content_delta",
+          sequence_number: seq++,
+          content: { kind: "reasoning", payload: null, summary: split.reasoning },
+        } as CanonicalEvent;
+      }
+      if (split.text.length > 0) {
+        yield {
+          type: "content_delta",
+          sequence_number: seq++,
+          content: { kind: "text", text: split.text },
+        } as CanonicalEvent;
+      }
+    }
+    for (const call of dsmlMarkupTail.calls) recoveredMarkupCalls.push(call);
   }
   const reasoningMarkupTail = reasoningMarkup?.flush();
   if (reasoningMarkupTail?.text) {

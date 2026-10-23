@@ -6,6 +6,7 @@ import { fetchTencentBillingQuota } from "../../src/providers/integrations/buddy
 import { fetchWorkBuddyCnQuota } from "../../src/providers/integrations/buddy/workbuddy/quota";
 import { parseDsmlToolCalls } from "../../src/protocol/response/dsml";
 import { parseChatResponseToEvents } from "../../src/protocol/response/chat";
+import { decodeChatSseStream } from "../../src/protocol/response/chat";
 import type { CanonicalRequest } from "../../src/protocol/canonical-model";
 import type { ProviderDispatchContext, ProviderDispatchTarget } from "../../src/providers/provider-contracts";
 
@@ -316,6 +317,50 @@ describe("Buddy upstream protocol alignment", () => {
       choices: [{ message: { role: "assistant", content: text }, finish_reason: "stop" }],
     }, request);
     expect(events.some((event) => event.type === "tool_call_delta" && event.name === "run_shell")).toBe(true);
+  });
+
+  test("recovers declared calls from donor DSML variants without exposing markup", async () => {
+    const singlePipe = "|";
+    const block = `<${singlePipe}DSML${singlePipe} function_calls><${singlePipe}DSML${singlePipe} invoke name="run_shell"><${singlePipe}DSML${singlePipe} parameter name="command" string="true">ls -la</${singlePipe}DSML${singlePipe} parameter></${singlePipe}DSML${singlePipe} invoke></${singlePipe}DSML${singlePipe} function_calls>`;
+    const callRequest = {
+      ...request,
+      tools: [{ name: "run_shell", description: "", schema: { type: "object", properties: {} } }],
+    } as unknown as CanonicalRequest;
+    const events = parseChatResponseToEvents({
+      choices: [{ message: { role: "assistant", content: block }, finish_reason: "stop" }],
+    }, callRequest);
+    expect(events.some((event) => event.type === "tool_call_delta" && event.name === "run_shell")).toBe(true);
+    expect(events.some((event) => event.type === "content_delta" && event.content.kind === "text" && event.content.text.includes("DSML"))).toBe(false);
+
+    const streamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const chunks = [block.slice(0, 18), block.slice(18, 59), block.slice(59)];
+        for (const content of chunks) {
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: null }] })}\n\n`));
+        }
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`));
+        controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+    const streamEvents = [];
+    for await (const event of decodeChatSseStream(streamBody, callRequest)) streamEvents.push(event);
+    expect(streamEvents.some((event) => event.type === "tool_call_delta" && event.name === "run_shell")).toBe(true);
+    expect(streamEvents.some((event) => event.type === "content_delta" && event.content.kind === "text" && event.content.text.includes("DSML"))).toBe(false);
+  });
+
+  test("does not execute undeclared DSML tool names", () => {
+    const pipe = "｜｜";
+    const text = `<${pipe}DSML${pipe} calls><${pipe}DSML${pipe} invoke name="unlisted_tool"><${pipe}DSML${pipe} parameter name="x">1</${pipe}DSML${pipe} parameter></${pipe}DSML${pipe} invoke></${pipe}DSML${pipe} calls>`;
+    const callRequest = {
+      ...request,
+      tools: [{ name: "run_shell", description: "", schema: { type: "object", properties: {} } }],
+    } as unknown as CanonicalRequest;
+    const events = parseChatResponseToEvents({
+      choices: [{ message: { role: "assistant", content: text }, finish_reason: "stop" }],
+    }, callRequest);
+    expect(events.some((event) => event.type === "tool_call_delta")).toBe(false);
+    expect(events.some((event) => event.type === "content_delta" && event.content.kind === "text" && event.content.text === text)).toBe(true);
   });
 
   test("drops a replayed tool call whose function name is empty, and its orphan result", () => {
