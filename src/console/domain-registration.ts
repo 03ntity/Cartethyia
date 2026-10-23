@@ -281,7 +281,7 @@ export function registerConsoleDomains(
     // same SSRF-validated fetch as every other egress.
     relayFetch: createValidatedFetch({ policy: resolveSsrfPolicy() }),
   }));
-  console.use(createRuntimeSettingsRoutes({ store: runtimeSettingsStore, accessResolver: ctx.accessResolver, auditSink: ctx.auditRecorder }));
+  console.use(createRuntimeSettingsRoutes({ store: runtimeSettingsStore, accessResolver: ctx.accessResolver, auditSink: ctx.auditRecorder, snapshotInvalidator: ctx.routeSnapshotService }));
   console.use(
     createDataManagementRoutes({
       telemetryDir: TELEMETRY_EVENT_DIR,

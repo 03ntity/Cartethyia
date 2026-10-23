@@ -64,14 +64,21 @@ dbDescribe("forceDisableCooldown", () => {
       });
   }
 
-  /** Puts this suite's own account into cooldown. */
-  async function cool(): Promise<void> {
+  /**
+   * Puts this suite's own account into cooldown.
+   *
+   * The category decides hard vs soft: `HARD_COOLDOWN_CATEGORIES` covers quota
+   * exhaustion, policy blocks, and auth invalidation, and only a hard cooldown
+   * is excluded outright. The default is transient rate limiting, which is the
+   * soft case.
+   */
+  async function cool(lastErrorCategory = "rate_limit_transient"): Promise<void> {
     await getDb()
       .update(providerAccounts)
       .set({
         status: "cooldown",
         cooldownUntil: FUTURE,
-        lastErrorCategory: "rate_limit_transient",
+        lastErrorCategory,
       })
       .where(eq(providerAccounts.id, accountId));
   }
@@ -109,6 +116,29 @@ dbDescribe("forceDisableCooldown", () => {
     // `cooldown_until` rides along even when the exclusion is skipped, so an
     // all-cooling answer can say when to retry instead of a bare 429.
     expect(await candidateFor().then((c) => c?.["cooldown_until"])).toBe(FUTURE.getTime());
+  });
+
+  test("a hard cooldown is excluded by default", async () => {
+    await writePreferences({});
+    await cool("quota_exhausted");
+    const candidate = await candidateFor();
+    expect(candidate?.["health_status"]).toBe("cooldown");
+    expect(candidate?.["cooldown_kind"]).toBe("hard");
+  });
+
+  test("with the override, a hard cooldown carries no exclusion stamp", async () => {
+    // The regression this locks: `health_status` and `cooldown_kind` used to be
+    // stamped even when the override was active, and the evaluator excludes a
+    // hard cooldown on `health_status === "cooldown"` alone. So the setting
+    // silently did nothing for quota-exhausted, policy-blocked, and
+    // auth-invalidated accounts — the ones an operator most wants to reach.
+    await writePreferences({ forceDisableCooldown: true });
+    await cool("quota_exhausted");
+    const candidate = await candidateFor();
+    expect(candidate?.["health_status"]).not.toBe("cooldown");
+    expect(candidate?.["cooldown_kind"]).toBeUndefined();
+    // Still carried, so plan() can explain an all-cooling case.
+    expect(candidate?.["cooldown_until"]).toBe(FUTURE.getTime());
   });
 
   test("the override is read-only — the account row still says cooldown", async () => {

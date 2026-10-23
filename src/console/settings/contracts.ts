@@ -63,6 +63,17 @@ export interface RuntimeSettingsConfig {
   readonly store: RuntimeSettingsStore;
   readonly accessResolver: ConsoleAccessResolver;
   readonly auditSink?: AuditSink;
+  /**
+   * Structurally satisfied by `InMemoryRouteSnapshotService`.
+   *
+   * Two preferences here are read on the request path, not per request: the
+   * route snapshot reads `forceDisableCooldown` when it builds candidates, and
+   * the admission path reads `tenantConcurrencyLimit`. The snapshot is cached
+   * until something invalidates it, so without this a saved setting stays
+   * invisible to `/v1/*` until some unrelated console write happens to
+   * invalidate — the toggle looks broken while the row is already correct.
+   */
+  readonly snapshotInvalidator?: { invalidate(): unknown };
 }
 
 
@@ -140,6 +151,14 @@ export function createRuntimeSettingsOperations(deps: RuntimeSettingsConfig) {
           target: a.tenantId,
           detail: patch as Record<string, unknown>,
         });
+        // Saved preferences are routing changes: `forceDisableCooldown` decides
+        // candidate eligibility and `tenantConcurrencyLimit` decides admission,
+        // and both are read from the cached route snapshot. Invalidate after the
+        // write commits so the next `/v1/*` request uses them instead of the
+        // revision that was built before the save. A failure here must not fail
+        // the save — the row is already correct, and the snapshot rebuilds on
+        // the next read anyway.
+        await Promise.resolve(deps.snapshotInvalidator?.invalidate()).catch(() => undefined);
         return updated;
       },
   };

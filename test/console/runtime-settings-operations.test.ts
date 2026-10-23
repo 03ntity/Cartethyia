@@ -16,6 +16,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { getDb } from "../../src/persistence/boot";
 import { consoleSettings } from "../../src/persistence/schema";
 import { DrizzleRuntimeSettingsStore } from "../../src/console/settings/store";
+import { createRuntimeSettingsOperations } from "../../src/console/settings/contracts";
 import { dbDescribe, requireDatabase } from "../helpers/database";
 import { createWorld, type GatewayWorld } from "../helpers/fixtures";
 
@@ -101,5 +102,81 @@ dbDescribe("operational runtime settings", () => {
     expect((await store.get(world.tenantId)).imageClampMaxBytes).toBe(64 * 1024);
     await writeBag({ imageClampMaxBytes: 500 * 1024 * 1024 });
     expect((await store.get(world.tenantId)).imageClampMaxBytes).toBe(100 * 1024 * 1024);
+  });
+});
+
+/**
+ * Saving a preference must invalidate the route snapshot.
+ *
+ * Two preferences are read on the request path: `forceDisableCooldown` decides
+ * candidate eligibility when the snapshot is built, and
+ * `tenantConcurrencyLimit` decides admission. The snapshot is cached until
+ * something invalidates it, so a save that does not invalidate leaves `/v1/*`
+ * dispatching the pre-save revision until some unrelated console write happens
+ * to clear it — the toggle looks broken while the row is already correct.
+ */
+dbDescribe("runtime settings invalidate the route snapshot", () => {
+  let world: GatewayWorld;
+  let invalidations: number;
+
+  beforeAll(async () => {
+    world = await createWorld();
+    invalidations = 0;
+  });
+
+  afterAll(async () => {
+    await world?.cleanup();
+  });
+
+  /** A tenant-scoped access decision, as the route layer supplies it. */
+  const access = () =>
+    ({
+      id: "key",
+      tenantId: world.tenantId,
+      tenant_id: world.tenantId,
+      scopes: ["dashboard:read", "dashboard:write"],
+    }) as never;
+
+  function operations(): ReturnType<typeof createRuntimeSettingsOperations> {
+    invalidations = 0;
+    return createRuntimeSettingsOperations({
+      store: new DrizzleRuntimeSettingsStore(getDb(), "redis"),
+      accessResolver: () => undefined,
+      snapshotInvalidator: {
+        invalidate: () => {
+          invalidations += 1;
+          return Promise.resolve(1);
+        },
+      },
+    });
+  }
+
+  test("a save invalidates so the next request reads it", async () => {
+    await operations().update(access(), { forceDisableCooldown: true });
+    expect(invalidations).toBe(1);
+    await operations().update(access(), { tenantConcurrencyLimit: 4 });
+    expect(invalidations).toBe(1);
+  });
+
+  test("a rejected save does not invalidate", async () => {
+    // Nothing was written, so there is nothing to rebuild for.
+    await expect(
+      operations().update(access(), { tenantConcurrencyLimit: 0 }),
+    ).rejects.toThrow();
+    expect(invalidations).toBe(0);
+  });
+
+  test("a save still returns when the invalidator fails", async () => {
+    // The row is already committed; a failed rebuild must not fail the save,
+    // or the operator sees an error for a setting that was stored.
+    const ops = createRuntimeSettingsOperations({
+      store: new DrizzleRuntimeSettingsStore(getDb(), "redis"),
+      accessResolver: () => undefined,
+      snapshotInvalidator: {
+        invalidate: () => Promise.reject(new Error("snapshot service down")),
+      },
+    });
+    const updated = await ops.update(access(), { forceDisableCooldown: false });
+    expect(updated.forceDisableCooldown).toBe(false);
   });
 });
