@@ -60,6 +60,10 @@ function admissionDirective(candidate: RouteCandidate): AdmissionDirective {
 /** The one shape of an admission rejection: the metric, then the decision. */
 function capacityRejected(): AdmissionDecision {
   metrics.proxy_admission_total.inc(1, { reason: "provider_capacity" });
+  // `reason` is the routing-internal label, not the public code. It stays the
+  // string the router and its tests match on; the envelope code is
+  // `provider_capacity_exhausted` so this layer cannot be confused with an
+  // API-key `max_concurrent` rejection (which owns `capacity_exhausted`).
   return { admitted: false, reason: "capacity_exhausted" };
 }
 

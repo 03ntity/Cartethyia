@@ -364,6 +364,9 @@ export function classifyUpstreamFailure(error: unknown): UpstreamFailurePolicy {
     error.code === "model_not_found" ||
     error.code === "admission_unavailable" ||
     error.code === "capacity_exhausted" ||
+    // A provider max-inflight rejection: the plan's next sibling account may
+    // have a free slot, exactly as with an API-key concurrency rejection.
+    error.code === "provider_capacity_exhausted" ||
     error.code === "accounts_unavailable" ||
     error.code === "accounts_rate_limited" ||
     error.code === "quota_exceeded" ||

@@ -43,7 +43,11 @@ const REASON_META: Record<
     metricLabel: "lifetime",
   },
   "concurrency-limit": {
-    message: "This model is already serving its maximum number of concurrent requests. Retry shortly, or raise the provider's max-inflight.",
+    // This ceiling is the API key's own `max_concurrent`, not the provider's
+    // max-inflight. The two used to be indistinguishable and both named the
+    // provider, sending operators to the wrong setting after a rejection. The
+    // `details` carry the limit so a client can tell which one fired.
+    message: "This API key is already serving its maximum number of concurrent requests. Retry shortly, or raise the key's concurrency limit.",
     code: "capacity_exhausted",
     status: 429,
     metricLabel: "concurrency",

@@ -250,7 +250,9 @@ export function RoutingStrategyCard({
                 </Inline>
               </label>
               <div className="text-badge text-text-tertiary mb-3">
-                Shared provider ceiling. One step past {SLIDER_MAX} is unlimited.
+                Per-account ceiling, not a provider-wide one: each account
+                enforces its own limit, so a full account spills to the next.
+                One step past {SLIDER_MAX} is unlimited.
               </div>
               <Inline gap="10px" className="mt-3">
                 <input

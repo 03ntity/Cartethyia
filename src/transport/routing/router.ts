@@ -827,7 +827,15 @@ export class RoutingEngine {
       const admitted = await this.admission.admit(candidate);
       if (admitted.admitted) return this.reservations.acquire(candidate, plan.revision);
     }
-    throw capacityExhaustedError();
+    // Last candidate's identity names the provider the plan was actually for;
+    // every candidate shares it, so any one of them is representative.
+    const last = plan.candidates[plan.candidates.length - 1];
+    throw capacityExhaustedError({
+      ...(last?.provider_id !== undefined ? { providerId: last.provider_id } : {}),
+      ...(plan.resolved_model !== undefined ? { model: plan.resolved_model } : {}),
+      candidateCount: plan.candidates.length,
+      ...(last?.max_inflight !== undefined ? { maxInflight: last.max_inflight } : {}),
+    });
   }
   async release(reservation: Reservation): Promise<void> {
     await this.admission.release(reservation);

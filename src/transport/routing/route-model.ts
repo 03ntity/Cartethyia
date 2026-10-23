@@ -324,11 +324,43 @@ export function capabilityUnsupportedError(capability: string): GatewayError {
   );
 }
 
-export function capacityExhaustedError(): GatewayError {
+/**
+ * Every candidate in the plan refused admission: each account is already
+ * serving its configured max-inflight.
+ *
+ * Deliberately NOT `capacity_exhausted`. That code also belongs to the API-key
+ * admission layer (`security/admission`, reason `concurrency-limit`), which
+ * enforces a key's own `max_concurrent`. Sharing one code made the two
+ * indistinguishable on the wire: an operator who raised the provider's
+ * max-inflight saw no change because the rejection was the *key's* ceiling, and
+ * vice versa. Distinct codes let each be read off the envelope alone.
+ *
+ * The counts are carried in `details` because the interesting question is never
+ * "was it rejected" but "was every account really full, or did the plan only
+ * carry one candidate" — the latter is a routing/eligibility problem that
+ * raising the ceiling will not fix.
+ */
+export function capacityExhaustedError(context?: {
+  readonly providerId?: string;
+  readonly model?: string;
+  readonly candidateCount?: number;
+  readonly maxInflight?: number;
+}): GatewayError {
+  const onlyOne = context?.candidateCount === 1;
   return new GatewayError(
-    "capacity_exhausted",
+    "provider_capacity_exhausted",
     429,
-    "Every account is at its concurrency limit. Retry shortly; if it persists, raise the provider's max-inflight or add an account.",
+    onlyOne
+      ? "The only account routing this model is at its concurrency limit. Retry shortly; if it persists, raise the provider's max-inflight or add another account."
+      : "Every account is at its concurrency limit. Retry shortly; if it persists, raise the provider's max-inflight or add an account.",
+    {
+      ...(context?.providerId !== undefined ? { providerId: context.providerId } : {}),
+      ...(context?.model !== undefined ? { model: context.model } : {}),
+      ...(context?.candidateCount !== undefined
+        ? { candidate_count: context.candidateCount }
+        : {}),
+      ...(context?.maxInflight !== undefined ? { maxInflight: context.maxInflight } : {}),
+    },
   );
 }
 
