@@ -1,12 +1,15 @@
 import { Ban, ChevronDown, ChevronRight, Eye, EyeOff, Link2, RefreshCw, RotateCw } from "lucide-react";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { Button } from "./ui/button";
+import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Dialog } from "./ui/dialog";
 import { EmptyState, ErrorState, LoadingState } from "./ui/state";
 import { ClipboardButton } from "./patterns/clipboard-button";
 import { toast } from "../lib/toast";
+import { mapWithConcurrency } from "../lib/concurrency";
 import { getErrorMessage } from "../data/api";
+import { queryKeys } from "../data/query-keys";
 import { quotaBarTone } from "../lib/format/quota";
 import { compactTokens } from "../lib/format/tokens";
 import type { ApiKeyResponse, SharedKeyActivityDetail, SharedKeySummary } from "../data/contracts";
@@ -166,6 +169,17 @@ function BudgetBar({
     </div>
   );
 }
+
+/**
+ * How many revokes run at once.
+ *
+ * Six, not one and not unlimited: a popular template can hold hundreds of
+ * recipients, so sequential revoking made "Revoke all" take as long as the
+ * list, while unbounded parallelism would send the whole list at once. Each
+ * call is one DELETE against the console, so six keeps the burst ordinary
+ * without making the operator wait on the list.
+ */
+const BULK_REVOKE_CONCURRENCY = 6;
 
 /** Active recipient count: child keys that have not been revoked. */
 function activeChildCount(children: readonly SharedKeySummary[]): number {
@@ -351,6 +365,7 @@ export function ShareManagementContent({
   // acts on.
   const [statusFilter, setStatusFilter] = useState<"active" | "revoked">("active");
   const [confirmingBulk, setConfirmingBulk] = useState<"all" | "unused" | null>(null);
+  const queryClient = useQueryClient();
   const share = useShareApiKey();
   const regenerate = useRegenerateApiKey();
   const revoke = useRevokeSharedKey();
@@ -380,23 +395,34 @@ export function ShareManagementContent({
   }, [parent.id]);
 
   /**
-   * Revokes every recipient in a chosen set.
+   * Revokes every recipient in a chosen set, with a bounded number in flight.
    *
-   * Sequential on purpose: the endpoint revokes one key per call, and firing
-   * them in parallel would race the parent's lifetime budget read. The count
-   * is reported per outcome so a partial failure is visible rather than
-   * swallowed by one shared toast.
+   * Was sequential, for a reason the old comment stated that the endpoint does
+   * not support: it claimed firing them together would race the parent's
+   * lifetime budget read. `revokeKey` never reads a budget — it revokes the
+   * child, purges admission for it, and audits. So the only cost of going
+   * parallel is the shape of the traffic, and unbounded `Promise.all` is that
+   * cost at its worst: a template with hundreds of recipients would send
+   * hundreds of deletes at once.
+   *
+   * `mapWithConcurrency` keeps a fixed number in flight and never lets one
+   * refusal abort the rest; the tally below reports partial failure rather than
+   * swallowing it behind one toast.
    */
   const revokeBulk = async (targets: readonly SharedKeySummary[], noun: string): Promise<void> => {
-    let done = 0;
-    for (const child of targets) {
-      try {
-        await revoke.mutateAsync({ parentKeyId: parent.id, childKeyId: child.id });
-        done += 1;
-      } catch {
-        // One refusal must not abort the rest; the tally below reports it.
-      }
-    }
+    const outcomes = await mapWithConcurrency(targets, BULK_REVOKE_CONCURRENCY, (child) =>
+      revoke.mutateAsync({
+        parentKeyId: parent.id,
+        childKeyId: child.id,
+        deferInvalidation: true,
+      }),
+    );
+    const done = outcomes.filter((outcome) => outcome.status === "fulfilled").length;
+    // One refetch for the whole run, not one per success: sixty recipients would
+    // otherwise refetch the list sixty times while it still had fifty-nine
+    // changes coming.
+    await queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.sharedKeys(parent.id) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.all });
     await summary.refetch();
     const failed = targets.length - done;
     if (failed > 0) toast.error(`Revoked ${done} of ${targets.length} ${noun}; ${failed} failed.`);
