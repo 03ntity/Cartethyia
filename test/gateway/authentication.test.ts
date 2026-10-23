@@ -126,10 +126,14 @@ dbDescribe("gateway authentication", () => {
       // shape of the request sent callers hunting a malformed body, when the
       // body was fine and the credential was the problem.
       expect(body.error.code).toBe("authentication_failed");
-      // The rotate instruction is the actionable half: the key that fails is
-      // usually the seeded default, which cannot be deleted and only rotates,
-      // so a 401 that does not say so leaves the operator at a dead end.
-      expect(body.error.message).toContain("Rotate");
+      // Not "Rotate": the rotate instruction was moved to the public model
+      // surface (`modelsListApiKeyError`), where the seeded default key is what
+      // normally fails. On a proxy request it was actively misleading — a
+      // revoked or mistyped *personal* key was answered with an instruction to
+      // rotate a key the operator was never using. What this path must say is
+      // how to send a working key, which is what it says.
+      expect(body.error.message).not.toContain("Rotate");
+      expect(body.error.message).toContain("Authorization: Bearer");
       // Compared against a key that really was revoked, so the assertion is on
       // the contract ("these two are indistinguishable") rather than on the
       // wording. Uses a throwaway key: revoking the shared world key would

@@ -205,7 +205,7 @@ export function UpdateDialog({
       </div>
     </Dialog>
     {updating ? (
-      <div className="fixed inset-0 z-[9999] grid place-items-center bg-black/70 backdrop-blur-sm">
+      <div className="fixed inset-0 z-toast grid place-items-center bg-black/70 backdrop-blur-sm">
         <div className="flex flex-col items-center gap-4 text-white">
           <Loader2 size={40} className="animate-spin" aria-hidden="true" />
           <p className="text-lg font-semibold">Updating Cartethyia…</p>

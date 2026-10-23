@@ -106,8 +106,14 @@ export function DataManagementPanel(): ReactNode {
         })}
       </div>
 
+      {/*
+        * `data-panel`, not `data-bucket`: this row is not one of the grid's
+        * buckets. It carried `data-bucket` while being rendered outside the
+        * grid, so a selector for the buckets counted four cards where the grid
+        * holds three.
+        */}
       <div
-        data-bucket="health_events"
+        data-panel="health_events"
         className="flex items-center justify-between gap-6 rounded-control border border-inner-border px-6 py-5"
       >
         <span className="min-w-0 flex items-center gap-4">

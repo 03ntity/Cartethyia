@@ -112,13 +112,19 @@ describe("cline auto-fetch: free means free", () => {
 });
 
 describe("the shared free roster", () => {
-  test("all three providers carry the same 9 free ids", () => {
+  test("all three providers carry the same free ids", () => {
     const cline = CLINE_MODELS.filter((m) => m.freeTier === true).map((m) => m.modelId).sort();
     const kilo = KILO_FREE_MODELS.filter((m) => m.freeTier === true).map((m) => m.modelId).sort();
     const openrouter = OPENROUTER_FREE_MODELS.filter((m) => m.freeTier === true)
       .map((m) => m.modelId)
       .sort();
-    expect(cline).toHaveLength(9);
+    // Compared against each other, never against a pinned count. The roster is
+    // a catalog fact that upstream changes — two rows were dropped as junk, and
+    // nine more had already been withdrawn — so any number written here goes
+    // stale on the next catalog change and fails for the wrong reason. What
+    // must hold is that the three providers never diverge, since they seed from
+    // one shared roster.
+    expect(cline.length).toBeGreaterThan(0);
     expect(kilo).toEqual(cline);
     expect(openrouter).toEqual(cline);
   });

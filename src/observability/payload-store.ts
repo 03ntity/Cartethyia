@@ -183,12 +183,18 @@ async function appendFrameToPath(
  * drawer order with the legacy `response_body` alias last, for the same reason
  * the record accounts it last: it names no panel of its own and must not
  * spend the shared byte budget ahead of the provider stages.
+ *
+ * There are five, not four. `buildPayloadRecord` builds one string per surface
+ * and `response_body` is the fifth — dropping it here wrote the frame with the
+ * first four bodies and silently discarded the last, so a capture whose client
+ * response was in the legacy slot came back with that panel empty.
  */
 const FRAME_BODY_KEYS = [
   "request_body",
   "provider_request_body",
   "provider_response_body",
   "client_response_body",
+  "response_body",
 ] as const;
 
 /**

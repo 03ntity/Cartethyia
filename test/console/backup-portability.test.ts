@@ -159,6 +159,23 @@ dbDescribe("backup credential portability", () => {
     expect(await sealedCredentialOf(importingTenant)).toBeNull();
   });
 
+  /**
+   * One restore of `payload` into a fresh tenant.
+   *
+   * Split out from the two-restore test that used to cover both input formats:
+   * `api_keys.key_hash` is unique *globally*, not per tenant, so a second
+   * restore of the same payload — into any tenant — collides with the key the
+   * first one inserted. The old test shared one payload across both restores
+   * and passed only while the second write was masked: the table grew on every
+   * run and the restore eventually exceeded the runner's 15 s hang detector,
+   * which reports a timeout rather than the constraint violation underneath.
+   */
+  async function restoreInto(input: string | Uint8Array) {
+    const db = getDb();
+    const service = new BackupService({ db, verifyPassword: async () => true });
+    return service.restore("pw", input, randomUUID());
+  }
+
   test("a restore accepts the compressed file the export downloads", async () => {
     const db = getDb();
     const world = await createWorld();
@@ -166,19 +183,23 @@ dbDescribe("backup credential portability", () => {
     const { payload } = await exportBackup(db, tablesForSection("config"), world.tenantId);
     await dropSourceRows(world.tenantId);
 
-    const importingTenant = randomUUID();
-    const service = new BackupService({ db, verifyPassword: async () => true });
-
-    // What the dashboard puts on disk: gzip bytes, base64-encoded to travel in a
-    // JSON body.
-    const gzBase64 = compressBackup(payload).toString("base64");
-    const fromEnvelope = await service.restore("pw", gzBase64, importingTenant);
+    // What the dashboard puts on disk: gzip bytes, base64-encoded to travel in
+    // a JSON body.
+    const fromEnvelope = await restoreInto(compressBackup(payload).toString("base64"));
     expect(fromEnvelope.format).toBe("native");
     expect(fromEnvelope.restored["provider_accounts"]).toBe(1);
+  });
 
-    // And the same bytes as a file, without the base64 step.
+  test("a restore accepts the same bytes as a file, without the base64 step", async () => {
+    const db = getDb();
+    const world = await createWorld();
+    await world.addAccount({ tenantId: world.tenantId, credential: SECRET, credentialKind: "api_key" });
+    const { payload } = await exportBackup(db, tablesForSection("config"), world.tenantId);
+    await dropSourceRows(world.tenantId);
+
     const gzBytes = gzipSync(Buffer.from(JSON.stringify(payload), "utf8"));
-    const fromBytes = await service.restore("pw", new Uint8Array(gzBytes), importingTenant);
+    const fromBytes = await restoreInto(new Uint8Array(gzBytes));
+    expect(fromBytes.format).toBe("native");
     expect(fromBytes.restored["provider_accounts"]).toBeGreaterThan(0);
   });
 

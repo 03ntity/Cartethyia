@@ -1718,3 +1718,17 @@ html[data-app="landing"] .landing-story-visual {
   font-size: var(--text-caption);
   letter-spacing: -0.01em;
 }
+
+/*
+ * The donation dialog's QR column: a fixed-width rail beside the prose.
+ *
+ * One width, stated once. The grid template and the QR image's own max width
+ * were two separate `220px` literals, which is how a layout decision ends up
+ * needing two edits to change and a third to stay in sync.
+ */
+.donate-qr-grid {
+  grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+}
+.donate-qr-image {
+  max-width: 220px;
+}

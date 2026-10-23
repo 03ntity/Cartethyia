@@ -62,7 +62,10 @@ describe("disk usage", () => {
   test("counts each category separately, not as one total", async () => {
     await writeFile(join(TELEMETRY_DIR, `${dayOffset(1)}.events.jsonl`), "x".repeat(100));
     await writeFile(join(TELEMETRY_DIR, `${dayOffset(2)}.index.json`), "y".repeat(50));
-    await writeFile(join(PAYLOAD_DIR, "frame.jsonb"), "z".repeat(25));
+    // `.jsonl`, matching `FRAME_FILE_SUFFIX`: the scanner matches the suffix the
+    // writer actually uses, so a fixture named for an older extension is counted
+    // as nothing and the payload bucket silently reads zero.
+    await writeFile(join(PAYLOAD_DIR, "frame.jsonl"), "z".repeat(25));
 
     const usage = await OPS.usage();
     const byId = Object.fromEntries(usage.buckets.map((b) => [b.id, b]));

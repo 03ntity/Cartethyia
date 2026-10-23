@@ -74,10 +74,48 @@ describe("Cursor quota — the summary outranks the legacy surface", () => {
     );
 
     expect(result.error).toBeNull();
-    // 25% of a $2,000 cap.
-    expect(result.windows[0]?.used).toBe(500);
-    expect(result.windows[0]?.limit).toBe(2000);
+    // The `auto` rail is reported on the 100-point percentage scale, not as a
+    // dollar figure: `percentWindowFor(kind, label, percent, false)` passes
+    // `withLimit: false`, so the plan's dollar cap is deliberately not applied
+    // to it. Asserting `used === 500` here assumed the dollar reading, which is
+    // the `api` rail's scale, not this one.
+    expect(result.windows[0]?.used).toBe(25);
+    expect(result.windows[0]?.limit).toBe(100);
     expect(result.plan).toBe("Pro");
+  });
+
+  test("the api rail uses the dollar cap, the auto rail does not", async () => {
+    // The two rails are denominated differently on purpose, and a test that
+    // only ever checked one scale could not tell them apart. `limit: 2000` is
+    // cents, so the cap is $20; the api rail spends 10% of it ($2), while the
+    // auto rail still reports its raw percentage against 100.
+    const fetcher = routedFetcher([
+      [
+        "usage-summary",
+        jsonResponse({
+          individualUsage: {
+            plan: { enabled: true, autoPercentUsed: 25, apiPercentUsed: 10, limit: 2000 },
+          },
+        }),
+      ],
+      // The legacy surface is still consulted after the summary answers, so a
+      // fixture without it fails on a 404 that has nothing to do with what
+      // this test is checking.
+      ["/auth/usage", jsonResponse({ "gpt-4": { numRequests: 0, maxRequestUsage: null } })],
+    ]);
+
+    const result = await fetchCursorQuota(
+      tokenWithSubject("auth0|user_01"),
+      fetcher,
+      { credential_kind: "oauth" },
+    );
+
+    expect(result.error).toBeNull();
+    const byLabel = new Map(result.windows.map((w) => [w.label, w]));
+    expect(byLabel.get("Cursor Models")?.used).toBe(25);
+    expect(byLabel.get("Cursor Models")?.limit).toBe(100);
+    expect(byLabel.get("Other Models")?.used).toBe(2);
+    expect(byLabel.get("Other Models")?.limit).toBe(20);
   });
 
   test("an api-key account falls back to the legacy surface", async () => {

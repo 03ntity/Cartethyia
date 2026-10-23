@@ -36,22 +36,26 @@ const USAGE = {
   totalBytes: 3 * 1024 * 1024,
   retentionDays: 30,
   payloadRetentionMs: 15 * 60_000,
+  // Bucket ids are the backend's own (`src/console/data-management/operations.ts`),
+  // not the labels: `telemetry_hourly`/`telemetry_compacted` were the names from
+  // before compaction was removed, and a fixture keyed on a name the server no
+  // longer sends asserts against a panel that cannot render.
   buckets: [
     {
-      id: "telemetry_hourly",
-      label: "Hourly request files",
+      id: "telemetry_events",
+      label: "Request event files",
       bytes: 2 * 1024 * 1024,
       files: 24,
-      note: "Per-request records.",
+      note: "Feeds the request list and detail drawer.",
       reclaimableBytes: null,
       reclaimableFiles: null,
     },
     {
-      id: "telemetry_compacted",
-      label: "Daily summaries",
+      id: "telemetry_index",
+      label: "Day indexes",
       bytes: 1024 * 1024,
       files: 30,
-      note: "Already folded up.",
+      note: "Feeds usage totals, breakdowns and the chart.",
       reclaimableBytes: 512 * 1024,
       reclaimableFiles: 5,
     },
@@ -84,8 +88,8 @@ describe("DataManagementPanel", () => {
       const text = container.textContent ?? "";
       // 2 MiB and 1 MiB are the two large buckets; formatting comes from the
       // shared helper, so assert on the rendered figure rather than raw bytes.
-      expect(text).toContain("Hourly request files");
-      expect(text).toContain("Daily summaries");
+      expect(text).toContain("Request event files");
+      expect(text).toContain("Day indexes");
       expect(text).toContain("Payload frames");
       // `formatBytes` scales to KB/MB with one decimal, not MiB.
       expect(text).toContain("2.0 MB");
@@ -101,7 +105,7 @@ describe("DataManagementPanel", () => {
     // until compaction folds it up, so the panel must not offer to delete it.
     const { container, unmount, restore } = await mountPanel();
     try {
-      const row = container.querySelector('[data-bucket="telemetry_hourly"]');
+      const row = container.querySelector('[data-bucket="telemetry_events"]');
       expect(row).not.toBeNull();
       expect(row?.querySelectorAll("button")).toHaveLength(0);
       expect(row?.textContent).toContain("no other copy");
@@ -128,7 +132,7 @@ describe("DataManagementPanel", () => {
   test("a bucket with something reclaimable offers it", async () => {
     const { container, unmount, restore } = await mountPanel();
     try {
-      const row = container.querySelector('[data-bucket="telemetry_compacted"]');
+      const row = container.querySelector('[data-bucket="telemetry_index"]');
       expect(row?.textContent).toContain("512.0 KB");
       const button = Array.from(row?.querySelectorAll("button") ?? []).find(
         (b) => (b.textContent ?? "").includes("Reclaim"),
