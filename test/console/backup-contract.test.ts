@@ -40,7 +40,7 @@ describe("backup contract coverage", () => {
 });
 
 describe("legacy dropped columns on restore", () => {
-  test("restores the canonical gateway key as default when the backup predates the flag", () => {
+  test("restores a pre-flag gateway key row without auto-promoting is_default", () => {
     const result = validateRestorePayload({
       app: "cartethyia",
       version: 1,
@@ -59,7 +59,9 @@ describe("legacy dropped columns on restore", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const table = tablesForSection("config").find((item) => tableName(item) === "api_keys")!;
-    expect(result.value.tables.get(table)?.rows[0]).toMatchObject({ is_default: true });
+    const row = result.value.tables.get(table)?.rows[0];
+    expect(row).toMatchObject({ label: "Default Cartethyia API key", key_mode: "personal" });
+    expect(row).not.toHaveProperty("is_default");
   });
 
   test("provider_accounts.max_inflight is accepted and skipped", () => {
@@ -115,7 +117,7 @@ describe("legacy dropped columns on restore", () => {
     ]);
   });
 
-  test("migrates legacy model allow/deny policy into the current single policy", () => {
+  test("drops legacy model_allowlist and model_denylist columns on restore", () => {
     const payload = {
       app: "cartethyia",
       version: 1,
@@ -140,16 +142,12 @@ describe("legacy dropped columns on restore", () => {
       const rows = result.value.tables.get(
         tablesForSection("config").find((table) => tableName(table) === "api_keys")!,
       )?.rows;
-      expect(rows?.[0]).toMatchObject({
-        model_access_mode: "whitelist",
-        model_list: ["alpha"],
-      });
       expect(rows?.[0]).not.toHaveProperty("model_allowlist");
       expect(rows?.[0]).not.toHaveProperty("model_denylist");
     }
   });
 
-  test("maps pre-baseline routing and network-pool values during restore", () => {
+  test("normalizes routing and network-pool values on restore; drops unknown columns", () => {
     const payload = {
       app: "cartethyia",
       version: 1,
@@ -157,8 +155,8 @@ describe("legacy dropped columns on restore", () => {
       sections: {
         config: {
           provider_routing_settings: [
-            { provider_id: "openai", bypass_proxy: true, user_agent: "codex_cli_rs/0.156.1" },
-            { provider_id: "cline", bypass_proxy: false },
+            { provider_id: "openai", skip_proxy: true, user_agent: "custom-ua/1.0" },
+            { provider_id: "cline", skip_proxy: false },
           ],
           network_pools: [
             {
@@ -183,7 +181,7 @@ describe("legacy dropped columns on restore", () => {
       {
         provider_id: "openai",
         skip_proxy: true,
-        user_agent: "claude-cli/2.1.293 (external, cli)",
+        user_agent: "custom-ua/1.0",
         tenant_id: "00000000-0000-0000-0000-000000000005",
       },
       { provider_id: "cline", skip_proxy: true, tenant_id: "00000000-0000-0000-0000-000000000005" },
