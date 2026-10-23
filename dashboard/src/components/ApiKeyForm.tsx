@@ -995,12 +995,7 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
 
                   {/* Blocked client apps */}
                   <div className="flex flex-col gap-2 px-4 py-3">
-                    <div>
                       <p className="text-badge font-semibold text-text-secondary m-0">Blocked client apps</p>
-                      <p className="mt-1 mb-2 text-badge text-text-tertiary">
-                        Fingerprinted requests from these apps are rejected with 403 before routing. Detection is best-effort; unrecognised clients are never matched.
-                      </p>
-                    </div>
                     <div className="flex flex-col gap-2">
                       {CLIENT_ROUTERS.map((router) => (
                         <div
@@ -1014,7 +1009,14 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
                         >
                           <div className="flex min-w-0 items-center gap-3">
                             <Ban size={14} className="shrink-0 text-orange" aria-hidden="true" />
-                            <span className="text-caption text-text-primary">Block {router.label} Client</span>
+                            <div className="min-w-0">
+                              <div className="text-caption font-semibold text-text-primary">Block {router.label} Client</div>
+                              <p className="mt-0.5 mb-0 text-badge text-text-tertiary">
+                                {router.id === "9router"
+                                  ? "Matches Node User-Agent, 9router / orouter UA & headers, x-omniroute-* probes, and OpenAI-compatible UA"
+                                  : "Fingerprint-based detection — best-effort; unrecognised clients are never matched"}
+                      </p>
+                    </div>
                           </div>
                           <Switch
                             checked={blockedRouters.includes(router.id)}
