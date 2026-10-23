@@ -44,9 +44,7 @@ export function createDispatchStreamEncoder(
     return {
       push: (event) => encoder.push(event).map((wire) => formatSseEvent(wire.type, wire)),
       finish: () => encoder.finish().map((wire) => formatSseEvent(wire.type, wire)),
-      encodeError: ({ origin, code, message, details }) => [
-        formatSseEvent("response.error", { type: "response.error", origin, code, message, details }),
-      ],
+      encodeError: (input) => encoder.encodeError(input).map((wire) => formatSseEvent(wire.type, wire)),
     };
   }
   if (surface === "messages") {

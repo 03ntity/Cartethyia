@@ -704,6 +704,44 @@ export class ResponsesEventEncoder extends SurfaceStreamEncoder<CanonicalEvent, 
       throw new ResponsesLifecycleError("Responses stream ended without a terminal event");
     return [];
   }
+
+  /**
+   * Encodes a fatal stream error as `response.error` followed immediately by
+   * `response.failed`.
+   *
+   * The OpenAI Responses SDK (and any strict client) requires a terminal
+   * lifecycle event (`response.completed`, `response.failed`, or
+   * `response.incomplete`) to close the stream cleanly.  Emitting only
+   * `response.error` and then closing the SSE connection causes the SDK to
+   * throw "stream closed before a terminal response event was received".
+   *
+   * `response.error` is kept so the client can surface the error message;
+   * `response.failed` immediately follows so the client's state machine
+   * reaches a terminal state and stops waiting.
+   */
+  encodeError(input: {
+    readonly origin: string;
+    readonly code: string;
+    readonly message: string;
+    readonly details: unknown;
+  }): ResponsesWireEvent[] {
+    if (this.terminal) return [];
+    this.terminal = true;
+    const errorEvent = this.emit("response.error", {
+      origin: input.origin,
+      code: input.code,
+      message: input.message,
+      details: input.details,
+    });
+    const response = this.responseObject("failed");
+    response["error"] = {
+      type: "server_error",
+      code: input.code,
+      message: input.message,
+    };
+    const failedEvent = this.emit("response.failed", { response });
+    return [errorEvent, failedEvent];
+  }
 }
 
 /** Encode synchronous canonical events into ordered Responses wire events. */
