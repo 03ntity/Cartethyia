@@ -124,9 +124,12 @@
 }
 
 /* Custom background, rendered by `BackgroundLayer` and framed by the variables
-   the Customization page writes onto `<html>`. It mounts inside
-   `.app-main-column`, so a card's backdrop-filter samples this image instead
-   of the black body. Inert — it must never catch a click meant for the page.
+   the Customization page writes onto `<html>`. Mounted in the shell fragment
+   root, outside any stacking context created by `.app-shell-frame` or
+   `.app-main-column`, so `position: fixed` always covers the full viewport
+   regardless of sidebar or column width. Cards still sample it via
+   `backdrop-filter` because compositing reads painted pixels, not the DOM
+   tree. Inert — it must never catch a click meant for the page.
 
    The media is oversized by the zoom and anchored with the offsets, then the
    layer clips it. That is what makes "taller" and "shift left" real instead of

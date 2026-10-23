@@ -797,6 +797,7 @@ export function DashboardShell({
   return (
     <>
       <div className="app-bg" aria-hidden="true" />
+      <BackgroundLayer />
       <div className="app-shell-frame">
       <div
         className="app-shell-root"
@@ -888,7 +889,6 @@ export function DashboardShell({
 
         {/* Main Column */}
         <div className="app-main-column">
-          <BackgroundLayer />
           {/* Topbar Header */}
           <header className="glass app-topbar">
             <button
