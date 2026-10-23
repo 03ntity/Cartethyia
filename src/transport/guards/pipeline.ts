@@ -28,7 +28,12 @@ import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import type { RedisClient } from "../../persistence/redis";
 import type { TelemetryBatchBuffer } from "../../observability/telemetry-buffer";
 import type { ModelStrikeService } from "../../security/model-abuse";
-import { TelemetryPayloadCapture, payloadCaptureKeepsBodies } from "../../observability/payload-capture";
+import {
+  TelemetryPayloadCapture,
+  payloadCaptureKeepsBodies,
+  payloadRetentionMs,
+  resolvePayloadCapture,
+} from "../../observability/payload-capture";
 
 /** Shared state/context carried by every ordered transport stage. */
 export interface TransportPipelineContext {
@@ -167,8 +172,15 @@ export function createTransportPipeline(context: TransportPipelineContext): Tran
         stateStore: context.stateStore,
         telemetryBuffer: context.telemetry,
         // One capture for the process, shared with every request state so an
-        // early rejection can record its payload from the finalize hook.
-        payloadCapture: new TelemetryPayloadCapture(context.db),
+        // early rejection can record its payload from the finalize hook. It
+        // resolves the tenant's retention itself because an early rejection has
+        // no preference memo on its state — nothing resolved one before the
+        // request was refused.
+        payloadCapture: new TelemetryPayloadCapture(context.db, (tenantId) =>
+          resolvePayloadCapture(context.db, tenantId).then(
+            (resolved) => (resolved.ok ? resolved.retentionMs : payloadRetentionMs()),
+          ),
+        ),
       });
     } else {
       registerRequestCleanup(rootApp, { stateStore: context.stateStore });

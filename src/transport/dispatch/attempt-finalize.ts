@@ -24,6 +24,7 @@ import {
 import { ProxyConnectRefusalError } from "../../network/pool/agent";
 import {
   payloadCaptureKeepsBodies,
+  payloadRetentionMs,
   resolvePayloadCapture,
 } from "../../observability/payload-capture";
 
@@ -103,6 +104,29 @@ export async function resolveCaptureDepthForRequest(
     | { readonly ok: true; readonly depth: TelemetryPayloadDepth }
     | { readonly ok: false };
   return resolved.ok === true ? resolved.depth : "minimum";
+}
+
+/**
+ * The tenant's chosen payload retention, memoized on the request like the mode
+ * and depth above — and resolved *after* one of them has populated the memo, so
+ * all three come from one preference read.
+ *
+ * Falls back to the deployment default when the read failed, which is the same
+ * answer the capture path reaches on its own; returning it here keeps the
+ * caller from having to know the fallback exists.
+ */
+export async function resolveCaptureRetentionForRequest(
+  db: CartethyiaDatabase,
+  tenantId: string | null,
+  state: { payloadCapturePreference?: unknown },
+): Promise<number> {
+  if (state.payloadCapturePreference === undefined) {
+    state.payloadCapturePreference = await resolvePayloadCapture(db, tenantId);
+  }
+  const resolved = state.payloadCapturePreference as
+    | { readonly ok: true; readonly retentionMs: number }
+    | { readonly ok: false };
+  return resolved.ok === true ? resolved.retentionMs : payloadRetentionMs();
 }
 
 /**
@@ -391,7 +415,7 @@ async function captureTerminalPayload(
       note("skipped_preference_read_failed");
       return;
     }
-    const { mode, depth } = resolved;
+    const { mode, depth, retentionMs } = resolved;
     if (mode === "none") {
       note("skipped_mode_none");
       return;
@@ -408,6 +432,7 @@ async function captureTerminalPayload(
         requestBody: null,
         responseBody: null,
         providerRequestBody: providerRequest,
+        retentionMs,
         scope: "tenant",
         tenantOptIn: true,
       });
@@ -426,6 +451,7 @@ async function captureTerminalPayload(
       ...(providerRequest === null ? {} : { providerRequestBody: providerRequest }),
       ...(providerResponse === null ? {} : { providerResponseBody: providerResponse }),
       maxBytes,
+      retentionMs,
       scope: "tenant",
       tenantOptIn: true,
     });

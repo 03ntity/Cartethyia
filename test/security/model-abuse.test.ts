@@ -28,6 +28,7 @@ import {
   ModelStrikeService,
   modelAbuseBannedError,
   modelWarningMessage,
+  PERMANENT_BAN_TTL_MS,
   type ModelAbuseAttempt,
 } from "../../src/security/model-abuse";
 
@@ -209,8 +210,11 @@ describe("InMemoryModelAbuseStore — bans", () => {
     expect(listed).toEqual([
       {
         ip: "203.0.113.1",
+        apiKeyId: null,
         reason: "repeated_invalid_model_requests",
         expiresAt: start + HOUR,
+        permanent: false,
+        identity: "203.0.113.1",
       },
     ]);
   });
@@ -314,13 +318,21 @@ describe("InMemoryModelAbuseStore — the key bound", () => {
 
 describe("ModelStrikeService — the policy layer over the store", () => {
   /** The service with a driven clock and a chosen threshold. */
-  function service(options: { threshold?: number; windowMs?: number; banTtlMs?: number } = {}) {
+  function service(
+    options: {
+      threshold?: number;
+      windowMs?: number;
+      banTtlMs?: number;
+      maxBanTtlMs?: number;
+    } = {},
+  ) {
     const clock = fakeClock();
     const store = new InMemoryModelAbuseStore(clock.now);
     const strikes = new ModelStrikeService(store, {
       threshold: options.threshold ?? 3,
       windowMs: options.windowMs ?? HOUR,
       banTtlMs: options.banTtlMs ?? 24 * HOUR,
+      ...(options.maxBanTtlMs === undefined ? {} : { maxBanTtlMs: options.maxBanTtlMs }),
     });
     return { strikes, store, clock };
   }
@@ -336,8 +348,11 @@ describe("ModelStrikeService — the policy layer over the store", () => {
     expect(await store.listBans()).toEqual([
       {
         ip: "203.0.113.1",
+        apiKeyId: null,
         reason: "repeated_invalid_model_requests",
         expiresAt: clock.now() + MINUTE,
+        permanent: false,
+        identity: "203.0.113.1",
       },
     ]);
   });
@@ -400,9 +415,64 @@ describe("ModelStrikeService — the policy layer over the store", () => {
 
   test("listBans and unban are exposed through the service", async () => {
     const { strikes } = service({ threshold: 1, banTtlMs: HOUR });
-    await strikes.noteInvalid({ ip: "203.0.113.1" });
-    expect((await strikes.listBans()).map((ban) => ban.ip)).toEqual(["203.0.113.1"]);
-    expect(await strikes.unban("203.0.113.1")).toBe(true);
+    await strikes.noteInvalid({ ip: "203.0.113.1", apiKeyId: "key-a" });
+    const listed = await strikes.listBans();
+    expect(listed.map((ban) => ban.ip)).toEqual(["203.0.113.1"]);
+    expect(await strikes.unban(listed[0]!.identity)).toBe(true);
+    expect(await strikes.listBans()).toEqual([]);
+  });
+
+  test("an operator ban lasts the duration it was asked for", async () => {
+    // The point of the duration control: a ban asked for an hour must not come
+    // back as the service's default TTL, or the choice is decoration.
+    const { strikes, clock, store } = service({ threshold: 3, banTtlMs: 6 * HOUR });
+    const ban = await strikes.ban({ ip: "203.0.113.1", apiKeyId: "key-a", ttlMs: HOUR });
+    expect(ban.expiresAt).toBe(clock.now() + HOUR);
+    expect(await store.isBanned(ban.identity)).toBe(true);
+  });
+
+  test("an operator ban outlives the graduated default when asked to", async () => {
+    // Seven days is the longest timed choice, and it must not be confused with
+    // "Permanent": the console shows the two differently, and an operator who
+    // picked a week has to be told a week.
+    const { strikes, clock } = service({ threshold: 3, banTtlMs: MINUTE });
+    const ban = await strikes.ban({ ip: "203.0.113.1", apiKeyId: "key-a", ttlMs: 7 * 24 * HOUR });
+    expect(ban.expiresAt).toBe(clock.now() + 7 * 24 * HOUR);
+    expect(ban.permanent).toBe(false);
+  });
+
+  test("a duration above the ceiling is clamped, not honoured", async () => {
+    // The ceiling exists because a typo in a duration should not park a caller
+    // for a decade. Clamping is what makes the knob safe to expose.
+    const { strikes, clock } = service({ threshold: 3, banTtlMs: MINUTE, maxBanTtlMs: HOUR });
+    const ban = await strikes.ban({ ip: "203.0.113.1", apiKeyId: "key-a", ttlMs: 90 * 24 * HOUR });
+    expect(ban.expiresAt).toBe(clock.now() + HOUR);
+  });
+
+  test("the permanent choice is a very long TTL, and reports as permanent", async () => {
+    // Not an unbounded ban: both stores lapse a ban by comparing an expiry to
+    // now, so "permanent" has to be a duration. What matters is that it is
+    // still liftable, which it is — the console unlifts by identity.
+    const { strikes, clock } = service({ threshold: 3, banTtlMs: MINUTE });
+    const ban = await strikes.ban({
+      ip: "203.0.113.1",
+      apiKeyId: "key-a",
+      ttlMs: PERMANENT_BAN_TTL_MS,
+    });
+    expect(ban.expiresAt).toBe(clock.now() + PERMANENT_BAN_TTL_MS);
+    expect(ban.permanent).toBe(true);
+    const listed = await strikes.listBans();
+    expect(listed[0]?.permanent).toBe(true);
+  });
+
+  test("a permanent ban is still liftable by its identity", async () => {
+    const { strikes } = service({ threshold: 3, banTtlMs: MINUTE });
+    const ban = await strikes.ban({
+      ip: "203.0.113.1",
+      apiKeyId: "key-a",
+      ttlMs: PERMANENT_BAN_TTL_MS,
+    });
+    expect(await strikes.unban(ban.identity)).toBe(true);
     expect(await strikes.listBans()).toEqual([]);
   });
 
@@ -436,6 +506,128 @@ describe("ModelStrikeService — the policy layer over the store", () => {
     });
     await expect(strikes.noteInvalid({ ip: "203.0.113.1" })).rejects.toThrow("store unavailable");
     await expect(strikes.check({ ip: "203.0.113.1" })).rejects.toThrow("store unavailable");
+  });
+});
+
+describe("ban scoping — one address, several callers", () => {
+  /**
+   * A service with a low threshold so one invalid attempt bans, and a driven
+   * clock so the ban's lifetime is asserted rather than slept through.
+   */
+  function scoped(options: { banTtlMs?: number } = {}) {
+    const clock = fakeClock();
+    const store = new InMemoryModelAbuseStore(clock.now);
+    const strikes = new ModelStrikeService(store, {
+      threshold: 1,
+      windowMs: HOUR,
+      banTtlMs: options.banTtlMs ?? HOUR,
+    });
+    return { strikes, store, clock };
+  }
+
+  test("a ban on one key leaves another key from the same IP unaffected", async () => {
+    // The whole point of scoping. One key can be shared by every recipient of a
+    // share link, and an address can sit behind a NAT: banning the address for
+    // what one caller did punishes callers that did nothing.
+    const { strikes } = scoped();
+    await strikes.ban({ ip: "203.0.113.1", apiKeyId: "key-a", ttlMs: HOUR });
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-a" })).toBe(true);
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-b" })).toBe(false);
+  });
+
+  test("a ban on one key leaves a different IP on that same key unaffected", async () => {
+    const { strikes } = scoped();
+    await strikes.ban({ ip: "203.0.113.1", apiKeyId: "key-a", ttlMs: HOUR });
+    expect(await strikes.check({ ip: "203.0.113.2", apiKeyId: "key-a" })).toBe(false);
+  });
+
+  test("an address-only ban blocks every key from that address", async () => {
+    // The deliberate blunt instrument, and it must still work: when the address
+    // is the problem rather than the credential, the operator bans the address.
+    const { strikes } = scoped();
+    await strikes.ban({ ip: "203.0.113.1", ttlMs: HOUR, addressOnly: true });
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-a" })).toBe(true);
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-b" })).toBe(true);
+    expect(await strikes.check({ ip: "203.0.113.1" })).toBe(true);
+  });
+
+  test("an address-only ban leaves another address unaffected", async () => {
+    const { strikes } = scoped();
+    await strikes.ban({ ip: "203.0.113.1", ttlMs: HOUR, addressOnly: true });
+    expect(await strikes.check({ ip: "203.0.113.2", apiKeyId: "key-a" })).toBe(false);
+  });
+
+  test("a ban written before scoping existed still blocks every key", async () => {
+    // A rolling deploy reads members written by the previous version, and those
+    // were the bare address. Reading one as a scoped ban would silently un-ban
+    // every caller a running deployment is currently blocking.
+    const { strikes, store } = scoped();
+    await store.ban("203.0.113.1", HOUR);
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-a" })).toBe(true);
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-b" })).toBe(true);
+  });
+
+  test("an escalation ban is scoped to the key that earned it", async () => {
+    // Not just the operator's ban button: the graduated path must not take down
+    // a shared address either, or the whole scoping change is cosmetic.
+    const { strikes } = scoped();
+    await strikes.noteInvalid({ ip: "203.0.113.1", apiKeyId: "key-a" });
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-a" })).toBe(true);
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-b" })).toBe(false);
+  });
+
+  test("strikes from two keys on one address do not add up", async () => {
+    // Each caller gets its own window. Merging them would let a busy caller
+    // spend a quiet one's budget and escalate a ban onto it.
+    const clock = fakeClock();
+    const store = new InMemoryModelAbuseStore(clock.now);
+    const strikes = new ModelStrikeService(store, {
+      threshold: 3,
+      windowMs: HOUR,
+      banTtlMs: HOUR,
+    });
+    for (let index = 0; index < 2; index += 1) {
+      await strikes.noteInvalid({ ip: "203.0.113.1", apiKeyId: "key-a" });
+    }
+    for (let index = 0; index < 2; index += 1) {
+      await strikes.noteInvalid({ ip: "203.0.113.1", apiKeyId: "key-b" });
+    }
+    // Four strikes in total, but no key reached three.
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-a" })).toBe(false);
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-b" })).toBe(false);
+  });
+
+  test("unbanning one key's ban leaves the other key's ban in place", async () => {
+    const { strikes } = scoped();
+    const first = await strikes.ban({ ip: "203.0.113.1", apiKeyId: "key-a", ttlMs: HOUR });
+    await strikes.ban({ ip: "203.0.113.1", apiKeyId: "key-b", ttlMs: HOUR });
+    expect(await strikes.unban(first.identity)).toBe(true);
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-a" })).toBe(false);
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-b" })).toBe(true);
+  });
+
+  test("the listing names the key each ban is scoped to", async () => {
+    // The console cannot show "this key only" vs "all keys" from the address
+    // alone, and a ban list that looks like it blocks more than it does sends
+    // the operator looking for clients that were never affected.
+    const { strikes } = scoped();
+    await strikes.ban({ ip: "203.0.113.1", apiKeyId: "key-a", ttlMs: HOUR });
+    await strikes.ban({ ip: "203.0.113.1", ttlMs: HOUR, addressOnly: true });
+    const listed = await strikes.listBans();
+    // "null" sorts after "key-a" as a string, so compare by the field rather
+    // than by a coercion that inverts the two.
+    expect(listed.map((ban) => ban.apiKeyId).sort((a, b) => (a === null ? -1 : b === null ? 1 : a.localeCompare(b)))).toEqual([
+      null,
+      "key-a",
+    ]);
+  });
+
+  test("a scoped ban lapses on its own, and an elapsed one stops blocking", async () => {
+    const { strikes, clock } = scoped({ banTtlMs: MINUTE });
+    await strikes.ban({ ip: "203.0.113.1", apiKeyId: "key-a", ttlMs: MINUTE });
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-a" })).toBe(true);
+    clock.advance(MINUTE + 1);
+    expect(await strikes.check({ ip: "203.0.113.1", apiKeyId: "key-a" })).toBe(false);
   });
 });
 

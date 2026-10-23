@@ -35,6 +35,13 @@ export interface DataManagementConfig {
   readonly retentionDays: number;
   readonly payloadRetentionMs: number;
   /**
+   * The longest payload retention a tenant may have chosen, and therefore the
+   * only cutoff a frame file can be judged dead against without reading it.
+   * Defaults to `payloadRetentionMs` for callers that predate per-tenant
+   * retention, which is then the true ceiling in that deployment.
+   */
+  readonly payloadRetentionMaxMs?: number;
+  /**
    * The health & error log store, backing the console's only row-level purge.
    * Absent (a reduced console composition) means the purge is not offered
    * rather than failing to boot.
@@ -84,10 +91,19 @@ function dayBefore(name: string, cutoff: number): boolean {
 
 export function createDataManagementOperations(config: DataManagementConfig) {
   const payloadDir = (): string => payloadDirectory();
+  /**
+   * The only cutoff a frame file can be judged dead against without parsing it.
+   *
+   * A file's mtime says when it was last written, not what its frames' tenants
+   * chose — so a file written an hour ago can hold a frame with a week to live.
+   * The ceiling is therefore the bound, and the default retention is only used
+   * when no ceiling was configured.
+   */
+  const payloadMax = (): number => config.payloadRetentionMaxMs ?? config.payloadRetentionMs;
 
   async function usage(): Promise<DiskUsageResponse> {
     const retentionCutoff = Date.now() - config.retentionDays * 24 * 60 * 60_000;
-    const payloadCutoff = Date.now() - config.payloadRetentionMs;
+    const payloadCutoff = Date.now() - payloadMax();
 
     const [hourly, compacted, staleCompacted, frames, staleFrames, healthEventCount] = await Promise.all([
       scan(config.telemetryDir, isHourly),
@@ -124,7 +140,7 @@ export function createDataManagementOperations(config: DataManagementConfig) {
         files: frames.files,
         note: `Captured bodies, expiring ${Math.round(
           config.payloadRetentionMs / 60_000,
-        )} min after write.`,
+        )} min after write by default.`,
         reclaimableBytes: staleFrames.bytes,
         reclaimableFiles: staleFrames.files,
       },
@@ -135,6 +151,7 @@ export function createDataManagementOperations(config: DataManagementConfig) {
       totalBytes: buckets.reduce((sum, bucket) => sum + bucket.bytes, 0),
       retentionDays: config.retentionDays,
       payloadRetentionMs: config.payloadRetentionMs,
+      payloadRetentionMaxMs: payloadMax(),
       ...(healthEventCount === undefined ? {} : { healthEventCount }),
     };
   }
@@ -153,7 +170,7 @@ export function createDataManagementOperations(config: DataManagementConfig) {
       const now = new Date();
       const deletedFiles = await prunePayloadFrames(
         now,
-        new Date(now.getTime() - config.payloadRetentionMs),
+        new Date(now.getTime() - payloadMax()),
       );
       const after = await scan(payloadDir(), isFrame);
       return {

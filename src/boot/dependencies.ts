@@ -78,6 +78,7 @@ import { TelemetryBatchBuffer } from "../observability/telemetry-buffer";
 import { RuntimeMetricsSampler } from "../observability/runtime-metrics";
 import {
   resolveIpRateLimit,
+  resolveModelBanMaxTtlMs,
   resolveModelBanTtlMs,
   resolveModelStrikeThreshold,
   resolveModelStrikeWindowMs,
@@ -275,6 +276,7 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
     threshold: resolveModelStrikeThreshold(),
     windowMs: resolveModelStrikeWindowMs(),
     banTtlMs: resolveModelBanTtlMs(),
+    maxBanTtlMs: resolveModelBanMaxTtlMs(),
   });
   const readiness = () => checkReadiness(db, redis, resolveRedisBackend(redis));
   // One list covers every periodic task: a small deployment can cut the

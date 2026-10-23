@@ -26,7 +26,11 @@ export function useModelBans(enabled: boolean) {
 }
 
 /**
- * Lifts one ban by its client address.
+ * Lifts one ban by the opaque identity the listing reports.
+ *
+ * The identity, not the address: a ban can now be scoped to one API key from
+ * an address, so the address alone does not name it. Unbanning by address would
+ * either miss a scoped ban or lift the wrong one.
  *
  * The list is refetched rather than patched: the server is the authority on
  * which bans are still active, and a ban may have lapsed between the read and
@@ -34,7 +38,7 @@ export function useModelBans(enabled: boolean) {
  */
 export function useUnbanModel() {
   const queryClient = useQueryClient();
-  return useMutation<{ success: boolean }, ApiErrorShape, ModelAbuseBan["ip"]>({
+  return useMutation<{ success: boolean }, ApiErrorShape, ModelAbuseBan["identity"]>({
     mutationFn: (identity) =>
       consoleRequest<{ success: boolean }>("/model-bans", {
         method: "DELETE",
@@ -47,18 +51,41 @@ export function useUnbanModel() {
   });
 }
 
+/** One ban request: who to block, for how long, and whether to scope it. */
+export interface BanRequest {
+  readonly ip: string;
+  /** The key to scope the ban to; omitted or null bans every key from the IP. */
+  readonly apiKeyId?: string | null;
+  /** Whole minutes, or null for permanent. */
+  readonly minutes?: number | null;
+  /** Bans the address outright regardless of `apiKeyId`. */
+  readonly addressOnly?: boolean;
+}
+
 /**
- * Instantly bans one client address for the full model-ban TTL, bypassing the
- * graduated strike window. The operator action behind the request-detail
- * "Ban user" button; keyed on the request's client IP.
+ * Bans one caller immediately, for a chosen duration, bypassing the graduated
+ * strike window. The operator action behind the request-detail "Banned User"
+ * button.
+ *
+ * Default is one hour scoped to the request's key, because that is the
+ * reversible answer: a ban on one credential from a shared address can be
+ * lifted without collateral, and an hour lapses on its own. Every wider or
+ * longer choice is opt-in through {@link BanRequest}.
  */
 export function useBanIp() {
   const queryClient = useQueryClient();
-  return useMutation<{ ban: ModelAbuseBan }, ApiErrorShape, string>({
-    mutationFn: (ip) =>
+  return useMutation<{ ban: ModelAbuseBan }, ApiErrorShape, BanRequest>({
+    mutationFn: (request) =>
       consoleRequest<{ ban: ModelAbuseBan }>("/model-bans", {
         method: "POST",
-        body: JSON.stringify({ ip }),
+        body: JSON.stringify({
+          ip: request.ip,
+          ...(request.apiKeyId === undefined
+            ? {}
+            : { apiKeyId: request.apiKeyId }),
+          ...(request.minutes === undefined ? {} : { minutes: request.minutes }),
+          ...(request.addressOnly === undefined ? {} : { addressOnly: true }),
+        }),
       }),
     ...DASHBOARD_MUTATION_OPTIONS,
     onSuccess: async () => {

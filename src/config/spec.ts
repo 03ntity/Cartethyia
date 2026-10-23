@@ -257,6 +257,18 @@ export const CONFIG_SPEC = {
   CARTETHYIA_MODEL_STRIKE_THRESHOLD: { kind: "int", default: 10, min: 1, max: 100 },
   CARTETHYIA_MODEL_STRIKE_WINDOW_MS: { kind: "int", default: 1_800_000, min: 1_000, max: 86_400_000 },
   CARTETHYIA_MODEL_BAN_TTL_MS: { kind: "int", default: 21_600_000, min: 1_000, max: 604_800_000 },
+  /**
+   * The longest ban the console will record, however long a request asks for.
+   * The "Permanent" choice is a very long TTL rather than an unbounded one,
+   * and this is what keeps a typo in a duration from parking a caller for a
+   * decade.
+   */
+  CARTETHYIA_MODEL_BAN_MAX_TTL_MS: {
+    kind: "int",
+    default: 604_800_000,
+    min: 1_000,
+    max: 604_800_000,
+  },
   CARTETHYIA_ENCRYPTION_KEY: {
     kind: "required",
     error:

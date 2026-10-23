@@ -28,6 +28,7 @@ const { PurgeNotWiredError } = await import(
   "../../src/console/data-management/contracts"
 );
 const { writePayloadFrame } = await import("../../src/observability/payload-store");
+const { MAX_PAYLOAD_RETENTION_MS } = await import("../../src/observability/payload-capture");
 
 const OPS = createDataManagementOperations({
   telemetryDir: TELEMETRY_DIR,
@@ -88,6 +89,51 @@ describe("disk usage", () => {
     const usage = await OPS.usage();
     expect(usage.totalBytes).toBe(0);
     expect(usage.buckets.every((b) => b.files === 0)).toBe(true);
+  });
+});
+
+describe("payload frames under a raised retention", () => {
+  /**
+   * The same operations, but with a deployment whose tenants may keep frames
+   * for seven days while the default window is fifteen minutes.
+   */
+  const RAISED = createDataManagementOperations({
+    telemetryDir: TELEMETRY_DIR,
+    retentionDays: 30,
+    payloadRetentionMs: 15 * 60_000,
+    payloadRetentionMaxMs: MAX_PAYLOAD_RETENTION_MS,
+  });
+
+  test("a frame younger than the longest retention is not offered for reclaim", async () => {
+    // The regression this guards: judging frames by the *default* window while
+    // a tenant kept theirs for a week offered a reclaim button for frames that
+    // were still live. The operator pressed it and saw "nothing to reclaim",
+    // which reads as broken rather than as "still in use".
+    const recent = new Date(Date.now() - 60 * 60_000);
+    await writePayloadFrame({ probe: true }, recent);
+    const usage = await RAISED.usage();
+    const frames = usage.buckets.find((b) => b.id === "payload_frames");
+    expect(frames?.files).toBe(1);
+    expect(frames?.reclaimableFiles).toBe(0);
+    expect(frames?.reclaimableBytes).toBe(0);
+  });
+
+  test("the response reports the ceiling it judged frames against", async () => {
+    // The panel cannot derive the bound, and a panel that shows a reclaim
+    // count without saying what it counted against is unauditable.
+    const usage = await RAISED.usage();
+    expect(usage.payloadRetentionMaxMs).toBe(MAX_PAYLOAD_RETENTION_MS);
+    expect(usage.payloadRetentionMs).toBe(15 * 60_000);
+  });
+
+  test("a deployment with no ceiling falls back to its own retention", async () => {
+    const plain = createDataManagementOperations({
+      telemetryDir: TELEMETRY_DIR,
+      retentionDays: 30,
+      payloadRetentionMs: 15 * 60_000,
+    });
+    const usage = await plain.usage();
+    expect(usage.payloadRetentionMaxMs).toBe(15 * 60_000);
   });
 });
 

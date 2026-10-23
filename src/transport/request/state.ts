@@ -114,7 +114,12 @@ export interface ProxyRequestState {
    * from disagreeing about whether capture is on.
    */
   payloadCapturePreference?:
-    | { readonly ok: true; readonly mode: TelemetryPayloadMode; readonly depth: TelemetryPayloadDepth }
+    | {
+        readonly ok: true;
+        readonly mode: TelemetryPayloadMode;
+        readonly depth: TelemetryPayloadDepth;
+        readonly retentionMs: number;
+      }
     | { readonly ok: false };
   /**
    * This request's resolved inline-attachment ceiling, memoized for the same

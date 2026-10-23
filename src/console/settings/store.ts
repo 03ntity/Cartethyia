@@ -11,6 +11,7 @@ import {
   RTK_LEVELS,
   TELEMETRY_PAYLOAD_DEPTHS,
   TELEMETRY_PAYLOAD_MODES,
+  TELEMETRY_PAYLOAD_RETENTION_MINUTES,
   type PonyTailLevel,
   type ResponsesReasoningSummary,
   type RtkLevel,
@@ -105,6 +106,25 @@ function normalizeImageClampMaxBytes(value: unknown): number | null {
   return normalizeBoundedNumber(value, 64 * 1024, 100 * 1024 * 1024);
 }
 
+/**
+ * How long a captured payload frame is kept, in whole minutes.
+ *
+ * Only one of the offered values survives; anything else reads as "deployment
+ * default" rather than being clamped to the nearest one. A stored value from
+ * before this list existed would otherwise be silently rewritten to a window
+ * the operator never chose, and dropping it to `null` is the same outcome the
+ * operator gets by never having set it.
+ */
+function normalizePayloadRetentionMinutes(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const minutes = Math.floor(parsed);
+  return (TELEMETRY_PAYLOAD_RETENTION_MINUTES as readonly number[]).includes(minutes)
+    ? minutes
+    : null;
+}
+
 function mapRuntimeSettingsRow(
   row: typeof consoleSettings.$inferSelect | undefined,
   redisBackend: RedisBackend,
@@ -120,6 +140,9 @@ function mapRuntimeSettingsRow(
       : "detailed",
     telemetryPayloads: normalizeTelemetryPayloadMode(prefs.telemetryPayloads),
     telemetryPayloadDepth: normalizeTelemetryPayloadDepth(prefs.telemetryPayloadDepth),
+    telemetryPayloadRetentionMinutes: normalizePayloadRetentionMinutes(
+      prefs.telemetryPayloadRetentionMinutes,
+    ),
     privacyMode: prefs.privacyMode === "full" ? "full" : "masked",
     rtkPruneEnabled: prefs.rtkPruneEnabled === true,
     rtkPruneLevel: normalizeRtkLevel(prefs.rtkPruneLevel),
@@ -169,6 +192,10 @@ export class DrizzleRuntimeSettingsStore implements RuntimeSettingsStore {
       patchPrefs.responsesReasoningSummary = patch.responsesReasoningSummary;
     if (patch.telemetryPayloads !== undefined) patchPrefs.telemetryPayloads = patch.telemetryPayloads;
     if (patch.telemetryPayloadDepth !== undefined) patchPrefs.telemetryPayloadDepth = patch.telemetryPayloadDepth;
+    if (patch.telemetryPayloadRetentionMinutes !== undefined)
+      patchPrefs.telemetryPayloadRetentionMinutes = normalizePayloadRetentionMinutes(
+        patch.telemetryPayloadRetentionMinutes,
+      );
     if (patch.privacyMode !== undefined) patchPrefs.privacyMode = patch.privacyMode;
     if (patch.rtkPruneEnabled !== undefined) patchPrefs.rtkPruneEnabled = patch.rtkPruneEnabled;
     if (patch.rtkPruneLevel !== undefined) patchPrefs.rtkPruneLevel = patch.rtkPruneLevel;

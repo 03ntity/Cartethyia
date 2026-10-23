@@ -94,6 +94,7 @@ Variables read outside the spec are therefore **not** listed below:
 | `CARTETHYIA_MODEL_STRIKE_THRESHOLD` | integer | 10 | 1 – 100 |
 | `CARTETHYIA_MODEL_STRIKE_WINDOW_MS` | integer | 1800000 | 1000 – 86400000 |
 | `CARTETHYIA_MODEL_BAN_TTL_MS` | integer | 21600000 | 1000 – 604800000 |
+| `CARTETHYIA_MODEL_BAN_MAX_TTL_MS` | integer | 604800000 | 1000 – 604800000 |
 | `CARTETHYIA_ENCRYPTION_KEY` | string, required | — (unset throws at startup) | — |
 | `CARTETHYIA_PUBLIC_ORIGIN` | string, required | — (unset throws at startup) | — |
 

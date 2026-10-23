@@ -269,7 +269,13 @@ export function createProxyRoutePreparationMiddleware(deps: {
         throw new GatewayError("admission_unavailable", 503, "The request was not authenticated and parsed, so this route cannot be served. Resend the request.");
       const strikes = deps.modelStrikes;
       const ip = state.clientIdentity?.address;
-      const strikeIdentity = strikes && ip !== undefined ? { strikes, ip } : undefined;
+      // The key rides along so a strike is charged to the caller that made it.
+      // Without it, one recipient of a shared link could escalate a ban onto
+      // every other caller behind the same address.
+      const strikeIdentity =
+        strikes && ip !== undefined
+          ? { strikes, ip, apiKeyId: state.authorization?.id ?? null }
+          : undefined;
       try {
         state.preparedRequest = await deps.preparer.prepare({
           canonicalRequest: state.canonicalRequest,
@@ -286,7 +292,7 @@ export function createProxyRoutePreparationMiddleware(deps: {
         // request, or any other failure is not the caller probing for models.
         if (strikeIdentity && isModelRejection(error)) {
           const outcome = await strikeIdentity.strikes
-            .noteInvalid({ ip: strikeIdentity.ip })
+            .noteInvalid({ ip: strikeIdentity.ip, apiKeyId: strikeIdentity.apiKeyId })
             .catch(() => null);
           if (outcome?.banned === true) throw modelAbuseBannedError();
           if (outcome) {

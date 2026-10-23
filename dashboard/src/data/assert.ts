@@ -380,15 +380,28 @@ export function assertModelBans(value: unknown): ModelAbuseBan[] {
     throw invalidResponse("Invalid model ban response");
   }
   return value.bans.map((ban) => {
+    // `identity` is what `unban` addresses, and `apiKeyId` is what tells the
+    // operator whether a ban blocks one credential or every one from the
+    // address. A listing without either cannot lift the right ban — the old
+    // shape keyed on the address, so a scoped ban would have been unliftable
+    // and an address-wide one would have looked narrower than it was.
     if (
       !isRecord(ban) ||
       typeof ban.ip !== "string" ||
       ban.reason !== "repeated_invalid_model_requests" ||
-      !isFiniteNumber(ban.expiresAt)
+      !isFiniteNumber(ban.expiresAt) ||
+      typeof ban.identity !== "string" ||
+      !(typeof ban.apiKeyId === "string" || ban.apiKeyId === null)
     ) {
       throw invalidResponse("Invalid model ban response");
     }
-    return ban as unknown as ModelAbuseBan;
+    // `permanent` is derived server-side; a response that omits it is from a
+    // build that predates the duration control, and reading it as false would
+    // show "in 50y" where the console means "Permanent".
+    return {
+      ...ban,
+      permanent: ban.permanent === true,
+    } as unknown as ModelAbuseBan;
   });
 }
 

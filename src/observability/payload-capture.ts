@@ -3,20 +3,68 @@ import { DrizzleTelemetryStore } from "../persistence/stores/telemetry-store";
 import { prunePayloadFrames, writePayloadFrame } from "./payload-store";
 import { resolveTelemetryPayloadMaxBytes } from "../config/telemetry";
 import { preferencesReaderFor } from "../persistence/tenant-preferences";
-import type { TelemetryPayloadDepth, TelemetryPayloadMode } from "../console/settings/contracts";
+import type {
+  TelemetryPayloadDepth,
+  TelemetryPayloadMode,
+  TelemetryPayloadRetentionMinutes,
+} from "../console/settings/contracts";
 export type CaptureScope = "tenant" | "debug_session" | "operator_flag";
+
+/**
+ * How long a captured payload frame lives when the deployment has not chosen.
+ *
+ * Exported so surfaces that report on disk usage quote the same window the
+ * capture path enforces, rather than a second copy of the default that would
+ * drift the first time this one changes.
+ */
+export function payloadRetentionMs(): number {
+  const raw = Number(process.env.CARTETHYIA_TELEMETRY_PAYLOAD_RETENTION_MS ?? 15 * 60_000);
+  if (!Number.isFinite(raw) || raw < 1_000 || raw > MAX_PAYLOAD_RETENTION_MS) return 15 * 60_000;
+  return Math.floor(raw);
+}
+
+/**
+ * The longest payload retention a tenant may ask for: seven days.
+ *
+ * Two things depend on this being a hard ceiling rather than a suggestion.
+ *
+ * The prune pass deletes a frame file it cannot parse once the file's last
+ * write is older than the retention window — that bound is the only thing that
+ * makes a damaged file reclaimable at all. A tenant allowed to keep frames for
+ * a year while the prune assumed an hour would have live frames deleted out
+ * from under them.
+ *
+ * The disk-usage panel counts a frame as reclaimable once its file is older
+ * than the same window. Without a ceiling it would offer a reclaim button for
+ * frames that are still live, and the operator would press it and see
+ * "nothing to reclaim".
+ */
+export const MAX_PAYLOAD_RETENTION_MS = 7 * 24 * 60 * 60_000;
+
+/** Milliseconds one tenant's chosen retention resolves to. */
+export function retentionMsFor(minutes: number | null | undefined): number {
+  if (minutes === null || minutes === undefined) return payloadRetentionMs();
+  if (!Number.isFinite(minutes)) return payloadRetentionMs();
+  return Math.min(Math.max(1_000, Math.floor(minutes * 60_000)), MAX_PAYLOAD_RETENTION_MS);
+}
 
 /**
  * Settings-gated payload capture. Request-event metadata is always retained;
  * tenants opt into drawer capture through Settings → Privacy: `metadata`
  * keeps only the Proxy→Provider request line, `full` keeps redacted bodies
- * at the tenant's chosen depth. Fail-closed on error.
+ * at the tenant's chosen depth, and both live for the tenant's chosen
+ * retention. Fail-closed on error.
  */
 export async function resolvePayloadCapture(
   db: CartethyiaDatabase,
   tenantId: string | null,
 ): Promise<
-  | { readonly ok: true; readonly mode: TelemetryPayloadMode; readonly depth: TelemetryPayloadDepth }
+  | {
+      readonly ok: true;
+      readonly mode: TelemetryPayloadMode;
+      readonly depth: TelemetryPayloadDepth;
+      readonly retentionMs: number;
+    }
   | { readonly ok: false }
 > {
   if (!tenantId) return { ok: false };
@@ -24,6 +72,7 @@ export async function resolvePayloadCapture(
     const prefs = await preferencesReaderFor(db).readPreferences(tenantId);
     const mode = prefs?.telemetryPayloads;
     const depth = prefs?.telemetryPayloadDepth;
+    const retention = prefs?.telemetryPayloadRetentionMinutes;
     return {
       ok: true,
       mode: mode === "full" || mode === "metadata" || mode === "none" ? mode : "none",
@@ -37,6 +86,7 @@ export async function resolvePayloadCapture(
               : depth === "full"
                 ? "maximum"
                 : "minimum",
+      retentionMs: retentionMsFor(retention as TelemetryPayloadRetentionMinutes | undefined),
     };
   } catch {
     // A preference read that fails must not invent capture. Off keeps nothing.
@@ -99,6 +149,12 @@ export interface PayloadCaptureInput {
    * Defaults to the configured capture limit.
    */
   maxBytes?: number;
+  /**
+   * How long this frame lives, in ms. Defaults to the tenant's chosen
+   * retention, then the deployment default. Bounded by
+   * {@link MAX_PAYLOAD_RETENTION_MS} either way.
+   */
+  retentionMs?: number;
   scope: CaptureScope;
   /** Links the row to `telemetry_events.request_id`. */
   requestId?: string;
@@ -147,11 +203,6 @@ export interface StoredPayload {
  * capture path enforces, rather than a second copy of the default that would
  * drift the first time this one changes.
  */
-export function payloadRetentionMs(): number {
-  const raw = Number(process.env.CARTETHYIA_TELEMETRY_PAYLOAD_RETENTION_MS ?? 15 * 60_000);
-  if (!Number.isFinite(raw) || raw < 1_000 || raw > 7 * 24 * 60 * 60_000) return 15 * 60_000;
-  return Math.floor(raw);
-}
 function isCaptureAllowed(input: PayloadCaptureInput): boolean {
   // Exactly one opt-in must be set, and it must be the one `scope` names:
   // two flags at once would silently widen capture beyond the declared scope.
@@ -209,7 +260,7 @@ function payloadSignals(values: readonly unknown[]): PayloadSignals {
  * `maxBytes` (post-redaction, defaulting to the configured capture limit): a
  * body that no longer fits is replaced with a truncation marker — no object
  * store exists, so an oversized body is never referenced, only accounted.
- * Payloads remain redacted and bounded during the 15-minute retention window.
+ * Payloads remain redacted and bounded during their retention window.
  *
  * Drawer order is the allocation order, and that is deliberate: the cap is a
  * single shared budget, so whatever is accounted first is what survives a
@@ -223,8 +274,9 @@ export function buildPayloadRecord(
   input: PayloadCaptureInput,
   now = new Date(),
   maxBytes = resolveTelemetryPayloadMaxBytes(),
+  retentionMs = payloadRetentionMs(),
 ): Omit<StoredPayload, "id"> {
-  const expiresAt = new Date(now.getTime() + payloadRetentionMs());
+  const expiresAt = new Date(now.getTime() + retentionMs);
   // Each body is serialized once, in drawer order, and only while the running
   // total still fits the cap. Serializing every body up front to measure them
   // and then serializing the whole record again to store it holds two copies of
@@ -310,14 +362,26 @@ export function buildPayloadRecord(
 }
 
 /**
- * Postgres-backed redacted request/response payload capture. Payloads have a
- * 15-minute retention window and are automatically pruned.
+ * Postgres-backed redacted request/response payload capture. Payloads live for
+ * the tenant's chosen retention — 15 minutes by default — and are pruned by the
+ * sweep.
 
  */
 export class TelemetryPayloadCapture {
   private readonly store: DrizzleTelemetryStore;
 
-  constructor(db: CartethyiaDatabase) {
+  constructor(
+    db: CartethyiaDatabase,
+    /**
+     * Reads the tenant's chosen retention for captures that arrive without one.
+     *
+     * Injected rather than imported so the capture path does not depend on the
+     * console's settings module, and so a test can pin a retention without
+     * touching the database. Absent means every capture uses the deployment
+     * default, which is what a probe or a debug session wants anyway.
+     */
+    private readonly retentionFor?: (tenantId: string) => Promise<number> | number,
+  ) {
     this.store = new DrizzleTelemetryStore(db);
   }
 
@@ -327,7 +391,17 @@ export class TelemetryPayloadCapture {
         code: "capture_not_opted_in",
       });
     }
-    const record = buildPayloadRecord(input, new Date(), input.maxBytes ?? resolveTelemetryPayloadMaxBytes());
+    // A caller that knows the answer passes it; otherwise the tenant's own
+    // preference is resolved, and failing that the deployment default. The
+    // early-rejection path has no preference to hand and lands here, which is
+    // why the default must be the deployment one rather than the shortest.
+    const retentionMs = await resolveRetention(input, this.retentionFor);
+    const record = buildPayloadRecord(
+      input,
+      new Date(),
+      input.maxBytes ?? resolveTelemetryPayloadMaxBytes(),
+      retentionMs,
+    );
     const reference = await writePayloadFrame(record, record.expires_at, record._serialized
       ? {
           requestId: record.request_id,
@@ -364,10 +438,54 @@ export class TelemetryPayloadCapture {
       deleted += batch;
       if (batch < batchSize) break;
     }
-    // Every frame expires `payloadRetentionMs()` after it is written, so a file
-    // last written before that window closed cannot still hold a live frame.
-    // That bound is what makes a damaged, unparsable file reclaimable at all.
-    deleted += await prunePayloadFrames(now, new Date(now.getTime() - payloadRetentionMs()));
+    // A file last written before *the longest retention a tenant can choose*
+    // closed cannot still hold a live frame — whatever its tenant picked, that
+    // frame has expired. Using the deployment default here instead was correct
+    // only while every frame shared one window: with a tenant allowed to keep
+    // frames for a week, a 15-minute bound would delete files still holding
+    // frames their rows address, and the drawer would silently read empty.
+    deleted += await prunePayloadFrames(now, payloadPruneBound(now));
     return { deleted };
   }
+}
+
+/**
+ * The cutoff before which a frame file can be deleted wholesale.
+ *
+ * Every frame expires at most {@link MAX_PAYLOAD_RETENTION_MS} after it is
+ * written, so a file last touched before that instant cannot still hold a live
+ * frame — and that is the only thing that makes a damaged, unparsable file
+ * reclaimable at all. Exported so the bound is pinned without a database: the
+ * alternative is a test that deletes a live frame and notices nothing.
+ */
+export function payloadPruneBound(now: Date): Date {
+  return new Date(now.getTime() - MAX_PAYLOAD_RETENTION_MS);
+}
+
+/**
+ * How long one capture's frame should live.
+ *
+ * Order of authority: the caller's own value, then the tenant's preference,
+ * then the deployment default. A failure resolving the tenant's preference
+ * falls back rather than throwing — an unknown retention must not turn into a
+ * lost capture, and the deployment default is always a valid answer.
+ */
+export async function resolveRetention(
+  input: PayloadCaptureInput,
+  retentionFor?: (tenantId: string) => Promise<number> | number,
+): Promise<number> {
+  if (typeof input.retentionMs === "number" && Number.isFinite(input.retentionMs)) {
+    return Math.min(Math.max(1_000, Math.floor(input.retentionMs)), MAX_PAYLOAD_RETENTION_MS);
+  }
+  if (retentionFor) {
+    try {
+      const value = await retentionFor(input.tenantId);
+      if (Number.isFinite(value)) {
+        return Math.min(Math.max(1_000, Math.floor(value)), MAX_PAYLOAD_RETENTION_MS);
+      }
+    } catch {
+      // Falls through to the deployment default below.
+    }
+  }
+  return payloadRetentionMs();
 }

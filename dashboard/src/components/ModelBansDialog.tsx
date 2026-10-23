@@ -14,13 +14,14 @@ import { useModelBans, useUnbanModel } from "../hooks/model-bans";
 /**
  * The model-abuse ban list, opened from the API Credentials header.
  *
- * A ban is keyed on the client address, so it is cross-tenant and only a
- * platform admin may see or lift one; the panel that hosts this dialog hides
- * the entry point for everyone else. A ban lapses on its own after its TTL —
- * lifting one early is the escape hatch for a false positive (a shared NAT, a
- * client that genuinely mistyped a model id).
+ * A ban is keyed on the client address *and* the API key that was used, so it
+ * is cross-tenant and only a platform admin may see or lift one; the panel that
+ * hosts this dialog hides the entry point for everyone else. A ban lapses on
+ * its own after its TTL — lifting one early is the escape hatch for a false
+ * positive (a shared NAT, a client that genuinely mistyped a model id).
  */
-function lapseLabel(expiresAt: number): string {
+function lapseLabel(expiresAt: number, permanent: boolean): string {
+  if (permanent) return "Permanent — lift manually";
   const date = new Date(expiresAt);
   if (!Number.isFinite(date.getTime())) return "—";
   const remaining = expiresAt - Date.now();
@@ -45,7 +46,7 @@ export function ModelBansDialog({ onClose }: { readonly onClose: () => void }): 
         open={true}
         onClose={onClose}
         title="Banned Users"
-        description="A client address is banned after repeated invalid-model requests. The ban applies to every API key used from that address, not just one credential."
+        description="A caller is banned after repeated invalid-model requests. A ban is scoped to the API key that made them, so other keys used from the same address keep working — unless an operator banned the address outright."
         size="lg"
       >
         <div className="flex flex-col gap-7 min-w-0">
@@ -77,12 +78,15 @@ export function ModelBansDialog({ onClose }: { readonly onClose: () => void }): 
                 <DataTable
                   maxHeight={480}
                   scrollRegion
-                  headers={["Client IP", "Reason", "Applies to", "Lapses", ""]}
+                  headers={["Client IP", "API key", "Reason", "Applies to", "Lapses", ""]}
                 >
                   {bans.map((ban) => (
-                    <tr key={ban.ip}>
+                    <tr key={ban.identity}>
                       <td className="font-mono tabular-nums text-badge text-text-primary whitespace-nowrap">
                         {ban.ip}
+                      </td>
+                      <td className="font-mono tabular-nums text-badge text-text-secondary whitespace-nowrap">
+                        {ban.apiKeyId ? `${ban.apiKeyId.slice(0, 8)}…` : "—"}
                       </td>
                       <td className="text-badge text-text-secondary">
                         {ban.reason === "repeated_invalid_model_requests"
@@ -90,12 +94,12 @@ export function ModelBansDialog({ onClose }: { readonly onClose: () => void }): 
                           : ban.reason}
                       </td>
                       <td className="text-badge text-text-secondary whitespace-nowrap">
-                        All API keys from this IP
+                        {ban.apiKeyId ? "This key only" : "All keys from this IP"}
                       </td>
                       <td
                         className="text-badge text-text-secondary whitespace-nowrap"
                       >
-                        {lapseLabel(ban.expiresAt)}
+                        {lapseLabel(ban.expiresAt, ban.permanent === true)}
                       </td>
                       <td className="text-right whitespace-nowrap">
                         <Button
@@ -128,14 +132,16 @@ export function ModelBansDialog({ onClose }: { readonly onClose: () => void }): 
         onClose={() => setUnbanTarget(null)}
         onConfirm={async () => {
           if (!unbanTarget) return;
-          await unban.mutateAsync(unbanTarget.ip);
+          await unban.mutateAsync(unbanTarget.identity);
           toast.success(`Unbanned ${unbanTarget.ip}.`);
           setUnbanTarget(null);
         }}
         title="Lift this ban?"
         message={
           unbanTarget
-            ? `Lift the ban on ${unbanTarget.ip}? The address can reach the gateway again immediately.`
+            ? `Lift the ban on ${unbanTarget.ip}${
+                unbanTarget.apiKeyId ? " for this API key" : ""
+              }? The caller can reach the gateway again immediately.`
             : "Lift this ban?"
         }
         confirmLabel="Unban"

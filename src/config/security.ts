@@ -37,6 +37,21 @@ export function resolveModelBanTtlMs(): number {
   return readInt("CARTETHYIA_MODEL_BAN_TTL_MS", CONFIG_SPEC.CARTETHYIA_MODEL_BAN_TTL_MS);
 }
 
+/**
+ * The longest model-abuse ban the console will record, however long a request
+ * asks for.
+ *
+ * A separate knob from the ban TTL because the two are different decisions:
+ * the TTL is what a graduated ban gets, this is the ceiling on what an
+ * operator may ask for by hand. Raising one was never meant to raise the other.
+ */
+export function resolveModelBanMaxTtlMs(): number {
+  return readInt(
+    "CARTETHYIA_MODEL_BAN_MAX_TTL_MS",
+    CONFIG_SPEC.CARTETHYIA_MODEL_BAN_MAX_TTL_MS,
+  );
+}
+
 /** Reads the application encryption key without caching it. */
 export function requireEncryptionKeyEnv(): string {
   return readRequired("CARTETHYIA_ENCRYPTION_KEY", CONFIG_SPEC.CARTETHYIA_ENCRYPTION_KEY);

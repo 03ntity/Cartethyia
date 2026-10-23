@@ -148,16 +148,68 @@ function PrivacyPanel(): ReactNode {
             { value: "none", label: "Off — no payload capture" },
             {
               value: "metadata",
-              label: "Metadata — method and headers, 15 minutes",
+              label: "Metadata — method and headers only",
             },
-            { value: "full", label: "Full — redacted bodies, 15 minutes" },
+            { value: "full", label: "Full — redacted bodies" },
           ]}
         />
         <p className="mt-3 text-caption text-text-tertiary">
           Request metadata is always kept. Bodies stay off until you turn them
-          on, and anything captured is redacted and deleted after 15 minutes.
+          on, and anything captured is redacted and deleted when its retention
+          below runs out.
         </p>
       </div>
+      {settings.telemetryPayloads === "none" ? null : (
+        <div className="settings-field">
+          <Select
+            label="Keep captured payloads for"
+            id="privacy-payload-retention"
+            value={String(settings.telemetryPayloadRetentionMinutes ?? "")}
+            onValueChange={(value) =>
+              mutation.mutate(
+                { telemetryPayloadRetentionMinutes: value === "" ? null : Number(value) },
+                {
+                  onSuccess: () => toast.success("Payload retention updated"),
+                  onError: (error) =>
+                    toast.error(
+                      getErrorMessage(error, "Could not update payload retention."),
+                    ),
+                },
+              )
+            }
+            options={[
+              { value: "15", label: "15 minutes" },
+              { value: "30", label: "30 minutes" },
+              { value: "60", label: "1 hour" },
+              { value: "360", label: "6 hours" },
+              { value: "720", label: "12 hours" },
+              { value: "1440", label: "1 day" },
+              { value: "10080", label: "7 days — maximum" },
+            ]}
+          />
+          {/*
+            * The warning is about server filesize, which is the actual cost: a
+            * frame is a gzipped copy of up to four request bodies, so keeping
+            * them for a week is keeping a week of bodies on disk. Shown from
+            * one hour up — 15 and 30 minutes are what the default already did.
+            *
+            * Hidden when capture is off, along with the control: nothing is
+            * stored, so a retention choice would do nothing at all.
+            */}
+          {(settings.telemetryPayloadRetentionMinutes ?? 15) >= 60 ? (
+            <Banner
+              tone="warning"
+              surface="raised"
+              className="text-text-secondary"
+            >
+              <strong>Keeping payloads this long costs server disk.</strong>{" "}
+              Every captured request keeps a gzipped copy of its bodies for the
+              whole window — at 7 days a busy deployment can fill the data
+              directory. Use it to debug, then set it back.
+            </Banner>
+          ) : null}
+        </div>
+      )}
       {settings.telemetryPayloads === "full" ? (
         <div className="settings-field">
           <Select

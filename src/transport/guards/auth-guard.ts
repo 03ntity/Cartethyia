@@ -90,14 +90,17 @@ export function createApiKeyAuthenticationMiddleware(deps: {
         );
       // Abuse ban: refuse before parse/prepare and before authorization is
       // recorded, so a banned caller cannot keep producing failed rows. The ban
-        // is keyed on the client address, not the key: one key can be shared by
-        // every recipient of a share link, so refusing the key would punish
-        // callers that did nothing.
+      // is keyed on the client address *and* the API key: one key can be shared
+      // by every recipient of a share link, so refusing the address alone would
+      // punish callers that did nothing, while refusing the key alone would let
+      // the caller that probed mint a fresh one.
       if (deps.modelStrikes) {
         const state = deps.stateStore.get(request);
         const ip = state?.clientIdentity?.address;
         if (ip !== undefined) {
-          const banned = await deps.modelStrikes.check({ ip }).catch(() => false);
+          const banned = await deps.modelStrikes
+            .check({ ip, apiKeyId: authorization.id })
+            .catch(() => false);
           if (banned) throw modelAbuseBannedError();
         }
       }
