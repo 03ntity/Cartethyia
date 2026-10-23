@@ -27,6 +27,7 @@ import { describe, expect, test } from "bun:test";
 import { recordAccountFailure } from "../../src/providers/operations/account-health-service";
 import type { CartethyiaDatabase } from "../../src/persistence/db-handle";
 import type { AccountFailureEvidence } from "../../src/providers/operations/account-health-service";
+import { resetCooldownCacheForTests } from "../../src/config/cooldowns";
 
 interface Captured {
   readonly updates: Record<string, unknown>[];
@@ -469,6 +470,7 @@ describe("recordAccountFailure — an auth rejection writes a cooldown, not a di
     // The documented escape hatch. It has to change the write, or the comment
     // promising the old behavior is a lie.
     process.env.CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS = "0";
+    resetCooldownCacheForTests();
     try {
       const account = coolingAccount();
       account["status"] = "active";
@@ -486,6 +488,7 @@ describe("recordAccountFailure — an auth rejection writes a cooldown, not a di
       expect(onlyUpdate(captured).cooldownUntil).toBeNull();
     } finally {
       delete process.env.CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS;
+      resetCooldownCacheForTests();
     }
   });
 });

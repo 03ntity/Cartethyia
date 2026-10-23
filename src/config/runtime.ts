@@ -2,7 +2,7 @@
  * HTTP listener, dashboard runtime, and graceful-shutdown drain resolvers.
  */
 
-import { CONFIG_SPEC, readInt, readOptionalText, readText } from "./spec";
+import { CONFIG_SPEC, readInt, readOptionalText } from "./spec";
 import { resolvePackagePath } from "./package-paths";
 
 /** Resolves the HTTP listener port from the process environment. */
@@ -12,8 +12,9 @@ export function resolvePort(): number {
 
 /** Resolves the dashboard static asset directory. */
 export function resolveDashboardDist(): string {
-  if (!process.env.DASHBOARD_DIST?.trim()) return resolvePackagePath("dist", "dashboard");
-  return readText("DASHBOARD_DIST", CONFIG_SPEC.DASHBOARD_DIST);
+  const raw = process.env.DASHBOARD_DIST?.trim();
+  if (!raw) return resolvePackagePath("dist", "dashboard");
+  return raw;
 }
 
 /**
@@ -46,8 +47,7 @@ export function resolveShutdownDrainWindowMs(): number {
 
 /** Resolves the operator drain token, or `undefined` when the drain route is disabled. */
 export function resolveDrainToken(): string | undefined {
-  const raw = process.env.CARTETHYIA_DRAIN_TOKEN?.trim();
-  return raw !== undefined && raw.length > 0 ? raw : undefined;
+  return readOptionalText("CARTETHYIA_DRAIN_TOKEN", CONFIG_SPEC.CARTETHYIA_DRAIN_TOKEN);
 }
 
 /**

@@ -60,9 +60,12 @@ export function createModelCatalogOperations(config: ProviderCatalogConfig) {
       },
     async listFlatModels(access: AccessDecision | undefined): Promise<readonly FlatModelCatalogEntry[]> {
       const a = requireTenantAnyScope(access, MODEL_READ_SCOPES);
-      const providers = await config.store.list(a.tenantId);
+      const [providers, allAccounts] = await Promise.all([
+        config.store.list(a.tenantId),
+        config.store.listAllAccounts(a.tenantId),
+      ]);
       const accountsByProvider = new Map<string, number>();
-      for (const account of await config.store.listAllAccounts(a.tenantId)) {
+      for (const account of allAccounts) {
         if (account.status === "active")
           accountsByProvider.set(account.providerId, (accountsByProvider.get(account.providerId) ?? 0) + 1);
       }

@@ -27,6 +27,7 @@ import type { CartethyiaDatabase } from "../../src/persistence/db-handle";
 import { providers, providerAccounts, healthEvents } from "../../src/persistence/schema";
 import { and, eq } from "drizzle-orm";
 import { sweepExpiredCooldowns } from "../../src/providers/operations/account-health-service";
+import { resetCooldownCacheForTests } from "../../src/config/cooldowns";
 
 /** Recovery window the boot-time reader resolves when the env var is unset. */
 const DEFAULT_RECOVERY_MS = 86_400_000;
@@ -48,6 +49,7 @@ beforeEach(async () => {
   await applySqliteMigrations(sqlite);
   db = buildSqliteHandle(sqlite).db;
   delete process.env.CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS;
+  resetCooldownCacheForTests();
   const [provider] = await db
     .insert(providers)
     .values({ id: "rec-provider" })

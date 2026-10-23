@@ -548,11 +548,12 @@ export function classifyAccountError(
     options?.providerId !== undefined &&
     BUDDY_PROVIDER_IDS.has(options.providerId.toLowerCase());
   if (policyBlock) {
+    const policyBlockMs = resolveAccountPolicyBlockCooldownMs();
     return result(
       "policy_blocked",
       "cooldown",
-      resolveAccountPolicyBlockCooldownMs(),
-      new Date(Date.now() + resolveAccountPolicyBlockCooldownMs()),
+      policyBlockMs,
+      new Date(Date.now() + policyBlockMs),
       reason("Provider content-policy block"),
       origin === "upstream",
     );
@@ -610,11 +611,12 @@ export function classifyAccountError(
     options?.providerId !== undefined &&
     BUDDY_PROVIDER_IDS.has(options.providerId.toLowerCase());
   if (channelBlock) {
+    const channelBlockMs = resolveAccountPolicyBlockCooldownMs();
     return result(
       "policy_blocked",
       "cooldown",
-      resolveAccountPolicyBlockCooldownMs(),
-      new Date(Date.now() + resolveAccountPolicyBlockCooldownMs()),
+      channelBlockMs,
+      new Date(Date.now() + channelBlockMs),
       reason("Provider channel rejection"),
       origin === "upstream",
     );
@@ -929,11 +931,12 @@ export function classifyAccountError(
     // that account down, or it stays `active` and is re-dialled for as long as
     // the block lasts. Provider-scoped 5xx keeps the old behavior: the upstream
     // is indiscriminately failing and no single account is at fault.
+    const transientMs = TRANSIENT_ERROR_COOLDOWN_MS();
     return result(
       lower.includes("timeout") ? "timeout" : "server_error",
       "cooldown",
-      TRANSIENT_ERROR_COOLDOWN_MS(),
-      new Date(Date.now() + TRANSIENT_ERROR_COOLDOWN_MS()),
+      transientMs,
+      new Date(Date.now() + transientMs),
       reason(`Provider ${statusCode ?? "network"} failure`),
       canMutate,
     );
@@ -941,11 +944,12 @@ export function classifyAccountError(
 
   // Same reasoning as above, with the shortest backoff: an unmapped failure
   // must still be retried automatically rather than parked forever.
+  const unclassifiedMs = UNCLASSIFIED_COOLDOWN_MS();
   return result(
     "unknown",
     "cooldown",
-    UNCLASSIFIED_COOLDOWN_MS(),
-    new Date(Date.now() + UNCLASSIFIED_COOLDOWN_MS()),
+    unclassifiedMs,
+    new Date(Date.now() + unclassifiedMs),
     reason("Unclassified provider failure"),
     false,
   );

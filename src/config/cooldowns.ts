@@ -4,48 +4,63 @@
 
 import { CONFIG_SPEC, readInt } from "./spec";
 
+let _rateLimitCooldown: number | undefined;
 /** Fallback cooldown for a provider rate limit (default 15m). */
 export function resolveAccountRateLimitCooldownMs(): number {
-  return readInt(
+  if (_rateLimitCooldown === undefined)
+    _rateLimitCooldown = readInt(
     "CARTETHYIA_ACCOUNT_RATE_LIMIT_COOLDOWN_MS",
     CONFIG_SPEC.CARTETHYIA_ACCOUNT_RATE_LIMIT_COOLDOWN_MS,
   );
+  return _rateLimitCooldown;
 }
 
+let _quotaCooldown: number | undefined;
 /**
  * Fallback cooldown for provider quota exhaustion when the error states no
  * reset window (default 1h). A provider-specific rule (xAI Grok Build's
  * rolling 24-hour free-tier window) overrides it inside the classifier.
  */
 export function resolveAccountQuotaCooldownMs(): number {
-  return readInt(
+  if (_quotaCooldown === undefined)
+    _quotaCooldown = readInt(
     "CARTETHYIA_ACCOUNT_QUOTA_COOLDOWN_MS",
     CONFIG_SPEC.CARTETHYIA_ACCOUNT_QUOTA_COOLDOWN_MS,
   );
+  return _quotaCooldown;
 }
 
+let _modelCapacityCooldown: number | undefined;
 /** Fallback cooldown for model-capacity overload (default 2m). */
 export function resolveAccountModelCapacityCooldownMs(): number {
-  return readInt(
+  if (_modelCapacityCooldown === undefined)
+    _modelCapacityCooldown = readInt(
     "CARTETHYIA_ACCOUNT_MODEL_CAPACITY_COOLDOWN_MS",
     CONFIG_SPEC.CARTETHYIA_ACCOUNT_MODEL_CAPACITY_COOLDOWN_MS,
   );
+  return _modelCapacityCooldown;
 }
 
+let _transientCooldown: number | undefined;
 /** Backoff for a transient 5xx/network fault, recorded as `cooldown` (default 30s). */
 export function resolveAccountTransientCooldownMs(): number {
-  return readInt(
+  if (_transientCooldown === undefined)
+    _transientCooldown = readInt(
     "CARTETHYIA_ACCOUNT_TRANSIENT_COOLDOWN_MS",
     CONFIG_SPEC.CARTETHYIA_ACCOUNT_TRANSIENT_COOLDOWN_MS,
   );
+  return _transientCooldown;
 }
 
+let _unclassifiedCooldown: number | undefined;
 /** Backoff for a failure no rule matched, recorded as `cooldown` (default 1m). */
 export function resolveAccountUnclassifiedCooldownMs(): number {
-  return readInt(
+  if (_unclassifiedCooldown === undefined)
+    _unclassifiedCooldown = readInt(
     "CARTETHYIA_ACCOUNT_UNCLASSIFIED_COOLDOWN_MS",
     CONFIG_SPEC.CARTETHYIA_ACCOUNT_UNCLASSIFIED_COOLDOWN_MS,
   );
+  return _unclassifiedCooldown;
 }
 
 /**
@@ -56,18 +71,25 @@ export function resolveAccountUnclassifiedCooldownMs(): number {
  * window: an account that recovers on its own must not sit parked for a day
  * because a burst of 5xx happened to arrive while it was already cooling.
  */
+let _escalationMaxCooldown: number | undefined;
 export function resolveAccountCooldownEscalationMaxMs(): number {
-  return readInt(
+  if (_escalationMaxCooldown === undefined)
+    _escalationMaxCooldown = readInt(
     "CARTETHYIA_ACCOUNT_COOLDOWN_ESCALATION_MAX_MS",
     CONFIG_SPEC.CARTETHYIA_ACCOUNT_COOLDOWN_ESCALATION_MAX_MS,
   );
+  return _escalationMaxCooldown;
 }
 
+let _poolCooldown: number | undefined;
 /** How long a proxy pool stays `cooldown` after a transport fault (default 2m). */
 export function resolvePoolCooldownMs(): number {
-  return readInt("CARTETHYIA_POOL_COOLDOWN_MS", CONFIG_SPEC.CARTETHYIA_POOL_COOLDOWN_MS);
+  if (_poolCooldown === undefined)
+    _poolCooldown = readInt("CARTETHYIA_POOL_COOLDOWN_MS", CONFIG_SPEC.CARTETHYIA_POOL_COOLDOWN_MS);
+  return _poolCooldown;
 }
 
+let _authRejectedCooldown: number | undefined;
 /**
  * Backoff for an auth rejection that names no revocation (default 5m).
  *
@@ -84,12 +106,15 @@ export function resolvePoolCooldownMs(): number {
  * it to rotation to fail again. Set this to `0` to restore the old behavior.
  */
 export function resolveAccountAuthRejectedCooldownMs(): number {
-  return readInt(
+  if (_authRejectedCooldown === undefined)
+    _authRejectedCooldown = readInt(
     "CARTETHYIA_ACCOUNT_AUTH_REJECTED_COOLDOWN_MS",
     CONFIG_SPEC.CARTETHYIA_ACCOUNT_AUTH_REJECTED_COOLDOWN_MS,
   );
+  return _authRejectedCooldown;
 }
 
+let _policyBlockCooldown: number | undefined;
 /**
  * Base backoff for the buddy policy/channel block (default 5m).
  *
@@ -106,12 +131,15 @@ export function resolveAccountAuthRejectedCooldownMs(): number {
  * while a single bad prompt costs five minutes.
  */
 export function resolveAccountPolicyBlockCooldownMs(): number {
-  return readInt(
+  if (_policyBlockCooldown === undefined)
+    _policyBlockCooldown = readInt(
     "CARTETHYIA_ACCOUNT_POLICY_BLOCK_COOLDOWN_MS",
     CONFIG_SPEC.CARTETHYIA_ACCOUNT_POLICY_BLOCK_COOLDOWN_MS,
   );
+  return _policyBlockCooldown;
 }
 
+let _disabledRecovery: number | undefined;
 /**
  * How long an **automatically** disabled account stays out of rotation (default 24h).
  *
@@ -131,8 +159,28 @@ export function resolveAccountPolicyBlockCooldownMs(): number {
  * only reproduces the refusal. Set to `0` to restore the old terminal behavior.
  */
 export function resolveAccountDisabledRecoveryMs(): number {
-  return readInt(
+  if (_disabledRecovery === undefined)
+    _disabledRecovery = readInt(
     "CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS",
     CONFIG_SPEC.CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS,
   );
+  return _disabledRecovery;
+}
+
+/**
+ * Resets all cached cooldown values. Call this in tests that override
+ * cooldown env-vars between test cases — mirrors `resetTimeoutCacheForTests`
+ * in `config/timeouts.ts`.
+ */
+export function resetCooldownCacheForTests(): void {
+  _rateLimitCooldown = undefined;
+  _quotaCooldown = undefined;
+  _modelCapacityCooldown = undefined;
+  _transientCooldown = undefined;
+  _unclassifiedCooldown = undefined;
+  _escalationMaxCooldown = undefined;
+  _poolCooldown = undefined;
+  _authRejectedCooldown = undefined;
+  _policyBlockCooldown = undefined;
+  _disabledRecovery = undefined;
 }

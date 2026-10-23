@@ -258,6 +258,7 @@ async function disableAccount(
       )
       .returning({ id: providerOauthStates.providerAccountId });
     if (leaseRows.length === 0) return;
+    const disabledRecoveryMs = resolveAccountDisabledRecoveryMs();
     await tx
       .update(providerAccounts)
       .set({
@@ -276,8 +277,8 @@ async function disableAccount(
         // is also what distinguishes this (machine-disabled) from an operator's
         // own disable, which leaves `cooldownUntil` null and is therefore never
         // swept. See `resolveAccountDisabledRecoveryMs`.
-        ...(resolveAccountDisabledRecoveryMs() > 0
-          ? { cooldownUntil: new Date(Date.now() + resolveAccountDisabledRecoveryMs()) }
+        ...(disabledRecoveryMs > 0
+          ? { cooldownUntil: new Date(Date.now() + disabledRecoveryMs) }
           : {}),
       })
       .where(eq(providerAccounts.id, accountId));
