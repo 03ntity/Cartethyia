@@ -242,7 +242,7 @@ class TraeAdapter implements ProviderAdapter {
           yield {
             type: "content_delta",
             sequence_number: seq++,
-            content: { kind: "reasoning", payload: flatReasoning, summary: flatReasoning },
+            content: { kind: "reasoning", payload: null, summary: flatReasoning },
           } as CanonicalEvent;
         }
         yield* this.#toolCallDeltas(record["tool_calls"], announced, () => seq++);
@@ -273,7 +273,7 @@ class TraeAdapter implements ProviderAdapter {
         yield {
           type: "content_delta",
           sequence_number: seq++,
-          content: { kind: "reasoning", payload: reasoning, summary: reasoning },
+          content: { kind: "reasoning", payload: null, summary: reasoning },
         } as CanonicalEvent;
       }
       if (typeof payload["finish_reason"] === "string") {
