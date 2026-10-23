@@ -182,7 +182,10 @@ export function parseResponsesResponseToEvents(
                 }
               : { payload: text }),
             ...(position === 0 && encryptedContent !== undefined
-              ? { encrypted_content: encryptedContent }
+              ? {
+                  encrypted_content: encryptedContent,
+                  ...(itemId === undefined ? {} : { item_id: itemId }),
+                }
               : {}),
           },
         });
@@ -566,7 +569,10 @@ export async function* decodeResponsesSseStream(
                     ? { payload: null, summary: text, summary_index: reasoningPart.index }
                     : { payload: text }),
                   ...(position === 0 && encryptedContent !== undefined
-                    ? { encrypted_content: encryptedContent }
+                    ? {
+                        encrypted_content: encryptedContent,
+                        ...(itemId === undefined ? {} : { item_id: itemId }),
+                      }
                     : {}),
                 },
               } as CanonicalEvent;

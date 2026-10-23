@@ -84,7 +84,10 @@ export function reasoningEvent(
       payload: null,
       ...(summary === undefined ? {} : { summary }),
       ...(typeof encrypted === "string"
-        ? { encrypted_content: encrypted }
+        ? {
+            encrypted_content: encrypted,
+            ...(typeof item["id"] === "string" ? { item_id: item["id"] } : {}),
+          }
         : {}),
       ...(summary === undefined && typeof encrypted === "string"
         ? { opaque: true as const }

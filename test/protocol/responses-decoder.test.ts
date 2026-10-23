@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import type { CanonicalRequest } from "../../src/protocol/canonical-model";
+import type { CanonicalRequest, ContentPart } from "../../src/protocol/canonical-model";
 import { decodeResponsesSseStream } from "../../src/protocol/response/responses";
+import { canonicalToResponsesPayload } from "../../src/protocol/request/responses";
 import { chatAdapter } from "../../src/transport/surface/chat/adapter";
 
 describe("Responses reasoning decoder", () => {
@@ -95,5 +96,56 @@ describe("Responses reasoning decoder", () => {
     expect(clientResponse.choices[0]?.message.reasoning_content).toBe(
       "**Summarizing in Indonesian**\n\nSaya akan menyam laju tangkapan per kucing.",
     );
+  });
+
+  test("replays encrypted reasoning under the item id it was issued for", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode([
+          'data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_17pws5a","type":"reasoning","encrypted_content":"gateway-opaque-blob","summary":[{"type":"summary_text","text":"thinking"}]}}',
+          'data: {"type":"response.completed","response":{"status":"completed","output":[]}}',
+          "data: [DONE]",
+          "",
+        ].join("\n\n")));
+        controller.close();
+      },
+    });
+    const request = {
+      model: "test-model",
+      source_surface: "responses",
+      stream: true,
+      messages: [],
+    } as unknown as CanonicalRequest;
+    const events = [];
+    for await (const event of decodeResponsesSseStream(stream, request)) events.push(event);
+    let reasoningPart: ContentPart | undefined;
+    for (const event of events) {
+      if (event.type !== "content_delta" || event.content.kind !== "reasoning") continue;
+      reasoningPart = event.content;
+      break;
+    }
+    // The id travels with the payload: the upstream verifies a replay against
+    // the item the encrypted content was issued for.
+    expect(reasoningPart).toMatchObject({
+      encrypted_content: "gateway-opaque-blob",
+      item_id: "rs_17pws5a",
+    });
+    if (reasoningPart === undefined) throw new Error("expected one reasoning part");
+
+    const replay: Record<string, unknown> = canonicalToResponsesPayload({
+      ...request,
+      messages: [
+        { role: "assistant", content: [reasoningPart] },
+        { role: "user", content: [{ kind: "text", text: "next" }] },
+      ],
+      generation_controls: {},
+    } as unknown as CanonicalRequest);
+    const rawInput: unknown = replay["input"];
+    if (!Array.isArray(rawInput)) throw new Error("expected an input item array");
+    const replayed = rawInput.find(
+      (item): item is Record<string, unknown> =>
+        typeof item === "object" && item !== null && "type" in item && item["type"] === "reasoning",
+    );
+    expect(replayed).toMatchObject({ id: "rs_17pws5a", encrypted_content: "gateway-opaque-blob" });
   });
 });

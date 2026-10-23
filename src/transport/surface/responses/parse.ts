@@ -456,6 +456,10 @@ function parseInputItem(item: ResponsesInputItem): {
         encrypted_content: encrypted,
       };
       if (summary !== undefined) reasoningPart.summary = summary;
+      // The upstream binds encrypted reasoning to the item id it was issued
+      // for; a replay under a different id is rejected outright.
+      const itemId = typeof item["id"] === "string" ? item["id"] : undefined;
+      if (itemId !== undefined) reasoningPart.item_id = itemId;
       return {
         message: { role: "assistant", content: [reasoningPart] },
         metadata: itemMetadata(item),

@@ -308,6 +308,13 @@ export type ContentPart =
       /** Responses reasoning summary block index, preserved across surfaces. */
       summary_index?: number;
       signature?: string;
+      /**
+       * Responses item id the `encrypted_content` was issued for. The upstream
+       * binds encrypted reasoning to its item and rejects a replay whose item
+       * id does not match, so the id travels with the payload it belongs to
+       * rather than being re-derived at request time.
+       */
+      item_id?: string;
       encrypted_content?: string;
     }
   | { kind: "extension"; name: string; payload: unknown };

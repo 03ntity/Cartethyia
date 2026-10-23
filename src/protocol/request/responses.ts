@@ -163,7 +163,15 @@ export function canonicalToResponsesPayload(
         flushMessage();
         // Replays prior encrypted reasoning so the model retains continuity
         // across turns; never decrypted or reconstructed from summary text.
-        input.push({ type: "reasoning", encrypted_content: p.encrypted_content });
+        // The upstream binds encrypted reasoning to the item it was issued
+        // for and rejects a replay whose id does not match ("Encrypted content
+        // item_id did not match the target item id"), so the item carries the
+        // id it was parsed with. Without one there is nothing to match and the
+        // payload would be rejected anyway — it is dropped rather than sent
+        // under an id the upstream cannot verify.
+        if (p.item_id !== undefined) {
+          input.push({ type: "reasoning", id: p.item_id, encrypted_content: p.encrypted_content });
+        }
       } else if (p.kind === "reasoning") {
         // Plain reasoning replayed from another surface (a Messages `thinking`
         // block, or Chat `reasoning_content`). It has no encrypted artifact, so

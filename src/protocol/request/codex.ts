@@ -374,7 +374,16 @@ export function canonicalToCodexResponsesPayload(
               summary: summaryArray,
               encrypted_content: r.encrypted_content,
             };
-            if (r.summary !== undefined || r.encrypted_content !== undefined) {
+            // The upstream binds encrypted reasoning to the item it was issued
+            // for and rejects a replay whose id does not match, so the id that
+            // came back with the payload is authoritative. A synthesized
+            // `rs_<hash>` never matched the real item and failed the whole
+            // request with "Encrypted content item_id did not match the target
+            // item id"; only fall back to it when no id survived, where a
+            // mismatch is unavoidable anyway.
+            if (typeof r.item_id === "string" && r.item_id.length > 0) {
+              item["id"] = r.item_id;
+            } else if (r.summary !== undefined || r.encrypted_content !== undefined) {
               const idSource = `${r.summary ?? ""}|${r.encrypted_content ?? ""}`;
               if (idSource.length > 1) {
                 item["id"] = `rs_${hashToBase36(idSource)}`;
