@@ -19,7 +19,7 @@
 /** One measured category of on-disk data. */
 export interface DiskUsageBucket {
   /** Stable id, so the dashboard can key rows without matching on copy. */
-  readonly id: "telemetry_hourly" | "telemetry_compacted" | "payload_frames";
+  readonly id: "telemetry_events" | "telemetry_index" | "payload_frames";
   readonly label: string;
   readonly bytes: number;
   readonly files: number;
@@ -45,7 +45,7 @@ export interface DiskUsageResponse {
   readonly healthEventCount?: number;
 }
 
-export type ReclaimAction = "payload_frames" | "telemetry_retention" | "telemetry_hourly";
+export type ReclaimAction = "payload_frames" | "telemetry_retention";
 
 export interface ReclaimResponse {
   readonly action: ReclaimAction;

@@ -1,70 +1,13 @@
 /**
- * Compaction for hourly telemetry files: old per-request rows become one
- * summary row per (tenant, API key, day).
+ * Bucket primitives for the per-day telemetry index.
  *
- * The problem this solves is growth, and growth alone. Hourly JSONL files were
- * never deleted, so every read of the usage list scanned every file ever
- * written — the cost grew with total volume, not with the number of users. An
- * install serving 20 users got slower purely by serving them longer.
- *
- * Compaction is **accumulation, not sampling**. A compacted row carries the
- * running sums of everything it replaced, so a total that read 2B tokens
- * before compaction still reads 2B after it. Nothing is estimated and nothing
- * is averaged away — the per-request rows are gone, their totals are not.
- *
- * What compaction cannot preserve is anything that needs the individual row:
- * the request list, per-request filters, and the detail drawer. Latency is the
- * interesting middle case — a percentile needs every sample, so compaction
- * keeps a fixed histogram instead. P50 stays available as an approximation and
- * is marked as one rather than silently reported as exact.
- *
- * Retention becomes tiered:
- *
- *   0 .. N days   hourly files, complete
- *   N .. M days   compacted daily summary
- *   beyond M      deleted
+ * Each day's events are folded into a `CompactedBucket` via `accumulate()` and
+ * stored as a `.index.json` file alongside the source `.events.jsonl`. Buckets
+ * are pure accumulators: every field is a running sum, min, or max — nothing
+ * is averaged or estimated away. `mergeBucketsInternal` adds two buckets so
+ * partial indexes can be merged without re-reading source files.
  */
 import type { TelemetryEventRecord } from "./event-log";
-import type { CartethyiaDatabase } from "../persistence/db-handle";
-import { consoleSettings } from "../persistence/schema";
-import { resolveTelemetryWindowMinutes } from "../config/telemetry";
-
-/**
- * The compaction age to apply on a pass with no explicit age given.
- *
- * Hourly files are **not** partitioned per tenant — one file per hour holds
- * every tenant's rows — so a per-tenant age cannot be honoured per file. The
- * safest reading of several tenants' preferences is the **largest**: compacting
- * smaller than one tenant asked for moves its requests into the summary before
- * that tenant expected, losing the per-request view of them, while keeping them
- * longer than another wanted only costs disk and a slower scan. Losing detail
- * is not reversible; using more disk is.
- *
- * Falls back to the deployment default when no tenant overrides, and never
- * exceeds the retention window (compacting at or past the delete age would
- * fold a file and discard it in the same pass).
- */
-export async function resolveEffectiveWindowMinutes(db: CartethyiaDatabase): Promise<number> {
-  const fallback = resolveTelemetryWindowMinutes();
-  try {
-    const rows = await db
-      .select({ preferences: consoleSettings.preferences })
-      .from(consoleSettings);
-    let widest = fallback;
-    for (const row of rows) {
-      const minutes = row.preferences?.telemetryWindowMinutes;
-      if (typeof minutes === "number" && Number.isFinite(minutes) && minutes > widest) {
-        widest = minutes;
-      }
-    }
-    return Math.floor(widest);
-  } catch {
-    return fallback;
-  }
-}
-
-/** Discriminator so a reader can tell a summary from a request row at a glance. */
-const COMPACTED_KIND = "compacted" as const;
 
 /**
  * Histogram bucket edges in milliseconds.
@@ -112,15 +55,6 @@ export interface CompactedBucket {
   readonly byProvider: Readonly<Record<string, number>>;
   readonly byClient: Readonly<Record<string, number>>;
   readonly byClientIp: Readonly<Record<string, number>>;
-}
-
-/** One compacted row: the totals of everything it replaced, for one key/day. */
-export interface CompactedRow extends CompactedBucket {
-  readonly kind: typeof COMPACTED_KIND;
-  /** ISO day (UTC) this row summarises. */
-  readonly day: string;
-  readonly tenantId: string;
-  readonly apiKeyId: string | null;
 }
 
 /** A number from a value that may be a numeric string; 0 when unusable. */

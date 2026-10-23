@@ -287,9 +287,6 @@ export function registerConsoleDomains(
       telemetryDir: TELEMETRY_EVENT_DIR,
       retentionDays: resolveTelemetryRetentionDays(),
       payloadRetentionMs: payloadRetentionMs(),
-      // Hourly files are the only copy of their requests until compaction
-      // folds them up, so the console does not delete them on request.
-      allowHourlyReclaim: false,
       accessResolver: ctx.accessResolver,
       auditSink: ctx.auditRecorder,
       flusher: ctx.flushBuffers,

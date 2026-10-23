@@ -24,7 +24,7 @@ process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR = PAYLOAD_DIR;
 const { createDataManagementOperations } = await import(
   "../../src/console/data-management/operations"
 );
-const { ReclaimNotAllowedError, PurgeNotWiredError } = await import(
+const { PurgeNotWiredError } = await import(
   "../../src/console/data-management/contracts"
 );
 const { writePayloadFrame } = await import("../../src/observability/payload-store");
@@ -33,7 +33,6 @@ const OPS = createDataManagementOperations({
   telemetryDir: TELEMETRY_DIR,
   retentionDays: 30,
   payloadRetentionMs: 15 * 60_000,
-  allowHourlyReclaim: false,
 });
 
 /** A UTC day offset from today, as `YYYY-MM-DD`. */
@@ -67,9 +66,9 @@ describe("disk usage", () => {
     const usage = await OPS.usage();
     const byId = Object.fromEntries(usage.buckets.map((b) => [b.id, b]));
 
-    expect(byId.telemetry_hourly?.bytes).toBe(100);
-    expect(byId.telemetry_hourly?.files).toBe(1);
-    expect(byId.telemetry_compacted?.bytes).toBe(50);
+    expect(byId.telemetry_events?.bytes).toBe(100);
+    expect(byId.telemetry_events?.files).toBe(1);
+    expect(byId.telemetry_index?.bytes).toBe(50);
     expect(byId.payload_frames?.bytes).toBe(25);
     expect(usage.totalBytes).toBe(175);
   });
@@ -79,7 +78,7 @@ describe("disk usage", () => {
     await writeFile(join(TELEMETRY_DIR, `${dayOffset(2)}.index.json`), "y".repeat(32));
 
     const usage = await OPS.usage();
-    const compacted = usage.buckets.find((b) => b.id === "telemetry_compacted");
+    const compacted = usage.buckets.find((b) => b.id === "telemetry_index");
     // Only the 90-day-old file: the 2-day-old one still answers queries.
     expect(compacted?.reclaimableBytes).toBe(64);
     expect(compacted?.reclaimableFiles).toBe(1);
@@ -101,16 +100,6 @@ describe("reclaim", () => {
     expect(result.deletedFiles).toBe(1);
     expect(result.reclaimedBytes).toBe(10);
     expect(result.action).toBe("telemetry_retention");
-    expect(await readdir(TELEMETRY_DIR)).toHaveLength(1);
-  });
-
-  test("hourly files are refused", async () => {
-    // The safety boundary: these are the only copy of their requests until
-    // compaction folds them up, so losing one loses real history.
-    await writeFile(join(TELEMETRY_DIR, `${dayOffset(1)}.events.jsonl`), "x".repeat(10));
-    await expect(OPS.reclaim("telemetry_hourly")).rejects.toBeInstanceOf(
-      ReclaimNotAllowedError,
-    );
     expect(await readdir(TELEMETRY_DIR)).toHaveLength(1);
   });
 
@@ -165,7 +154,6 @@ describe("the health & error log purge", () => {
       telemetryDir: TELEMETRY_DIR,
       retentionDays: 30,
       payloadRetentionMs: 15 * 60_000,
-      allowHourlyReclaim: false,
       healthEvents: store,
     });
     const usage = await ops.usage();

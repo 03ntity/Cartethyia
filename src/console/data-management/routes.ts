@@ -11,7 +11,6 @@ const reclaimBody = t.Object({
   action: t.Union([
     t.Literal("payload_frames"),
     t.Literal("telemetry_retention"),
-    t.Literal("telemetry_hourly"),
   ]),
 });
 

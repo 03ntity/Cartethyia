@@ -35,12 +35,6 @@ export interface DataManagementConfig {
   readonly retentionDays: number;
   readonly payloadRetentionMs: number;
   /**
-   * Whether hourly files may be dropped from the console. Off unless a caller
-   * opts in: an hourly file still inside the compaction window is the only
-   * copy of its requests, so removing one loses real history.
-   */
-  readonly allowHourlyReclaim: boolean;
-  /**
    * The health & error log store, backing the console's only row-level purge.
    * Absent (a reduced console composition) means the purge is not offered
    * rather than failing to boot.
@@ -107,8 +101,8 @@ export function createDataManagementOperations(config: DataManagementConfig) {
 
     const buckets: DiskUsageBucket[] = [
       {
-        id: "telemetry_hourly",
-        label: "Daily request files",
+        id: "telemetry_events",
+        label: "Request event files",
         bytes: hourly.bytes,
         files: hourly.files,
         note: "Feeds the request list and detail drawer.",
@@ -116,7 +110,7 @@ export function createDataManagementOperations(config: DataManagementConfig) {
         reclaimableFiles: null,
       },
       {
-        id: "telemetry_compacted",
+        id: "telemetry_index",
         label: "Day indexes",
         bytes: compacted.bytes,
         files: compacted.files,
@@ -178,12 +172,7 @@ export function createDataManagementOperations(config: DataManagementConfig) {
         (isIndex(name) || isHourly(name)) && dayBefore(name, cutoff),
       );
     }
-    if (!config.allowHourlyReclaim) {
-      throw new ReclaimNotAllowedError(
-        "Hourly files are the only copy of their requests until compaction folds them up, so the console will not delete them.",
-      );
-    }
-    return unlinkWhere(action, config.telemetryDir, isHourly);
+    throw new ReclaimNotAllowedError(`Unknown reclaim action: ${action}`);
   }
 
   /** The one row-level deletion the console offers. */

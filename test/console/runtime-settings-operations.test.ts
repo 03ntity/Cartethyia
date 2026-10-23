@@ -16,7 +16,6 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { getDb } from "../../src/persistence/boot";
 import { consoleSettings } from "../../src/persistence/schema";
 import { DrizzleRuntimeSettingsStore } from "../../src/console/settings/store";
-import { resolveEffectiveWindowMinutes } from "../../src/observability/event-compaction";
 import { dbDescribe, requireDatabase } from "../helpers/database";
 import { createWorld, type GatewayWorld } from "../helpers/fixtures";
 
@@ -88,16 +87,6 @@ dbDescribe("operational runtime settings", () => {
   test("a compaction age override round-trips", async () => {
     await writeBag({ telemetryWindowMinutes: 14 });
     expect((await store.get(world.tenantId)).telemetryWindowMinutes).toBe(14);
-  });
-
-  test("the effective compaction age never compacts earlier than the widest ask", async () => {
-    // Hourly files hold every tenant together, so the safest reading of several
-    // preferences is the largest: compacting earlier than one tenant asked for
-    // destroys rows that tenant expected to keep, while compacting later only
-    // costs disk.
-    await writeBag({ telemetryWindowMinutes: 21 });
-    const effective = await resolveEffectiveWindowMinutes(getDb());
-    expect(effective).toBeGreaterThanOrEqual(21);
   });
 
   test("an attachment ceiling round-trips", async () => {
