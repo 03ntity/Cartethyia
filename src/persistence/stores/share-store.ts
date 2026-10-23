@@ -308,9 +308,10 @@ export class DrizzleShareLinkStore implements ShareLinkStore {
           .set({
             tokenHash: input.tokenHash,
             tokenEncrypted: input.tokenEncrypted,
-            // The slug is the address and survives a rotate, so an operator who
-            // rotates does not invalidate every copy of the link they shared.
-            ...(current.slug === null ? { slug: input.slug } : {}),
+            // Rotating the slug changes the public URL, so the old link stops resolving.
+            // Callers always generate a fresh slug via generateShareSlug() before calling
+            // create() with rotate: true.
+            slug: input.slug,
             expiresAt: input.expiresAt,
             lastViewedAt: null,
           })

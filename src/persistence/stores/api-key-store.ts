@@ -187,6 +187,7 @@ export interface ApiKeyStore {
   reorder(tenantId: string, keyIds: readonly string[]): Promise<void>;
   update(tenantId: string, keyId: string, patch: ApiKeyPatch): Promise<ApiKeyRecord | undefined>;
   revoke(tenantId: string, keyId: string, revokedAt: Date): Promise<boolean>;
+  remove(tenantId: string, keyId: string): Promise<boolean>;
   findActiveByHash?(hash: string): Promise<typeof apiKeys.$inferSelect | undefined>;
   findActiveById?(keyId: string): Promise<typeof apiKeys.$inferSelect | undefined>;
   sumChildrenConsumed?(parentKeyId: string): Promise<number>;
@@ -447,6 +448,21 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
           .where(and(eq(shareLinks.apiKeyId, keyId), eq(shareLinks.active, true)));
       }
       return true;
+    });
+  }
+  async remove(tenantId: string, keyId: string): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const rows = await tx
+        .delete(apiKeys)
+        .where(
+          and(
+            eq(apiKeys.tenantId, tenantId),
+            eq(apiKeys.id, keyId),
+            eq(apiKeys.isDefault, false),
+          ),
+        )
+        .returning({ id: apiKeys.id });
+      return rows.length > 0;
     });
   }
   async findActiveByHash(hash: string): Promise<typeof apiKeys.$inferSelect | undefined> {

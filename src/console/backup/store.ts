@@ -283,7 +283,7 @@ export async function exportBackup(
   const config: Record<string, readonly BackupRow[]> = {};
   const telemetry: Record<string, readonly BackupRow[]> = {};
   const counts: Record<string, number> = {};
-  const configSet = new Set<Table>([...CONFIG_TABLES, TENANT_TABLE]);
+  const configSet = new Set<Table>([...CONFIG_TABLES]);
   const telemetrySet = new Set<Table>(TELEMETRY_TABLES);
 
   for (const table of tables) {

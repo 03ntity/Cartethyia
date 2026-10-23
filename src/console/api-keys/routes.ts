@@ -367,7 +367,7 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
     async revokeKey(access: AccessDecision | undefined, keyId: string): Promise<{ success: true }> {
       const authorized = requireTenantScope(access, "dashboard:write");
       const target = await config.store.get(authorized.tenantId, keyId);
-      if (!target || target.revokedAt !== undefined)
+      if (!target)
         throw new ConsoleDomainError("key_not_found", 404, "Key not found");
       // The gateway routes every request off this key and the CLI reads it for
       // the CLI, so removing it would strand the installation with no way to
@@ -378,9 +378,9 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
           409,
           "The default gateway API key cannot be deleted. Rotate it instead.",
         );
-      const revoked = await config.store.revoke(authorized.tenantId, keyId, new Date());
-      if (!revoked) throw new ConsoleDomainError("key_not_found", 404, "Key not found");
       const children = await config.store.listChildren(authorized.tenantId, keyId);
+      const removed = await config.store.remove(authorized.tenantId, keyId);
+      if (!removed) throw new ConsoleDomainError("key_not_found", 404, "Key not found");
       invalidateApiKeyCache(keyId);
       for (const child of children) invalidateApiKeyCache(child.id);
       await Promise.all([

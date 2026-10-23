@@ -374,6 +374,10 @@ export class BackupService {
     const validation = validateRestorePayload(candidate, "");
     const warnings = validation.ok ? validation.value.warnings : [];
     const supported = new Set(validation.ok ? [...validation.value.tables.keys()].map(tableName) : []);
+    // `tenants` is diverted to `validation.value.tenantRows` during validate —
+    // not included in `tables` — so it would show as "unsupported" in the
+    // preview for any backup that carries it. Mark it supported explicitly.
+    if (validation.ok) supported.add("tenants");
 
     const rows: BackupInspectionRow[] = [];
     let total = 0;
