@@ -32,6 +32,7 @@ import { networkPools } from "../../persistence/schema";
 import { subscribePoolHealth } from "../../network/pool-health-machine";
 import { poolByteSnapshot } from "../../network/pool/byte-accounting";
 import { consoleSseResponse, createConsoleSseStream } from "./sse";
+import { subscribeRequestCompleted } from "../../observability/request-notify";
 
 export interface LiveConfig {
   readonly accessResolver: ConsoleAccessResolver;
@@ -87,6 +88,27 @@ function withPoolBytes<T extends { poolId: string; currentInflight?: number }>(
 
 export function createLiveRoutes(config: LiveConfig): Elysia {
   return new Elysia()
+    .get("/live/requests/stream", ({ request, set }) => {
+      try {
+        const access = config.accessResolver(request);
+        requireScope(access, "dashboard:read");
+        const tenantId = access?.tenantId;
+        if (!tenantId) return errorResponse(new Error("Tenant required"), set, "Live operation failed");
+        set.headers["content-type"] = "text/event-stream";
+        set.headers["cache-control"] = "no-cache, no-transform";
+        set.headers["connection"] = "keep-alive";
+        set.headers["x-accel-buffering"] = "no";
+        return consoleSseResponse(
+          createConsoleSseStream(request.signal, ({ send }) => {
+            return subscribeRequestCompleted((notice) => {
+              if (notice.tenantId === tenantId) send("request_completed", notice);
+            });
+          }),
+        );
+      } catch (e) {
+        return errorResponse(e, set, "Live operation failed");
+      }
+    })
     .get("/live/in-flight", ({ request, set }) => {
       try {
         requireScope(config.accessResolver(request), "dashboard:read");

@@ -266,3 +266,71 @@ export function usePoolUsage(): PoolUsageState {
 
   return { pools, live };
 }
+
+/**
+ * Subscribes to the `/live/requests/stream` SSE endpoint and invalidates the
+ * usage requests query whenever a `request_completed` event arrives. This
+ * makes the request list update in real time without polling — each completed
+ * request appears immediately instead of waiting for the next 5-second tick.
+ *
+ * The hook does not hold any state; it is purely a side-effect subscriber.
+ * Call it once near the top of the Usage page.
+ */
+export function useRequestsStream(): void {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    let stopped = false;
+    let source: EventSource | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let generation = 0;
+
+    const connect = async () => {
+      const currentGeneration = ++generation;
+      try {
+        // Auth-gate: a preflight GET confirms the session is valid so a dead
+        // session bounces through the normal 401 → login flow instead of
+        // opening an SSE stream that immediately closes and retries forever.
+        await consoleRequest<unknown>("/live/in-flight");
+        if (stopped || currentGeneration !== generation) return;
+
+        const nextSource = new EventSource("/console/api/live/requests/stream");
+        source = nextSource;
+
+        nextSource.addEventListener("request_completed", () => {
+          if (stopped || currentGeneration !== generation) return;
+          // Invalidate all request list queries so the table refreshes
+          // immediately. The query key prefix covers every period/limit combo.
+          void queryClient.invalidateQueries({
+            queryKey: ["console", "usage", "requests"],
+            exact: false,
+          });
+        });
+
+        nextSource.onerror = () => {
+          if (stopped || currentGeneration !== generation) return;
+          nextSource.close();
+          if (source === nextSource) source = undefined;
+          retryTimer = setTimeout(() => {
+            if (!stopped) void connect();
+          }, STREAM_RETRY_MS);
+        };
+      } catch {
+        // Offline or unauthenticated — retry after a delay; the shell
+        // handles the 401 → login transition through its own mechanism.
+        if (!stopped) {
+          retryTimer = setTimeout(() => {
+            if (!stopped) void connect();
+          }, STREAM_RETRY_MS);
+        }
+      }
+    };
+
+    void connect();
+    return () => {
+      stopped = true;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+      source?.close();
+    };
+  }, [queryClient]);
+}

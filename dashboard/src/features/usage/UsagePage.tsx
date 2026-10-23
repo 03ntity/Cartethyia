@@ -64,7 +64,7 @@ import { usageApiKeyLabel, usageClientLabel, maskClientIp } from "./usage-labels
 import { useMaskIp } from "../../lib/privacy-mode";
 
 import { useProviderAccounts, useProviders } from "../../hooks/providers";
-import { useInFlight, type InFlightState } from "../../hooks/live";
+import { useInFlight, useRequestsStream, type InFlightState } from "../../hooks/live";
 import { useTrackedTimeout } from "../../hooks/use-timeout";
 import { USAGE_PERIODS, type UsagePeriod as Period } from "../../data/usage-periods";
 import { httpStatusLabel, httpStatusShortLabel, httpStatusTone } from "./http-status";
@@ -1520,6 +1520,7 @@ export default function Usage(): ReactNode {
   const [requestLimit, setRequestLimit] = useState(50);
   const [requestStatusFilter, setRequestStatusFilter] = useState<number | null>(null);
   const requestsQuery = useUsageRequests(period, requestLimit, requestStatusFilter);
+  useRequestsStream();
   /** Scroll offset of the Requests table, restored after each live refresh. */
   const requestsScrollTopRef = useRef(0);
   const [requestSortKey, setRequestSortKey] = useState<"startedAt" | "model" | "status" | "tokens" | "tps" | "ttft" | "duration">("startedAt");

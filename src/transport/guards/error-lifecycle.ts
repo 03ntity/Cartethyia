@@ -12,6 +12,7 @@ import { computeTokensPerSec } from "../../observability/token-speed";
 import { pushStructuredConsoleLog } from "../../observability/log-ring";
 import type { ConsoleLogLevel, ConsoleLogMetadata } from "../../observability/log-ring";
 import { isProxyDispatchRoute } from "./body-policy";
+import { notifyRequestCompleted } from "../../observability/request-notify";
 
 interface ElysiaBuiltinError {
   readonly status?: number;
@@ -235,6 +236,12 @@ export function finalizeRequestTelemetry(
       tokensPerSec,
     }),
   );
+  notifyRequestCompleted({
+    tenantId: authorization.tenantId,
+    requestId: state.requestId,
+    status,
+    httpStatus: requestStatus,
+  });
 }
 
 /** Console-log severity for a terminal request status. */
