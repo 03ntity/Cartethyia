@@ -614,26 +614,26 @@ export function SharePage(): ReactElement {
 
             {data.sharePopup.enabled && data.sharePopup.hasImage ? (
               <Card surface="muted" className="min-w-0 overflow-hidden border-glass-border-2 bg-glass-bg backdrop-blur-md backdrop-saturate-150">
-                <div className="grid grid-cols-[280px_1fr] gap-0 max-sm:grid-cols-1">
+                <div className="grid grid-cols-[280px_1fr] gap-0 max-sm:grid-cols-[140px_1fr]">
                   {/* Left: QRIS image */}
-                  <div className="relative flex items-center justify-center bg-white p-6 max-sm:py-8">
+                  <div className="relative flex items-center justify-center bg-white p-4">
                     <img
                       src={"/share/" + linkToken + "/popup-image"}
                       alt={data.sharePopup.title ?? "Support QR code"}
-                      className="block w-full max-w-[220px] max-sm:max-w-[180px] rounded-control"
+                      className="block w-full max-w-[220px] rounded-control"
                     />
                   </div>
                   {/* Right: title, body, download, project info */}
-                  <div className="flex flex-col justify-center gap-6 p-8 max-sm:p-6">
+                  <div className="flex flex-col justify-center gap-5 p-6 max-sm:p-4 max-sm:gap-3">
                     <div>
                       <p className="inline-flex items-center gap-2 text-text-tertiary font-mono text-micro font-bold tracking-label leading-normal mb-3">
                         <Heart size={12} aria-hidden="true" className="text-orange" /> SUPPORT
                       </p>
                       {data.sharePopup.title ? (
-                        <h2 className="font-head text-title font-semibold leading-snug wrap-anywhere">{data.sharePopup.title}</h2>
+                        <h2 className="font-head text-title font-semibold leading-snug wrap-anywhere max-sm:text-lead">{data.sharePopup.title}</h2>
                       ) : null}
                       {data.sharePopup.body ? (
-                        <p className="mt-3 text-body leading-loose whitespace-pre-wrap text-text-secondary wrap-anywhere">{data.sharePopup.body}</p>
+                        <p className="mt-2 text-body leading-loose whitespace-pre-wrap text-text-secondary wrap-anywhere max-sm:text-caption max-sm:leading-normal">{data.sharePopup.body}</p>
                       ) : null}
                     </div>
                     <div className="flex flex-wrap gap-3">
@@ -657,12 +657,12 @@ export function SharePage(): ReactElement {
                         Download QR
                       </button>
                     </div>
-                    <div className="border-t border-inner-border pt-5 flex flex-col gap-1">
+                    <div className="border-t border-inner-border pt-4 max-sm:pt-3 flex flex-col gap-1">
                       <p className="text-badge text-text-tertiary">
                         <span className="font-semibold text-text-secondary">Gateway</span>&ensp;{data.name}
                       </p>
-                      <p className="text-badge text-text-tertiary">
-                        Scan the QR code with any QRIS-compatible banking or e-wallet app.
+                      <p className="text-badge text-text-tertiary max-sm:hidden">
+                        Scan with any QRIS-compatible banking or e-wallet app.
                       </p>
                     </div>
                   </div>
