@@ -138,7 +138,7 @@ function TokenBudgetField({
         disabled={disabled}
       />
       <div
-        className="flex flex-wrap gap-3 mt-3"
+        className="flex flex-wrap gap-2 mt-2"
         role="group"
         aria-label={`${label} presets`}
       >
@@ -150,7 +150,7 @@ function TokenBudgetField({
             aria-label={`${preset.label}, ${preset.description} tokens`}
             onClick={() => onChange(preset.label)}
             disabled={disabled}
-            className="py-1 px-4 rounded-chip text-micro font-semibold"
+            className="py-0.5 px-3 rounded-chip text-micro font-semibold"
             style={{
               cursor: disabled ? "not-allowed" : "pointer",
               border: `1px solid ${selected === preset.label ? "var(--accent)" : "var(--inner-border)"}`,
@@ -211,9 +211,9 @@ function RemoteRoutingRow({
 
   return (
     <div
-      className="flex items-center justify-between gap-6 py-2 px-5 rounded-inset"
+      className="flex items-center justify-between gap-4 py-1.5 px-4 rounded-inset"
       style={{
-        minHeight: "44px",
+        minHeight: "38px",
         border: "1px solid var(--inner-border)",
         background: enabled ? "var(--accent-soft)" : "var(--surface-1)",
       }}
@@ -484,9 +484,9 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
     );
   });
   return (
-    <div className="flex flex-col gap-6 min-w-0 pb-2">
-      <section className="flex flex-col gap-4 min-w-0 p-6 border border-inner-border rounded-card bg-surface-2 col-span-full">
-        <h3 className="inline-flex items-center gap-2 text-body font-bold text-text-primary">
+    <div className="flex flex-col gap-3 min-w-0 pb-2">
+      <section className="flex flex-col gap-3 min-w-0 p-4 border border-inner-border rounded-card bg-surface-2 col-span-full">
+        <h3 className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
           <KeyRound size={16} className="text-accent" aria-hidden="true" />
           Credential mode
         </h3>
@@ -495,7 +495,7 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
             <button key={modeOption} type="button" aria-pressed={keyMode === modeOption}
               disabled={busy || modeLocked} onClick={() => setKeyMode(modeOption)}
               title={modeLocked ? "Credential mode cannot change after creation" : undefined}
-              className="rounded-inset py-2 px-6"
+              className="rounded-inset py-1.5 px-5"
               style={{ border: "1px solid var(--inner-border)",
                 color: keyMode === modeOption ? "var(--accent)" : "var(--text-secondary)",
                 background: keyMode === modeOption ? "var(--accent-soft)" : "var(--surface-2)",
@@ -513,11 +513,11 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
             : "A personal key authenticates requests directly; its secret is shown once when created or rotated."}
         </p>
       </section>
-      <div className="columns-2 gap-6 min-w-0 max-medium:columns-1">
+      <div className="grid grid-cols-2 gap-3 min-w-0 max-medium:grid-cols-1">
       {mode === "create" && (
-        <section className="flex flex-col gap-4 min-w-0 p-6 border border-inner-border rounded-card bg-surface-2 break-inside-avoid mb-6">
+        <section className="flex flex-col gap-3 min-w-0 p-4 border border-inner-border rounded-card bg-surface-2">
           <div>
-            <h3 className="inline-flex items-center gap-2 text-body font-bold text-text-primary">
+            <h3 className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
               <Fingerprint size={16} className="text-accent" aria-hidden="true" />
               Identity
             </h3>
@@ -538,9 +538,9 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
         </section>
       )}
       {mode === "edit" && (
-        <section className="flex flex-col gap-4 min-w-0 p-6 border border-inner-border rounded-card bg-surface-2 break-inside-avoid mb-6">
+        <section className="flex flex-col gap-3 min-w-0 p-4 border border-inner-border rounded-card bg-surface-2">
           <div>
-            <h3 className="text-body font-bold text-text-primary">
+            <h3 className="text-caption font-bold text-text-primary">
               <Fingerprint size={16} className="mr-2 inline text-accent" aria-hidden="true" />
               Identity
             </h3>
@@ -563,9 +563,9 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
           </div>
         </section>
       )}
-      <section className="flex flex-col gap-4 min-w-0 p-6 border border-inner-border rounded-card bg-surface-2 break-inside-avoid mb-6">
+      <section className="flex flex-col gap-3 min-w-0 p-4 border border-inner-border rounded-card bg-surface-2">
         <div>
-          <h3 className="text-body font-bold text-text-primary">
+          <h3 className="text-caption font-bold text-text-primary">
             <StickyNote size={16} className="mr-2 inline text-accent" aria-hidden="true" />
             Share notes
           </h3>
@@ -588,6 +588,7 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
           placeholder="e.g. Come and save your tokens"
           disabled={busy}
         />
+        <div className="col-span-full">
         <Input
           label="Body"
           value={notesBody}
@@ -596,10 +597,11 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
           disabled={busy}
         />
         </div>
+        </div>
       </section>
-      <section className="flex flex-col gap-4 min-w-0 p-6 border border-inner-border rounded-card bg-surface-2 break-inside-avoid mb-6">
+      <section className="flex flex-col gap-3 min-w-0 p-4 border border-inner-border rounded-card bg-surface-2 col-span-full">
         <div>
-          <h3 className="text-body font-bold text-text-primary">
+          <h3 className="text-caption font-bold text-text-primary">
             <Gauge size={16} className="mr-2 inline text-accent" aria-hidden="true" />
             Limits
           </h3>
@@ -628,7 +630,7 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
           />
         </div>
         <div
-          className="flex items-center justify-between gap-6 rounded-panel border border-inner-border px-6 py-5 bg-surface-2"
+          className="flex items-center justify-between gap-4 rounded-panel border border-inner-border px-4 py-3 bg-surface-2"
         >
           <div>
             <div className="text-caption font-bold text-text-primary">
@@ -648,9 +650,9 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
               type="button"
               onClick={() => setBudgetMode("recurring")}
               disabled={busy}
-              className="py-2 px-5 rounded-chip font-semibold border-0 cursor-pointer"
+              className="py-1.5 px-4 rounded-chip font-semibold border-0 cursor-pointer"
               style={{
-                fontSize: "10.5px",
+                fontSize: "10px",
                 background: !isOneTime ? "var(--accent-soft)" : "transparent",
                 color: !isOneTime ? "var(--accent)" : "var(--text-tertiary)",
               }}
@@ -664,9 +666,9 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
               type="button"
               onClick={() => setBudgetMode("one-time")}
               disabled={busy}
-              className="py-2 px-5 rounded-chip font-semibold border-0 cursor-pointer"
+              className="py-1.5 px-4 rounded-chip font-semibold border-0 cursor-pointer"
               style={{
-                fontSize: "10.5px",
+                fontSize: "10px",
                 background: isOneTime ? "var(--accent-soft)" : "transparent",
                 color: isOneTime ? "var(--accent)" : "var(--text-tertiary)",
               }}
@@ -703,10 +705,10 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
         )}
       </section>
       </div>
-      <section className="flex flex-col gap-4 min-w-0 p-6 border border-inner-border rounded-card bg-surface-2 col-span-full" aria-labelledby="share-popup-heading">
+      <section className="flex flex-col gap-3 min-w-0 p-4 border border-inner-border rounded-card bg-surface-2 col-span-full" aria-labelledby="share-popup-heading">
         <div className="flex items-start justify-between gap-6">
           <div>
-            <h3 id="share-popup-heading" className="text-body font-bold text-text-primary">
+            <h3 id="share-popup-heading" className="text-caption font-bold text-text-primary">
               <Share2 size={16} className="mr-2 inline text-accent" aria-hidden="true" />
               Share page popup
             </h3>
@@ -785,9 +787,9 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
         ) : null}
       </section>
       <details className="group min-w-0 col-span-full rounded-card border border-inner-border bg-surface-2">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-6 [&::-webkit-details-marker]:hidden">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
           <span className="flex min-w-0 items-start gap-3">
-            <span className="grid size-10 shrink-0 place-items-center rounded-inset bg-accent-soft text-accent">
+            <span className="grid size-8 shrink-0 place-items-center rounded-inset bg-accent-soft text-accent">
               <Shield size={18} aria-hidden="true" />
             </span>
             <span className="min-w-0">
@@ -804,7 +806,7 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
             <ChevronDown size={14} className="transition-transform group-open:rotate-180" aria-hidden="true" />
           </span>
         </summary>
-        <div className="flex flex-col gap-5 border-t border-inner-border p-6">
+        <div className="flex flex-col gap-4 border-t border-inner-border p-4">
           {record?.isDefault ? (
             <div className="flex items-start gap-3 rounded-control border border-accent/30 bg-accent-soft p-4 text-badge text-text-secondary">
               <ShieldCheck size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
@@ -816,16 +818,16 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
               </p>
             </div>
           ) : null}
-        <div className="columns-2 gap-6 min-w-0 max-medium:columns-1">
+        <div className="grid grid-cols-2 gap-4 min-w-0 max-medium:grid-cols-1">
         <div>
-          <label className="inline-flex items-center gap-2 text-badge font-semibold text-text-secondary block mb-3">
+          <label className="inline-flex items-center gap-2 text-badge font-semibold text-text-secondary block mb-2">
             <Boxes size={14} className="text-accent" aria-hidden="true" />
             Model access
           </label>
           <div
             role="group"
             aria-label="Model access mode"
-            className="flex gap-3 mb-4"
+            className="flex gap-2 mb-3"
           >
             {(["whitelist", "blacklist"] as const).map((option) => (
               <button
@@ -857,11 +859,11 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
             ))}
           </div>
           <label
-            className="text-badge font-semibold text-text-secondary block mb-3"
+            className="text-badge font-semibold text-text-secondary block mb-2"
           >
             {modelAccessMode === "whitelist" ? "Allowed models" : "Blocked models"}
           </label>
-          <div className="flex gap-3 flex-wrap mb-4">
+          <div className="flex gap-2 flex-wrap mb-3">
             {models.length === 0 ? (
               <span className="mt-1 text-badge text-text-tertiary">
                 {modelAccessMode === "whitelist" ? "All models allowed" : "No models blocked"}
@@ -904,7 +906,7 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
             multi
           />
         </div>
-        <section aria-labelledby="blocked-routers-heading" className="flex flex-col gap-4">
+        <section aria-labelledby="blocked-routers-heading" className="flex flex-col gap-3">
           <div>
             <h4 id="blocked-routers-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
               <Ban size={15} className="text-accent" aria-hidden="true" />
@@ -918,9 +920,9 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
             {CLIENT_ROUTERS.map((router) => (
               <div
                 key={router.id}
-                className="flex items-center justify-between gap-6 py-2 px-5 rounded-inset"
+                className="flex items-center justify-between gap-4 py-1.5 px-4 rounded-inset"
                 style={{
-                  minHeight: "44px",
+                  minHeight: "38px",
                   border: "1px solid var(--inner-border)",
                   background: blockedRouters.includes(router.id) ? "var(--accent-soft)" : "var(--surface-1)",
                 }}
@@ -952,7 +954,7 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
             ))}
           </div>
         </section>
-        <section aria-labelledby="routing-scopes-heading" className="flex flex-col gap-4">
+        <section aria-labelledby="routing-scopes-heading" className="flex flex-col gap-3">
           <h4 id="routing-scopes-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
             <Route size={15} className="text-accent" aria-hidden="true" />
             Routing
@@ -965,9 +967,9 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
             {TENANT_KEY_SCOPES.filter((scope) => scope === "routing:invoke").map((scope) => (
               <div
                 key={scope}
-                className="flex items-center justify-between gap-6 py-2 px-5 rounded-inset"
+                className="flex items-center justify-between gap-4 py-1.5 px-4 rounded-inset"
                 style={{
-                  minHeight: "44px",
+                  minHeight: "38px",
                   border: "1px solid var(--inner-border)",
                   background: scopes.includes(scope) ? "var(--accent-soft)" : "var(--surface-1)",
                 }}
@@ -1010,18 +1012,18 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
             );
           }}
         />
-        <section aria-labelledby="dashboard-scopes-heading" className="flex flex-col gap-4">
+        <section aria-labelledby="dashboard-scopes-heading" className="flex flex-col gap-3">
           <h4 id="dashboard-scopes-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">
             <LayoutDashboard size={15} className="text-accent" aria-hidden="true" />
             Dashboard / Resources
           </h4>
-          <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-2 max-medium:grid-cols-1">
             {TENANT_KEY_SCOPES.filter((scope) => !scope.startsWith("routing:")).map((scope) => (
               <div
                 key={scope}
-                className="flex items-center justify-between gap-6 py-2 px-5 rounded-inset"
+                className="flex items-center justify-between gap-4 py-1.5 px-4 rounded-inset"
                 style={{
-                  minHeight: "44px",
+                  minHeight: "38px",
                   border: "1px solid var(--inner-border)",
                   background: scopes.includes(scope) ? "var(--accent-soft)" : "var(--surface-1)",
                 }}
