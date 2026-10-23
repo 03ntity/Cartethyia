@@ -36,17 +36,12 @@ import {
   type ValidatedRestore,
   type ValidatedTable,
 } from "./contracts";
-import { DEFAULT_API_KEY_LABEL } from "../api-keys/contracts";
 import {
-  apiKeys,
   modelCombos,
   networkPools,
   providerRoutingSettings,
   shareLinks,
 } from "../../persistence/schema";
-
-const LEGACY_PROVIDER_USER_AGENT = "codex_cli_rs/0.156.1";
-const CURRENT_PROVIDER_USER_AGENT = "claude-cli/2.1.293 (external, cli)";
 
 /**
  * Provider ids that were renamed, old spelling to current.
@@ -68,51 +63,14 @@ function currentProviderId(value: unknown): unknown {
   return RENAMED_PROVIDER_IDS[value] ?? value;
 }
 
-function legacyModelList(value: unknown): readonly string[] | undefined {
-  if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) return undefined;
-  return value;
-}
-
-function normalizeLegacyApiKeyPolicy(row: Record<string, unknown>): Record<string, unknown> {
-  const allowlist = legacyModelList(row["model_allowlist"]);
-  const denylist = legacyModelList(row["model_denylist"]);
-  if (row["model_access_mode"] !== undefined || row["model_list"] !== undefined) return row;
-  if (denylist !== undefined && denylist.length > 0) {
-    return { ...row, model_access_mode: "blacklist", model_list: denylist };
-  }
-  if (allowlist !== undefined) {
-    return { ...row, model_access_mode: "whitelist", model_list: allowlist };
-  }
-  return row;
-}
-
 function normalizeLegacyRow(table: Table, row: Record<string, unknown>): Record<string, unknown> {
   if (row["provider_id"] !== undefined) {
     const renamed = currentProviderId(row["provider_id"]);
     if (renamed !== row["provider_id"]) row = { ...row, provider_id: renamed };
   }
-  if (
-    table === apiKeys &&
-    row["is_default"] === undefined &&
-    (row["key_mode"] === undefined || row["key_mode"] === "personal") &&
-    row["parent_key_id"] == null &&
-    row["label"] === DEFAULT_API_KEY_LABEL
-  ) {
-    return { ...row, is_default: true };
-  }
   if (table === providerRoutingSettings) {
-    const { bypass_proxy: legacySkipProxy, ...current } = row;
-    let normalized = current;
-    if (normalized["skip_proxy"] === undefined && legacySkipProxy !== undefined) {
-      normalized = { ...normalized, skip_proxy: legacySkipProxy };
-    }
-    if (normalized["provider_id"] === "cline") {
-      normalized = { ...normalized, skip_proxy: true };
-    }
-    if (normalized["user_agent"] === LEGACY_PROVIDER_USER_AGENT) {
-      normalized = { ...normalized, user_agent: CURRENT_PROVIDER_USER_AGENT };
-    }
-    return normalized;
+    if (row["provider_id"] === "cline") return { ...row, skip_proxy: true };
+    return row;
   }
   if (table === networkPools && row["kind"] === "bridge") {
     return { ...row, kind: "https" };
@@ -342,7 +300,7 @@ export function validateRestorePayload(payload: unknown, tenantId: string): Rest
         // the current single policy before dropping retired column names.
         const sourceRow = normalizeLegacyRow(
           table,
-          table === apiKeys ? normalizeLegacyApiKeyPolicy(row) : row,
+          row,
         );
         // A stale backup may still carry columns the schema has since dropped.
         // Those are accepted but removed here, so they never reach the store

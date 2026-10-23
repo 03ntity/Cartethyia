@@ -2,27 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { encryptCredential, setCredentialEncryptionKeyForTesting, snapshotCredentialEncryptionKeyForTesting } from "../../src/security/crypto";
 import { CONFIG_TABLES, droppedColumns, ownershipOf, tableName, tablesForSection } from "../../src/console/backup/contracts";
-import { DEFAULT_API_KEY_LABEL, isDefaultGatewayApiKey } from "../../src/console/api-keys/contracts";
+import { isDefaultGatewayApiKey } from "../../src/console/api-keys/contracts";
 import { DELETE_ALL_SCOPES, type DeleteAllScope } from "../../src/console/backup/store";
 import { validateRestorePayload } from "../../src/console/backup/validate";
 
 describe("backup contract coverage", () => {
-  test("recognizes only the legacy personal gateway key by its canonical label", () => {
-    expect(isDefaultGatewayApiKey({
-      isDefault: false,
-      keyMode: "personal",
-      label: DEFAULT_API_KEY_LABEL,
-    })).toBe(true);
-    expect(isDefaultGatewayApiKey({
-      isDefault: false,
-      keyMode: "share",
-      label: DEFAULT_API_KEY_LABEL,
-    })).toBe(false);
-    expect(isDefaultGatewayApiKey({
-      isDefault: false,
-      keyMode: "personal",
-      label: "renamed ordinary key",
-    })).toBe(false);
+  test("recognizes the default gateway key by its persisted flag", () => {
+    expect(isDefaultGatewayApiKey({ isDefault: true })).toBe(true);
+    expect(isDefaultGatewayApiKey({ isDefault: false })).toBe(false);
   });
 
   test("keeps browser-only studio history out of the backup", () => {

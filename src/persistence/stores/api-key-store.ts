@@ -380,10 +380,6 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
         .set({
           ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
           ...(patch.label !== undefined ? { label: patch.label } : {}),
-          // Promotes a legacy default key: `isDefaultGatewayApiKey` recognizes
-          // it by its canonical label, but recognition was never written back,
-          // so the row stayed unflagged and a later rename — which changes the
-          // only field that identifies it — dropped the default entirely.
           ...(patch.isDefault !== undefined ? { isDefault: patch.isDefault } : {}),
           ...(patch.keyHash !== undefined ? { keyHash: patch.keyHash } : {}),
           ...(patch.keyMode !== undefined ? { keyMode: patch.keyMode } : {}),

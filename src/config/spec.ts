@@ -183,27 +183,6 @@ export const CONFIG_SPEC = {
     min: 5,
     max: 1440,
   },
-  /**
-   * Inert. Accepted so existing deployments keep booting; nothing reads it.
-   *
-   * It sized the one-file-per-window scheme — events were written to a file
-   * per this many minutes, 96 a day at the default. Events now append to one
-   * file per UTC day, so there is no window left to size.
-   */
-  CARTETHYIA_TELEMETRY_WINDOW_MINUTES: {
-    kind: "int",
-    default: 15,
-    min: 1,
-    max: 1440,
-  },
-  /**
-   * Inert. Accepted so existing deployments keep booting; nothing reads it.
-   *
-   * It capped how many window files one pass could fold. Folding is driven by
-   * a byte offset into the day file now and never deletes the file, so there
-   * is no per-pass batch to bound.
-   */
-  CARTETHYIA_TELEMETRY_COMPACT_MAX_FILES: { kind: "int", default: 48, min: 1, max: 10_000 },
   CARTETHYIA_TELEMETRY_PAYLOAD_MAX_BYTES: {
     kind: "int",
     default: 16 * 1024 * 1024,

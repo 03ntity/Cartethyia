@@ -186,15 +186,11 @@ const KEY_SECRET_BYTES = 12;
 /** Label of the default gateway API key seeded at first boot; never revoked. */
 export const DEFAULT_API_KEY_LABEL = "Default Cartethyia API key";
 
-/** Recognizes the default key and legacy rows restored before its flag existed. */
+/** Recognizes the default gateway API key by its persisted flag. */
 export function isDefaultGatewayApiKey(
-  record: Pick<ApiKeyRecord, "isDefault" | "keyMode" | "label" | "parentKeyId">,
+  record: Pick<ApiKeyRecord, "isDefault">,
 ): boolean {
-  return record.isDefault || (
-    record.keyMode === "personal" &&
-    record.parentKeyId === undefined &&
-    record.label === DEFAULT_API_KEY_LABEL
-  );
+  return record.isDefault;
 }
 
 /** Generates an inbound key and its one-way hash. */
@@ -213,10 +209,10 @@ export function resolveKeyPrefix(raw: string | undefined): string {
   return trimmed && trimmed.length > 0 ? trimmed : DEFAULT_API_KEY_PREFIX;
 }
 
-/** Resolves the share-key prefix and upgrades the legacy default prefix. */
+/** Resolves the share-key prefix; falls back to the default. */
 export function resolveShareKeyPrefix(raw: string | undefined): string {
   const trimmed = raw?.trim();
-  return !trimmed || trimmed === "rk_" ? DEFAULT_SHARE_API_KEY_PREFIX : trimmed;
+  return !trimmed ? DEFAULT_SHARE_API_KEY_PREFIX : trimmed;
 }
 
 /** Maximum hint the enroll page accepts; the dashboard caps its input there. */

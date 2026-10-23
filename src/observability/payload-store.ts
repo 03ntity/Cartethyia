@@ -4,12 +4,7 @@ import { randomUUID } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
 
 export interface PayloadFileReference {
-  /**
-   * `jsonb-file` is a frame written before compression existed: plain JSON.
-   * New frames are `jsonl-file`: the same JSON, gzipped. The row names its
-   * encoding, so a reader never guesses and an old row still resolves.
-   */
-  readonly storage: "jsonb-file" | "jsonl-file";
+  readonly storage: "jsonl-file";
   readonly file: string;
   readonly offset: number;
   readonly length: number;
@@ -28,7 +23,7 @@ export function isPayloadFileReference(value: unknown): value is PayloadFileRefe
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
   return (
-    (record["storage"] === "jsonb-file" || record["storage"] === "jsonl-file") &&
+    record["storage"] === "jsonl-file" &&
     typeof record["file"] === "string" &&
     typeof record["offset"] === "number" &&
     typeof record["length"] === "number" &&
@@ -65,19 +60,10 @@ export function payloadReferenceFromRow(row: {
 /** Extension for newly written frame files. Old `.jsonb` files are still read. */
 const FRAME_FILE_SUFFIX = ".jsonl";
 
-/**
- * True for a frame file, whichever extension it carries.
- *
- * Files written before the format change end `.jsonb`. They still hold live
- * frames whose rows point at them, so a prune that recognised only the new
- * extension would abandon them — and since nothing else removes them, they
- * would sit on disk indefinitely.
- */
 function isFrameFileName(name: string): boolean {
-  return name.endsWith(FRAME_FILE_SUFFIX) || name.endsWith(".jsonb");
+  return name.endsWith(FRAME_FILE_SUFFIX);
 }
 
-const FRAME_HEADER_BYTES = 4;
 const MAX_FRAME_BYTES = 256 * 1024 * 1024;
 const DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024;
 const DEFAULT_DIRECTORY = "./data/telemetry-payloads";
@@ -205,7 +191,6 @@ const FRAME_BODY_KEYS = [
   "provider_request_body",
   "provider_response_body",
   "client_response_body",
-  "response_body",
 ] as const;
 
 /**
@@ -273,7 +258,7 @@ export async function readPayloadFrame(reference: PayloadFileReference): Promise
     await handle.close();
   }
   const frame = data;
-  const json = frameJsonFromSlice(frame, reference.storage);
+  const json = frameJsonFromSlice(frame);
   if (json === undefined) return undefined;
   const parsed = JSON.parse(json.toString("utf8")) as PayloadFrame;
   return parsed.version === 1 ? parsed.payload : undefined;
@@ -303,16 +288,8 @@ function gunzipFrame(stored: Buffer): Buffer | undefined {
  */
 function frameJsonFromSlice(
   slice: Buffer,
-  storage: PayloadFileReference["storage"],
 ): Buffer | undefined {
-  const hasBinaryHeader = slice.byteLength >= FRAME_HEADER_BYTES && slice[0] === 0x00;
-  if (hasBinaryHeader) {
-    const length = slice.readUInt32BE(0);
-    if (length <= 0 || length + FRAME_HEADER_BYTES !== slice.byteLength) return undefined;
-    const stored = slice.subarray(FRAME_HEADER_BYTES);
-    return storage === "jsonl-file" ? gunzipFrame(stored) : stored;
-  }
-  // New shape: a base64 line. The trailing newline is not part of the payload.
+  // Frames are a base64 line. The trailing newline is not part of the payload.
   const text = slice.toString("utf8").trim();
   if (text.length === 0) return undefined;
   const gzipped = Buffer.from(text, "base64");
@@ -331,31 +308,12 @@ type FrameLiveness = "live" | "none" | "unknown";
 
 function frameLiveness(data: Buffer, before: Date): FrameLiveness {
   let offset = 0;
-  // One byte, not FRAME_HEADER_BYTES: a line frame is bounded by its newline
-  // and needs no minimum length of its own. Keying the loop to the old header
-  // size would stop a new-shape file a few bytes early and report it
-  // unreadable, which leaves it on disk forever.
   while (offset < data.byteLength) {
-    // New frames end at the next newline; old ones carry a length header. The
-    // first byte tells them apart, so a file holding a mix still walks.
     const newline = data.indexOf(0x0a, offset);
-    const hasBinaryHeader = data[offset] === 0x00;
-
-    let end: number;
-    let slice: Buffer;
-    if (hasBinaryHeader) {
-      const length = data.readUInt32BE(offset);
-      end = offset + FRAME_HEADER_BYTES + length;
-      // A length that runs past the file is a half-written tail, not a frame.
-      if (length <= 0 || end > data.byteLength) return "unknown";
-      slice = data.subarray(offset, end);
-    } else {
-      if (newline <= 0) return "unknown";
-      end = newline + 1;
-      slice = data.subarray(offset, end);
-    }
-
-    const json = frameJsonFromSlice(slice, "jsonl-file");
+    if (newline <= 0) return "unknown";
+    const end = newline + 1;
+    const slice = data.subarray(offset, end);
+    const json = frameJsonFromSlice(slice);
     if (json === undefined) return "unknown";
     let frame: PayloadFrame;
     try {
