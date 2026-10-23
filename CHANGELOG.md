@@ -124,6 +124,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   a loopback peer that the boundary will not trust logs one warning naming the
   fix and the shared-fate consequence, instead of silently degrading.
 
+- **Legacy tool parameter roots are accepted.** Some clients send a tool's
+  `parameters` as an empty root, or as a property-name → schema map with a
+  per-field boolean `required` flag and no `{"type":"object", …}` wrapper.
+  Upstreams reject both as `invalid_function_parameters` (CodeBuddy `11129`).
+  The root is now rewritten into an explicit object schema, with the legacy
+  flag hoisted into `required` — and a field the caller did not flag stays
+  optional. A root that already holds schema keywords is left untouched:
+  guessing there would rewrite a valid schema into a wrong one.
+
+- **A provider code hidden in an escaped envelope is found.** A provider may
+  embed its error object as a string rather than nesting it, so the code that
+  decides whether an account is cooled was invisible and a blocked account
+  stayed in rotation failing every request. Both the escaped and doubly-escaped
+  spellings are now read, as a fallback behind the real nested code.
+
+- **Escaped-underscore schema keys no longer collide away.** A `\_` in a
+  property name is stripped, which can collapse two distinct keys onto one; they
+  are now merged with `allOf` (which accepts boolean schemas, so neither
+  constraint is lost) instead of one silently overwriting the other.
+
 - **Error codes and messages are unambiguous.** A scan of every rejection site
   found codes doing double duty, and messages a client could not act on:
 

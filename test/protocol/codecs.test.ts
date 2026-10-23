@@ -26,6 +26,7 @@ import { GatewayError } from "../../src/protocol/gateway-error";
 import {
   canonicalTerminal,
   completeRequiredSchema,
+  normalizeToolParameterRoot,
   decodeCodexToolCallId,
   encodeCodexToolCallId,
   endpointUrl,
@@ -530,6 +531,110 @@ describe("sanitizeSchemaForAnthropic", () => {
       expect(serialized).not.toContain(dropped);
     }
   });
+
+  test("an escaped-underscore property key is normalized", () => {
+    // Some clients emit `\_` inside a property name; the upstream rejects the
+    // escape itself.
+    const out = sanitizeSchemaForAnthropic({
+      properties: { "a\\_b": { type: "string" } },
+    }) as { properties: Record<string, unknown>; required: string[] };
+    expect(Object.keys(out.properties)).toEqual(["a_b"]);
+  });
+
+  test("two keys differing only by an escape merge instead of overwriting", () => {
+    // The whole point of the merge: `allOf` accepts boolean schemas, so neither
+    // constraint is lost. A plain overwrite would silently drop one of two
+    // rules the caller actually sent.
+    const out = sanitizeSchemaForAnthropic({
+      properties: { "a\\_b": { type: "string" }, a_b: { type: "integer" } },
+    }) as { properties: Record<string, unknown> };
+    expect(Object.keys(out.properties)).toHaveLength(1);
+    expect(out.properties["a_b"]).toEqual({
+      allOf: [{ type: "string" }, { type: "integer" }],
+    });
+  });
+
+  test("a key with no escape is untouched", () => {
+    // The scan is a no-op on the ordinary case, which is nearly every schema.
+    const out = sanitizeSchemaForAnthropic({
+      properties: { plain: { type: "string" } },
+    }) as { properties: Record<string, unknown>; required: string[] };
+    expect(Object.keys(out.properties)).toEqual(["plain"]);
+    expect(out.required).toEqual(["plain"]);
+  });
+});
+
+describe("normalizeToolParameterRoot", () => {
+  test("an empty root becomes an explicit object schema", () => {
+    // `{}` carries no `type`, and a schema with no type is not one the upstream
+    // accepts: it answers `invalid_function_parameters` (CodeBuddy 11129).
+    expect(normalizeToolParameterRoot({})).toEqual({ type: "object", properties: {} });
+  });
+
+  test("a legacy property map is wrapped, with per-field required hoisted", () => {
+    // The shape old clients emit: each entry names a parameter and carries its
+    // own boolean `required`. Upstream wants the wrapper and a `required` array.
+    expect(
+      normalizeToolParameterRoot({
+        path: { type: "string", required: true, description: "file" },
+        limit: { type: "integer" },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: {
+        path: { type: "string", description: "file" },
+        limit: { type: "integer" },
+      },
+      required: ["path"],
+    });
+  });
+
+  test("a root that already holds schema keywords is left alone", () => {
+    // Guessing here would rewrite a valid schema into a wrong one — worse than
+    // the refusal it was trying to avoid.
+    expect(normalizeToolParameterRoot({ type: "object", properties: { a: { type: "string" } } })).toEqual({
+      type: "object",
+      properties: { a: { type: "string" } },
+    });
+    expect(normalizeToolParameterRoot({ $defs: { a: {} } })as Record<string, unknown>).toEqual({ $defs: { a: {} } });
+  });
+
+  test("a root whose fields do not all look like schemas is left alone", () => {
+    // Not recognisably the legacy shape, so untouched: a field with no `type`,
+    // and a field whose `type` is not a JSON Schema primitive.
+    expect(
+      normalizeToolParameterRoot({ a: { required: true } }) as Record<string, unknown>,
+    ).toEqual({ a: { required: true } });
+    expect(
+      normalizeToolParameterRoot({ a: { type: "sandwich", required: true } }) as Record<
+        string,
+        unknown
+      >,
+    ).toEqual({ a: { type: "sandwich", required: true } });
+  });
+
+  test("a map with no boolean required flag is left alone", () => {
+    // The flag is what identifies the legacy shape; without one this could be
+    // anything.
+    expect(
+      normalizeToolParameterRoot({ a: { type: "string" } }) as Record<string, unknown>,
+    ).toEqual({ a: { type: "string" } });
+  });
+
+  test("an extension key means a real schema, not a property map", () => {
+    expect(
+      normalizeToolParameterRoot({
+        "x-custom": {},
+        a: { type: "string", required: true },
+      }) as Record<string, unknown>,
+    ).toEqual({ "x-custom": {}, a: { type: "string", required: true } });
+  });
+
+  test("a non-object is returned unchanged", () => {
+    for (const value of [undefined, null, "x", 7, []]) {
+      expect(normalizeToolParameterRoot(value)).toEqual(value);
+    }
+  });
 });
 
 describe("completeRequiredSchema", () => {
@@ -565,6 +670,42 @@ describe("completeRequiredSchema", () => {
     const out = completeRequiredSchema({ type: "string" }) as Record<string, unknown>;
     expect(out.required).toBeUndefined();
     expect(out.type).toBe("string");
+  });
+
+  test("a legacy parameter root is normalized before required is completed", () => {
+    // Driven through `completeRequiredSchema`, not the helper directly: that is
+    // the function every provider adapter calls, so this is the assertion that
+    // actually protects the wire behavior. Asserting only the helper would pass
+    // while the caller kept shipping the unnormalized root.
+    //
+    // The legacy flag is what survives, and that is the useful outcome: the
+    // completer preserves an explicit `required` list rather than overwriting
+    // it (see "an existing required list is preserved" above), so `path` stays
+    // required and `limit` — which the caller did not flag — stays optional.
+    // Only the per-field boolean is removed, which is what the upstream
+    // would have rejected.
+    expect(
+      completeRequiredSchema({
+        path: { type: "string", required: true },
+        limit: { type: "integer" },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: { path: { type: "string" }, limit: { type: "integer" } },
+      required: ["path"],
+    });
+  });
+
+  test("an empty parameter root still ships a valid object schema", () => {
+    // The `11129` case end to end: `{}` would otherwise reach the upstream with
+    // no `type` at all. `required` is present and empty because the completer
+    // rebuilds it from the (empty) property list — which is also what it does
+    // for any other object root, so this stays consistent with the case below.
+    expect(completeRequiredSchema({})).toEqual({
+      type: "object",
+      properties: {},
+      required: [],
+    });
   });
 
   test("nesting recurses", () => {

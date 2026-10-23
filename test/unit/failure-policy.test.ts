@@ -759,6 +759,38 @@ describe("upstreamProviderCode", () => {
     expect(upstreamProviderCode({ extError: { code: "" }, code: "top" })).toBe("top");
   });
 
+  test("finds a code in an envelope embedded as an escaped string", () => {
+    // Some providers embed their error envelope inside a string rather than
+    // nesting an object, so none of the record candidates above is readable.
+    // This matters because the channel code is what decides whether an account
+    // is cooled: missing it, a blocked account stays in rotation and fails every
+    // request.
+    expect(upstreamProviderCode({ error: '{"code":"11-128","msg":"request illegal"}' })).toBe(
+      "11-128",
+    );
+    expect(upstreamProviderCode({ extError: { error: '{"code":"11140"}' } })).toBe("11140");
+    // The doubly-escaped spelling, where the quotes are themselves escaped.
+    expect(upstreamProviderCode({ error: '{\\"code\\":\\"11-128\\"}' })).toBe("11-128");
+  });
+
+  test("finds a bare code fragment inside a longer message", () => {
+    expect(upstreamProviderCode({ error: 'channel check failed: "code": "11-128"' })).toBe("11-128");
+  });
+
+  test("an embedded value with no code still yields nothing", () => {
+    // Fail-closed: the scan must not invent a code from unrelated text.
+    expect(upstreamProviderCode({ error: "upstream is unavailable" })).toBeUndefined();
+    expect(upstreamProviderCode({ error: "{not json}" })).toBeUndefined();
+  });
+
+  test("a real nested code still wins over an embedded one", () => {
+    // The embedded scan is a fallback, not a replacement: a readable record
+    // candidate is the better answer and must not be displaced.
+    expect(
+      upstreamProviderCode({ error: { code: "real" }, msg: '{"code":"embedded"}' }),
+    ).toBe("real");
+  });
+
   test("returns a whitespace-only string code verbatim", () => {
     // Unlike `upstreamErrorIdentifier`, this function does not trim or reject
     // whitespace — only `length > 0` is checked. Pinned so the asymmetry with
