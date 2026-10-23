@@ -101,6 +101,10 @@ export class ApiKeyAdmissionService {
       await this.store.reserve({
         reservationId,
         apiKeyId,
+        // rpm and concurrency are tracked per child key so each share recipient
+        // has its own independent window and slot. Token budgets (daily/monthly/
+        // lifetime) remain on `apiKeyId` (the parent) — the shared pool.
+        ...(snapshot.api_key_id !== apiKeyId ? { rpmConcurrencyKeyId: snapshot.api_key_id } : {}),
         now,
         estimatedTokens,
         rpmLimit: snapshot.rpm ?? null,

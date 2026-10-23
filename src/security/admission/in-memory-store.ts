@@ -94,12 +94,13 @@ export class InMemoryAdmissionCounterStore implements AdmissionCounterStore {
       ) {
         throw reasonToGatewayError("admission-unavailable", { reason: "invalid_counter" });
       }
-      const rpm = this.pruneRpm(request.apiKeyId, request.now);
+      const rpmConcId = request.rpmConcurrencyKeyId ?? request.apiKeyId;
+      const rpm = this.pruneRpm(rpmConcId, request.now);
       const dailyKey = bucketKey(request.apiKeyId, dailyBucket(request.now));
       const monthlyKey = bucketKey(request.apiKeyId, monthlyBucket(request.now));
       const daily = this.value(this.daily, dailyKey);
       const monthly = this.value(this.monthly, monthlyKey);
-      const concurrent = this.value(this.concurrent, request.apiKeyId);
+      const concurrent = this.value(this.concurrent, rpmConcId);
       const tenantConcurrent = this.value(this.tenantConcurrent, request.tenantId);
       // A missing counter is the only path that seeds from the snapshot; on
       // that path prefer a fresh persisted read over the ≤3s-stale snapshot,
@@ -165,7 +166,7 @@ export class InMemoryAdmissionCounterStore implements AdmissionCounterStore {
         this.evictCounter(this.lifetime);
       }
       if (request.concurrencyLimit != null) {
-        this.concurrent.set(request.apiKeyId, concurrent + 1);
+        this.concurrent.set(rpmConcId, concurrent + 1);
         this.evictCounter(this.concurrent);
       }
       if (request.tenantConcurrencyLimit != null) {

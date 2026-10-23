@@ -16,11 +16,12 @@ export class RedisAdmissionCounterStore implements AdmissionCounterStore {
   async reserve(request: AdmissionReserveRequest): Promise<void> {
     const id = request.reservationId ?? `${request.apiKeyId}:${request.now}:${crypto.randomUUID()}`;
     const lifetimeKey = `admission:lifetime:${request.apiKeyId}`;
+    const rpmConcId = request.rpmConcurrencyKeyId ?? request.apiKeyId;
     const keys = [
-      `admission:rpm:${request.apiKeyId}`,
+     `admission:rpm:${rpmConcId}`,
       `admission:daily:${request.apiKeyId}:${dailyBucket(request.now)}`,
       `admission:monthly:${request.apiKeyId}:${monthlyBucket(request.now)}`,
-      `admission:concurrent:${request.apiKeyId}`,
+     `admission:concurrent:${rpmConcId}`,
       lifetimeKey,
       `admission:lease:${id}`,
       `admission:tenant_concurrent:${request.tenantId}`,

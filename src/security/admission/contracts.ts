@@ -25,6 +25,17 @@ export interface ApiKeyAdmissionRequest {
 export interface AdmissionReserveRequest {
   readonly reservationId: string;
   readonly apiKeyId: string;
+  /**
+   * The key whose rpm and concurrency counters are charged.
+   *
+   * Share child keys set this to their own id so each child has an independent
+   * rpm window and concurrency slot. Token budgets (daily / monthly / lifetime)
+   * are still charged to `apiKeyId` — the parent — so the shared pool is
+   * enforced globally across all children.
+   *
+   * Defaults to `apiKeyId` when absent (non-share keys, backward compat).
+   */
+  readonly rpmConcurrencyKeyId?: string;
   readonly now: number;
   readonly estimatedTokens: number;
   readonly rpmLimit: number | null;
