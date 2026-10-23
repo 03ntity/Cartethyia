@@ -995,7 +995,7 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
                               <div className="text-caption font-semibold text-text-primary">Block {router.label} Client</div>
                               <p className="mt-0.5 mb-0 text-badge text-text-tertiary">
                                 {router.id === "9router"
-                                  ? "Matches Node User-Agent, 9router / orouter UA & headers, x-omniroute-* probes, and OpenAI-compatible UA"
+                                  ? "9router, Omniroute, and Baazar Probes"
                                   : "Fingerprint-based detection — best-effort; unrecognised clients are never matched"}
                       </p>
                     </div>
