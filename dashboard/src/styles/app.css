@@ -1687,3 +1687,34 @@ html[data-app="landing"] .landing-story-visual {
   background: var(--banner-surface);
   color: var(--banner-ink);
 }
+
+/* ===== stat card value fit =====
+ * The headline number on a stat card is the one value on the page whose width
+ * the caller does not control: a token count can be `1.5M` or `1,234,567,890`.
+ * A fixed size that fits one clips or overflows the other, so the size steps
+ * down as the string grows — a short number keeps the display weight, a long
+ * one shrinks instead of spilling out of the card.
+ *
+ * Three steps, chosen from the length of the rendered string rather than from
+ * the viewport: the card's width does not change, the content does. `fit=long`
+ * additionally allows a break so a value that is still too wide wraps within
+ * the card instead of pushing past its padding.
+ */
+.stat-card-value {
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1.15;
+  /* Long values must never widen the card: break anywhere rather than overflow. */
+  overflow-wrap: anywhere;
+}
+.stat-card-value[data-fit="default"] {
+  font-size: var(--text-display);
+}
+.stat-card-value[data-fit="medium"] {
+  font-size: var(--text-body-lg);
+}
+.stat-card-value[data-fit="long"] {
+  font-size: var(--text-caption);
+  letter-spacing: -0.01em;
+}

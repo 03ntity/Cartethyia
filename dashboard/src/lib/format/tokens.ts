@@ -35,7 +35,21 @@ export const TOKEN_SCALES = [
 export const RAW_TOKEN_SCALE = TOKEN_SCALES.length;
 /** Sentinel for the compact unit the value lands on. */
 export const TOKEN_SCALE_AUTO = -1;
-export const DEFAULT_TOKEN_SCALE = RAW_TOKEN_SCALE;
+/**
+ * Index of the `M` scale in {@link TOKEN_SCALES}, kept derived rather than
+ * literal so reordering the list cannot silently point this at another unit.
+ */
+export const MILLION_TOKEN_SCALE = TOKEN_SCALES.findIndex((scale) => scale.suffix === "M");
+/**
+ * The unit the Usage cards open on.
+ *
+ * Millions, not the exact count: a busy tenant's token totals run to ten or
+ * eleven digits, and the raw spelling overflowed the card at every size that
+ * still looked like a headline. `M` is coarse enough that no realistic total
+ * overflows and fine enough to read — and the exact count is still one click
+ * away on every card's scale switch.
+ */
+export const DEFAULT_TOKEN_SCALE = MILLION_TOKEN_SCALE;
 
 /** Index into `TOKEN_SCALES` for the compact unit a token count lands on. */
 export function tokenScaleIndex(value: number): number {
@@ -69,6 +83,14 @@ export function tokenScaleValue(value: number | null | undefined, scale: number,
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   if (scale === TOKEN_SCALE_AUTO) return formatScaled(value, tokenScaleIndex(value), locale);
   if (scale === RAW_TOKEN_SCALE) return Math.round(value).toLocaleString(locale);
+  // A pinned unit that the value never reaches would render as `0M` / `0K`,
+  // which loses the number entirely — a real 500-token period must not read as
+  // nothing. Below one unit, show the exact count instead: at that size it is
+  // at most seven characters, so it costs no more room than `0M` saved.
+  const threshold = TOKEN_SCALES[scale]?.threshold;
+  if (threshold !== undefined && Math.abs(value) < threshold) {
+    return Math.round(value).toLocaleString(locale);
+  }
   return formatScaled(value, scale, locale);
 }
 

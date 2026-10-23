@@ -16,6 +16,7 @@ import {
   tokenScaleIndex,
   tokenScaleValue,
   DEFAULT_TOKEN_SCALE,
+  MILLION_TOKEN_SCALE,
   RAW_TOKEN_SCALE,
   TOKEN_SCALE_AUTO,
   TOKEN_SCALES,
@@ -96,16 +97,28 @@ describe("tokenScaleValue", () => {
   });
 
   test("a pinned scale renders that unit regardless of magnitude", () => {
-    // A chart axis pins one unit so its bars are comparable; a value too small
-    // for the unit rounds within that unit rather than silently switching.
+    // A chart axis pins one unit so its bars are comparable; a value that
+    // reaches the unit renders within it rather than silently switching.
     expect(tokenScaleValue(1_500_000, 3, EN)).toBe("1,500K");
-    expect(tokenScaleValue(500, 3, EN)).toBe("1K");
     expect(tokenScaleValue(1_500_000, 2, EN)).toBe("1.5M");
   });
 
-  test("the default scale is the raw count", () => {
-    expect(DEFAULT_TOKEN_SCALE).toBe(RAW_TOKEN_SCALE);
-    expect(tokenScaleValue(1_500_000, DEFAULT_TOKEN_SCALE, EN)).toBe("1,500,000");
+  test("a pinned scale the value never reaches falls back to the exact count", () => {
+    // `0K` / `0M` would erase the number: a real 500-token period must not read
+    // as nothing, and below one unit the exact count is no wider than `0K` was.
+    expect(tokenScaleValue(500, 3, EN)).toBe("500");
+    expect(tokenScaleValue(500, 2, EN)).toBe("500");
+    expect(tokenScaleValue(999_999, 2, EN)).toBe("999,999");
+  });
+
+  test("the default scale is millions, not the raw count", () => {
+    // The Usage cards open on M because a busy tenant's totals run to eleven
+    // digits and the exact count overflowed the card. The exact count stays one
+    // click away on every card's scale switch.
+    expect(DEFAULT_TOKEN_SCALE).toBe(MILLION_TOKEN_SCALE);
+    expect(tokenScaleValue(1_500_000, DEFAULT_TOKEN_SCALE, EN)).toBe("1.5M");
+    // Far narrower than the raw spelling it replaced.
+    expect(tokenScaleValue(1_234_567_890, DEFAULT_TOKEN_SCALE, EN)).toBe("1,234.6M");
   });
 
   test("renders the placeholder for absent values at every scale", () => {

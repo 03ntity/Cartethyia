@@ -40,6 +40,19 @@ export function SectionHeading({
   );
 }
 
+/**
+ * Picks the size step for a card's headline number from how long it renders.
+ *
+ * The card does not get wider, the value does — so the size is a function of
+ * the string, not of the viewport. Measured against the mono digits the value
+ * renders in, which are what set its width.
+ */
+function fitFor(value: string): "default" | "medium" | "long" {
+  if (value.length <= 7) return "default";
+  if (value.length <= 11) return "medium";
+  return "long";
+}
+
 export function StatCard({
   label,
   value,
@@ -50,6 +63,7 @@ export function StatCard({
   valueColor,
   action,
   size = "default",
+  fit = false,
 }: {
   label: string;
   value: string;
@@ -60,6 +74,12 @@ export function StatCard({
   valueColor?: string;
   action?: ReactNode;
   size?: "default" | "roomy";
+  /**
+   * Size the headline from the length of the value instead of fixing it. On for
+   * cards whose number the caller does not control — a token total can be `1.5M`
+   * or eleven digits, and one fixed size cannot fit both.
+   */
+  fit?: boolean;
 }) {
   const toneColorMap: Record<string, string> = {
     teal: "text-teal",
@@ -90,7 +110,13 @@ export function StatCard({
         {action ? <span className="shrink-0">{action}</span> : null}
       </div>
       <p
-        className={cn("font-mono tabular-nums font-bold leading-[1.15] mb-0", size === "roomy" ? "text-hero mt-4" : "text-display mt-1")}
+        className={cn(
+          "mb-0",
+          fit
+            ? cn("stat-card-value", size === "roomy" ? "mt-4" : "mt-1")
+            : cn("font-mono tabular-nums font-bold leading-[1.15]", size === "roomy" ? "text-hero mt-4" : "text-display mt-1"),
+        )}
+        data-fit={fit ? fitFor(value) : undefined}
         style={valueColor ? { color: valueColor } : undefined}
       >
         {value}

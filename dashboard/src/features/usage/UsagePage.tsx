@@ -1268,6 +1268,7 @@ function RequestsStatCard({
   return (
     <StatCard
       label="Requests"
+      fit
       value={pending ? "…" : formatNumber(requests)}
       detail={
         flight.count === null || flight.uniqueIps === null
@@ -1671,6 +1672,7 @@ export default function Usage(): ReactNode {
         />
         <StatCard
           label="Input tokens"
+          fit
           value={summaryQuery.isPending ? "…" : tokenScaleValue(summary?.inputTokens, tokenScale)}
           detail="Prompt tokens"
           tone="accent"
@@ -1685,6 +1687,7 @@ export default function Usage(): ReactNode {
         />
         <StatCard
           label="Cached tokens"
+          fit
           value={summaryQuery.isPending ? "…" : tokenScaleValue(summary?.cachedTokens, tokenScale)}
           detail={
             summaryQuery.isPending
@@ -1704,6 +1707,7 @@ export default function Usage(): ReactNode {
         />
         <StatCard
           label="Output tokens"
+          fit
           value={summaryQuery.isPending ? "…" : tokenScaleValue(summary?.outputTokens, tokenScale)}
           detail="Completion tokens"
           icon={<ArrowUpFromLine size={13} />}
