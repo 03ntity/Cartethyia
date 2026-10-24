@@ -1,15 +1,13 @@
-import { isNewerRelease } from "../../src/console/updates/version-compare";
 import { resolvePackagePath } from "../../src/config/package-paths";
 import { resolvePort } from "../../src/config/runtime";
 import { ensureDrainToken } from "./instance";
 import { startGateway } from "./gateway";
 import { stopGateway } from "./gateway";
-import { readInstalledVersion, readLatestPublishedVersion } from "./version";
+import { readInstalledVersion } from "./version";
 import { reportTrayStartup } from "./startup-signal";
 import { createTray } from "./tray/index";
 import { openUrl } from "./background";
 import { exportBackup, resetConsoleAccount } from "./admin";
-import { printUpdateInstructions } from "./update";
 
 /**
  * Runs the gateway with a tray icon. The tray is platform-specific (`tray/`):
@@ -44,14 +42,12 @@ export async function startTray(): Promise<void> {
   const port = resolvePort();
   const drainToken = ensureDrainToken();
   const dashboardUrl = `http://127.0.0.1:${port}/console`;
-  const repositoryUrl = "https://github.com/risunCode/cartethyia";
+  const releasesUrl = "https://github.com/risunCodex/Cartethyia/releases";
   const currentVersion = await readInstalledVersion();
 
   let gateway: Bun.Subprocess | null = null;
   let closing = false;
-  let busy = false;
   let resetArmed = false;
-  let latestVersion: string | null = null;
   let closePromise: Promise<void> | undefined;
 
   const tray = createTray({
@@ -64,7 +60,11 @@ export async function startTray(): Promise<void> {
     ),
     tooltip: `Cartethyia ${currentVersion}`,
     items: [
-      { kind: "action", id: "update", title: `Cartethyia ${currentVersion} \u00b7 checking\u2026`, enabled: true },
+      // Version row is informational; clicking it opens the releases page so
+      // the operator can decide for themselves. No background check: the tray
+      // used to poll the registry on open and the result was a cue the user
+      // did not ask for.
+      { kind: "action", id: "version", title: `Cartethyia ${currentVersion}`, enabled: true },
       { kind: "separator" },
       { kind: "action", id: "console", title: `Open Console \u00b7 ${dashboardUrl}` },
       { kind: "action", id: "reset", title: "Reset console password" },
@@ -89,43 +89,11 @@ export async function startTray(): Promise<void> {
     return closePromise;
   };
 
-  const refreshVersion = async (): Promise<void> => {
-    const fetched = await readLatestPublishedVersion();
-    if (closing) return;
-    latestVersion = fetched;
-    if (fetched === null) {
-      tray.update("update", `Cartethyia ${currentVersion} \u00b7 check for updates`, true);
-      return;
-    }
-    const newer = isNewerRelease(currentVersion, fetched);
-    tray.update(
-      "update",
-      newer
-        ? `Cartethyia ${currentVersion} \u00b7 update to ${fetched}`
-        : `Cartethyia ${currentVersion} \u00b7 up to date`,
-      // Always clickable: the row opens the repository, and only offers the
-      // update command when there is something newer.
-      true,
-    );
-  };
-
-  const runUpdate = async (): Promise<void> => {
-    if (busy) return;
-    busy = true;
-    const latest = await readLatestPublishedVersion();
-    await close();
-    printUpdateInstructions(currentVersion, latest);
-    // The tray has no terminal of its own, so these instructions are only
-    // visible when it was started from one. Hold that terminal open long
-    // enough to copy the command, then exit.
-    await new Promise<void>((resolve) => setTimeout(resolve, 180_000));
-    process.exit(0);
-  };
-
   async function handleSelect(id: string): Promise<void> {
     if (closing) return;
     if (id === "exit") return void (await close());
     if (id === "console") return void (await openUrl(dashboardUrl));
+    if (id === "version") return void (await openUrl(releasesUrl));
     if (id === "backup") {
       const result = await exportBackup(port, drainToken);
       if (result !== null) {
@@ -148,14 +116,6 @@ export async function startTray(): Promise<void> {
       await resetConsoleAccount(port, drainToken);
       return;
     }
-    if (id === "update") {
-      // Nothing to install: the row is the way to the repository instead.
-      if (latestVersion === null || !isNewerRelease(currentVersion, latestVersion)) {
-        await openUrl(repositoryUrl);
-        return;
-      }
-      await runUpdate();
-    }
   }
 
   process.once("SIGINT", () => void close());
@@ -176,7 +136,6 @@ export async function startTray(): Promise<void> {
     // running fine.
     reportTrayStartup({ status: "ready", url: dashboardUrl });
     console.log(`Cartethyia is running at ${dashboardUrl}`);
-    void refreshVersion();
 
     let misses = 0;
     // A detached child's `exited` never settles on Windows, so the old

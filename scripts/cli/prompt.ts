@@ -26,9 +26,19 @@ export type MenuRow =
  * Returns -1 when stdin is not a TTY (piped, CI, or a non-interactive run) or
  * when the operator cancels, so the caller can drain and exit either way.
  */
+/**
+ * Options for `chooseFromMenu`. `initialIndex` is an **action** index, not a
+ * row index — the caller numbers from the actions it exposes, which is also
+ * what the function returns. Rules (separators) are not indexed.
+ */
+export interface MenuOptions {
+  readonly initialIndex?: number;
+}
+
 export async function chooseFromMenu(
   header: string | readonly string[],
   rows: readonly MenuRow[],
+  options: MenuOptions = {},
 ): Promise<number> {
   if (!process.stdin.isTTY) return -1;
 
@@ -40,6 +50,26 @@ export async function chooseFromMenu(
   // Enquirer indexes the rows it renders, rules included, so the action index
   // has to be recovered from the label rather than from the position.
   const labels = rows.flatMap((row) => (row.kind === "action" ? [row.label] : []));
+  // Translate the action-index the caller passed into the row-index enquirer
+  // wants (which counts rules). An out-of-range or unspecified initial index
+  // falls back to the first action.
+  const clampedActionIndex = (() => {
+    if (options.initialIndex === undefined) return 0;
+    if (options.initialIndex < 0) return 0;
+    if (options.initialIndex >= labels.length) return labels.length - 1;
+    return options.initialIndex;
+  })();
+  let seenActions = 0;
+  let rowInitial = 0;
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i];
+    if (row === undefined || row.kind !== "action") continue;
+    if (seenActions === clampedActionIndex) {
+      rowInitial = i;
+      break;
+    }
+    seenActions += 1;
+  }
 
 
   try {
@@ -56,7 +86,7 @@ export async function chooseFromMenu(
               ...(row.hint === undefined ? {} : { hint: row.hint }),
             },
       ),
-      initial: 0,
+      initial: rowInitial,
     });
     return labels.indexOf(answer.choice);
   } catch {

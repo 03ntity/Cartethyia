@@ -12,7 +12,7 @@ import { stopGateway } from "./gateway";
 import { ENV_PATH, readEnvFile } from "./env";
 import { readInstalledVersion, readLatestPublishedVersion } from "./version";
 import { launchBackgroundWithStatus, openUrl } from "./background";
-import { chooseFromMenu, confirmByTyping, confirmStep } from "./prompt";
+import { chooseFromMenu, confirmByTyping, confirmStep, type MenuRow } from "./prompt";
 import { renderWordmark } from "./wordmark";
 import { exportBackup, resetConsoleAccount } from "./admin";
 import { runDetachedUpdate } from "./update";
@@ -137,16 +137,26 @@ export async function startMenu(): Promise<void> {
   let latestVersion = await readLatestPublishedVersion();
   let running = true;
 
-  const header = [...renderWordmark(), `Cartethyia ${currentVersion} \u00b7 ${dashboardUrl}`];
-
   while (running) {
     const upToDate = latestVersion === null || !isNewerRelease(currentVersion, latestVersion);
-    const updateLabel =
+    // Header-line version checker. When something newer is published the line
+    // calls it out and the menu adds an `Update to X.Y.Z` row that the arrow
+    // keys land on by default — the operator still has to press Enter, so a
+    // reflex Enter cannot run an update by accident, but attention is on the
+    // action that matters.
+    const versionCheckerLine =
       latestVersion === null
-        ? "Check for updates"
+        ? `Version Checker: ${currentVersion} \u00b7 could not reach the registry`
         : upToDate
-          ? `Up to date (${currentVersion})`
-          : `Update to ${latestVersion}`;
+          ? `Version Checker: ${currentVersion} \u00b7 up to date`
+          : `Version Checker: ${currentVersion} \u2192 ${latestVersion} available`;
+    const header = [
+      ...renderWordmark(),
+      `Cartethyia ${currentVersion} \u00b7 ${dashboardUrl}`,
+      versionCheckerLine,
+      "",
+      "Section menu",
+    ];
 
     // Anything that talks to the gateway waits for it to be listening; the menu
     // itself does not.
@@ -156,62 +166,6 @@ export async function startMenu(): Promise<void> {
 
     const actions: readonly (() => Promise<void>)[] = [
       async () => openUrl(dashboardUrl),
-      async () => {
-        // Deleting the console account is the only real password recovery:
-        // /change-password needs the current password, and first-boot setup
-        // only runs when no user exists. Removing the user puts the wizard
-        // back. Providers, keys, and routing are untouched.
-        console.log("");
-        console.log("This deletes every console account and its sessions.");
-        console.log("The next visit to /console asks you to create a new one.");
-        console.log("Providers, API keys, and routing are not touched.");
-        console.log("");
-        if (!(await confirmStep("Continue with the reset?"))) {
-          console.log("Cancelled.");
-          return;
-        }
-        if (!(await confirmByTyping("RESET", "Confirm deleting the console account"))) {
-          console.log("Cancelled.");
-          return;
-        }
-        await whenReady();
-        const status = await resetConsoleAccount(port, drainToken);
-        console.log(
-          status === 0
-            ? `Console account removed. Open ${dashboardUrl} to create a new one.`
-            : "Reset failed; see the gateway log.",
-        );
-      },
-      async () => {
-        // Export straight to the download directory. The console page asks for
-        // the operator password, which is exactly the thing a locked-out
-        // operator does not have; the CLI already runs as the OS user who owns
-        // the database, so the loopback token is the whole gate.
-        await whenReady();
-        const result = await exportBackup(port, drainToken);
-        if (result === null) return;
-        console.log(
-          `Backup written to ${result.path} (${(result.bytes / 1024).toFixed(1)} KiB, ${Object.keys(result.counts).length} tables).`,
-        );
-        console.log("Telemetry is not included: it is per-request history, not configuration.");
-      },
-      async () => {
-        if (upToDate) return;
-        // npm cannot replace this package's directory while this process is
-        // running out of it: on Windows the rename fails with EBUSY and npm
-        // exits 14. Even with the gateway stopped, the CLI itself is executing
-        // from that directory, so an in-process install can never succeed.
-        // Print the command and exit, the way 9router does.
-        await shutDown();
-        runDetachedUpdate();
-        console.log("");
-        console.log(`Update available: ${currentVersion} \u2192 ${latestVersion}`);
-        console.log("Detached update started; this process will exit now.");
-        console.log("Re-run `carte` after it finishes.");
-        console.log("");
-        running = false;
-        process.exit(0);
-      },
       async () => {
         // Drain first, then start the tray.
         //
@@ -245,22 +199,92 @@ export async function startMenu(): Promise<void> {
         }
       },
       async () => {
+        // Export straight to the download directory. The console page asks for
+        // the operator password, which is exactly the thing a locked-out
+        // operator does not have; the CLI already runs as the OS user who owns
+        // the database, so the loopback token is the whole gate.
+        await whenReady();
+        const result = await exportBackup(port, drainToken);
+        if (result === null) return;
+        console.log(
+          `Backup written to ${result.path} (${(result.bytes / 1024).toFixed(1)} KiB, ${Object.keys(result.counts).length} tables).`,
+        );
+        console.log("Telemetry is not included: it is per-request history, not configuration.");
+      },
+      async () => {
+        // Deleting the console account is the only real password recovery:
+        // /change-password needs the current password, and first-boot setup
+        // only runs when no user exists. Removing the user puts the wizard
+        // back. Providers, keys, and routing are untouched.
+        console.log("");
+        console.log("This deletes every console account and its sessions.");
+        console.log("The next visit to /console asks you to create a new one.");
+        console.log("Providers, API keys, and routing are not touched.");
+        console.log("");
+        if (!(await confirmStep("Continue with the reset?"))) {
+          console.log("Cancelled.");
+          return;
+        }
+        if (!(await confirmByTyping("RESET", "Confirm deleting the console account"))) {
+          console.log("Cancelled.");
+          return;
+        }
+        await whenReady();
+        const status = await resetConsoleAccount(port, drainToken);
+        console.log(
+          status === 0
+            ? `Console account removed. Open ${dashboardUrl} to create a new one.`
+            : "Reset failed; see the gateway log.",
+        );
+      },
+      async () => {
         running = false;
       },
     ];
+    // The Update action is only wired in when there is something newer to go
+    // to; otherwise the menu's up-to-date state is already told by the header
+    // line and an extra row would be noise.
+    const updateAction = async (): Promise<void> => {
+      if (upToDate || latestVersion === null) return;
+      // npm cannot replace this package's directory while this process is
+      // running out of it: on Windows the rename fails with EBUSY and npm
+      // exits 14. Even with the gateway stopped, the CLI itself is executing
+      // from that directory, so an in-process install can never succeed.
+      // Print the command and exit, the way 9router does.
+      await shutDown();
+      runDetachedUpdate();
+      console.log("");
+      console.log(`Update available: ${currentVersion} \u2192 ${latestVersion}`);
+      console.log("Detached update started; this process will exit now.");
+      console.log("Re-run `carte` after it finishes.");
+      console.log("");
+      running = false;
+      process.exit(0);
+    };
+    const extendedActions: readonly (() => Promise<void>)[] = upToDate
+      ? actions
+      : [...actions.slice(0, actions.length - 1), updateAction, actions[actions.length - 1] ?? (async () => undefined)];
 
-    const choice = await chooseFromMenu(header, [
-        { kind: "action", label: "Open Console", hint: `browser \u00b7 ${dashboardUrl}` },
-        { kind: "action", label: "Reset console password", hint: "deletes the account" },
-        { kind: "action", label: "Backup", hint: "export config to Downloads" },
-        { kind: "action", label: updateLabel, hint: upToDate ? "open the repository" : "installs now" },
-        { kind: "action", label: "Hide to tray", hint: "keep the gateway running" },
-        { kind: "rule" },
-        { kind: "action", label: "Exit", hint: "stop the gateway" },
-      ],
-    );
+    const rows: MenuRow[] = [
+      { kind: "action", label: "Open Console", hint: `browser \u00b7 ${dashboardUrl}` },
+      { kind: "action", label: "Hide to Tray", hint: "keep the gateway running" },
+      { kind: "action", label: "Backup", hint: "export config to Downloads" },
+      { kind: "action", label: "Reset", hint: "deletes the console account" },
+    ];
+    if (!upToDate && latestVersion !== null) {
+      rows.push({ kind: "action", label: `Update to ${latestVersion}`, hint: "installs now and exits" });
+    }
+    rows.push({ kind: "rule" });
+    rows.push({ kind: "action", label: "Exit", hint: "stop the gateway" });
+
+    // Focus the Update row by default when it exists, so the operator who
+    // launched `carte` *because* they saw the version checker gets a one-key
+    // path to the fix.
+    const updateIndex = upToDate || latestVersion === null ? -1 : 4;
+    const initialActionIndex = updateIndex >= 0 ? updateIndex : 0;
+    const choice = await chooseFromMenu(header, rows, { initialIndex: initialActionIndex });
     if (choice === -1) break;
-    const action = actions[choice];
+    const action = extendedActions[choice];
     if (action) await action();
   }
   // "Hide to tray" has already given the gateway to the tray. Draining here
