@@ -1,9 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { resolveUserConfigDir } from "../../src/config/package-paths";
-import { ENV_PATH, readEnvFile } from "./support/env";
 import { MINIMUM_BUN_VERSION, assertBunVersion } from "./support/bun";
 import { printUpdateInstructions, runDetachedUpdate } from "./command/update";
-import { reportTrayStartup } from "./support/startup-signal";
 
 process.env.CARTETHYIA_CONFIG_DIR ??= resolveUserConfigDir();
 
@@ -33,10 +31,26 @@ async function loadUserConfig(): Promise<void> {
   const configDir = process.env.CARTETHYIA_CONFIG_DIR;
   if (!configDir) throw new Error("Cartethyia config directory could not be resolved");
   mkdirSync(configDir, { recursive: true });
+  // Imported here rather than at module scope: `support/env` pulls in the
+  // package-root resolver and `node:fs/promises`, and `carte --help` (which
+  // never reads a .env) should not pay for either before it prints.
+  const { ENV_PATH, readEnvFile } = await import("./support/env");
   const values = await readEnvFile(ENV_PATH);
   for (const [key, value] of Object.entries(values)) {
     if (!process.env[key]) process.env[key] = value;
   }
+}
+
+/**
+ * Reports tray readiness to the launcher waiting on a signal file.
+ *
+ * Deferred to a dynamic import for the same reason as `loadUserConfig`: only
+ * the tray path writes this file, so the other commands should not load
+ * `node:fs` machinery they never touch.
+ */
+async function reportTrayFailed(message: string): Promise<void> {
+  const { reportTrayStartup } = await import("./support/startup-signal");
+  reportTrayStartup({ status: "failed", message });
 }
 
 async function main(): Promise<void> {
@@ -113,9 +127,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
+main().catch(async (error: unknown) => {
   const message = error instanceof Error ? error.message : "unknown error";
-  if (process.argv[2] === "tray") reportTrayStartup({ status: "failed", message });
+  if (process.argv[2] === "tray") await reportTrayFailed(message);
   console.error(`Cartethyia failed: ${message}`);
   process.exitCode = 1;
 });

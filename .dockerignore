@@ -63,3 +63,26 @@ CHANGELOG.md
 
 # Project-specific
 docker-compose*.yml
+
+# Build context size is the first thing that decides how fast `docker build`
+# starts: the daemon hashes and uploads everything not excluded here before a
+# single layer runs. These are the largest trees that are never read by the
+# Dockerfile.
+documentation
+docs
+*.md
+!README.md
+# Local agent/editor state and OS noise, which can be very large.
+.omp
+.serena
+.kilocode
+.worktrees
+Thumbs.db
+ehthumbs.db
+desktop.ini
+# Local database and log files: never shipped, and a stray lite db can be huge.
+*.sqlite
+*.sqlite3
+*.db
+*.log
+*.tsbuildinfo
