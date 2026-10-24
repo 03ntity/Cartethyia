@@ -89,7 +89,7 @@ request does that.
 Per-key CLI slots resolve through the same `resolveAlias`, with a second map
 merged in only when the key's scope and the request's User-Agent allow it. Within
 one bucket the CLI row wins for the names it covers. See
-[CLI model mapping](cli-model-mapping.md).
+[CLI model mapping](01-cli-model-mapping.md).
 
 ## Console
 

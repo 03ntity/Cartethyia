@@ -131,7 +131,7 @@ lookup; there is no focused checked-in test for the differential above yet.
 
 ## See also
 
-- [Routing aliases and combos](routing-aliases-combos.md) — the ordinary alias
+- [Routing aliases and combos](02-routing-aliases-combos.md) — the ordinary alias
   table this resolves through when the gates are closed.
 - [`architecture.md`](../reference/architecture.md) — how the snapshot is built and
   invalidated.

@@ -151,9 +151,9 @@ how symptoms get suppressed instead of fixed.
 | --- | --- | --- |
 | Request parsing, protocol translation, streaming, errors | `src/protocol/`, `src/transport/`, `src/providers/` | `.skills/cartethyia-trace-replay/references/protocol-and-translation.md` |
 | Candidate matching, eligibility, cooldowns, failover | `src/transport/routing/` | `documentation/reference/architecture.md`, `.skills/cartethyia-health-routing/SKILL.md` |
-| Quota reads, cache, Usage floor, quota UI | `src/console/quota/`, `src/providers/quota/`, `src/workers/`, provider-detail dashboard | `documentation/features/usage-floor.md`, `documentation/reference/providers.md` |
+| Quota reads, cache, Usage floor, quota UI | `src/console/quota/`, `src/providers/quota/`, `src/workers/`, provider-detail dashboard | `documentation/features/04-usage-floor.md`, `documentation/reference/providers.md` |
 | Provider catalog, auth, discovery, adapters | `src/providers/` | `documentation/reference/providers.md`, `.skills/cartethyia-provider-catalog/SKILL.md` |
-| Egress, proxy pools, SSRF | `src/network/`, `src/console/routing/pools/` | `documentation/features/network-pools.md`, `.skills/cartethyia-health-routing/SKILL.md` |
+| Egress, proxy pools, SSRF | `src/network/`, `src/console/routing/pools/` | `documentation/features/03-network-pools.md`, `.skills/cartethyia-health-routing/SKILL.md` |
 | Console API | `src/console/<domain>/` | `.skills/cartethyia-console-api/references/console-api.md` |
 | Browser UI | `dashboard/src/` | `.skills/cartethyia-dashboard/references/dashboard-map.md` |
 | Schema or persistence behavior | `src/persistence/`, `migrations/`, `scripts/tools/` | `documentation/reference/sqlite-parity.md`, `.skills/cartethyia-schema-telemetry/SKILL.md` |
@@ -167,7 +167,7 @@ how symptoms get suppressed instead of fixed.
   below the threshold are skipped so routing can continue to another account.
   Missing quota readings are unknown, not proof that the floor was crossed;
   exhausted quota windows are still excluded. See
-  `documentation/features/usage-floor.md`.
+  `documentation/features/04-usage-floor.md`.
 - **Quota cache freshness is explicit.** Cache entries distinguish the last
   attempt from the last successful reading. A refresh failure retains a
   successful reading for a bounded period, and the dashboard exposes refresh

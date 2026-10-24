@@ -12,7 +12,7 @@ not own model selection (`architecture.md`).
 | --- | --- | --- |
 | `network_pools` | `id` | `kind`, `endpoint_config`, `credential_ciphertext`, `max_inflight`, `weight`, `family`, health columns, speed-test and byte totals |
 | `pool_routing_settings` | PK `tenant_id` | `strategy` (`least_loaded` \| `round_robin`), `rotate_count` |
-| `provider_routing_settings` | `(tenant_id, provider_id)` or global when `tenant_id IS NULL` | Provider/account routing controls, including `skip_proxy`, `user_agent`, and the separate [Usage floor](usage-floor.md) setting |
+| `provider_routing_settings` | `(tenant_id, provider_id)` or global when `tenant_id IS NULL` | Provider/account routing controls, including `skip_proxy`, `user_agent`, and the separate [Usage floor](04-usage-floor.md) setting |
 
 `skipProxy` and `userAgent` live on the *provider* row, not the pool row: when
 `skipProxy` is false and the tenant has pools configured, dispatch selects
@@ -141,7 +141,7 @@ invalidates it.
 
 `provider_routing_settings` also owns the account quota threshold, but that
 threshold is not a pool-selection rule. Its evaluation and quota refresh
-behavior are documented in [Usage floor](usage-floor.md).
+behavior are documented in [Usage floor](04-usage-floor.md).
 
 ## Dashboard
 

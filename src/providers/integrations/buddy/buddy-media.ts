@@ -15,7 +15,7 @@
  *
  * ⚠️ The provider's actual polling route has not been verified. The sibling
  *   URL is an implementation inference, not an observed contract. See
- *   `documentation/features/buddy-media-generation.md` before changing it.
+ *   `documentation/features/07-buddy-media-generation.md` before changing it.
  */
 import { OpenAICompatibleAdapter, authHeaders, type OpenAICompatibleAdapterConfig } from "../../adapters/compatible-adapter";
 import { GatewayError } from "../../../protocol/gateway-error";
@@ -305,7 +305,7 @@ export function buddyErrorOf(payload: unknown): string | undefined {
  * inferred sibling task URL until it reports a finished clip.
  *
  * ⚠️ The status path is not provider-verified; see the module header and
- * `documentation/features/buddy-media-generation.md`.
+ * `documentation/features/07-buddy-media-generation.md`.
  */
 export async function buddyGenerateVideo(
   config: BuddyMediaConfig,

@@ -127,7 +127,7 @@ into the next.
 | `settings/` | `/console/api/settings/runtime` | Per-tenant preferences: telemetry payloads, privacy mode, RTK prune, PonyTail |
 | `backup/` | `/console/api/backup/*` | Export, import, delete-all. Recognized legacy exports are converted without guessing provider ids |
 | `studio/` | `/console/api/studio/*` | Model lab sessions, bounded to 50 per tenant with oldest-first eviction |
-| `quota/` | `/console/api/quota/*`, `/console/api/accounts/*`, `/console/api/global/accounts/*` | Quota windows and refresh; cached readings also feed the per-account [Usage floor](../../../documentation/features/usage-floor.md) routing policy |
+| `quota/` | `/console/api/quota/*`, `/console/api/accounts/*`, `/console/api/global/accounts/*` | Quota windows and refresh; cached readings also feed the per-account [Usage floor](../../../documentation/features/04-usage-floor.md) routing policy |
 | `observability/` | `/console/api/system/*` (including `/system/performance`), `/system/usage/requests/:id/download` (JSON attachment of the full detail incl. payloads), `/telemetry/*`, `/logs/*`, `/live/*` | File-log reads, log ring SSE, live in-flight gauge, pool health streams |
 | `audit/` | `/console/api/audit` | Cursor-paginated `admin_audit_log` read, `platform:admin` only |
 | `admin/model-abuse` | `/console/api/model-bans` | List (`GET`), instant-ban one caller for a chosen duration (`POST`, `{ip, apiKeyId?, minutes?, addressOnly?}`), lift early (`DELETE`, `{identity}`); mounted only when `ctx.modelStrikes` exists (`domain-registration.ts`). A ban is scoped to the address **and** the key — `addressOnly` is the explicit opt-in to ban every key from the address |
@@ -136,10 +136,10 @@ into the next.
 That table is the index. Four areas carry their own feature page — data,
 ownership, the routes behind the row, and where to change what:
 
-[CLI model mapping](../../../documentation/features/cli-model-mapping.md) ·
-[Share keys](../../../documentation/features/share-keys.md) ·
-[Network pools](../../../documentation/features/network-pools.md) ·
-[Routing aliases and combos](../../../documentation/features/routing-aliases-combos.md)
+[CLI model mapping](../../../documentation/features/01-cli-model-mapping.md) ·
+[Share keys](../../../documentation/features/05-share-keys.md) ·
+[Network pools](../../../documentation/features/03-network-pools.md) ·
+[Routing aliases and combos](../../../documentation/features/02-routing-aliases-combos.md)
 
 ## Route snapshot
 

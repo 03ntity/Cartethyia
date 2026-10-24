@@ -91,7 +91,7 @@ on the next request, not at the next process start.
 | `search/` | Hosted search tools and grounding |
 
 Per-account quota thresholds are applied during route eligibility; they are not
-account health state. See [Usage floor](../../../documentation/features/usage-floor.md).
+account health state. See [Usage floor](../../../documentation/features/04-usage-floor.md).
 `base-adapter.ts` and `compatible-adapter.ts` cover standard-wire providers; a
 bespoke provider frames its own bytes in its adapter — that fact lives on
 provider metadata, not in `wire_family`. Details:
@@ -103,8 +103,8 @@ provider metadata, not in `wire_family`. Details:
 types and `InMemoryRouteSnapshotService`; `admission.ts`/`reservations.ts`
 hold slots and leases; `round-robin.ts` keeps the per-provider cursor. Three
 independently configured strategies: provider, pool, and combo (all `fallback`
-or `round_robin`) — see [network pools](../../../documentation/features/network-pools.md) and
-[routing aliases and combos](../../../documentation/features/routing-aliases-combos.md).
+or `round_robin`) — see [network pools](../../../documentation/features/03-network-pools.md) and
+[routing aliases and combos](../../../documentation/features/02-routing-aliases-combos.md).
 
 `src/network/` is the egress half: `pool/` selects a pool and accounts bytes,
 `ssrf.ts` rejects disallowed destinations, `retry.ts` is the outbound retry

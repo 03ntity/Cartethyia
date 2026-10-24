@@ -98,8 +98,8 @@ settings, disabled models, and the two CLI mapping tables).
 `RoutingEngine` turns a requested model into a `RoutePlan`. A bare name matches
 `model_id`. A `provider/model` name matches both. Alias and combo lookup happen
 before candidate filtering; eligibility runs after it. Each of those has its own
-page: [routing aliases and combos](../features/routing-aliases-combos.md) for the
-name resolution itself, and [CLI model mapping](../features/cli-model-mapping.md)
+page: [routing aliases and combos](../features/02-routing-aliases-combos.md) for the
+name resolution itself, and [CLI model mapping](../features/01-cli-model-mapping.md)
 for the per-key slot table that merges into the same resolver.
 
 `EligibilityEvaluator` then drops candidates that cannot serve the request:
@@ -123,7 +123,7 @@ is set. Otherwise the slot is in-process.
 Quota eligibility is also evaluated per account before dispatch. A configured
 Usage floor excludes accounts whose known allowance is at or below the
 threshold; a missing reading remains unknown rather than exhausted. See
-[Usage floor](../features/usage-floor.md) for its accounting and cache behavior.
+[Usage floor](../features/04-usage-floor.md) for its accounting and cache behavior.
 
 ## Data
 

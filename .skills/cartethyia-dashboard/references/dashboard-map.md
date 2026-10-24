@@ -60,11 +60,11 @@ loop.
 Unknown protected paths redirect to `/`. There is no fusion page.
 
 Three of those pages are backed by a feature page that owns the data and the
-console domain behind them: [`/combos`](../../../documentation/features/routing-aliases-combos.md),
-[`/proxy`](../../../documentation/features/network-pools.md), and `/cli-tools`
-([CLI model mapping](../../../documentation/features/cli-model-mapping.md)). The share page is public
-and has its own: [share keys](../../../documentation/features/share-keys.md). Provider detail's
-quota threshold is documented in [Usage floor](../../../documentation/features/usage-floor.md).
+console domain behind them: [`/combos`](../../../documentation/features/02-routing-aliases-combos.md),
+[`/proxy`](../../../documentation/features/03-network-pools.md), and `/cli-tools`
+([CLI model mapping](../../../documentation/features/01-cli-model-mapping.md)). The share page is public
+and has its own: [share keys](../../../documentation/features/05-share-keys.md). Provider detail's
+quota threshold is documented in [Usage floor](../../../documentation/features/04-usage-floor.md).
 
 ## Data flow
 
@@ -137,7 +137,7 @@ or media-generation tools run; **YOLO** runs those tools automatically.
 lets recipients copy granted model ids and test allowed models with the shared
 key, and carries no key-management controls such as enable, disable, or delete.
 What the page is for, and what enforces it, is on the
-[share keys](../../../documentation/features/share-keys.md) page.
+[share keys](../../../documentation/features/05-share-keys.md) page.
 
 `apps/landing` is the unauthenticated product page. Crawlers do not run the
 bundle, so title, description, and social tags for landing, console, and share

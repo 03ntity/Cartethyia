@@ -71,7 +71,7 @@ time, so an edit on the parent takes effect without rewriting child rows:
 
 - **CLI mapping bucket** — `cliMappingOwnerId` falls back to the parent, so a
   child consumes the parent's remote routes
-  ([details](cli-model-mapping.md)).
+  ([details](01-cli-model-mapping.md)).
 - **Denylist, allowlist, budgets** — `invalidateApiKeyCache` runs for the parent
   *and every child* after a parent edit. Without that loop a denylist or budget
   edit looks like a no-op for up to `AUTH_CACHE_TTL_MS` per child.

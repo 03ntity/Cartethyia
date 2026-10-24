@@ -203,5 +203,4 @@ The runner `scripts/test/run.ts` supplies the TLS certificate bundle and keeps
 backend/dashboard/script scopes separate. Typechecking is not runtime proof;
 exercise the changed behavior at its actual boundary.
 
-See [the documentation index](README.md) for architecture, configuration, and
-feature references.
+See the [project README](../README.md) for the product overview.
