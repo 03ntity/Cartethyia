@@ -218,8 +218,12 @@ class UnixTray implements Tray {
   }
 
   update(id: string, title: string, enabled = true): void {
-    void id;
-    void this.#tray.sendAction({ type: "update-item", item: { title, tooltip: title, enabled } });
+    const item = this.#items.get(id);
+    // An update sent before the helper reports ready carries no row number, and
+    // systray2 then rewrites the first row instead of this one.
+    if (item?.__id === undefined) return;
+    const next: IdentifiedItem = { title, tooltip: title, enabled, __id: item.__id };
+    void this.#tray.sendAction({ type: "update-item", item: next });
   }
 
   setTooltip(text: string): void {
