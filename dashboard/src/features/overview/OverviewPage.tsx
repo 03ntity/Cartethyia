@@ -1,4 +1,4 @@
-import { Check, Copy, Globe } from "lucide-react";
+import { Check, Copy, Globe, RadioTower } from "lucide-react";
 import { type ReactNode } from "react";
 import { Button } from "../../components/ui/button";
 import { Card, CardBody, CardHeader } from "../../components/ui/card";
@@ -60,10 +60,80 @@ function ApiEndpointCard() {
 }
 
 
+/**
+ * How to let someone reach this gateway from outside the local network.
+ *
+ * The gateway exposes no tunnel of its own and holds no tunnel state, so this
+ * card documents the two supported ways to publish it rather than reporting a
+ * status there is nothing to read. A tunnel terminates at the edge and the
+ * gateway only ever sees a forwarded client address — see the boundary rules
+ * in `src/security/ip-boundary.ts`, which exist precisely because a tunnel
+ * collapses the peer address onto loopback.
+ */
+function RemoteSupportCard() {
+  return (
+    <Card>
+      <CardHeader
+        title="Remote Support"
+        subtitle="Reach this gateway from outside the local network"
+        icon={<RadioTower size={16} />}
+      />
+      <CardBody>
+        <Stack gap="10px">
+          <div className="grid grid-cols-2 gap-4 max-medium:grid-cols-1">
+            <section
+              aria-labelledby="remote-support-cloudflared"
+              className="rounded-control border border-inner-border bg-surface-2 p-5"
+            >
+              <h3 id="remote-support-cloudflared" className="text-caption font-semibold">
+                cloudflared
+              </h3>
+              <p className="mt-2 text-caption leading-normal text-text-secondary">
+                Publish a temporary public URL without opening a port:
+              </p>
+              <code className="mt-3 block overflow-x-auto rounded-inset border border-inner-border bg-code-surface px-4 py-3 font-mono text-badge text-text-primary">
+                cloudflared tunnel --url http://localhost:12800
+              </code>
+              <p className="mt-3 text-badge leading-normal text-text-tertiary">
+                Best for one-off help. The URL changes each run unless you use a named
+                tunnel.
+              </p>
+            </section>
+            <section
+              aria-labelledby="remote-support-tailscale"
+              className="rounded-control border border-inner-border bg-surface-2 p-5"
+            >
+              <h3 id="remote-support-tailscale" className="text-caption font-semibold">
+                Tailscale
+              </h3>
+              <p className="mt-2 text-caption leading-normal text-text-secondary">
+                Give a helper a private address on your own tailnet:
+              </p>
+              <code className="mt-3 block overflow-x-auto rounded-inset border border-inner-border bg-code-surface px-4 py-3 font-mono text-badge text-text-primary">
+                tailscale serve --bg --https=443 http://localhost:12800
+              </code>
+              <p className="mt-3 text-badge leading-normal text-text-tertiary">
+                Best for ongoing access. Nothing is exposed to the public internet.
+              </p>
+            </section>
+          </div>
+          <p className="text-caption leading-normal text-text-secondary">
+            Either way the gateway still sees the tunnel&apos;s address as the client, so set{" "}
+            <code className="font-mono">TRUSTED_PROXY_CIDRS</code> to the edge that forwards to
+            it — otherwise every remote caller is recorded as the loopback address.
+          </p>
+        </Stack>
+      </CardBody>
+    </Card>
+  );
+}
+
+
 export default function Overview(): ReactNode {
   return (
     <Stack gap="16px">
       <ApiEndpointCard />
+      <RemoteSupportCard />
       <CompressionPanel />
       <ApiKeysPanel />
     </Stack>
