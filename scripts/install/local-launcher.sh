@@ -2,6 +2,7 @@
 # Generated local Cartethyia CLI; keeps package/config roots tied to this install.
 set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
 export CARTETHYIA_CONFIG_DIR="$ROOT"
 export CARTETHYIA_PACKAGE_ROOT="$ROOT"
 export CARTETHYIA_GATEWAY_BINARY="$ROOT/dist/cartethyia"

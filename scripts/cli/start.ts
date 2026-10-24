@@ -1,6 +1,7 @@
 import { resolvePort } from "../../src/config/runtime";
 import { ensureDrainToken } from "./instance";
 import { clearInstanceLock, pidAlive, readInstanceLock, writeInstanceLock } from "./instance";
+import { blockedPortMessage, listenPortErrorMessage, probeListenPort } from "./port";
 
 /**
  * Runs the gateway in the foreground, in this process.
@@ -18,6 +19,10 @@ export async function startForeground(): Promise<void> {
   const token = ensureDrainToken();
   process.env.CARTETHYIA_DRAIN_TOKEN ??= token;
   const port = resolvePort();
+  const probe = await probeListenPort(port);
+  if (probe.status === "blocked" && probe.code !== "EADDRINUSE") {
+    throw new Error(listenPortErrorMessage(port, probe));
+  }
   const blocker = await inspectPortHolder(port, token);
   if (blocker !== null) throw new Error(blocker);
   writeInstanceLock(port, process.pid, token);
@@ -50,7 +55,7 @@ async function inspectPortHolder(port: number, token: string): Promise<string | 
     signal: AbortSignal.timeout(3_000),
   }).catch(() => null);
   if (response === null) {
-    return `Port ${port} is busy and nothing there answers a drain request. Stop whatever holds it, or set a different PORT.`;
+    return blockedPortMessage(port);
   }
   if (response.status === 401) {
     return `Another Cartethyia gateway is already running on port ${port} under a different install. Stop it from its own terminal or tray — this install will not stop a gateway it does not own.`;

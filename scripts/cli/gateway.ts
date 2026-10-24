@@ -1,4 +1,4 @@
-import { openSync } from "node:fs";
+import { openSync, statSync } from "node:fs";
 import {
   clearInstanceLock,
   fingerprint,
@@ -10,6 +10,13 @@ import { join } from "node:path";
 import { PACKAGE_ROOT, resolvePackagePath } from "../../src/config/package-paths";
 import { compiledBinaryPath } from "../build/compile";
 import { spawn as spawnDetached, type ChildProcess } from "node:child_process";
+import {
+  blockedPortMessage,
+  gatewayLogPath,
+  listenPortErrorMessage,
+  probeListenPort,
+  startupFailureMessage,
+} from "./port";
 
 function detachedSubprocess(executable: readonly string[], cwd: string, env: NodeJS.ProcessEnv, logFd: number | null): Bun.Subprocess {
   const child: ChildProcess = spawnDetached(executable[0]!, [...executable.slice(1)], {
@@ -106,19 +113,25 @@ export async function startGateway(
   drainToken: string,
   options: { readonly detached?: boolean } = {},
 ): Promise<Bun.Subprocess> {
-  // Starting a second gateway on the same port used to fail with "stopped
-  // before becoming ready (exit code 1)", which says nothing about the real
-  // cause. Probe the port first and say what is actually there.
-  const existing = await fetch(`http://127.0.0.1:${port}/health`, {
-    signal: AbortSignal.timeout(1_000),
-  }).catch(() => null);
-  if (existing !== null) {
-    // Something already owns the port. Replace it only when it proves to be our
-    // own gateway — otherwise stop and say what is there. A gateway left behind
-    // by a closed terminal used to make every later start fail until the
-    // operator found and killed it by hand.
-    const claimed = await claimPort(port, drainToken);
-    if (claimed !== null) throw new Error(claimed);
+  // A dead marker from the previous process must not turn its now-reused port
+  // into an ownership claim. Only identity + drain authorization may stop one.
+  const lock = readInstanceLock();
+  if (lock && !pidAlive(lock.pid)) clearInstanceLock();
+  const probe = await probeListenPort(port);
+  if (probe.status === "blocked") {
+    if (probe.code === "EADDRINUSE") {
+      const claimed = await claimPort(port, drainToken);
+      if (claimed !== null) {
+        if (claimed.startsWith("Port") && claimed.includes("nothing there answers")) {
+          throw new Error(blockedPortMessage(port));
+        }
+        throw new Error(claimed);
+      }
+      const released = await probeListenPort(port);
+      if (released.status === "blocked") throw new Error(blockedPortMessage(port));
+    } else {
+      throw new Error(listenPortErrorMessage(port, probe));
+    }
   }
   // The gateway logs a startup phase line per stage. In menu mode those lines
   // would scroll through the same terminal the menu is drawing on, so they go
@@ -131,6 +144,11 @@ export async function startGateway(
     } catch {
       // A read-only config directory costs only the log, not startup.
     }
+  }
+  const logPath = gatewayLogPath(configDir);
+  let logOffset = 0;
+  if (logPath) {
+    try { logOffset = statSync(logPath).size; } catch { logOffset = 0; }
   }
   const configuredBinary = process.env.CARTETHYIA_GATEWAY_BINARY?.trim();
   const defaultBinary = resolvePackagePath(compiledBinaryPath());
@@ -188,7 +206,7 @@ export async function startGateway(
   try {
     const result = await Promise.race([readyResult, exitedEarly]);
     if (result.status === "exit") {
-      throw new Error(`Cartethyia stopped before becoming ready (exit code ${result.code})`);
+      throw new Error(startupFailureMessage(port, result.code, logPath, logOffset));
     }
     if (result.status === "failure") throw result.error;
     // Recorded only once the child is actually serving: a marker written before

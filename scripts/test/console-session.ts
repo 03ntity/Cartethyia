@@ -26,12 +26,30 @@ const DEV_ORIGIN = "http://127.0.0.1:5173";
 /** The gateway serves the built bundle from `dist/dashboard`, so edits need `dashboard:build`. */
 const BUILT_ORIGIN = "http://127.0.0.1:12800";
 
+async function resolveDevOrigin(): Promise<string> {
+  const explicitPort = process.env.DASHBOARD_PORT ?? process.env.VITE_PORT;
+  if (explicitPort && explicitPort.trim()) {
+    return `http://127.0.0.1:${explicitPort.trim()}`;
+  }
+  const check5173 = await fetch("http://127.0.0.1:5173/console/api/auth/session", {
+    signal: AbortSignal.timeout(300),
+  }).catch(() => null);
+  if (check5173 !== null) return "http://127.0.0.1:5173";
+
+  const check1931 = await fetch("http://127.0.0.1:1931/console/api/auth/session", {
+    signal: AbortSignal.timeout(300),
+  }).catch(() => null);
+  if (check1931 !== null) return "http://127.0.0.1:1931";
+
+  return DEV_ORIGIN;
+}
+
 async function main(): Promise<void> {
   // `Bun.argv` is [executable, script, ...args], so the first real argument is
   // index 2. Reading index 3 here silently ignored an explicit origin and signed
   // the browser into the default one instead — the caller believes it asked for
   // the built bundle and is measuring a different origin.
-  const origin = Bun.argv[2]?.trim() || DEV_ORIGIN;
+  const origin = Bun.argv[2]?.trim() || (await resolveDevOrigin());
   const creds = resolveDevAdminCredentials();
 
   // Checked before touching the browser: a missing gateway otherwise surfaces as

@@ -50,7 +50,7 @@ workspace's dependency directory. Do not install separately from `dashboard/`.
 The wizard creates the env, encryption key, Lite/Full choice, and listen port,
 then probes the database. `PORT`
 (default 12800) is what `bun dev` and the production build bind. 5173 is only
-the dashboard dev server. Automation uses `bun setup --non-interactive` and
+the default dashboard dev server (with automatic fallback to 1931). Automation uses `bun setup --non-interactive` and
 must already have `CARTETHYIA_DB_MODE`, plus a reachable `DATABASE_URL` for
 Full. Do not add a second installer that copies `.env.example`.
 `scripts/install.sh --local --lite` handles dependencies, setup, build, start,

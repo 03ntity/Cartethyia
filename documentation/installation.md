@@ -151,8 +151,9 @@ bun run start
 when Full is selected, and checks Redis only when configured. It does not
 install PostgreSQL or start the gateway. `bun run start` requires the compiled
 binary from `bun run build`. Development uses `bun run dev` or
-`bun run dev:watch`; the dashboard development server listens on 5173 and
-proxies to the same gateway port.
+`bun run dev:watch`; the dashboard development server listens on 5173 (with an
+automatic fallback to 1931 or DASHBOARD_PORT if occupied) and proxies to the
+configured gateway port.
 
 Useful runtime endpoints:
 

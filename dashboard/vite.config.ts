@@ -1,8 +1,13 @@
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, type Plugin, type UserConfig, type ConfigEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { createServer } from "node:net";
+import type { IncomingMessage } from "node:http";
 
-const backendTarget = process.env.VITE_BACKEND_URL ?? "http://127.0.0.1:12800";
+function resolveBackendTarget(): string {
+  const backendPort = process.env.PORT?.trim() || "12800";
+  return process.env.VITE_BACKEND_URL ?? `http://127.0.0.1:${backendPort}`;
+}
 
 /**
  * Dev-server routing for the shared index document: `/` serves the landing app,
@@ -85,15 +90,50 @@ function precompressAssets(): Plugin {
   };
 }
 
+function isPortFree(port: number, host = "127.0.0.1"): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.unref();
+    server.once("error", () => resolve(false));
+    server.listen({ port, host, exclusive: true }, () => {
+      server.close(() => resolve(true));
+});
+});
+}
 
-export default defineConfig({
+async function resolveServerPort(): Promise<{ port: number; strictPort: boolean }> {
+  const explicit = process.env.DASHBOARD_PORT ?? process.env.VITE_PORT;
+  if (explicit && explicit.trim() !== "") {
+    const num = Number(explicit.trim());
+    if (Number.isInteger(num) && num > 0 && num <= 65535) {
+      return { port: num, strictPort: true };
+}
+}
+
+  // Default 5173, fallback to 1931 if 5173 is occupied
+  if (await isPortFree(5173)) {
+    return { port: 5173, strictPort: false };
+}
+
+  if (await isPortFree(1931)) {
+    return { port: 1931, strictPort: false };
+}
+
+  // If 1931 is also occupied, Vite will pick the next available port automatically
+  return { port: 1931, strictPort: false };
+}
+
+export default defineConfig(async (_env: ConfigEnv): Promise<UserConfig> => {
+  const { port, strictPort } = await resolveServerPort();
+  const backendTarget = resolveBackendTarget();
+  return {
   base: "/",
   appType: "spa",
   plugins: [multiPageRouting(), react(), tailwindcss(), precompressAssets()],
   server: {
     host: "127.0.0.1",
-    port: 5173,
-    strictPort: true,
+    port,
+    strictPort,
     proxy: {
       "/console/api": {
         target: backendTarget,
@@ -115,7 +155,7 @@ export default defineConfig({
       "/share": {
         target: backendTarget,
         changeOrigin: false,
-        bypass: (req) => {
+        bypass: (req: IncomingMessage) => {
           const path = (req.url ?? "").split("?")[0] ?? "";
           if (path.endsWith("/data") || path.endsWith("/issue") || path.endsWith("/stats") || path.endsWith("/stream") || path.endsWith("/popup-image")) return undefined;
           return "/index.html";
@@ -136,4 +176,5 @@ export default defineConfig({
       },
     },
   },
+  };
 });

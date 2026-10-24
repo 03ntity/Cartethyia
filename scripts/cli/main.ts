@@ -39,6 +39,11 @@ async function loadUserConfig(): Promise<void> {
   // package-root resolver and `node:fs/promises`, and `carte --help` (which
   // never reads a .env) should not pay for either before it prints.
   const { ENV_PATH, readEnvFile } = await import("./env");
+  // Bun injects PORT=12800 when no explicit port was supplied. It is a
+  // runner default, not an operator override; without removing it, a saved
+  // custom port is ignored by npm/carte and the gateway starts on 12800.
+  // Preserve any non-default/custom shell value exactly as before.
+  if (process.env.PORT === "12800") delete process.env.PORT;
   const values = await readEnvFile(ENV_PATH);
   for (const [key, value] of Object.entries(values)) {
     if (!process.env[key]) process.env[key] = value;

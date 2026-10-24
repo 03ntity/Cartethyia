@@ -3,7 +3,6 @@ import { stdin as input, stdout as output } from "node:process";
 import { existsSync, mkdirSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { createServer } from "node:net";
 import { readRequiredBunVersion, bunVersionAtLeast } from "./version";
 import {
   ENV_PATH,
@@ -16,6 +15,7 @@ import {
 import { getLocalPlatform, getOsHints } from "./platform";
 import { detectLocalPostgres, parseServiceUrl, probeTcpService } from "./services";
 import type { ProbeResult } from "./services";
+import { blockedPortMessage, probeListenPort } from "./port";
 import { resolveDataDir, resolveDbMode } from "../../src/persistence/db-mode";
 
 async function ask(question: string, defaultValue = ""): Promise<string> {
@@ -180,24 +180,7 @@ async function chooseDbMode(envExisted: boolean): Promise<void> {
 /** Port the example ships with. A VPS NAT often does not forward it. */
 const DEFAULT_PORT = "12800";
 
-/** Ports this installer suggests when 12800 is taken. */
 const PORT_SUGGESTIONS: readonly string[] = ["8080", "3000", "8081"];
-
-/**
- * True when nothing is listening on the port yet.
- *
- * Binding is the test, not connecting: only a real bind proves the port is
- * free, and the socket is closed immediately so the probe never holds it.
- */
-function isPortFree(host: string, port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const server = createServer();
-    server.once("error", () => resolve(false));
-    server.listen(port, host, () => {
-      server.close(() => resolve(true));
-    });
-  });
-}
 
 /**
  * Asks which port the gateway should listen on. Enter keeps 12800. The
@@ -206,14 +189,21 @@ function isPortFree(host: string, port: number): Promise<boolean> {
  * production build; the dashboard dev server stays on 5173 and proxies to it.
  */
 async function choosePort(envExisted: boolean): Promise<void> {
-  const alreadyChosen = envExisted && Boolean(process.env.PORT?.trim());
-  if (alreadyChosen || nonInteractive()) return;
+  if (nonInteractive()) return;
+  const currentPort = process.env.PORT?.trim() || DEFAULT_PORT;
+  if (envExisted) {
+    const answer = await ask(`Keep the current port ${currentPort}? yes / no`, "yes");
+    if (answer.toLowerCase() === "yes" || answer.toLowerCase() === "y") return;
+    if (answer.toLowerCase() !== "no" && answer.toLowerCase() !== "n") {
+      throw new Error(`Port choice must be yes or no (got "${answer}")`);
+    }
+  }
 
-  const candidates = [DEFAULT_PORT, ...PORT_SUGGESTIONS];
+  const candidates = [...new Set([currentPort, DEFAULT_PORT, ...PORT_SUGGESTIONS])];
   const states = await Promise.all(
     candidates.map(async (port) => ({
       port,
-      free: await isPortFree("127.0.0.1", Number(port)),
+      free: port === currentPort || (await probeListenPort(Number(port))).status === "free",
     })),
   );
   const free = states.filter((s) => s.free).map((s) => s.port);
@@ -231,9 +221,15 @@ async function choosePort(envExisted: boolean): Promise<void> {
   if (taken.length > 0) console.log(`In use:    ${taken.join(", ")}`);
   console.log("Pick 8080 (or any open port) when a VPS does not forward 12800.");
 
-  const answer = await ask("Port", DEFAULT_PORT);
+  const answer = await ask("Port", currentPort);
   if (!/^[1-9][0-9]{0,4}$/.test(answer) || Number(answer) > 65535) {
     throw new Error(`Port must be a number from 1 to 65535 (got "${answer}")`);
+  }
+  if (answer !== currentPort) {
+    const selected = await probeListenPort(Number(answer));
+    if (selected.status === "blocked") {
+      throw new Error(`${blockedPortMessage(Number(answer))} Port selection was not saved.`);
+    }
   }
   if (!defaultFree && answer === DEFAULT_PORT) {
     console.log(`⚠ ${DEFAULT_PORT} is in use — starting will fail unless whatever holds it is stopped first.`);
@@ -324,6 +320,8 @@ export async function setup(): Promise<void> {
   // Step 2: Load the file, then choose the mode. A fresh file carries the
   // example default, which is not a choice the operator made, so it is asked.
   const fileEnv = await readEnvFile(envPath);
+  // See main.ts: Bun's automatic PORT default must not mask a saved choice.
+  if (process.env.PORT === "12800") delete process.env.PORT;
   for (const [key, value] of Object.entries(fileEnv)) {
     if (!process.env[key]) process.env[key] = value;
   }
@@ -432,7 +430,7 @@ export async function setup(): Promise<void> {
     console.log("    Production. Builds the dashboard, AOT manifest, and binary first.");
     console.log("");
     console.log("  bun run dev");
-    console.log("    Development. No build; hot reload, dashboard on 5173, API on");
+    console.log("    Development. No build; hot reload, dashboard on 5173 (or 1931 if busy), API on");
     console.log(`    ${port}. Use this while changing source.`);
   }
   console.log("");

@@ -6,6 +6,29 @@ import { installLocal } from "./local";
 import { installVps } from "./vps";
 import { installDocker } from "./docker";
 
+export interface InstallPreflightDependencies {
+  readonly probePort: (port: number) => Promise<{ readonly status: "free" | "blocked"; readonly code?: string }>;
+  readonly ownedGateway: (port: number, root: string) => Promise<boolean>;
+}
+
+const defaultPreflight: InstallPreflightDependencies = {
+  async probePort(port) {
+    const { probeListenPort } = await import("../cli/port");
+    return await probeListenPort(port);
+  },
+  async ownedGateway(port, root) {
+    const previous = process.env.CARTETHYIA_CONFIG_DIR;
+    try {
+      process.env.CARTETHYIA_CONFIG_DIR = root;
+      const { attachGateway, ensureDrainToken } = await import("../cli/instance");
+      return (await attachGateway(port, ensureDrainToken())) !== null;
+    } finally {
+      if (previous === undefined) delete process.env.CARTETHYIA_CONFIG_DIR;
+      else process.env.CARTETHYIA_CONFIG_DIR = previous;
+    }
+  },
+};
+
 async function detectTopology(host: HostExecutor): Promise<VpsTopology | null> {
   try {
     const local = await host.run(["sh", "-c", "ip -4 addr show scope global | awk '/inet /{print $2}' | cut -d/ -f1 | head -1"], { timeoutMs: 10_000 });
@@ -31,7 +54,11 @@ async function confirmPlan(request: InstallRequest): Promise<void> {
     rl.close();
   }
 }
-export async function install(request: InstallRequest, host: HostExecutor = hostExecutor): Promise<void> {
+export async function install(
+  request: InstallRequest,
+  host: HostExecutor = hostExecutor,
+  preflight: InstallPreflightDependencies = defaultPreflight,
+): Promise<void> {
   if (request.dryRun) {
     console.log(buildInstallPlan(request).map((step, index) => `${index + 1}. ${step}`).join("\n"));
     return;
@@ -67,6 +94,18 @@ export async function install(request: InstallRequest, host: HostExecutor = host
     console.log(JSON.stringify(results, null, 2));
     if (results.some((item) => item.phase === "preflight" && item.required && item.status === "fail")) process.exitCode = 1;
     return;
+  }
+  if (request.target !== "docker") {
+    const port = await preflight.probePort(request.port);
+    if (port.status === "blocked") {
+      const owned = port.code === "EADDRINUSE" && await preflight.ownedGateway(request.port, request.root);
+      if (!owned) {
+        const { blockedPortMessage, listenPortErrorMessage } = await import("../cli/port");
+        throw new Error(port.code === "EADDRINUSE"
+          ? `Installation cannot use the requested custom port. ${blockedPortMessage(request.port)}`
+          : listenPortErrorMessage(request.port, port));
+      }
+    }
   }
   if (request.target === "vps") {
     if (host.platform !== "linux") throw new Error("VPS installation requires Linux with apt and systemd");

@@ -113,9 +113,9 @@ Three things worth knowing before it looks broken:
   in `scripts/test/console-auth.ts` resolves all three terminal states
   (`setup` / `login` / already-`shell`), which is why re-running the command is
   safe and a no-op.
-- **5173 serves `dashboard/src` with HMR; 12800 serves the built bundle** from
+- **5173 (fallback 1931) serves `dashboard/src` with HMR; 12800 serves the built bundle** from
   `dist/dashboard` and needs `bun run dashboard:build` after an edit. The
-  command defaults to 5173 and takes an origin argument for the other.
+  command auto-detects the dev server port and takes an origin argument for the other.
 
 Sign-in, credential resolution, and the `agent-browser` CLI plumbing live in
 `scripts/test/console-auth.ts`, shared with `visual-baseline.ts` so there is one

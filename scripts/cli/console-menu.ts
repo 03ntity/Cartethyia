@@ -17,6 +17,7 @@ import { renderWordmark } from "./wordmark";
 import { exportBackup, resetConsoleAccount } from "./admin";
 import { runDetachedUpdate } from "./update";
 
+
 /**
  * The default `carte` experience: start the gateway, then offer an arrow-key
  * menu. This needs no desktop environment, so it works over SSH, on a headless
@@ -57,12 +58,17 @@ export async function startMenu(): Promise<void> {
   const dashboardUrl = `http://127.0.0.1:${port}/console`;
   const currentVersion = await readInstalledVersion();
 
-  // The gateway starts in the background: the menu is usable before it has
-  // finished booting, and awaiting it cost ~670 ms of blank terminal on every
-  // start. `ready` resolves when the health probe passes; actions that need a
-  // listening gateway await it, so nothing races.
+  // Reattach without draining a healthy instance. A new child must either be
+  // ready or produce its actionable failure before the menu is shown; otherwise
+  // the UI offers gateway actions for a process that already exited.
   const attached = await attachGateway(port, drainToken);
-  const ready = attached ? Promise.resolve(null) : startGateway(port, drainToken);
+  let startupError: unknown = null;
+  const ready: Promise<Bun.Subprocess | null> = attached
+    ? Promise.resolve(null)
+    : startGateway(port, drainToken).catch((error: unknown) => {
+      startupError = error;
+      return null;
+    });
   let gateway: Bun.Subprocess | null = null;
   const runningAttached: RunningGateway | null = attached;
   void ready.then((child) => {
@@ -70,10 +76,19 @@ export async function startMenu(): Promise<void> {
     gateway = child;
     child.unref();
   }).catch((error: unknown) => {
-    console.error(
-      `The gateway did not start: ${error instanceof Error ? error.message : "unknown error"}`,
-    );
+    console.error(`The gateway did not start: ${error instanceof Error ? error.message : "unknown error"}`);
   });
+
+  if (!attached) {
+    await ready;
+    if (startupError !== null) {
+      const detail = startupError instanceof Error ? startupError.message : "unknown startup error";
+      console.error(`The gateway did not start on port ${port}.\n${detail}`);
+      console.error("Fix the reported issue, then run `carte` again.");
+      process.exitCode = 1;
+      return;
+    }
+  }
 
   let stopping = false;
   let handedOff = false;
