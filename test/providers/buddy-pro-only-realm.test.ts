@@ -41,6 +41,7 @@ describe("Buddy Pro-only tagging follows measured account scope", () => {
       "gemini-3.8-flash",
       "grok-4.6",
       "grok-4.7",
+      "kimi-k3.1-pro-highspeed",
     ]);
     expect(codeBuddyProIds).toEqual(expected);
     expect(workBuddyProIds).toEqual(expected);

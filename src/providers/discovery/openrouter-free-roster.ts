@@ -54,7 +54,6 @@ interface FreeRow {
 const FREE_ROWS: readonly FreeRow[] = [
   { id: "cohere/north-mini-code:free", ctx: 256_000, out: 64_000 },
   { id: "dots-studio/dots-3-note-preview:free", ctx: 512_000, out: 460_800, vision: true },
-  { id: "minimax/minimax-m3.1-flash:free", ctx: 1_000_000, out: 524_288, vision: true },
   {
     id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
     ctx: 256_000,

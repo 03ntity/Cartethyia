@@ -8,6 +8,41 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.5.9] - 2026-10-24
+
+### Fixed
+
+- **Imported Cline accounts stop asking to re-authenticate.** A 9router /
+  Omniroute export of a Cline connection carries both an `apiKey` (sk_...) and
+  an OAuth access/refresh bundle for the same account. The importer forced the
+  credential kind to `oauth` because Cline was in the OAuth-preferred set, so
+  dispatch wrapped the api key as `Bearer workos:sk_...` and Cline refused it
+  with "Unauthorized: please make sure you're using the latest version of
+  Cline and re-authenticate". The api key is now stored as `api_key`, dispatch
+  sends it as a bare `Bearer`, and the refresh token still travels so the
+  account can rotate to OAuth later without losing it. An explicit
+  `authType: "oauth"` still forces the oauth path.
+
+- **An OAuth account with no stored expiry refreshes on first use.** An OAuth
+  row whose `provider_oauth_states.expires_at` is `NULL` but which carries a
+  refresh token (hand-pasted bundles, migrated accounts) had its `dueAt` left
+  undefined, so dispatch sent the pasted access token untouched. If that token
+  had already expired on another install, the upstream answered "re-authenticate"
+  before the refresh grant was ever used. Dispatch now treats this shape as
+  due immediately. A failed refresh keeps the already-decrypted token in place
+  so the upstream's own 401 remains the authoritative verdict, not a
+  credential-less gateway error raised before the request leaves.
+
+### Changed
+
+- **Buddy catalogs tracked.** Added `kimi-k3.1-pro` and
+  `kimi-k3.1-pro-highspeed` to the shared WorkBuddy / CodeBuddy roster and the
+  CodeBuddy CN roster (1,000,000 ctx, 64,000 out). Highspeed is tagged
+  Pro-only on the international realm, matching every other `BUDDY_PRO_ONLY`
+  entry's shape. Removed `kimi-k3-1` from CodeBuddy CN, `deepseek-v4.1-pro`
+  and `deep-model` from the shared buddy roster, and `minimax/minimax-m3.1-flash:free`
+  from the OpenRouter-backed free roster (Cline, Kilo, OpenRouter).
+
 ## [2.5.8] - 2026-10-24
 
 ### Fixed

@@ -229,6 +229,71 @@ describe("legacy accounts", () => {
     expect((config.provider_oauth_states ?? [])[0]?.refresh_token).toBe("rt");
   });
 
+  test("a cline connection with both an api key and an OAuth bundle imports as api_key", () => {
+    // Reproduces the 9router/Omniroute export shape that produced
+    // "Unauthorized: please make sure you're using the latest version of Cline
+    // and re-authenticate" on dispatch. The connection carries BOTH an
+    // `apiKey` (sk_...) and an expired OAuth access/refresh pair for the same
+    // account. Previously the importer forced the kind to `oauth` because
+    // Cline was in the OAuth-preferred set, so dispatch wrapped the api key
+    // as `Bearer workos:sk_...` and the upstream rejected it. The api key is
+    // the dispatchable credential; the OAuth bundle moves to `oauth_states`
+    // so the account can still rotate to OAuth later.
+    const { payload } = convert9RouterBackup(
+      backup({
+        providerConnections: [
+          {
+            id: "a",
+            provider: "cline",
+            authType: "apikey",
+            apiKey: "sk_6c51b524d61d99d5d8b7436401ac2a479256fd035e86a4e9638a5af15a0d0607",
+            accessToken: "eyJhbGciOiJSUzI1NiJ9.expired",
+            refreshToken: "3bS5rWxIL9l4imO7q73xpH0oU",
+            expiresAt: "2026-10-20T17:17:29.053Z",
+            isActive: true,
+            createdAt: NOW,
+          },
+        ],
+      }),
+      TENANT,
+    );
+    const config = (payload as unknown as { sections: { config: Record<string, Record<string, unknown>[]> } }).sections.config;
+    const account = (config.provider_accounts ?? [])[0];
+    expect(account?.access_token).toBe(
+      "sk_6c51b524d61d99d5d8b7436401ac2a479256fd035e86a4e9638a5af15a0d0607",
+    );
+    expect(account?.credential_kind).toBe("api_key");
+    // The refresh token still travels, so a later rotation to OAuth is lossless.
+    expect((config.provider_oauth_states ?? [])[0]?.refresh_token).toBe("3bS5rWxIL9l4imO7q73xpH0oU");
+  });
+
+  test("a cline connection with authType=oauth stays oauth even when an api key field is present", () => {
+    // The inverse case: explicit `authType: "oauth"` wins. An api key field
+    // next to an OAuth bundle might be a stale value the router left behind,
+    // so the authType is believed over the field.
+    const { payload } = convert9RouterBackup(
+      backup({
+        providerConnections: [
+          {
+            id: "a",
+            provider: "cline",
+            authType: "oauth",
+            apiKey: "sk_stale",
+            accessToken: "workos-at",
+            refreshToken: "workos-rt",
+            isActive: true,
+            createdAt: NOW,
+          },
+        ],
+      }),
+      TENANT,
+    );
+    const config = (payload as unknown as { sections: { config: Record<string, Record<string, unknown>[]> } }).sections.config;
+    const account = (config.provider_accounts ?? [])[0];
+    expect(account?.access_token).toBe("workos-at");
+    expect(account?.credential_kind).toBe("oauth");
+  });
+
   test("an api key keeps its bearer and its restriction", () => {
     const { payload, report } = convert9RouterBackup(
       backup({

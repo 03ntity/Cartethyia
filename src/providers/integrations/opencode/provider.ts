@@ -230,7 +230,6 @@ const FREE_AGENT_TOOL_SCHEMA = {
   required: [] as string[],
 } as const;
 
-
 function ensureFreeAgentRequest(request: CanonicalRequest): CanonicalRequest {
   const present: Record<string, true> = {};
   for (const tool of request.tools ?? []) present[tool.name] = true;
@@ -250,8 +249,6 @@ function ensureFreeAgentRequest(request: CanonicalRequest): CanonicalRequest {
     tools: [...(request.tools ?? []), ...missing],
   };
 }
-
-
 
 function completeOpenCodeToolSchemas(payload: Record<string, unknown>): void {
   if (!Array.isArray(payload.tools)) return;

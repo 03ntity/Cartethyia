@@ -123,6 +123,7 @@ export const BUDDY_PRO_ONLY_MODEL_IDS: ReadonlySet<string> = new Set([
   "gemini-3.8-flash",
   "grok-4.6",
   "grok-4.7",
+  "kimi-k3.1-pro-highspeed",
 ]);
 
 /**
@@ -259,7 +260,6 @@ export const BUDDY_SHARED_RAW: readonly BuddyRawEntry[] = [
   ["claude-sonnet-4.6", "Claude Sonnet 4.6", true, true, 200_000, 32_000],
   ["deepseek-v4.1-flash", "DeepSeek V4.1 Flash", true, true, 1_000_000, 384_000],
   ["deepseek-v4.1-flash-sg", "DeepSeek V4.1 Flash SG", true, true, 1_000_000, 128_000],
-  ["deepseek-v4.1-pro", "DeepSeek V4.1 Pro", true, false, 1_000_000, 384_000],
   ["gemini-2.5-flash-image", "Gemini 2.5 Flash Image", true, true, 1_000_000, 64_000],
   ["gemini-3.0-pro-image", "Gemini 3.0 Pro Image", true, true, 1_000_000, 64_000],
   ["gemini-3.1-flash-image", "Gemini 3.1 Flash Image", true, true, 1_000_000, 64_000],
@@ -278,7 +278,6 @@ export const BUDDY_SHARED_RAW: readonly BuddyRawEntry[] = [
   ["gpt-5.6-sol", "GPT-5.6 Sol", true, true, 1_050_000, 128_000],
   ["gpt-5.6-terra", "GPT-5.6 Terra", true, true, 1_050_000, 128_000],
   ["gpt-6-luna", "GPT-6 Luna", true, true, 1_050_000, 128_000],
-  ["deep-model", "Deep Model", true, true, null, null],
   ["gpt-6-sol", "GPT-6 Sol", true, true, 1_000_000, 128_000, true],
   ["gpt-6.1-sol", "GPT-6.1 Sol", true, true, 1_050_000, 128_000],
   ["gpt-image-2", "GPT-Image-2", true, true, 400_000, 128_000],
@@ -293,6 +292,8 @@ export const BUDDY_SHARED_RAW: readonly BuddyRawEntry[] = [
   ["kimi-k2.7", "Kimi K2.7", true, false, 256_000, 65_536],
   ["kimi-k2.8-preview", "Kimi K2.8 Preview", true, false, 1_048_576, 65_536],
   ["kimi-k3", "Kimi K3", true, false, 1_048_576, 131_072],
+  ["kimi-k3.1-pro", "Kimi K3.1 Pro", true, true, 1_000_000, 64_000],
+  ["kimi-k3.1-pro-highspeed", "Kimi K3.1 Pro Highspeed", true, true, 1_000_000, 64_000],
   ["minimax-m3", "MiniMax-M3", true, false, 512_000, 512_000],
   ["step-5-preview", "Step-5-Preview", true, true, 1_000_000, 64_000, true],
 ];

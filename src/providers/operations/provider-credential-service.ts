@@ -152,14 +152,33 @@ export async function loadAccountWithFreshness(
   const row = rows[0];
   if (!row) return undefined;
   const lead = skewMs ?? refreshLeadMs(row.providerId);
+  // A refresh-capable OAuth account with no stored expiry is unknown-liveness:
+  // we have no evidence the access token still works. The old rule left
+  // `dueAt` undefined for these, so `resolveCredentialForAccount` skipped the
+  // refresh branch and dispatch sent the pasted token as-is. For a token that
+  // had already expired on another installation (a 9router/Omniroute import
+  // carrying `accessToken` + `refreshToken` + a past `expiresAt` that was
+  // dropped by validation, a hand-pasted OAuth bundle with no expiry field,
+  // or an upstream that stopped minting expiries) that produced the exact
+  // "re-authenticate" refusal the refresh grant exists to prevent. Marking the
+  // token due immediately refreshes it on first use; the sweep handles the
+  // normal case where `expires_at` is populated.
+  const hasRefreshGrant = row.refreshCiphertext != null;
+  const kindOauth = row.credentialKind === "oauth";
+  const unknownExpiryButRefreshable =
+    kindOauth && !row.staticToken && hasRefreshGrant && row.expiresAt == null;
   return {
     row,
     // A static token is never "due": it is used as issued and there is no
     // refresh to run, so the dispatch path must not treat it as stale.
     dueAt:
-      row.staticToken || row.expiresAt == null
+      row.staticToken
         ? undefined
-        : row.expiresAt.getTime() - lead,
+        : row.expiresAt != null
+          ? row.expiresAt.getTime() - lead
+          : unknownExpiryButRefreshable
+            ? 0
+            : undefined,
   };
 }
 
@@ -223,7 +242,14 @@ export async function resolveCredentialForAccount(
   if (row.credentialKind === "oauth" && oauth && dueAt !== undefined && dueAt <= Date.now()) {
     const refresher = await oauth.resolveRefresher(row.providerId);
     if (refresher) {
-      secret = await oauth.refreshService.ensureFreshAccessToken(accountId, refresher) ?? undefined;
+      // Try to refresh. If it fails (refresh grant dead, upstream unreachable,
+      // etc.) keep the already-decrypted stale secret rather than wiping it:
+      // dispatch then sends the token we have, and the upstream's own 401 is
+      // the authoritative verdict. Wiping it here turned "token expired" into
+      // a credential-less GatewayError before the request ever left, which is
+      // worse than letting the server say so.
+      const refreshed = await oauth.refreshService.ensureFreshAccessToken(accountId, refresher);
+      if (refreshed) secret = refreshed;
     }
   }
 
