@@ -1165,3 +1165,156 @@ describe("decodeChatSseStream — an empty body", () => {
     expect(terminal(events).state).toBe("failed");
   });
 });
+
+describe("decodeChatSseStream — Inferhub ag/* model quirks", () => {
+  // ag/gemini-3.8-flash-high (and similar thinking models) emit two non-standard
+  // chunks when tools are called:
+  //   1. A `reasoning_details` delta (alongside finish_reason:"tool_calls") whose
+  //      entries carry opaque `thoughtSignature` blobs, NOT readable text.
+  //   2. A trailing `choices: []` usage-only chunk that arrives *after* `[DONE]`.
+  // Neither must crash the decoder or swallow the tool call from chunk 1.
+
+  const TOOL: CanonicalRequest["tools"] = [
+    {
+      name: "get_current_weather",
+      description: "Get the weather",
+      jsonSchema: {
+        type: "object",
+        properties: { location: { type: "string" } },
+        required: ["location"],
+      },
+    },
+  ];
+
+  test("reasoning_details with thoughtSignature blobs does not crash or emit phantom reasoning", async () => {
+    // Chunk 1: tool_calls delta (normal)
+    // Chunk 2: reasoning_details delta carrying only {id, name, thoughtSignature} — no .text
+    // The decoder must emit the tool call from chunk 1 and produce no reasoning event.
+    const events = await collect(
+      sseStream(
+        frame({
+          choices: [
+            {
+              delta: {
+                role: "assistant",
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_1197851",
+                    type: "function",
+                    function: { name: "get_current_weather", arguments: '{"location":"Tokyo"}' },
+                  },
+                ],
+              },
+              finish_reason: null,
+              index: 0,
+            },
+          ],
+        }) +
+          frame({
+            choices: [
+              {
+                delta: {
+                  reasoning_details: [
+                    {
+                      id: "call_1197851",
+                      name: "get_current_weather",
+                      thoughtSignature: "EpMHABCDEFG_opaque_base64_blob==",
+                    },
+                  ],
+                },
+                finish_reason: "tool_calls",
+                index: 0,
+              },
+            ],
+          }) +
+          frame("[DONE]"),
+      ),
+      undefined,
+      request({ tools: TOOL }),
+    );
+
+    // Exactly one tool call delta emitted, with the correct identity.
+    const calls = events.flatMap((event) => (event.type === "tool_call_delta" ? [event] : []));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.call_id).toBe("call_1197851");
+    expect(calls[0]?.name).toBe("get_current_weather");
+    expect(calls[0]?.arguments_delta).toBe('{"location":"Tokyo"}');
+
+    // No reasoning content event: thoughtSignature blobs are not readable text.
+    const reasoning = events.filter(
+      (event) => event.type === "content_delta" && event.content.kind === "reasoning",
+    );
+    expect(reasoning).toHaveLength(0);
+
+    // Stream ends as a complete tool_use turn.
+    const term = terminal(events);
+    expect(term.state).toBe("complete");
+    expect(term.stop_reason).toBe("tool_use");
+  });
+
+  test("trailing choices:[] chunk after [DONE] is never seen by the decoder", async () => {
+    // Inferhub emits a final usage-only frame after [DONE]. The decoder must
+    // stop at [DONE] and not attempt to access choices[0] on an empty array.
+    // The trailing frame is appended to the SSE wire after [DONE] to confirm
+    // it has no effect on events or the terminal state.
+    const trailingUsageChunk = JSON.stringify({
+      choices: [],
+      object: "chat.completion.chunk",
+      usage: {
+        completion_tokens: 465,
+        completion_tokens_details: { reasoning_tokens: 428 },
+        cost: 1.4016e-5,
+        prompt_tokens: 11,
+        total_tokens: 476,
+      },
+    });
+    const events = await collect(
+      sseStream(
+        frame({ choices: [{ delta: { role: "assistant", content: "Hello" }, finish_reason: null, index: 0 }] }) +
+          frame({ choices: [{ delta: {}, finish_reason: "stop", index: 0 }] }) +
+          frame("[DONE]") +
+          // This chunk arrives after [DONE] — the decoder must not process it.
+          `data: ${trailingUsageChunk}\n\n`,
+      ),
+    );
+
+    const texts = events.flatMap((event) =>
+      event.type === "content_delta" && event.content.kind === "text" ? [event.content.text] : [],
+    );
+    expect(texts).toEqual(["Hello"]);
+    expect(terminal(events).state).toBe("complete");
+    expect(terminal(events).stop_reason).toBe("stop");
+  });
+
+  test("reasoning_details with no text parts is not confused with Qwen/MiniMax readable reasoning", async () => {
+    // Qwen/MiniMax use reasoning_details[] with {type:"thinking", text:"..."} parts
+    // that readReasoningText() concatenates into a reasoning event.
+    // Inferhub uses reasoning_details[] with {id, name, thoughtSignature} — no .text —
+    // so no reasoning event must be emitted.
+    const events = await collect(
+      sseStream(
+        frame({
+          choices: [
+            {
+              delta: {
+                reasoning_details: [
+                  // Inferhub shape: no .text field
+                  { id: "call_abc", name: "some_tool", thoughtSignature: "AAABBBCCC==" },
+                ],
+              },
+              finish_reason: "tool_calls",
+              index: 0,
+            },
+          ],
+        }) +
+          frame("[DONE]"),
+      ),
+    );
+
+    const reasoning = events.filter(
+      (event) => event.type === "content_delta" && event.content.kind === "reasoning",
+    );
+    expect(reasoning).toHaveLength(0);
+  });
+});
