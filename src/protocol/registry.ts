@@ -110,6 +110,8 @@ async function loadCodec(wireFamily: WireFamily): Promise<CodecModule> {
   const cached = codecCache.get(wireFamily);
   if (cached !== undefined) return cached;
   const promise = (async (): Promise<CodecModule> => {
+    // dynamic-import: codec picked by wire family at request time; static
+    // imports here would couple every request path to every codec module.
     switch (wireFamily) {
       case "chat":
         return (await import("./request/chat")).chatCodecModule;

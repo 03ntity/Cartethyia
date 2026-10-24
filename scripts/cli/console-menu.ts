@@ -36,10 +36,10 @@ export async function startMenu(): Promise<void> {
         ? "Cartethyia is missing its database mode. Starting setup.\n"
         : "Cartethyia is not set up yet. Starting setup.\n",
     );
-    // Dynamic on purpose: `setup` pulls in the whole wizard and the database
-    // mode resolver, and it is only reachable on a first run. A static import
-    // would pay that cost on every `carte`, which is the one path that has to
-    // stay fast.
+    // dynamic-import: `setup` pulls in the whole wizard and the database mode
+    // resolver, and it is only reachable on a first run. A static import
+    // would pay that cost on every `carte`, which is the one path that has
+    // to stay fast.
     const { setup } = await import("./setup");
     await setup();
     const after = existsSync(ENV_PATH) ? (await readEnvFile(ENV_PATH)).CARTETHYIA_DB_MODE : undefined;

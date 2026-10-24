@@ -401,6 +401,8 @@ export async function discoverOpenCodeFreeModels(options: {
   readonly baseUrl: string;
   readonly fetcher?: typeof fetch;
 }): Promise<readonly ModelDefinition[] | null> {
+  // dynamic-import: cycle break -- the discovery helper imports this file's
+  // OPENCODE_FREE_SPEC to decide its request shape.
   const { fetchOpenAICompatibleModels } = await import("../../discovery/openai-model-discovery");
   const listed = await fetchOpenAICompatibleModels({
     baseUrl: options.baseUrl,

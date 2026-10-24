@@ -16,6 +16,7 @@ import { classifyPoolConnectError, classifyPoolProbeResponse, parseEgressIp } fr
 import { encryptCredential } from "../../../security/crypto";
 import { createValidatedFetch } from "../../../network/outbound-fetch";
 import { classifyProviderProbeAnswer } from "./probe-verdict";
+import { buildProviderProbeRequest } from "../../../providers/provider-probe";
 import type { StoredProviderProbe } from "./contracts";
 import {
   createHttpProxyAgent,
@@ -302,7 +303,6 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
     providerId: string,
     poolId?: string,
   ): Promise<PoolProviderProbeResult> {
-    const { buildProviderProbeRequest } = await import("../../../providers/provider-probe");
     const spec = await buildProviderProbeRequest(providerId);
     if (!spec) {
       return { poolId: label, providerId, status: "unreachable", reason: "Unknown provider" };

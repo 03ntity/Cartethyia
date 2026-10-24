@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   accumulate,
@@ -382,7 +382,6 @@ export async function foldDayIndex(day: string): Promise<{ readonly folded: numb
 
 /** The days whose index should be folded, newest last. */
 export async function listEventDays(): Promise<readonly string[]> {
-  const { readdir } = await import("node:fs/promises");
   const files = await readdir(TELEMETRY_EVENT_DIR).catch(() => [] as string[]);
   const days = new Set<string>();
   for (const file of files) {

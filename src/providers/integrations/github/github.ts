@@ -422,6 +422,9 @@ class GithubAdapter extends OpenAICompatibleAdapter {
     const selectedModelId = autoDecision.modelId;
     let route = await githubModelRoute(selectedModelId, credential);
     if (route === undefined) {
+      // dynamic-import: discovery module is only loaded when the first
+      // request routes to a model id not in the bundled roster; off the hot
+      // path for most deployments.
       const { discoverGithubModels } = await import("./github-discovery");
       const outboundFetch = context.outbound_fetch;
       const fetcher = outboundFetch === undefined
@@ -655,7 +658,6 @@ class GithubAdapter extends OpenAICompatibleAdapter {
       : GITHUB_ENDPOINT_PATH;
     const url = `${this.#baseUrl(context).replace(/\/+$/, "")}${endpointPath}`;
     const outboundFetch = context.outbound_fetch ?? this.#fetch ?? globalThis.fetch;
-    const { postUpstreamJson } = await import("../../../protocol/upstream/post-json");
     const upstream = await postUpstreamJson(url, headers, payload as Record<string, unknown>, context, outboundFetch);
     upstream.release();
     return upstream.res;

@@ -95,6 +95,9 @@ export async function resetLockout(args: readonly string[]): Promise<void> {
   }
   process.env.DATABASE_URL = databaseUrl;
 
+  // dynamic-import: database driver loaded after DATABASE_URL is published to
+  // process.env; static import would initialise the connection pool against
+  // whatever (or nothing) is in the environment at module load time.
   const { getDb, closeDb } = await import("../../src/persistence/boot");
   const { consoleLockouts } = await import("../../src/persistence/schema");
   const { eq, or } = await import("drizzle-orm");

@@ -1,3 +1,7 @@
+// dynamic-import-ok: lazy per-realm capability map. Each buddy regional
+// product (cb/cbcn/workbuddy/workbuddycn) imports its adapter + oauth +
+// discovery on first use so a deployment that only serves one realm never
+// drags the others into memory.
 import type { ProviderModuleCapabilities } from "../../provider-capabilities";
 import { oauthCapability, quotaCapability } from "../../provider-capabilities";
 

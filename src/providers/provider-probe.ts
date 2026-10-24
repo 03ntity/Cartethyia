@@ -87,6 +87,9 @@ export async function buildProviderProbeRequest(
 ): Promise<ProviderProbeRequest | undefined> {
   if (!isProbeableProvider(providerId)) return undefined;
 
+  // dynamic-import: cycle break -- opencode/provider transitively imports
+  // this module through the discovery helper; a static import deadlocks at
+  // load time.
   const { OPENCODE_FREE_SPEC } = await import("./integrations/opencode/provider");
   const spec = OPENCODE_FREE_SPEC;
   const source = probeRequest();

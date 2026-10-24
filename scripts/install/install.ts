@@ -1,3 +1,8 @@
+// dynamic-import-ok: installer plan runner. Every `await import("../cli/*")`
+// lazy-loads a gateway-side module (port probe, instance attach, env reader,
+// health runner) only when the installer actually needs it; a static import
+// would drag the gateway surface into every `cartethyia install --help` or
+// dry-run.
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { INSTALL_HELP, buildInstallPlan, parseInstallArgs, type InstallRequest, type VpsTopology } from "./plan";

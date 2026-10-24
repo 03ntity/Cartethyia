@@ -26,6 +26,9 @@ export async function startForeground(): Promise<void> {
   const blocker = await inspectPortHolder(port, token);
   if (blocker !== null) throw new Error(blocker);
   writeInstanceLock(port, process.pid, token);
+  // dynamic-import: `src/main` boots the gateway as a side effect of module
+  // evaluation. Importing it statically would start the server before the
+  // port probe + instance-lock sequence above has a chance to refuse the run.
   await import("../../src/main");
 }
 

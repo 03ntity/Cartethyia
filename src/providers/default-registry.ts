@@ -1,3 +1,7 @@
+// dynamic-import-ok: lazy provider registry. Every entry is a
+// `() => await import("./integrations/<name>/...")` so loading a provider
+// pays only when the first request routes to it. Static imports here would
+// drag every integration into memory at process start.
 import {
   GENERIC_API_KEY_SPECS,
 } from "./configured-openai-providers";

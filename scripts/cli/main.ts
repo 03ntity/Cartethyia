@@ -1,3 +1,6 @@
+// dynamic-import-ok: subcommand dispatcher. Every branch lazy-loads only the
+// module its command needs so `cartethyia --help` and `cartethyia stop` do
+// not drag the gateway, dashboard, and database driver into memory.
 import { mkdirSync } from "node:fs";
 import { resolveUserConfigDir } from "../../src/config/package-paths";
 import { readRequiredBunVersion, assertBunVersion } from "./version";
