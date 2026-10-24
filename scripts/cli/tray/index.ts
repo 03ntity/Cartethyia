@@ -1,7 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
-import SysTray from "systray2";
+import SysTray, { type MenuItem } from "systray2";
 import { resolvePackagePath } from "../../../src/config/package-paths";
+
+/**
+ * A row as systray2 holds it. The helper numbers the rows itself and reports
+ * that number back on a click and on an update, but it is absent from the
+ * package's typings.
+ */
+type IdentifiedItem = MenuItem & { readonly __id?: number };
 
 /**
  * One tray row. `action` rows report their id on click; separators are drawn
@@ -162,33 +169,69 @@ class WindowsTray implements Tray {
 /**
  * macOS and Linux tray: `systray2` runs its own helper, and neither platform
  * attaches a console window to it, so the bundled tray is used as-is.
+ *
+ * Clicks arrive only through `onClick`; a menu built without a listener shows
+ * every row and reports none of them, which is why the callbacks are wired
+ * here rather than left to the default.
  */
 class UnixTray implements Tray {
   readonly #tray: SysTray;
+  readonly #onSelect: (id: string) => void;
+  readonly #onExit: () => void;
+  /** Row objects kept by reference: a click hands back the object, not the id. */
+  readonly #items = new Map<string, IdentifiedItem>();
+  #closed = false;
 
   constructor(options: TrayOptions) {
+    this.#onSelect = options.onSelect;
+    this.#onExit = options.onExit;
+    const items = options.items.map((item) => {
+      if (item.kind === "separator") return SysTray.separator;
+      const menuItem: IdentifiedItem = {
+        title: item.title,
+        tooltip: item.title,
+        enabled: item.enabled ?? true,
+      };
+      this.#items.set(item.id, menuItem);
+      return menuItem;
+    });
     this.#tray = new SysTray({
       menu: {
         icon: options.iconPath,
         title: "Cartethyia",
         tooltip: options.tooltip,
-        items: options.items.map((item) =>
-          item.kind === "separator"
-            ? SysTray.separator
-            : { title: item.title, tooltip: item.title, enabled: item.enabled ?? true },
-        ),
+        items,
       },
       copyDir: true,
     });
   }
 
-  ready(): Promise<void> {
-    return this.#tray.ready().then(() => undefined);
+  async ready(): Promise<void> {
+    await this.#tray.ready();
+    // Registered after `ready()`: the helper process does not exist before
+    // that, and `onExit` attaches to it directly.
+    this.#tray.onExit(() => {
+      if (!this.#closed) this.#onExit();
+    });
+    await this.#tray.onClick((action) => {
+      for (const [id, item] of this.#items) {
+        // Identity first: `onClick` merges the clicked row into the object this
+        // class built, so a match needs no assumptions about the numbering.
+        if (item === action.item || item.__id === action.__id) {
+          this.#onSelect(id);
+          return;
+        }
+      }
+    });
   }
 
   update(id: string, title: string, enabled = true): void {
-    void id;
-    void this.#tray.sendAction({ type: "update-item", item: { title, tooltip: title, enabled } });
+    const item = this.#items.get(id);
+    // An update sent before the helper reports ready carries no row number, and
+    // systray2 then rewrites the first row instead of this one.
+    if (item?.__id === undefined) return;
+    const next: IdentifiedItem = { title, tooltip: title, enabled, __id: item.__id };
+    void this.#tray.sendAction({ type: "update-item", item: next });
   }
 
   setTooltip(text: string): void {
@@ -198,9 +241,16 @@ class UnixTray implements Tray {
   }
 
   async close(): Promise<void> {
-    if (this.#tray.killed) return;
+    if (this.#closed) return;
+    this.#closed = true;
+    const helper = this.#tray.process;
+    // `kill()` settles on the helper's `exit` event, so a helper that already
+    // exited would leave it pending forever and hang the shutdown after it.
+    if (helper.exitCode !== null || helper.signalCode !== null) return;
     try {
-      this.#tray.kill();
+      // `false`: systray2 otherwise calls `process.exit(0)` when the helper
+      // exits, which discards the exit code this close was given.
+      await this.#tray.kill(false);
     } catch {
       // The helper may already be gone.
     }
