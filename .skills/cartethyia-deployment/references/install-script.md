@@ -1,59 +1,59 @@
-# `scripts/install/vps.sh`
+# `scripts/install.sh`
 
-One script, both topologies, both database modes. Idempotent — an existing
-`.env` is never overwritten, and an existing checkout is updated in place.
+One command for local Linux/macOS, Regular/NAT VPS, and Docker. The shell file
+bootstraps a checkout and Bun; TypeScript modules under `scripts/install/` own
+all install policy. Do not add a second implementation in shell wrappers.
 
 ```bash
-# NAT VPS, full mode (Postgres)
-curl -fsSL <raw-url>/scripts/install/vps.sh | bash -s -- --nat --full
+# Fresh Regular VPS, Full mode
+curl -fsSL https://raw.githubusercontent.com/risunCode/Cartethyia/dev/scripts/install.sh \
+  | bash -s -- --vps --regular --full --domain app.example.com
 
-# Regular VPS, full mode, Caddy issues the certificate
-bash scripts/install/vps.sh --regular --full --domain app.example.com
-
-# Lite mode (SQLite, no Postgres)
-bash scripts/install/vps.sh --regular --lite --domain app.example.com
+# From a checkout
+bash scripts/install.sh --local --lite
+bash scripts/install.sh --vps --regular --lite --domain app.example.com
+bash scripts/install.sh --vps --nat --lite --port 8080 --public-origin https://app.example.com:8080
+bash scripts/install.sh --docker --lite
 ```
 
-## Flags
+## Target flags
 
-| Flag | Meaning |
-|---|---|
-| `--nat` | Provider already terminates TLS. No proxy installed. |
-| `--regular` | VM owns the public IP; installs Caddy and lets it issue. |
-| `--full` | Postgres (default). |
-| `--lite` | SQLite; no Postgres installed. |
-| `--domain <host>` | Required with `--regular`; Caddy's site address, also sets `CARTETHYIA_PUBLIC_ORIGIN`. |
-| `--skip-tls` | `--regular` without installing Caddy — you front it yourself. |
+Exactly one of `--local`, `--vps`, `--docker`, plus one of `--lite`, `--full`.
 
-Env overrides: `CARTETHYIA_ROOT`, `CARTETHYIA_BRANCH`, `CARTETHYIA_PORT`,
-`CARTETHYIA_REPO_URL`, `CARTETHYIA_DB_NAME`, `CARTETHYIA_DB_USER`.
+- `--regular|--nat`: VPS topology; detection is used only when omitted and
+  ambiguous detection never defaults to NAT.
+- `--domain`: required for Regular VPS with managed Caddy.
+- `--port`: app/external forwarded port; NAT requires it explicitly.
+- `--public-origin`: required for NAT and for Regular with `--no-caddy`.
+- `--root`: checkout/install root (default `/opt/cartethyia` for VPS).
+- `--check`, `--dry-run`: read-only report/plan; no mutation.
+- `--no-start`, `--skip-deps`, `--no-caddy`, `--provision-redis`,
+  `--non-interactive`.
 
-## What it does
+Bootstrap overrides: `CARTETHYIA_ROOT`, `CARTETHYIA_BRANCH` (default `dev`),
+`CARTETHYIA_REPO_URL`.
 
-Packages → bun → clone/update → database (full only) → `.env` → install and
-build → systemd → Caddy (regular only) → health check.
+## What the targets do
 
-Two details worth knowing before you run it:
+Local: Bun dependencies, atomic config, `bun run build`, detached compiled
+gateway, readiness, doctor. The command returns to the shell. Reattach with
+`./carte menu`; stop explicitly with `./carte stop` from the install root.
+No Node/npm, `nohup`, or `pkill`.
 
-- **It builds the AOT artifact**, not a source run: `build:aot` then
-  `build:binary`, and the unit's `ExecStart` is `dist/cartethyia`. That is why
-  `NODE_ENV=production` is safe here — see
-  [`gotchas.md`](gotchas.md). If you instead run `bun run src/main.ts`, set
-  `CARTETHYIA_SOURCE_RUN=1`.
-- **It refuses to guess a Postgres password.** If the role already exists, the
-  script cannot know its password and dies with a message telling you to set
-  `DATABASE_URL` yourself. This is deliberate: silently blanking it would
-  produce a gateway that boots and then fails every DB write.
+VPS: Bun source build and compiled `dist/cartethyia` under systemd. Full uses a
+valid existing `DATABASE_URL` or provisions a new local role/database. Existing
+roles with unknown passwords are never reset. Regular validates DNS and manages
+Caddy after verifying the pinned release checksum. NAT never installs Caddy.
 
-## Lite mode
+Docker: requires the full checkout, Docker Engine, and Compose. It delegates to
+the existing Dockerfile/Compose/entrypoint and named data volume. Full needs an
+external `DATABASE_URL`; no PostgreSQL container is added implicitly.
 
-Single-writer SQLite. `CARTETHYIA_DB_MODE=lite` and no Postgres. The data dir
-is mounted writable in the unit, which is what
-[`shared-provisioning.md`](shared-provisioning.md) requires regardless of mode.
+All targets preserve valid secrets/custom env keys on rerun and reject an
+implicit Lite↔Full switch. Use backup export/import to change modes. Redis is
+optional: `REDIS_URL` set means shared coordination, unset means in-memory;
+there is no `REDIS_MODE` flag.
 
-## After it finishes
-
-1. Open `/console` and finish the first-boot wizard.
-2. Enroll an account — see [`proving-a-deployment.md`](proving-a-deployment.md).
-3. Dispatch one real request. The script's health check proves the process is
-   up; it does not prove upstream reachability.
+Read [shared provisioning](shared-provisioning.md) for the systemd/config
+invariants and the topology references for TLS and forwarding. A health check
+proves process/database readiness, not provider egress or external NAT reachability.

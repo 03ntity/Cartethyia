@@ -279,7 +279,7 @@ database migration.
 ### Do not run `bun test` directly
 
 `bun test` is defined, but it is not the gate — it skips the runner, and the
-runner is what makes the TLS-dependent suites pass. `scripts/ci/run.ts` merges
+runner is what makes the TLS-dependent suites pass. `scripts/test/run.ts` merges
 `test/fixtures/localhost-cert.pem` into a bundle and passes it to the subprocess
 as `NODE_EXTRA_CA_CERTS`. Bun reads that variable only at process start, so a
 direct `bun test` has no extra CA and the outbound HTTP/2 suites fail on the
@@ -371,7 +371,7 @@ its own, which covers those two cases, but any other proxy must be named.
 
 ### 12.4 Auto-deploy
 
-Use `scripts/install/lite.sh` rather than writing your own (see below). If you
+Use `scripts/install.sh --vps --regular --lite --domain your.domain` rather than writing your own (see below). If you
 do poll for updates, a build takes 3–5 minutes on 1 vCPU, so a 1-minute cron
 stacks builds until the box runs out of memory. Poll every 5 minutes, take a
 `flock` before fetching, and roll back to the previous commit if
@@ -420,24 +420,24 @@ on a named volume.
 
 ### 12.8 One-shot install script
 
-`scripts/install/lite.sh` — one command, Lite mode, no manual steps.
-Idempotent; safe to re-run.
+Use `scripts/install.sh` for local, VPS, and Docker installation. The canonical
+command matrix and lifecycle details live in [installation](installation.md).
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/risunCode/Cartethyia/dev/scripts/install/lite.sh | bash
+curl -fsSL https://raw.githubusercontent.com/risunCode/Cartethyia/dev/scripts/install.sh | bash -s -- --vps --regular --full --domain your.domain
 # or, from a checkout:
-bash scripts/install/lite.sh
+bash scripts/install.sh --local --lite
 ```
 
-That script is the canonical one-shot installer: it installs system packages
-and Bun, installs the `cartethyia` npm package globally, writes `.env`, and
-starts the gateway. With `--topology regular` it also installs Caddy and a
-`caddy.service` unit; it writes no unit for Cartethyia itself. An existing
-`.env` is never overwritten.
+The installer uses Bun for local/source and VPS builds, writes config
+atomically without rotating existing secrets, builds the compiled gateway,
+starts it through the target lifecycle, and runs the doctor. Local installs
+return to the shell with a reattachable detached gateway; VPS uses systemd;
+Docker uses Compose. Existing `.env` custom values are preserved.
 
-It takes flags, not environment overrides: `--mode lite|full`,
-`--topology regular|nat`, `--domain <fqdn>`, `--port <n>`,
-`--non-interactive`, and `--skip <packages,bun,postgres,redis,node,npm,caddy,env,start>`.
+Use `--check` for a read-only report or `--dry-run` to inspect the plan. NAT
+requires an explicit forwarded `--port` and `--public-origin`; it never
+installs Caddy. Full Docker requires an external `DATABASE_URL`.
 
 **NEXT after install:** the console first-boot wizard has not run yet. Open
 `$ORIGIN/console`, or seed it non-interactively:

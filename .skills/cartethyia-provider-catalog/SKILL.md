@@ -176,7 +176,7 @@ an operator who turned proxying back on keeps it on.
   authority for limits, pricing, and capability; do not add a duplicate raw or
   compact snapshot. Lookups are binary searches over typed-array columns — there
   is no JSON parse and no per-row object at boot.
-- Refresh it with `bun run scripts/generate/models-catalog.ts`. Generation
+- Refresh it with `bun run scripts/tools/generate-models.ts`. Generation
   fetches models.dev for breadth and pricing plus `models.opencode.ai` for the
   OpenCode family's authoritative limits, and the server reads only the
   committed blob.

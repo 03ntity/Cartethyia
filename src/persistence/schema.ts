@@ -527,7 +527,7 @@ export const healthEvents = pgTable(
     index("health_events_account_id_created_at_idx").on(table.accountId, table.createdAt),
     // Descending `created_at` is deliberate: health history is always read
     // newest-first. The SQLite baseline drops the direction (see
-    // `scripts/generate/sqlite-ddl.ts` — SQLite scans an index either way),
+    // `scripts/tools/generate-sqlite.ts` — SQLite scans an index either way),
     // so this is a Postgres-only access-path choice, not a cross-backend
     // disagreement.
     index("health_events_account_model_created_idx").on(

@@ -3,7 +3,7 @@
 Both backends run the same Drizzle schema (`src/persistence/schema.ts`, written
 with `pg-core`) and the same stores. SQL expressions that differ are meant to
 live in `src/persistence/dialect.ts`. The SQLite baseline is generated from the
-PostgreSQL baseline by `scripts/generate/sqlite-ddl.ts`; on top of
+PostgreSQL baseline by `scripts/tools/generate-sqlite.ts`; on top of
 `0000_baseline.sql` both backends carry the same numbered forward migrations
 under `migrations/full-postgres/` and `migrations/lite-sqlite3/`
 (e.g. `0001_allow_multiple_shared_keys_per_ip.sql`), and

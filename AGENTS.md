@@ -156,7 +156,7 @@ how symptoms get suppressed instead of fixed.
 | Egress, proxy pools, SSRF | `src/network/`, `src/console/routing/pools/` | `documentation/features/network-pools.md`, `.skills/cartethyia-health-routing/SKILL.md` |
 | Console API | `src/console/<domain>/` | `.skills/cartethyia-console-api/references/console-api.md` |
 | Browser UI | `dashboard/src/` | `.skills/cartethyia-dashboard/references/dashboard-map.md` |
-| Schema or persistence behavior | `src/persistence/`, `migrations/`, `scripts/generate/` | `documentation/reference/sqlite-parity.md`, `.skills/cartethyia-schema-telemetry/SKILL.md` |
+| Schema or persistence behavior | `src/persistence/`, `migrations/`, `scripts/tools/` | `documentation/reference/sqlite-parity.md`, `.skills/cartethyia-schema-telemetry/SKILL.md` |
 | Startup, lifecycle, scheduled work | `src/boot/`, `src/workers/` | `.skills/cartethyia-engineering/references/backend.md` |
 | Environment variables | `src/config/spec.ts` | `documentation/reference/configuration.md` (generated — regenerate, do not hand-edit) |
 

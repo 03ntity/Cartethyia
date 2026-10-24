@@ -9,7 +9,7 @@ import { resolveElysiaPrecompile } from "../../src/config/runtime";
  * that field is absent, so the process dies at the first schema-bearing route
  * with `undefined is not an object (evaluating
  * 'this.tb.buildResult.external')`. Only the bundled artifact can take the
- * eager path, because `scripts/binary/aot.ts` rewrites the call site and
+ * eager path, because `scripts/build/aot.ts` rewrites the call site and
  * bundles the namespaces statically.
  *
  * The guard is what keeps a source-run deployment off that branch. Without it

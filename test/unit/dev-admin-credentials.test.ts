@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveDevAdminCredentials } from "../../scripts/qa/console-auth";
+import { resolveDevAdminCredentials } from "../../scripts/test/console-auth";
 
 /**
  * The fail-closed half of `bun run dev:console-auth`.

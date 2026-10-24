@@ -76,7 +76,7 @@ implementation and correct the owning documentation page.
 | Egress, proxy pools, SSRF | `src/network/`, `src/console/routing/pools/` | [Network pools](features/network-pools.md), health-routing skill |
 | Console API | `src/console/<domain>/` | [Console API](../.skills/cartethyia-console-api/references/console-api.md), console-api skill |
 | Browser UI | `dashboard/src/` | [Dashboard](../.skills/cartethyia-dashboard/references/dashboard-map.md), dashboard skill |
-| Schema or persistence behavior | `src/persistence/`, `migrations/`, `scripts/generate/` | [SQLite parity](reference/sqlite-parity.md), schema-telemetry skill |
+| Schema or persistence behavior | `src/persistence/`, `migrations/`, `scripts/tools/` | [SQLite parity](reference/sqlite-parity.md), schema-telemetry skill |
 | Startup, lifecycle, scheduled work | `src/boot/`, `src/workers/` | [Backend](../.skills/cartethyia-engineering/references/backend.md) |
 | Environment variables | `src/config/spec.ts` | [Generated configuration reference](reference/configuration.md); regenerate, do not hand-edit |
 

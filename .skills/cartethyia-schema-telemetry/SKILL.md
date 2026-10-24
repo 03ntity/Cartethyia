@@ -33,7 +33,7 @@ buys nothing and costs every existing deployment.
    and then every later file. `0008_add_models_route_unique_index.sql` is the
    shape: the bundled model seed upserts on an index a pre-baseline database
    does not have, and boot dies without it.
-3. Regenerate the SQLite baseline with `bun scripts/generate/sqlite-ddl.ts`
+3. Regenerate the SQLite baseline with `bun scripts/tools/generate-sqlite.ts`
    **only** when the canonical schema itself changed in a way the SQLite
    derivation has to follow (a new table or column). `test/persistence/sqlite-baseline.test.ts`
    fails when the two disagree. Do not edit the SQLite baseline by hand.

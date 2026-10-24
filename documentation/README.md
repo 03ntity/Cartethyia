@@ -18,7 +18,7 @@ not here; `AGENTS.md` routes you to the right skill.
 | [Providers](reference/providers.md) | Provider layers, boot and bundled vs BYOK, credentials and auth, discovery, quota, per-family notes |
 | [Model name forms](reference/model-name-forms.md) | Every spelling a model name takes and where each is resolved |
 | [SQLite parity](reference/sqlite-parity.md) | Measured dialect differences between Lite and Full, and which ones are not defects |
-| [Configuration](reference/configuration.md) | Every environment variable. **Generated** from `src/config/spec.ts` by `scripts/generate/config-reference.ts`; regenerate it, never edit it by hand |
+| [Configuration](reference/configuration.md) | Every environment variable. **Generated** from `src/config/spec.ts` by `scripts/tools/generate-config.ts`; regenerate it, never edit it by hand |
 
 ## One page per feature
 

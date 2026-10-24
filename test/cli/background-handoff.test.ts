@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "bun:test";
 import { writeFileSync, unlinkSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { launchBackgroundWithStatus } from "../../scripts/cli/ui/background";
+import { launchBackgroundWithStatus } from "../../scripts/cli/background";
 
 /**
  * The signal channel a detached child reports startup through.

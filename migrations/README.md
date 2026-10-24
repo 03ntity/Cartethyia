@@ -5,7 +5,7 @@ Cartethyia keeps one SQL baseline per database backend:
 - `full-postgres/0000_baseline.sql` defines the foundational PostgreSQL schema
   for a new database.
 - `lite-sqlite3/0000_baseline.sql` is generated from the PostgreSQL baseline by
-  `scripts/generate/sqlite-ddl.ts`; do not edit it by hand.
+  `scripts/tools/generate-sqlite.ts`; do not edit it by hand.
 
 The startup runner applies the baseline and numbered forward migrations,
 recording them in `cartethyia_schema_migrations` along with a hash marker for

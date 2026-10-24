@@ -109,7 +109,7 @@ which one you are looking at decides the fix.
 
 The gate list is `references/verification.md`; that file is the single owner.
 Backend suites live in `test/`, dashboard suites in `dashboard/test/`, run via
-`scripts/ci/run.ts`. Database suites use the disposable
+`scripts/test/run.ts`. Database suites use the disposable
 `CARTETHYIA_TEST_DATABASE_URL` from the local `.env` or shell and never the dev
 database. Typecheck never proves a behavior change: exercise the affected
 path at its real boundary and report what you observed. State the limitation

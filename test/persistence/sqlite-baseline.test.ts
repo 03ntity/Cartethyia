@@ -2,7 +2,7 @@
  * The SQLite baseline is derived, not written.
  *
  * `migrations/lite-sqlite3/0000_baseline.sql` must be exactly what
- * `scripts/generate/sqlite-ddl.ts` produces from the PostgreSQL baseline, and
+ * `scripts/tools/generate-sqlite.ts` produces from the PostgreSQL baseline, and
  * the result must build a database whose constraints do the job the PostgreSQL
  * types were doing: enums, booleans, foreign keys, the partial unique index
  * that keeps one live default key per tenant, and cascading deletes.
@@ -15,7 +15,7 @@ import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { deriveSqliteBaseline } from "../../scripts/generate/sqlite-ddl";
+import { deriveSqliteBaseline } from "../../scripts/tools/generate-sqlite";
 import { DrizzleModelRoutingStore } from "../../src/console/routing/model/store";
 import { applySqliteMigrations, buildSqliteHandle, createSqliteDatabase } from "../../src/persistence/db-sqlite";
 import {

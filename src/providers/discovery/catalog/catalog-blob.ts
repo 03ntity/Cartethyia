@@ -2,7 +2,7 @@
  * GENERATED — do not edit.
  *
  * The packed, brotli-compressed offline model catalog for `ModelsDevCatalog`.
- * Rebuild with `bun run scripts/generate/models-catalog.ts`.
+ * Rebuild with `bun run scripts/tools/generate-models.ts`.
  *
  * Sources: models.dev (pricing, every provider) and models.opencode.ai (the
  * authoritative limits for the OpenCode family).

@@ -10,7 +10,7 @@ Keep it that way — a feature that needs prose gets a page under `features/`.
 | [Architecture](architecture.md) | Process, request path, routing snapshot and its invalidation, data, what is intentionally absent |
 | [Providers](providers.md) | Provider layers, boot and bundled vs BYOK, credentials and auth, discovery, quota, per-family notes |
 | [Codebase size](codebase-size.md) | Tracked backend and frontend source-line counts and counting scope |
-| [Configuration](configuration.md) | Every environment variable. **Generated** from `src/config/spec.ts` by `scripts/generate/config-reference.ts`; regenerate it, never edit it by hand |
+| [Configuration](configuration.md) | Every environment variable. **Generated** from `src/config/spec.ts` by `scripts/tools/generate-config.ts`; regenerate it, never edit it by hand |
 | [Model name forms](model-name-forms.md) | Every spelling a model name takes and where each is resolved |
 | [SQLite parity](sqlite-parity.md) | Measured dialect differences between Lite and Full, and which ones are not defects |
 

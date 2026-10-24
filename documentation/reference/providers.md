@@ -108,7 +108,7 @@ caller — capability does not fall back, because an invented default is worse
 than a stated false. The offline catalog is a single generated, brotli-packed
 binary blob (`discovery/catalog/catalog-blob.ts`, read by
 `discovery/catalog/catalog-format.ts` behind `models-dev-catalog.ts`); refresh
-with `bun run scripts/generate/models-catalog.ts`; id remaps live in
+with `bun run scripts/tools/generate-models.ts`; id remaps live in
 `CATALOG_PROVIDER_IDS`. `seedBundledModels` writes rows as
 `source: 'builtin'`, prunes retired pairs, and reconciles capability drift
 while leaving operator-owned `enabled` alone.

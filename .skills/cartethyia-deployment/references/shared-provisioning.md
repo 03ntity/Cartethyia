@@ -20,7 +20,9 @@ systemctl enable --now postgresql
 ## Postgres
 
 ```bash
-runuser -u postgres -- psql -c "CREATE ROLE cartethyia LOGIN PASSWORD '<generated>'"
+runuser -u postgres -- psql -v ON_ERROR_STOP=1 \
+  --set "carte_password=<generated>" \
+  -c "CREATE ROLE cartethyia LOGIN PASSWORD :'carte_password'"
 runuser -u postgres -- createdb -O cartethyia cartethyia
 ```
 
@@ -62,7 +64,7 @@ TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128
 CARTETHYIA_DB_MODE=full
 DATABASE_URL=postgres://cartethyia:<generated>@127.0.0.1:5432/cartethyia
 # One instance means in-process coordination is correct; `normal` requires Redis.
-REDIS_MODE=disabled
+# Optional: omit REDIS_URL for one-process in-memory coordination.
 CARTETHYIA_ENCRYPTION_KEY=<base64 of 32 random bytes>
 CARTETHYIA_API_KEY=carte_<generated>
 ```

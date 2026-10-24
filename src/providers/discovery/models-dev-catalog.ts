@@ -3,7 +3,7 @@
  * bundled providers can route to.
  *
  * The data is a packed, brotli-compressed binary blob (`catalog-blob.ts`, built
- * by `scripts/generate/models-catalog.ts`) read through {@link PackedCatalog}.
+ * by `scripts/tools/generate-models.ts`) read through {@link PackedCatalog}.
  * There is no JSON parse and no per-row object: a lookup is a binary search
  * over a typed-array column, and the metadata object for a row is built only
  * when something asks for that row.

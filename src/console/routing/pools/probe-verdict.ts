@@ -2,7 +2,7 @@
  * What one provider-probe answer means about the egress.
  *
  * Extracted from the store so the console, the CLI probe
- * (`scripts/operations/probe-egress.ts`) and the tests cannot drift into three
+ * (`scripts/tools/probe-egress.ts`) and the tests cannot drift into three
  * readings of the same response. The rule that matters is not obvious:
  *
  * **The provider's IP gate runs before it validates the body.** So a `4xx`

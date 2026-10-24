@@ -53,7 +53,8 @@ then probes the database. `PORT`
 the dashboard dev server. Automation uses `bun setup --non-interactive` and
 must already have `CARTETHYIA_DB_MODE`, plus a reachable `DATABASE_URL` for
 Full. Do not add a second installer that copies `.env.example`.
-`scripts/install/lite.sh` calls the wizard.
+`scripts/install.sh --local --lite` handles dependencies, setup, build, start,
+and the final doctor in one command.
 
 ## First console boot
 

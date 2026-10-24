@@ -25,7 +25,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
  * The fixture is a self-signed loopback cert and the binding verifies
  * certificates unconditionally (`rejectUnauthorized: true`), which is correct
  * and is not weakened for this test. The fixture CA is therefore trusted
- * through `NODE_EXTRA_CA_CERTS`, which the runner (`scripts/ci/run.ts`) sets on
+ * through `NODE_EXTRA_CA_CERTS`, which the runner (`scripts/test/run.ts`) sets on
  * the `bun test` subprocess — it is read when the TLS root store is first
  * built, so it cannot be assigned from inside this file, and a per-socket `ca`
  * option would mean adding an override to the production dial. Run these via

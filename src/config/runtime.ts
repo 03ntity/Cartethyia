@@ -59,7 +59,7 @@ export function resolveDrainToken(): string | undefined {
  * `require("typebox/schema")` resolves to a namespace that does not carry it —
  * and the process dies at the first schema-bearing route with
  * `undefined is not an object (evaluating 'this.tb.buildResult.external')`.
- * `scripts/binary/aot.ts` avoids this by rewriting the call site and bundling
+ * `scripts/build/aot.ts` avoids this by rewriting the call site and bundling
  * the namespaces statically, so only the built artifact can actually take the
  * eager path.
  *

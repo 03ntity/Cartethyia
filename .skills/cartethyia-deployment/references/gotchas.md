@@ -17,7 +17,7 @@ The chain, confirmed by A/B on elysia 2.0.0-beta.16 + typebox 1.3.27:
 3. The eager branch calls TypeBox's `SchemaCompile(schema)` and reads
    `.buildResult.external`, which **does not exist** outside a bundler.
 
-Only the built artifact can take that branch: `scripts/binary/aot.ts` rewrites
+Only the built artifact can take that branch: `scripts/build/aot.ts` rewrites
 the call site and bundles the namespaces statically.
 
 **`setupTypebox(...)` does not fix it.** It wires the namespaces but does not
@@ -28,7 +28,8 @@ necessary and not sufficient.
 **Current fix:** `resolveElysiaPrecompile()` returns false when
 `CARTETHYIA_SOURCE_RUN=1`, so a source run never takes the eager branch. Set
 that variable whenever you start from source with `NODE_ENV=production`.
-[`scripts/install/vps.sh`](../references/install-script.md) sets it, and also
+The VPS installer builds the AOT binary and starts that artifact, avoiding a
+production source-run branch. When a source run is used instead, it also
 builds the AOT binary so production keeps its precompilation where it is safe.
 
 ## `ProtectHome=true` blocks `/root/.bun/bin/bun`

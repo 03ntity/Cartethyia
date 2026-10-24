@@ -58,7 +58,8 @@ Supporting references, independent of shape:
 ## Order of work
 
 1. Identify the topology (Step 1).
-2. Prefer [`scripts/install/vps.sh`](../../../scripts/install/vps.sh) — it does
+2. Prefer [`scripts/install.sh`](../../../scripts/install.sh) with `--vps` and
+   `--regular`/`--nat` — it does
    steps 3–5 and is idempotent. Read the manual references when it fails, or
    when you need to change something it does not cover.
 3. [`shared-provisioning.md`](references/shared-provisioning.md) — what the

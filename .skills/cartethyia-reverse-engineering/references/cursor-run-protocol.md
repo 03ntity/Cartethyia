@@ -34,7 +34,7 @@ named model â€” `grok-4.6`, `grok-4.7`, `claude-opus-4-8`, `claude-haiku-4-5` â€
 across all declared variants, with and without `parameters`, with and without
 `max_mode`. Only `default` (Auto) serves.
 
-Swept with `scripts/operations/cursor-live-probe.ts` (the `--params`/`--max-mode`
+Swept with `scripts/tools/probe-cursor.ts` (the `--params`/`--max-mode`
 flags and a temporary variant sweep). Identical refusal on ~9 combinations per
 model means no parameter, variant, or flag fixes it: it is the account's plan.
 
