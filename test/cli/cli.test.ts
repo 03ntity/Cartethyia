@@ -8,7 +8,8 @@
  * start can never match the gateway that is actually running.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chooseFromMenu } from "../../scripts/cli/prompt";
@@ -28,6 +29,47 @@ afterEach(() => {
   else process.env.CARTETHYIA_CONFIG_DIR = originalConfigDir;
   rmSync(configDir, { recursive: true, force: true });
 });
+
+test("the npm package has no source-checkout installer lifecycle", () => {
+  // The source installer requires explicit local/vps/docker arguments and a
+  // `.git` checkout. Running it from an npm lifecycle both fails in a non-TTY
+  // install and targets a directory the published package does not contain.
+  // `cartethyia setup` is the supported post-install configuration path.
+  const manifest = JSON.parse(readFileSync(join(import.meta.dir, "..", "..", "package.json"), "utf8")) as {
+    scripts: Record<string, string>;
+  };
+  expect(manifest.scripts["install"]).toBeUndefined();
+  expect(manifest.scripts["setup"]).toBe("bun run scripts/cli/setup.ts");
+});
+
+test("an npm upgrade from 2.5.4 succeeds from the packed tarball", () => {
+  // This is the consumer path, not just a manifest assertion: 2.5.6 failed
+  // during npm's lifecycle before its CLI could be used. Rehearse the actual
+  // upgrade in an isolated prefix so the developer's global install and
+  // running gateway are never touched.
+  const root = mkdtempSync(join(tmpdir(), "cartethyia-npm-upgrade-test-"));
+  const project = join(import.meta.dir, "..", "..");
+  const run = (args: string[]) => {
+    const result = spawnSync("npm", args, {
+      cwd: project,
+      encoding: "utf8",
+      timeout: 180_000,
+      shell: process.platform === "win32",
+    });
+    expect(result.error, `${result.stdout}\n${result.stderr}`).toBeUndefined();
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+  };
+  try {
+    run(["install", "--prefix", root, "cartethyia@2.5.4"]);
+    const manifestAt = () => join(root, "node_modules", "cartethyia", "package.json");
+    expect(JSON.parse(readFileSync(manifestAt(), "utf8")).version).toBe("2.5.4");
+    run(["pack", "--pack-destination", root]);
+    run(["install", "--prefix", root, join(root, `cartethyia-${JSON.parse(readFileSync(join(project, "package.json"), "utf8")).version}.tgz`)]);
+    expect(JSON.parse(readFileSync(manifestAt(), "utf8")).version).toBe(JSON.parse(readFileSync(join(project, "package.json"), "utf8")).version);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 240_000);
 
 test("chooseFromMenu returns -1 when stdin is not a TTY", () => {
   // Under `bun test` stdin is not a TTY, so this is the real non-interactive

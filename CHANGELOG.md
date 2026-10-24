@@ -8,6 +8,17 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.5.7] - 2026-10-24
+
+### Fixed
+
+- **The npm package installs again.** Cartethyia 2.5.6 accidentally registered
+  the source-checkout installer as an npm lifecycle script. That installer
+  requires an explicit deployment target and a `.git` checkout, neither of
+  which belongs to `npm install -g cartethyia`; its supporting directory was
+  also excluded from the tarball. The lifecycle hook is removed. The documented
+  flow is unchanged: install globally, run `cartethyia setup`, then run `carte`.
+
 ## [2.5.6] - 2026-10-24
 
 ### Added
