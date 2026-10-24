@@ -1,7 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
-import SysTray from "systray2";
+import SysTray, { type MenuItem } from "systray2";
 import { resolvePackagePath } from "../../../src/config/package-paths";
+
+/**
+ * A row as systray2 holds it. The helper numbers the rows itself and reports
+ * that number back on a click and on an update, but it is absent from the
+ * package's typings.
+ */
+type IdentifiedItem = MenuItem & { readonly __id?: number };
 
 /**
  * One tray row. `action` rows report their id on click; separators are drawn
@@ -162,28 +169,52 @@ class WindowsTray implements Tray {
 /**
  * macOS and Linux tray: `systray2` runs its own helper, and neither platform
  * attaches a console window to it, so the bundled tray is used as-is.
+ *
+ * Clicks arrive only through `onClick`; a menu built without a listener shows
+ * every row and reports none of them, which is why the callbacks are wired
+ * here rather than left to the default.
  */
 class UnixTray implements Tray {
   readonly #tray: SysTray;
+  readonly #onSelect: (id: string) => void;
+  /** Row objects kept by reference: a click hands back the object, not the id. */
+  readonly #items = new Map<string, IdentifiedItem>();
 
   constructor(options: TrayOptions) {
+    this.#onSelect = options.onSelect;
+    const items = options.items.map((item) => {
+      if (item.kind === "separator") return SysTray.separator;
+      const menuItem: IdentifiedItem = {
+        title: item.title,
+        tooltip: item.title,
+        enabled: item.enabled ?? true,
+      };
+      this.#items.set(item.id, menuItem);
+      return menuItem;
+    });
     this.#tray = new SysTray({
       menu: {
         icon: options.iconPath,
         title: "Cartethyia",
         tooltip: options.tooltip,
-        items: options.items.map((item) =>
-          item.kind === "separator"
-            ? SysTray.separator
-            : { title: item.title, tooltip: item.title, enabled: item.enabled ?? true },
-        ),
+        items,
       },
       copyDir: true,
     });
   }
 
-  ready(): Promise<void> {
-    return this.#tray.ready().then(() => undefined);
+  async ready(): Promise<void> {
+    await this.#tray.ready();
+    await this.#tray.onClick((action) => {
+      for (const [id, item] of this.#items) {
+        // Identity first: `onClick` merges the clicked row into the object this
+        // class built, so a match needs no assumptions about the numbering.
+        if (item === action.item || item.__id === action.__id) {
+          this.#onSelect(id);
+          return;
+        }
+      }
+    });
   }
 
   update(id: string, title: string, enabled = true): void {
