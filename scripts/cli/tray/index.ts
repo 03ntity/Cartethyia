@@ -177,11 +177,14 @@ class WindowsTray implements Tray {
 class UnixTray implements Tray {
   readonly #tray: SysTray;
   readonly #onSelect: (id: string) => void;
+  readonly #onExit: () => void;
   /** Row objects kept by reference: a click hands back the object, not the id. */
   readonly #items = new Map<string, IdentifiedItem>();
+  #closed = false;
 
   constructor(options: TrayOptions) {
     this.#onSelect = options.onSelect;
+    this.#onExit = options.onExit;
     const items = options.items.map((item) => {
       if (item.kind === "separator") return SysTray.separator;
       const menuItem: IdentifiedItem = {
@@ -205,6 +208,11 @@ class UnixTray implements Tray {
 
   async ready(): Promise<void> {
     await this.#tray.ready();
+    // Registered after `ready()`: the helper process does not exist before
+    // that, and `onExit` attaches to it directly.
+    this.#tray.onExit(() => {
+      if (!this.#closed) this.#onExit();
+    });
     await this.#tray.onClick((action) => {
       for (const [id, item] of this.#items) {
         // Identity first: `onClick` merges the clicked row into the object this
@@ -233,7 +241,12 @@ class UnixTray implements Tray {
   }
 
   async close(): Promise<void> {
-    if (this.#tray.killed) return;
+    if (this.#closed) return;
+    this.#closed = true;
+    const helper = this.#tray.process;
+    // `kill()` settles on the helper's `exit` event, so a helper that already
+    // exited would leave it pending forever and hang the shutdown after it.
+    if (helper.exitCode !== null || helper.signalCode !== null) return;
     try {
       this.#tray.kill();
     } catch {
