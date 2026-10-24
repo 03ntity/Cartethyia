@@ -8,7 +8,7 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.5.10] - 2026-10-24
+## [2.5.10] - 2026-10-25
 
 ### Fixed
 
@@ -21,6 +21,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   detached from the gateway so a gateway restart cannot kill a live session.
   State and logs live under the per-user config dir
   (`<config>/remote-support/<tool>.{pid,url,log,err}`).
+
+- **`.env.example` no longer advertises defaults the gateway contradicts.** The
+  sampled `CARTETHYIA_UPSTREAM_TIMEOUT_MS` was `120000` and the sampled
+  `CARTETHYIA_ACCOUNT_UNCLASSIFIED_COOLDOWN_MS` was `60000`, but `CONFIG_SPEC`
+  shipped them as `75000` and `900000` with rationale comments explaining why
+  the lower / higher value matters (keeping the upstream deadline inside the
+  client's own budget; letting an unknown failure cool off instead of thrashing
+  through retries). An operator who copied `.env.example` wrote a configuration
+  the maintainers had explicitly documented as inferior. Both sample lines now
+  match the spec defaults and carry the one-line rationale inline.
 
 ### Changed
 
@@ -40,6 +50,70 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   that would dangle, any bare import that is a devDependency rather than a
   runtime dependency, and any `bin`/install-lifecycle target that is not in
   the tarball. Replaces the earlier hard-coded whitelist string-list guard.
+
+- **CLI menu leads with the version checker, tray drops its background check.**
+  The console menu now carries a dedicated `Version Checker:` line in the
+  header that reads `up to date`, `could not reach the registry`, or
+  `X.Y.Z → Y.Y.Z available`. When something newer is published an
+  `Update to X.Y.Z` row joins the menu and the arrow-key cursor lands on it
+  by default — Enter still has to be pressed, so a reflex keystroke cannot
+  install anything, but attention goes where it matters. Items reorder to
+  `Open Console / Hide to Tray / Backup / Reset / [Update] / Exit`. The tray
+  no longer polls the npm registry on open: the version row is a
+  non-background info label that opens the GitHub releases page on click,
+  because the previous behaviour surfaced a cue the operator did not ask for
+  and could not act on from inside the tray anyway.
+
+- **Primary GitHub repository is `risunCodex/Cartethyia`.** The original
+  `risunCode/Cartethyia` was hidden from public view by GitHub and is kept
+  as the historical `GITHUB_ALT_REPO` for operators who still have access.
+  Every public surface — the install script's default clone URL, the console
+  update-indicator fetch, the README's install block, the installation docs,
+  the tray's releases link — points at `risunCodex` now, so a fresh install
+  reaches a repository the public can actually see.
+
+- **Robustness guards: programmatic walkers replace trust-but-no-verify.** A
+  batch of CI-only tests captures the current legitimate exceptions as
+  inline-reason allowlists and fails on any new drift. There is no runtime
+  behavior change; these only make a future regression fail in CI rather
+  than ship.
+
+  - `test/config/spec-env-example-bijection.test.ts` loads `CONFIG_SPEC` and
+    `.env.example`, asserts the symmetric diff matches the allowlist, and
+    checks every shared key's spec default agrees with the sampled value.
+    This is the test that would have caught the two defaults fixed above
+    before shipping.
+  - `test/config/no-direct-env-reads.test.ts` walks `src/` for
+    `process.env.CARTETHYIA_*` reads that bypass the spec and fails on any
+    new one. Seven legitimate direct reads (boot-time, module-local
+    telemetry, deployment-injected paths) are named with their reason;
+    adding a knob now means declaring it in the spec or extending the
+    allowlist deliberately.
+  - `test/cli/no-dynamic-imports-in-shipped.test.ts` scans every shipped
+    `.ts` for `await import("<literal>")` and fails unless the file carries
+    a `// dynamic-import-ok:` banner (for lazy-registry files like
+    `default-registry.ts`, `buddy/capabilities.ts`, `cli/main.ts`,
+    `install/install.ts`) or the call has a `// dynamic-import: <reason>`
+    comment above it. Three incidental dynamic imports were converted to
+    static while writing the walker: a redundant `postUpstreamJson`
+    re-import in the GitHub adapter, a `readdir` import in the event-day
+    index, and `buildProviderProbeRequest` in the pool store.
+  - `test/providers/registry-integration-parity.test.ts` invokes every
+    declared loader on every provider in `PROVIDER_CAPABILITIES` and
+    asserts the imported module exposes the promised named export. Catches
+    the 2.5.8/2.5.9 shape of bug where an adapter loads but model-discovery
+    throws `TypeError` at first request because the registry referenced
+    the wrong export name. Also walks `src/providers/integrations/` and
+    reports any file nobody imports.
+  - `test/providers/registry-metadata-bijection.test.ts` asserts every
+    registry id has a `BUNDLED_PROVIDER_METADATA` row and vice versa, and
+    that every metadata row has a non-empty `baseUrl` and `displayName`.
+    A new provider cannot be added halfway anymore.
+  - `test/meta/no-real-fs-writes.test.ts` fails any test that references
+    `homedir()`, `USERPROFILE`, `AppData`, a `~/.<tool>` path, or imports
+    from `src/console/cli-tools/injectors/*` without also stubbing
+    `process.env.HOME`. Prevents the class of bug where a developer's own
+    `~/.codex/config.toml` is rewritten by `bun test`.
 
 ## [2.5.9] - 2026-10-24
 
