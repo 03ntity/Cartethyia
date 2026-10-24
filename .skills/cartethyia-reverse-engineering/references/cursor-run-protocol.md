@@ -1,5 +1,9 @@
 # Cursor Run protocol — evidence ledger
 
+This is a dated evidence ledger, not a guarantee of the current upstream
+contract. Revalidate before using its model roster, entitlement, or client
+version observations to change current behavior.
+
 Build pinned: `CursorSetup-x64-3.24.18.exe` (installer inspected statically only;
 never launched). Donor protocol source: `Public/cursor-opencode-provider`
 v0.8.3. Wire client version observed live: `cli-2026.10.19-6bbf2c4`.

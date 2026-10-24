@@ -9,22 +9,23 @@ backend runtime code, and its API contracts are type-only mirrors.
 
 It is not the data plane. `/v1/*` serves clients; `/console/api` serves the
 operator who configures them. One Elysia process mounts both, but the console is
-compressed on the way out (`src/console/response-compression.ts:216`) while `/v1/*`
+compressed on the way out (`src/console/response-compression.ts`) while `/v1/*`
 is deliberately not, because a streaming completion must not be buffered.
 
 ## Anatomy of a domain
 
-A domain is one folder under `src/console/`. The file roles are consistent:
+A domain is one folder under `src/console/`. Use these file roles as
+navigation, not a mandatory template:
 
 | File | Owns |
 |---|---|
-| `contracts.ts` | Request/response types, the store interface, validation helpers, and the operations factory. Elysia-free on purpose — `src/console/routing/pools/contracts.ts:3` says so because the dashboard imports these types. |
+| `contracts.ts` | Request/response types, the store interface, validation helpers, and often the operations factory. A module re-exported to the browser must stay Elysia/Node-free; not every backend-only contracts module has that constraint. |
 | `routes.ts` | The HTTP binding: Elysia paths and schemas, response status, and one error hook per route group. |
 | `store.ts` | Drizzle. The row-to-view mapping lives here; a route never touches the driver. |
 | `service.ts` | Behaviour too large for a store but not HTTP — `src/console/backup/service.ts`, `src/console/cli-tools/service.ts`. |
 
 Not every domain has every file, and the split is not uniform. `settings`
-declares its operations factory in `contracts.ts:75`; `providers/catalog` splits
+declares its operations factory in `contracts.ts`; `providers/catalog` splits
 operations into `provider-operations.ts` and `model-operations.ts`;
 `routing/pools` keeps its operations in `operations.ts`. Follow the folder you are
 editing rather than assuming a template.
@@ -32,35 +33,35 @@ editing rather than assuming a template.
 Two conventions worth keeping because they prevent drift, not because they are
 pretty:
 
-- `literalUnion()` (`src/console/shared/elysia-schema.ts:17`) projects an
+- `literalUnion()` (`src/console/shared/elysia-schema.ts`) projects an
   Elysia literal union from the canonical tuple. Hand-writing the union at every
   route is how a new enum member reaches the validator but not the schema.
   `t.UnionEnum` is not a substitute — it stamps a default of the first member.
-- `parseQueryLimit()` (`src/console/shared/query.ts:16`) is the only `?limit=`
+- `parseQueryLimit()` (`src/console/shared/query.ts`) is the only `?limit=`
   parser. A non-numeric value is a caller error (400 `invalid_limit`), never a
   silent fallback to the default.
 
 ## How a domain is wired
 
-`createConsoleRouter()` (`src/console/console-router.ts:96`) builds the Elysia
-instance with `prefix: "/console/api"` (`console-router.ts:129`), installs the
+`createConsoleRouter()` (`src/console/console-router.ts`) builds the Elysia
+instance with `prefix: "/console/api"` (`console-router.ts`), installs the
 guards and the session resolver, mounts the auth routes itself, then hands the
-instance to `registerConsoleDomains()` (`src/console/domain-registration.ts:110`).
+instance to `registerConsoleDomains()` (`src/console/domain-registration.ts`).
 
 `domain-registration.ts` is the single composition root for everything else. It
 constructs the concrete Drizzle stores and calls one `console.use(createXRoutes({...}))`
 per domain. A new domain is not wired by editing `console-router.ts`; it is wired
 by adding one `use()` there with the dependencies the domain's config interface
-declares. `ConsoleDomainContext` (`domain-registration.ts:69`) is what the function
+declares. `ConsoleDomainContext` (`domain-registration.ts`) is what the function
 receives — the database, the access resolver, the registry, the snapshot
 invalidator, the pool selector, and so on.
 
 Dependencies are injected, not imported. `LiveConfig` in
-`src/console/observability/live.ts:15` declares its own
+`src/console/observability/live.ts` declares its own
 `LiveInFlightSource` interface rather than importing from `transport/`, because
 the console must not depend on the transport layer. Same reason
 `ConsoleApiCompositionDeps.routeSnapshotService` is a structural
-`{ invalidate(): Promise<number> }` (`console-router.ts:48`).
+`{ invalidate(): Promise<number> }` (`console-router.ts`).
 
 ## Access and mutation boundaries
 
@@ -68,30 +69,30 @@ These boundaries apply according to the request and operation: console/API-key
 authentication and authorization, CSRF and throttling for session mutations,
 and password re-authentication for sensitive backup operations.
 
-**Session and tenant.** A `beforeHandle` (`console-router.ts:132`) resolves the
+**Session and tenant.** A `beforeHandle` (`console-router.ts`) resolves the
 session cookie to an `AccessDecision` and caches it per `Request` in a `WeakMap`
 scoped to the composition. `/console/api/auth/*` is skipped because the auth
 routes resolve their own session. Every domain then calls one of
 `requireScope`, `requireAnyScope`, `requireTenantScope`, `requireTenantAnyScope`,
-or `requireGlobalAdmin` from `src/console/shared/errors.ts:78-139`.
+or `requireGlobalAdmin` from `src/console/shared/errors.ts`.
 `requireTenantScope` is the common case: it rejects a `null` tenant id with 403
 `tenant_required`, so a platform-admin session cannot accidentally write as a
 tenant.
 
 Scopes are not a ladder. A console session holds `dashboard:read`,
 `providers:read`, `models:read` and — for a platform admin — the write scopes
-plus `platform:admin` (`src/security/access-control.ts:52`). A regular console
+plus `platform:admin` (`src/security/access-control.ts`). A regular console
 user is read-only. `dashboard:write` deliberately does not imply
 `providers:write`, because a tenant API key can hold `dashboard:write` and must
 not thereby add an upstream.
 
 **API-key access.** With no session cookie, a `Bearer` token is resolved through
-`resolveApiKeyAuthorization` — the same path `/v1` uses (`console-router.ts:149-161`).
+`resolveApiKeyAuthorization` — the same path `/v1` uses (`console-router.ts`).
 That is what lets a key register a BYOK provider or read its own telemetry for
 remote debugging without a browser. A request with no credential stays
 unauthenticated and the route rejects it; nothing falls back to an implicit identity.
 
-**CSRF.** `createConsoleCsrfMiddleware()` (`src/console/console-router-guards.ts:21`)
+**CSRF.** `createConsoleCsrfMiddleware()` (`src/console/console-router-guards.ts`)
 is stateless double-submit: `x-csrf-token` header against the readable
 `csrf_token` cookie, no database I/O. It applies to unsafe methods under
 `/console/api/` when a session cookie is present. Four paths are exempt —
@@ -99,7 +100,7 @@ is stateless double-submit: `x-csrf-token` header against the readable
 login has no session yet to forge.
 
 **Mutation throttle.** `createConsoleMutationLimiterMiddleware()`
-(`console-router-guards.ts:77`) allows 240 unsafe requests per 10-second sliding
+(`console-router-guards.ts`) allows 240 unsafe requests per 10-second sliding
 window per session, keyed by the SHA-256 of the session cookie. It exists to bound
 what a stolen cookie can do at full request rate; the limit sits well above
 legitimate bulk operations (a bulk model delete fires one DELETE per model).
@@ -107,9 +108,9 @@ Over-limit requests get 429 `quota_exceeded` with a measured `retry-after`.
 
 **Re-authentication.** Backup export, restore, and delete-all require the
 operator's password in the body or query, not merely a session
-(`src/console/backup/routes.ts:1-13`). An export is the whole configuration in the
+(`src/console/backup/routes.ts`). An export is the whole configuration in the
 clear; a stolen cookie should not be enough to walk away with it. The service is
-built per request (`backup/routes.ts:34`) so one request's identity cannot leak
+built per request (`backup/routes.ts`) so one request's identity cannot leak
 into the next.
 
 ## Feature inventory
@@ -146,7 +147,7 @@ ownership, the routes behind the row, and where to change what:
 A console write that changes where traffic goes must invalidate the route
 snapshot, or the data plane keeps dispatching the old catalog until some
 unrelated write happens to invalidate. Domains that do this: provider catalog
-model operations (`providers/catalog/model-operations.ts:135` and neighbours),
+model operations (`providers/catalog/model-operations.ts` and neighbours),
 routing, pools, CLI tools (mapping saves and remote routes), and backup restore.
 
 ## Where to change what
@@ -158,7 +159,8 @@ routing, pools, CLI tools (mapping saves and remote routes), and backup restore.
 | New response field | The domain contract, then `dashboard/src/data/contracts.ts`, then the hook |
 | New access rule | `src/console/shared/errors.ts` guards; do not hand-roll a check in a route |
 | New list endpoint | `parseQueryLimit`, then the store query |
-| Egress/SSRF behaviour | `src/console/routing/pools/contracts.ts:344` `validateEndpoint` |
+| Egress/SSRF behaviour | `src/console/routing/pools/contracts.ts` `validateEndpoint` |
 | Error envelope | `src/console/shared/errors.ts` `errorResponse` |
-| Compression, CSRF, throttle | `console-router-guards.ts`, `response-compression.ts` |
+| CSRF, throttle | `console-router-guards.ts` |
+| Compression | `response-compression.ts` and its mount in `console-router.ts` |
 | Dashboard mirror of a payload | `dashboard/src/data/contracts.ts` — never a second hand-written type |

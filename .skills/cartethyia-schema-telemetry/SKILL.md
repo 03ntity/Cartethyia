@@ -7,6 +7,25 @@ description: "Schema and telemetry changes: update the canonical schema and gene
 
 Use for a schema change, a baseline update, or a new usage/telemetry field.
 
+## Telemetry tests must not touch real data
+
+`TELEMETRY_EVENT_DIR` resolves from the data dir when `event-log` is first
+imported (`src/observability/event-log.ts`). Setting `CARTETHYIA_DATA_DIR`
+after that import is too late; leaving it unset can write to—and let cleanup
+delete—the machine's real telemetry.
+
+Create a temporary data directory and set it **before any dynamic telemetry
+import**:
+
+```ts
+const sandbox = await mkdtemp(join(tmpdir(), "carte-telemetry-test-"));
+process.env.CARTETHYIA_DATA_DIR = sandbox;
+const telemetry = await import("../../src/observability/event-day-index");
+```
+
+Use `test/observability/telemetry-window.test.ts` as the reference. Keep every
+telemetry test and cleanup inside its own sandbox.
+
 ## Schema changes
 
 The repository ships one baseline per backend plus the numbered files after it.
@@ -33,11 +52,12 @@ buys nothing and costs every existing deployment.
    and then every later file. `0008_add_models_route_unique_index.sql` is the
    shape: the bundled model seed upserts on an index a pre-baseline database
    does not have, and boot dies without it.
-3. Regenerate the SQLite baseline with `bun scripts/tools/generate-sqlite.ts`
-   **only** when the canonical schema itself changed in a way the SQLite
-   derivation has to follow (a new table or column). `test/persistence/sqlite-baseline.test.ts`
-   fails when the two disagree. Do not edit the SQLite baseline by hand.
-   Do not touch `0000_baseline.sql` for a forward-only change.
+3. Do not regenerate either baseline for an ordinary schema change. The SQLite
+   baseline is generated from the pinned PostgreSQL baseline, not from
+   `schema.ts` or the accumulated forward migrations. Regenerate it only for a
+   deliberate baseline/generator change that preserves released schema
+   semantics and accepted hash compatibility; do not edit it by hand.
+   `test/persistence/sqlite-baseline.test.ts` checks the current contract.
 4. Update backup validation and restore mapping for old column names, enum
    values, defaults, or required data that must survive recreation.
 5. Test the fresh schema, the numbered file against a database created before
@@ -91,9 +111,9 @@ append-only file under `data/telemetry-payloads/`.
 A new usage field must pass through canonical usage, normalization, the file
 writer, **the day index bucket**, console contract/store, dashboard validator,
 and Usage UI. Reject invalid upstream values; do not silently clamp them.
-An aggregate that must survive retention needs the schema and both baselines.
-Update restore mapping when old backups do not carry the field or use a retired
-representation.
+An aggregate that must survive retention needs the canonical schema and a
+forward migration in both backend directories. Update restore mapping when old
+backups do not carry the field or use a retired representation.
 
 Costs arrive as strings from `numeric` columns and from restored rows. Coerce
 before summing: `0 + "0.000966"` concatenates instead of adding.
@@ -101,8 +121,8 @@ before summing: `0 + "0.000966"` concatenates instead of adding.
 ## Renames and strategy removal
 
 Change the canonical enum/model, router, console contract/store, validation,
-catalog snapshot, schema, both baselines, backup mapping, dashboard
-contract/hook/card, and docs. No alias fields.
+catalog snapshot, schema, forward migrations in both backend directories,
+backup mapping, dashboard contract/hook/card, and docs. No alias fields.
 
 Combo strategies are `fallback` and `round_robin`. There is no fusion strategy
 and no minimum-balance floor: do not reintroduce

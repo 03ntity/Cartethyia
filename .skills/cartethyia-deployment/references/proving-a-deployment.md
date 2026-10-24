@@ -7,12 +7,16 @@ dispatch through an enrolled account.
 ## Layer 1 — units and listeners
 
 ```bash
-systemctl is-enabled cartethyia caddy && systemctl is-active cartethyia caddy
+systemctl is-enabled cartethyia && systemctl is-active cartethyia
+# Regular VPS with Cartethyia-managed Caddy only:
+systemctl is-enabled caddy && systemctl is-active caddy
 ss -lnt | grep -E ':8080|:443'
 ```
 
-On a NAT VPS the service names may differ; on a regular VPS both must be
-enabled so they survive a reboot.
+On a regular VPS with managed Caddy, both units must be enabled to survive a
+reboot. NAT does not install/manage Caddy through Cartethyia; `--no-caddy`
+also leaves the external proxy outside this check. Match the configured port
+rather than assuming 8080.
 
 ## Layer 2 — TLS from a real client
 
@@ -41,7 +45,10 @@ curl -s --max-time 120 \
   http://127.0.0.1:8080/v1/chat/completions
 ```
 
-A 200 here proves DNS, TLS, DB, and upstream auth end to end.
+A loopback 200 proves request parsing, the selected route, database-backed
+account/model state needed by that dispatch, and upstream auth/provider reach.
+It does not separately prove public DNS, external TLS, or NAT forwarding;
+verify those through the public origin from an outside client.
 
 Qualify the model as `<providerId>/<model>`. An unqualified id matching two
 providers returns `ambiguous_model` with the candidate list.
@@ -69,11 +76,12 @@ curl -s -H 'authorization: Bearer <key>' http://127.0.0.1:8080/console/api/provi
   `{ credential, accountLabel }`.
 - `import: false, device: true` →
   `POST /console/api/providers/:providerId/oauth/device/start` returns a
-  `verificationUri` that **a human must open in a browser**. This cannot be
-  automated — hand the URL to the user and wait.
+  `verificationUri` that **a human must open in a browser**. Do not automate
+  the provider's authorization or consent. Give the URL to the authorized user
+  and follow the flow's polling/completion procedure.
 
-Buddy-family providers (`cb`, `workbuddy`) are device-only in practice, so
-having a token on disk does not help.
+Check the Buddy family's current `oauthFlows`; do not assume that a token on
+disk is enrollable when import is disabled.
 
 Send credentials on stdin (`--data-binary @-`) rather than in the command line,
 so they do not land in the process list or shell history.
@@ -88,9 +96,9 @@ curl -s -H 'authorization: Bearer <key>' \
   | python3 -c "import sys,json;[print(i['requestId'],i.get('model'),i.get('httpStatus'),i.get('errorKind')) for i in json.load(sys.stdin).get('items',[]) if i.get('httpStatus')!=200]"
 ```
 
-`errorKind` carries what the public message drops — including the upstream code
-and status. Group by `httpStatus` rather than eyeballing: a failure hides easily
-among a screen of 200s.
+Read the retained error details for the upstream code/status and category.
+Group by `httpStatus` rather than eyeballing: a failure hides easily among a
+screen of 200s. Payload retention and redaction may limit what is available.
 
 ## Report
 

@@ -220,4 +220,4 @@ benchmarks. Client version refresh is deferred until after startup.
 | New provider | a spec in `configured-provider.ts` (standard OpenAI shape) or a family under `integrations/`, then the registry and discovery catalog |
 | Routing rule | `router.ts` and `route-model.ts`, then the snapshot builder |
 | Console resource | the domain under `src/console/`, then the dashboard hook that calls it |
-| Schema | `schema.ts`, then a numbered file in both `migrations/` directories for an existing database, and `migrations/full-postgres/0000_baseline.sql` for a fresh one. Regenerate SQLite with `scripts/tools/generate-sqlite.ts` |
+| Schema | `schema.ts`, then the next numbered migration in both `migrations/` directories. Fresh and existing databases both apply the forward files. Do not edit either pinned baseline for an ordinary schema change; the SQLite generator derives from the pinned PostgreSQL baseline, not the accumulated forward migrations |

@@ -14,37 +14,38 @@ bisect on a guess; do not bisect on a payload you retyped.
 | Surface | Auth | Use for |
 |---|---|---|
 | `/v1/*` | tenant API key (`CARTETHYIA_API_KEY`) | Replaying requests, confirming behaviour |
-| `/console/api/*` | console session | Listing and exporting recorded requests |
+| `/console/api/*` | console session or tenant API key with the required scope | Listing and exporting recorded requests |
 
 The console prefix is `/console/api` — it is mounted in
 `src/console/console-router.ts` (`new Elysia({ prefix: "/console/api" })`) and
 hard-coded in `console-router-guards.ts`. A probe against `/api/...` returns
 `404`, which is easy to misread as "the endpoint does not exist here".
 
-The gateway route and the console route are different auth domains. A key that
-works on `/v1/chat/completions` will not read `/system/usage/requests`. If the
-console needs a browser session, the dashboard's own "Export"/download path is
-the way in, not `curl`.
+The gateway route and the console route use different scopes. A key limited to
+`routing:invoke` cannot read `/system/usage/requests`; a tenant key with the
+required `dashboard:read` scope can. Check the key's scopes rather than
+assuming every gateway key has console access. A browser session can instead
+use the dashboard's own Export/download path.
 
 ## Credentials
 
-- A credential for a throwaway debug environment is disposable and may be
-  echoed and reused when the user explicitly asks. The one absolute is **git**:
-  never in source, env files, commits, logs, or telemetry. `AGENTS.md` ("Git, data, and credentials") is the owner.
-- **Re-state the credential in the command that uses it.** An exported shell
-  variable does not survive between tool calls; `curl` then sends an empty
-  header and returns `000` with exit 43, which reads as "host unreachable" and
-  can end the investigation before the failure is reproduced.
+- Never print credentials or place them in command arguments. Read them from
+  the existing protected environment/configuration in the same invocation or
+  supply them through stdin/file descriptors. Shell variables do not persist
+  between independent tool calls; that is not a reason to repeat a secret
+  literally. Keep credentials out of tool output, process lists, logs, reports,
+  and Git. `AGENTS.md` "Git and credentials" is the owner.
 
 ## Diagnose `000` before believing it
 
-`000` is ambiguous — DNS, TLS, egress, or a missing credential all look the
-same. Run `curl -v` once and read the status line:
+`000` is ambiguous — DNS, TLS, egress, or the client transport may be
+responsible. Use an unauthenticated request or a second client and read the
+HTTP result:
 
 - `401` — the host answered; only the credential was missing or wrong.
 - `404` — the host answered; the **route** is wrong, not the host.
-- `000` with no response — DNS, TLS, or egress. Only now is the host genuinely
-  unreachable.
+- `000` with no response — transport is still unresolved; investigate DNS, TLS,
+  egress, and the client itself before declaring the host unreachable.
 
 An unauthenticated probe returning `401` is the cheapest way to tell these
 apart. Do not report a host as unreachable on a single `000`.
@@ -67,9 +68,10 @@ Console endpoints (`src/console/observability/routes.ts`):
 - `GET /system/usage/requests?period=…&limit=…&status=…` — the list the Usage
   page reads; filter by the HTTP status you are chasing.
 - `GET /system/usage/requests/:requestId` — one record, with the error envelope.
-- `GET /system/usage/requests/:requestId/download` — **the whole payload**. This
-  is the one that matters: it gives the exact bytes to replay, so you never
-  retype a body.
+- `GET /system/usage/requests/:requestId/download` — the retained request detail
+  and payload metadata. Export it rather than retyping a body. Retention,
+  redaction, or truncation may mean the exact original bytes are unavailable;
+  say so instead of treating a partial capture as verbatim evidence.
 
 Read `error.details` before theorising. `providerCode`, `providerStatus`, and
 `raw` carry what the public `message` drops; `param` is often empty even when
@@ -82,18 +84,18 @@ gateway takes the same path. Repeat it two or three times: a single 4xx may be
 transient, and a baseline that does not repeat is not a baseline.
 
 Then bisect with the parent skill's method: remove one thing at a time
-until it turns 200, and prove the flip after fixing.
+to isolate the trigger, and compare the same request after fixing.
 
 ## Triage by status
 
 | Status | Usual owner |
 |---|---|
 | `404` | Model id absent from `/v1/models`; alias or combo resolved to a name the provider does not serve |
-| `400` | A payload field, not the model — bisect the body |
+| `400` | Often payload validation, but check provider code/message and model availability before bisecting |
 | `401`/`403` | Key or scope, not the payload — **but see the egress rule below first** |
 | `429` | Rate limit; lower probe counts |
 | `503` | No healthy account upstream, or admission found no route |
-| `504` | Upstream timeout, not a payload bug |
+| `504` | Often upstream/gateway timeout; distinguish it from cancellation and transport failure |
 
 Repeated invalid model requests trip the IP strike window ("Warning n/10 … will
 temporarily ban this IP"). Keep probe counts low and list `/v1/models` before
@@ -101,14 +103,14 @@ guessing ids.
 
 ### When a 403 survives every payload change, vary the egress IP
 
-A 403 that is identical across every header, body, and credential permutation
-is usually not a request bug — it is an IP-level block. Before spending another
-round on the payload:
+A 403 that survives controlled payload changes may be an egress restriction,
+but that is still a hypothesis. Test it before spending another round on the
+payload:
 
 1. Run the **vendor's own client** from the same host. If it also fails, the
    contract is not yours to satisfy.
-2. Repeat the byte-identical request through a proxy with a different exit IP.
-   A 200 there and a 403 direct proves the block is on egress.
+2. Repeat the same request through an authorized proxy with a different exit
+   IP. A 200 there and a 403 direct supports an egress-address restriction.
 
 Confirmed against OpenCode's free tier on 2026-10-17: 403 direct, 200 through a
 proxy, with the request unchanged. A datacenter egress was refused outright, so

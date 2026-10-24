@@ -75,11 +75,9 @@ large installers when a small official metadata response answers the question.
 The CLI version and each bundled SDK version are separate identities. Do not use
 the standalone `@anthropic-ai/sdk` npm latest as Claude Code's bundled version,
 and do not take the first matching version string in a Kiro installer — tie it
-to the active import path. The app version and the SDK version are separate
-numbers and only the SDK is stable: Kiro uses streaming SDK `1.0.39` and SSO SDK
-`3.980.0`, while Claude Code's SDK is `0.128.0`. A pinned app version here is a
-snapshot, not a contract — read `VERSION_SOURCES.<client>.fallback` for the
-value actually shipped, because it moves when discovery succeeds.
+to the active import path. App and SDK versions are separate values; read the
+owning constants and `VERSION_SOURCES.<client>.fallback` for the value actually
+shipped rather than copying a version from this guide.
 
 After changing a pin, check any derived User-Agent/fingerprint consumers remain
 connected to the same source, add or update a focused assertion in
@@ -239,9 +237,9 @@ examples are account-specific, not guarantees. After a catalog edit, restart;
 
 ## Grok video generation
 
-Unverified research notes, not a supported integration. The checked-in adapter
-targets Grok Build at `cli-chat-proxy.grok.com` and does not implement this, so
-re-probe before relying on it. The observed surface was
+Unverified historical research notes, not a supported integration. The
+checked-in adapter targets Grok Build at `cli-chat-proxy.grok.com` and does not
+implement this, so re-probe before relying on it. The observed surface was
 `POST https://console.x.ai/v1/videos/generations` returning a `request_id`, then
 `GET /v1/videos/<request_id>` for `video.url`. Model `grok-imagine-video`,
 duration 1–15 seconds, one `image.url` as HTTPS or `data:`, never bare base64.
@@ -259,10 +257,12 @@ retirement safeguards are
 
 ## What a model can do
 
-Capabilities are not cosmetic — preflight reads them and **silently strips**
-unsupported parts of a request, so a false negative looks like a working route
-that quietly dropped the caller's tools or images. Setting, publishing, and
-proving a capability is [`references/capabilities.md`](references/capabilities.md).
+Capabilities are not cosmetic. Route selection excludes candidates that lack a
+required capability, may choose a degraded variant, and `projectForRoute`
+throws `capability_unsupported` when the selected route cannot serve the
+request. A false declaration can therefore select the wrong route or reject a
+valid request. Setting, publishing, and proving a capability is
+[`references/capabilities.md`](references/capabilities.md).
 
 ## Verify
 

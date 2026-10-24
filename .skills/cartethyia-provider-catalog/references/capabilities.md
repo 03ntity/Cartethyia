@@ -6,10 +6,11 @@ document/audio input, free tier, plan gating — and when proving those
 capabilities end to end.
 
 Capabilities are the claims a catalog row makes about what a request to that
-model may contain and what it may expect back. They are not cosmetic: capability
-preflight reads them and **silently strips** unsupported parts from a request, so
-a false negative looks like a working route that quietly dropped the caller's
-tools or images.
+model may contain and what it may expect back. They are not cosmetic: routing
+uses them to exclude candidates or select a degraded variant, and
+`projectForRoute` rejects an unsupported requirement on the selected route with
+`capability_unsupported`. A false declaration can therefore reject a valid
+request or route it to the wrong provider/model.
 
 ## When to use
 

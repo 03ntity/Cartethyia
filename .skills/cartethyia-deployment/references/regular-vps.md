@@ -6,6 +6,9 @@ with, which makes this the simpler of the two bare-metal shapes.
 
 Do the [shared provisioning](../references/shared-provisioning.md) first.
 
+The shell examples below assume `set -euo pipefail`; stop on a failed download,
+checksum, command, or validation rather than continuing into service changes.
+
 ## 1. Point DNS at the VM before starting Caddy
 
 ACME cannot issue unless the domain already resolves to this host. Confirm
@@ -23,18 +26,34 @@ single box the release binary is more reliable:
 
 ```bash
 ARCH=$(dpkg --print-architecture)
+case "$ARCH" in
+  amd64) CADDY_ARCH=x86_64 ;;
+  arm64) CADDY_ARCH=arm64 ;;
+  *) printf 'Unsupported Caddy architecture: %s\n' "$ARCH" >&2; exit 1 ;;
+esac
+curl -fsSL -o /tmp/caddy-checksums.txt \
+  "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_checksums.txt"
 curl -fsSL -o /tmp/caddy.tar.gz \
-  "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_${ARCH}.tar.gz"
+  "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_${CADDY_ARCH}.tar.gz"
+grep "  caddy_2.9.1_linux_${CADDY_ARCH}.tar.gz$" /tmp/caddy-checksums.txt \
+  | (cd /tmp && sha256sum -c -)
 tar -xzf /tmp/caddy.tar.gz -C /tmp caddy
 install -m 0755 /tmp/caddy /usr/bin/caddy
-rm -f /tmp/caddy /tmp/caddy.tar.gz
+rm -f /tmp/caddy /tmp/caddy.tar.gz /tmp/caddy-checksums.txt
 caddy version
 ```
+
+Abort if the official release checksum is missing or does not match. Never
+replace it with a checksum calculated from the downloaded archive itself.
 
 A binary install does **not** create `/etc/caddy` or the `caddy` user. Create
 both before writing the Caddyfile, or the unit fails on a missing path:
 
 ```bash
+if [ -f /etc/caddy/Caddyfile ] && ! grep -q '^# Cartethyia managed' /etc/caddy/Caddyfile; then
+  printf 'Refusing to overwrite an unmanaged Caddyfile\n' >&2
+  exit 1
+fi
 mkdir -p /etc/caddy /var/log/caddy /var/lib/caddy
 useradd --system --home /var/lib/caddy --shell /usr/sbin/nologin caddy
 chown -R caddy:caddy /var/lib/caddy /var/log/caddy
@@ -43,6 +62,7 @@ chown -R caddy:caddy /var/lib/caddy /var/log/caddy
 ## 3. Caddyfile (`/etc/caddy/Caddyfile`)
 
 ```caddyfile
+# Cartethyia managed
 <domain> {
 	encode zstd gzip
 
@@ -65,9 +85,8 @@ chown -R caddy:caddy /var/lib/caddy /var/log/caddy
 }
 ```
 
-No `local_certs` — ever. It replaces the public Let's Encrypt certificate with
-a private one and is a NAT-VPS-only footgun; on a regular VPS it simply breaks
-the site.
+No `local_certs`. It replaces the public certificate with a private one and is
+not a valid public-site workaround in either topology.
 
 ## 4. Caddy unit (`/etc/systemd/system/caddy.service`)
 
@@ -112,17 +131,18 @@ echo | openssl s_client -connect <domain>:443 -servername <domain> 2>/dev/null \
   | openssl x509 -noout -issuer -subject
 ```
 
-`O=Let's Encrypt` is the pass condition. `Caddy Local Authority` means
-`local_certs` is somehow set.
+The issuer must be a publicly trusted CA expected for the domain. `Caddy Local
+Authority` means the site is using a private certificate, not public TLS.
 
 Then `https://<domain>/health` must return 200. See
 [`proving-a-deployment.md`](proving-a-deployment.md) for why that alone is not proof.
 
-## Verified instance
+## Historical verification example
 
-`160.250.227.21` → `https://dev-cartethyia.risun.web.id`. Ubuntu 24.04.5,
-1 CPU / 1919 MB RAM. Bun 1.4.3, PostgreSQL 16, Caddy 2.9.1. Let's Encrypt
-issued on first start; real upstream dispatch returned 200.
+One Ubuntu 24.04 deployment with Bun, PostgreSQL, and Caddy 2.9.1 obtained a
+public certificate and completed a real upstream dispatch. This is a dated
+example, not a guarantee for a new host; record the current host's evidence
+instead of relying on old versions and addresses.
 
 The egress resolver on this host was poisoned
 (`www.codebuddy.ai` → `0.0.0.1`). Check

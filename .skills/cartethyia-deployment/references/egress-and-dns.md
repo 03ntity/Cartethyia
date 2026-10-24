@@ -26,8 +26,10 @@ nslookup <upstream-host> 1.1.1.1      # comparison against a public resolver
 nslookup <upstream-host> 8.8.8.8
 ```
 
-A disagreement between the local answer and the public resolvers means the
-local resolver is lying. Poisoning is often selective: on the host above
+A disagreement between the local answer and public resolvers means resolution
+is inconsistent; investigate poisoning, split-horizon DNS, filtering, or a
+different upstream answer rather than assuming one cause. Poisoning can be
+selective: on the host above
 `www.workbuddy.ai` resolved correctly while `www.codebuddy.ai` did not, so one
 healthy lookup proves nothing.
 
@@ -55,15 +57,16 @@ cat /etc/resolv.conf | grep nameserver
 getent hosts <upstream-host>   # must now be the real address
 ```
 
-**Restart the app afterwards.** A process that already resolved and cached the
-bad answer keeps using it, so a DNS fix that appears not to work is usually just
-a stale process.
+Restart the app when its resolver/connection pool may retain the old answer.
+Do not claim every process caches DNS indefinitely; verify the current path.
 
 ## Rules of thumb
 
-- `ECONNREFUSED` naming an address you did not configure is egress, not payload.
-- A burst of unrelated `4xx` from one provider at once is usually egress, not
-  payload. Real payload bugs are specific to a field, not to a host.
+- `ECONNREFUSED` naming an unexpected resolved address points to
+  DNS/routing/listener state, not a request-body field.
+- A burst of unrelated failures from one provider can be egress, provider
+  policy, or shared request shaping. Compare egress and the official client
+  before ruling out a payload cause.
 - `0.0.0.1` is not `127.0.0.1`. Do not read a `0.0.0.1` connection error as
   "the app is misconfigured to talk to itself".
 - If a provider's own client fails from the same host, the contract is not yours
@@ -73,13 +76,13 @@ a stale process.
 
 ## Related: verifying HTTPS from Windows
 
-Windows `curl`/schannel and some Git-Bash builds fail the handshake against
-otherwise-healthy sites and print `000`. That is a client problem. Confirm with
-a real TLS client:
+Windows `curl`/schannel and some Git-Bash builds can fail independently of the
+service and print `000`. Confirm with another TLS client:
 
 ```bash
 python -c "import urllib.request;r=urllib.request.urlopen('https://<domain>/health',timeout=20);print(r.status,r.read()[:80])"
 ```
 
-`000` from curl **plus** 200 from Python means the deployment is fine. Do not
-report a host as unreachable on a single `000`.
+`000` from curl plus 200 from Python proves the tested HTTPS endpoint is
+reachable and isolates the failure to the first client path; it does not prove
+every deployment boundary. Do not report a host as unreachable on one `000`.

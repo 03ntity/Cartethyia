@@ -1,83 +1,85 @@
-# NAT VPS (provider-managed Caddy)
+# NAT VPS (provider-managed forwarding and TLS)
 
-A "NAT VPS" (Dahono Cloud, Narwhal, and similar cheap Indonesian/Chinese hosts)
-is an LXC container on a **private** address with a limited set of public ports
-forwarded by the host. The public IP is the host's, not yours.
+A NAT VPS has a private interface address and selected public ports forwarded
+by the hosting provider. The public IP belongs to the provider, not necessarily
+to the VM. Provider offerings such as "Caddy Auto-SSL" normally mean the
+provider owns the reverse proxy and certificate lifecycle.
 
-Providers like this advertise "Caddy Auto-SSL & subdomain gratis". That means a
-Caddy already occupies `:80`/`:443` **and terminates TLS for you**.
+Prefer `scripts/install.sh --vps --nat ...`. Cartethyia's NAT target does not
+install or configure Caddy. Use [shared provisioning](shared-provisioning.md)
+for the application, then configure forwarding in the provider's control panel.
 
-Do the [shared provisioning](../references/shared-provisioning.md) first.
+## 1. Establish the actual topology
 
-## 1. Confirm which ports actually reach you
+A private interface plus a different public egress address supports NAT, but
+missing or timed-out detection is **unknown**, not permission to guess. Confirm
+the provider's forwarding/TLS model and the external port before changing the
+host. See the parent skill's detection procedure.
 
-Probe **from outside** — inside the VM everything binds fine and tells you
-nothing:
+## 2. Configure the provider boundary
 
-```bash
-for p in 22 80 443 8080; do timeout 6 bash -c "echo > /dev/tcp/<PUBLIC_IP>/$p" 2>/dev/null \
-  && echo "$p OPEN" || echo "$p CLOSED"; done
-```
-
-Corroborate by binding a throwaway listener inside and probing from outside. A
-port can bind locally yet be unreachable, so the outside probe is the only
-answer that counts.
-
-SSH is usually on a non-standard port (e.g. `:45222`) precisely because :22 is
-not forwarded.
-
-## 2. The three rules that cost the most time
-
-- **Do not install a second reverse proxy.** You will fight the provider's for
-  the ports.
-- **Do not set `local_certs`.** It swaps the public certificate for a private
-  one; the browser then rejects the site and ACME never issues. The symptom is
-  `https=000` from outside while `openssl s_client` shows a cert issued by
-  `Caddy Local Authority`. This is the single most expensive mistake in this
-  setup.
-- **Do not disable the 80→443 redirect** to "fix" an ACME challenge. If :443 is
-  forwarded, tls-alpn-01 and http-01 both work; suppressing the redirect just
-  breaks the site for users.
-
-## 3. Caddyfile
-
-The provider's Caddy does the TLS work; yours only needs the proxy hop:
-
-```caddyfile
-<domain> {
-	encode zstd gzip
-
-	reverse_proxy 127.0.0.1:8080 {
-		# SSE / streaming must not be buffered.
-		flush_interval -1
-	}
-}
-```
-
-## 4. Bind the app to loopback
-
-Once a proxy fronts it, the app should listen on `127.0.0.1:<port>`. Exposing
-`0.0.0.0:8080` adds nothing — that port is not forwarded anyway — and it invites
-direct plaintext access if it ever is.
-
-## 5. Verify issuance
+Forward the provider's external port to the same application port on the VM.
+The current installer has one `--port`; it does not model separate internal
+and external ports. The public origin must match the browser-facing scheme,
+host, and external port exactly:
 
 ```bash
-journalctl -u caddy --since '-2min' --no-pager | grep -iE 'certificate obtained|challenge failed'
-echo | openssl s_client -connect <domain>:443 -servername <domain> 2>/dev/null \
-  | openssl x509 -noout -issuer -subject
+bash scripts/install.sh --vps --nat --lite \
+  --port 8080 --public-origin https://app.example.com:8080
 ```
 
-`issuer=... O=Let's Encrypt` is the pass condition. `Caddy Local Authority`
-means `local_certs` is still set.
+If the provider requires different internal and external ports, do not use the
+installer's NAT shortcut as though it modeled that mapping. Configure/build
+manually: set `PORT` to the internal listener and
+`CARTETHYIA_PUBLIC_ORIGIN` to the external URL, then verify both sides. Do not
+infer public reachability from the install flag. Preserve explicit
+`TRUSTED_PROXY_CIDRS`. Add the provider proxy's trusted address range only
+when its request-forwarding behavior is known; an unspecified proxy network is
+not automatically trusted.
 
-## 6. Do not import regular-VPS assumptions
+The application still needs to be reachable by the provider's forwarder. The
+gateway's default listener is not loopback-only. Do not force a loopback bind
+when the forwarder runs outside the VM; it cannot connect to the VM's
+loopback. Restrict exposure with the provider/host firewall and verify the
+actual forwarding path.
 
-No `local_certs` guard is needed on a regular VPS, and no port-forwarding
-probing is needed there either. Conversely, never assume a NAT host's :80/:443
-are yours to bind.
+## 3. Do not manage another proxy
 
-## Verified instance
+- Do not install a second Caddy or compete for the provider's public ports.
+- Do not add `local_certs` to a public-site configuration; a private CA is not
+  a substitute for the provider's public certificate.
+- Do not overwrite an existing proxy configuration that Cartethyia does not
+  own.
+- Do not assume NAT needs the Regular VPS Caddy/TLS procedure.
 
-`143.20.199.50`, ssh on `:45222` (Dahono Cloud) →
-`https://cartethyia.risun.web.id`, real Let's Encrypt certificate.
+If the provider gives no forwarding/TLS service and the VM actually owns its
+public IP, reclassify the host instead of forcing the NAT path.
+
+## 4. Verify each boundary separately
+
+Inside the VM:
+
+```bash
+systemctl is-active cartethyia
+curl -fsS http://127.0.0.1:8080/health/ready
+ss -lnt
+```
+
+This proves only local process/readiness and listener state. It does **not**
+prove forwarding, public DNS, external TLS, or provider upstream access.
+
+From an outside client, probe the exact public origin and inspect the presented
+certificate and `/health/ready`. A successful public HTTPS response verifies
+that path; a failure remains a provider/network boundary until isolated. Do not
+inspect `journalctl -u caddy` as a substitute when Caddy is provider-managed.
+
+When the public path works, follow
+[`proving-a-deployment.md`](proving-a-deployment.md) for an authenticated model
+request. If outside access is unavailable, report external forwarding and TLS
+as unverified rather than claiming success from loopback.
+
+## Historical evidence is not a current guarantee
+
+Previous provider-specific hosts and certificate observations are examples,
+not a universal NAT contract. Provider products and forwarding rules differ;
+verify the current host and control plane before applying them.

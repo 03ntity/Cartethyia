@@ -2,6 +2,8 @@
 
 Measured against `https://www.codebuddy.ai/v2/chat/completions` with a real
 CodeBuddy intl (`cb`) OAuth access token, on 2026-10-19.
+These are dated observations; revalidate before treating them as a current
+upstream guarantee.
 
 ## The three required headers
 

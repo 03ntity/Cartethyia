@@ -24,12 +24,15 @@ ip route | head -3
 python3 -c "import urllib.request;print(urllib.request.urlopen('https://api.ipify.org',timeout=8).read().decode())"
 ```
 
-- VM holds the **same** address as egress → **regular VPS**. You own :80/:443.
-- VM holds `10.x` / `192.168.x` / `100.x` but egress is public → **NAT VPS**.
-  The public IP belongs to the host, not the VM.
+- VM holds the **same** public address as egress → **regular VPS**.
+- VM has a private interface address and a different public egress → **NAT
+  VPS**. Do not infer NAT from a private address alone: home/office networks
+  and overlays use private addresses too.
+- Missing, timed-out, or contradictory data is **unknown**. Confirm with the
+  provider; never default unknown to NAT.
 
-Corroborate with what is already installed. A Caddy you did not install (typical
-on Dahono Cloud, Narwhal) means NAT:
+Corroborate with what is already installed. An unfamiliar Caddy is a clue, not
+proof of NAT or of who owns TLS:
 
 ```bash
 systemctl list-unit-files | grep -i caddy; systemctl is-active caddy
@@ -74,8 +77,9 @@ Supporting references, independent of shape:
 - Secrets are generated **on the host** and never reused from another
   deployment or a pasted env file. `.env` is mode `0600`. Nothing reaches git:
   no source file, env file, commit, diff, log, or report.
-- Do not copy NAT workarounds onto a regular VPS (`local_certs`, port-forwarding
-  assumptions) or vice versa.
+- Do not copy NAT forwarding/provider-TLS assumptions onto a regular VPS or
+  the regular-VPS Caddy procedure onto NAT. Do not use `local_certs` as a
+  public-certificate workaround in either topology.
 - Patch the repository, not the installed tree. A hot patch under
   `/opt/cartethyia` is lost on the next clone and lets the server drift from the
   tag it claims to run.

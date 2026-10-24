@@ -34,10 +34,11 @@ builds the AOT binary so production keeps its precompilation where it is safe.
 
 ## `ProtectHome=true` blocks `/root/.bun/bin/bun`
 
-The unit fails with `status=203/EXEC`. Install bun to `/usr/local/bin`, or set
-`ProtectHome=read-only`. The unit in
-[`shared-provisioning.md`](shared-provisioning.md) uses `ProtectHome=true`, so
-`/usr/local/bin` is required.
+The unit fails with `status=203/EXEC` if its executable is under `/root`.
+Install build-time Bun at `/usr/local/bin` and run the compiled gateway from
+the installation root. Do not weaken `ProtectHome` just to execute a binary
+from a private home directory. See
+[`shared-provisioning.md`](shared-provisioning.md).
 
 ## `su - postgres -c` swallows output
 

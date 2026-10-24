@@ -35,8 +35,9 @@ editing, and change it the way it is meant to change".
 
 ## Naming and structure
 
-- Keep `scripts/` grouped by purpose: `cli/`, `operations/`, `install/`,
-  `build/`, `generate/`, `dev/`, `test/`, and `shared/`.
+- Keep `scripts/` grouped by purpose: `cli/`, `install/`, `build/`, `test/`,
+  `dev/`, and `tools/`. Health helpers and standalone launchers may remain at
+  the scripts root when their callers expect that location.
 - How a change should read — names, comments, types, errors — is `taste.md`.
   Do not restate it here.
 

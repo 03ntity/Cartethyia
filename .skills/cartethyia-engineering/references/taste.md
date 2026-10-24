@@ -69,6 +69,7 @@ introduce a second style beside one that already exists.
 
 - Browser code stays browser-safe. It calls `/console/api`. It does not import
   the backend.
-- A mutation toasts both arms. A silent `mutate` is unfinished.
+- A user-initiated console mutation reports both outcomes. Deliberately quiet
+  or automated paths may suppress toasts; follow the dashboard skill.
 - Use the existing dialog sizes, query keys, and `cartethyia:<area>:<name>`
   storage prefix. Do not invent a parallel set.

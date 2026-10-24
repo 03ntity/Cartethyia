@@ -50,23 +50,33 @@ Order of work, so a step never lands blind:
    in the same commit.
 
 Verification per step: `bun run dashboard:typecheck`, `bun run dashboard:test`,
-and `CARTETHYIA_DEV_ADMIN_PASSWORD=… bun scripts/test/visual-baseline.ts
-compare` (which must stay green while a step only re-expresses styling, and is
-re-captured in the scale-normalization step that intentionally changes pixels).
+and `bun run dev:visual-baseline -- compare`. Load
+`CARTETHYIA_DEV_ADMIN_PASSWORD` through the existing protected environment or
+a secret-injecting runner in the same invocation; never place it literally in
+command text. This script reads process environment, not `.env`, and has no
+credential prompt. The comparison must stay green when a step only
+re-expresses styling, and is recaptured only when the pixel change is
+intentional.
 
 That script reads `CARTETHYIA_DEV_ADMIN_PASSWORD` (required), plus
 `CARTETHYIA_DEV_ADMIN_USER`, `CARTETHYIA_VISUAL_PORT`, and
 `CARTETHYIA_BROWSER_AGENT` when set. They are dev-tooling only — no runtime
 path reads them, so they are absent from `CONFIG_SPEC` and
-`documentation/reference/configuration.md` — and are listed in `.env.example`
-under "Dev console admin". The password is an operator credential; handling it
-follows `AGENTS.md` "Safety and git" — it may arrive in a message, and it never
-goes into a file, a commit, or output.
+`documentation/reference/configuration.md`. The password is an operator
+credential; follow
+`AGENTS.md` "Git and credentials". Never print it or place it in process
+arguments, tool output, or Git.
+
+The baseline boots the real gateway against the configured development
+database. It does not intentionally change configuration, but sign-in creates
+a session and the running app can write normal telemetry. Do not describe the
+run as read-only or point it at production data.
 
 `agent-browser` is what UI claims about layout, computed style, focus, and
 overflow are measured through, including this script's own measurements. A
-page can also be measured by driving the CLI directly, which is the normal path
-when no gateway credential is available.
+page can also be measured by driving the CLI directly. Without an authorized
+credential, limit that check to public pages; protected console pages still
+require a real session.
 
 ## Authenticated console session
 

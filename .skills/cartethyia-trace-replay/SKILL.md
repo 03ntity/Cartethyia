@@ -9,10 +9,10 @@ Use when a request failed and the cause is not yet pinned to a specific field.
 The seam map — wire families, the canonical model, and where a dialect is
 applied — is `references/protocol-and-translation.md`.
 
-Method: **reproduce the exact failure, then remove one thing at a time until it
-turns 200.** The field whose removal flips the status is the cause. Do not stop
-at a plausible-looking suspect — a parameter that "should" matter and one that
-does are different things, and this method is cheap enough to settle it.
+Method: **reproduce the exact failure, then vary one thing at a time.** A field
+whose controlled addition or removal flips the result is the isolated trigger;
+confirm its mechanism in the owning layer before calling it the root cause. Do
+not stop at a plausible-looking suspect or a one-off status change.
 
 This method attributed a `400 model_param_invalid` on a 3.16M-char prompt to an
 **absent** `max_tokens` — not to payload size and not to `reasoning_effort`,
@@ -23,10 +23,10 @@ both of which looked like better suspects.
 1. **Reproduce verbatim** — send the captured body unchanged. If it does not
    fail, you do not yet have the failure. Find out why before bisecting
    (different route, key, or deployment state).
-2. **Repeat the baseline.** A single 400 may be transient; replay it several
-   times (three is a useful starting point) and confirm the same failure before
-   bisecting. Repeated failures establish a reproducible baseline, not proof
-   that every run will fail. Change one variable per step.
+2. **Repeat the baseline.** A single 400 may be transient. Replay it a small,
+   bounded number of times and confirm the same failure before bisecting.
+   Repeated failures establish a reproducible baseline, not proof that every
+   run will fail. Stop early if the endpoint applies rate limits or bans.
 3. **Bisect** on the full payload — strip optional controls one at a time
    (`prompt_cache_key`, `reasoning_effort`, `stream_options`, `thinking`,
    `reasoning_summary`), then shrink size, then **add** the field you suspect is
@@ -83,9 +83,11 @@ Read the provider's own response/code, not just the gateway's. When retained,
 the public `message` is often generic and names nothing.
 
 **Guard against the size red herring.** A large failing payload makes you
-suspect size. Before concluding that, add a tiny explicit limit: 3.16M chars +
-`max_tokens=1` returning 200 proves size was never the bound. A field whose
-*presence* fixes it is the cause, however large the payload.
+suspect size. Before concluding that, add a tiny explicit limit. If the same
+large body with `max_tokens=1` returns 200 under otherwise identical
+conditions, that test rules out total prompt size as the trigger; it does not
+prove every provider/model accepts every larger body. Treat the field whose
+presence changes the result as the trigger, then verify its mechanism.
 
 ## Where the owner usually is
 
@@ -110,16 +112,17 @@ gets the guard.
 ## Image and video replay
 
 Identify the listener before bisecting. `Get-NetTCPConnection -LocalPort 12800
--State Listen` reports a process id, not its command line; inspect
-`OwningProcess` to confirm it is `bun run --hot src/main.ts`. `dist/cartethyia.exe`
-or a cached adapter answers with the old payload. Do not assign `$pid` in
-PowerShell; it is read-only.
+-State Listen` reports a process id, not its command line; inspect the owning
+process to confirm it is the intended source or compiled gateway. An old
+compiled gateway or a cached adapter can answer with the old payload. Do not
+assign `$pid` in PowerShell; it is read-only.
 
 Capture the body at the last boundary that still owns it. For Codex, compare
 the object passed to `postUpstreamJson` with the string inside `pinnedFetch`.
 If both contain `tools` and the upstream still says `tool_choice` must be
-specified with `tools`, the body is not the cause. Replay that body directly
-only when authorized.
+specified with `tools`, those captures did not isolate a missing field. Check
+serialization, headers, endpoint, and account/endpoint expectations before
+excluding the body entirely. Replay directly only when authorized.
 
 A 200 chat response is not an image. Proof is an `image_generation_call` or
 `inlineData` whose decoded bytes start with `89 50 4E 47` (PNG) or `FF D8 FF`
@@ -167,7 +170,7 @@ payload from there rather than retyping it; a retyped body is not the failure.
 ## Prove the flip
 
 Unit tests and typecheck do not prove a wire change. Replay the original
-failing body against an instance carrying the change and show the status change.
+failing body against an instance carrying the change and compare the result.
 
 ```bash
 PORT=12801 CARTETHYIA_PUBLIC_ORIGIN=http://127.0.0.1:12801 bun run src/main.ts
@@ -182,24 +185,20 @@ it, see it pass. A test that passes both ways proves nothing.
 
 ## Hygiene
 
-- A credential may be echoed and reused when the user explicitly asks; a
-  throwaway debug credential is disposable and secret-handling ceremony must
-  not block the replay. The one absolute is **git**: never in source, env
-  files, commits, logs, reports, or telemetry. `AGENTS.md` "Git, data, and
-  credentials" is the owner.
-- **Re-state the credential in the command that uses it.** An exported shell
-  variable does not survive between tool calls, so `curl` sends an empty
-  `Authorization` header and returns `000` with exit 43. That looks like "host
-  unreachable" and ends the investigation before the failure is reproduced.
-- **Diagnose `000` before believing it.** Run `curl -v` once with no credential:
-  a `401` proves the host answered and only the key was missing, while `000`
-  with no response means DNS, TLS, or egress. Do not report a host as
-  unreachable on a single `000`.
-- **`curl -o <file>` is unreliable on Windows here**: it intermittently returns
-  exit 43 / HTTP 000 even against a host that answers (schannel renegotiation),
-  which is indistinguishable from the unreachable case above. For a replay that
-  needs the response body, prefer `bun -e` with `fetch` — same request, no
-  schannel path. If `curl` must be used, confirm with `curl -v` first.
+- Never print credentials or place them in command arguments. Load them from
+  the existing protected environment/configuration or supply them through
+  stdin/file descriptors. Keep them out of tool output, process lists, logs,
+  reports, and Git. `AGENTS.md` "Git and credentials" is the owner.
+- Shell variables do not persist between independent tool calls. Reuse the
+  protected credential source in the same invocation; do not solve that by
+  repeating the secret literally.
+- **Diagnose `000` before believing it.** An unauthenticated `401` proves the
+  host answered; `000` with no HTTP response leaves DNS, TLS, client transport,
+  and egress unresolved. Use a second client when the transport is suspect. Do
+  not report a host as unreachable on a single `000`.
+- **Windows curl can fail independently of the service.** If it reports exit
+  43 / HTTP 000 against a host another client reaches, prefer `bun -e` with
+  `fetch` for the replay. Record which client produced each result.
 - Work in a scratch directory outside the repo; delete it when done. Leave no
   replay scripts or captured payloads in the tree.
 - Send the same `user-agent` as the failing client so the gateway takes the same
@@ -211,6 +210,6 @@ it, see it pass. A test that passes both ways proves nothing.
 
 State the exact field that caused it, the replay table (what passed, what
 failed), whether the baseline was repeatable, the layer you fixed and why it
-owns it, and the before/after status against a real instance. Say plainly what
+owns it, and the before/after result against a real instance. Say plainly what
 you could not verify — e.g. whether other upstreams on that wire share the
 behavior, when the available routes could not exercise them.

@@ -1,326 +1,167 @@
 # Cartethyia — Agent Guide
 
-Use this file as the general guide for work in this repository. Keep the task
-moving, adapt to the request, and use focused subsystem guidance when it adds
-useful detail. Do not treat every suggestion here as a reason to block progress.
+Use this guide to orient yourself, then follow the skill that owns the task.
+Skills may impose stricter domain requirements. Do not turn this guide into a
+second copy of their procedures.
 
-## Requirements
+## Work the task
 
-At the start of a task, briefly understand:
+1. Identify the requested outcome, observable acceptance criteria, and
+   constraints. Use the user's wording; do not create a specification for a
+   small task.
+2. Inspect the current worktree, owning implementation, callers, and tests.
+   Source code and tests are the authority for current behavior.
+3. Read the closest relevant skill. Do not read every skill for every task.
+4. Make the smallest complete change at the canonical owner. Update affected
+   callers, tests, configuration, and documentation; leave unrelated work
+   alone.
+5. Verify the affected behavior and report exactly what passed, failed, or
+   remains unverified.
 
-- **Requirement:** the requested behavior or outcome.
-- **Acceptance criteria:** what observable result would satisfy the request.
-- **Constraints:** what must remain unchanged, and any explicit limits.
+Act before deliberating at length: inspect, search, reproduce, edit, or verify.
+Work directly unless a separate task is genuinely independent.
 
-Use the user's wording where possible. A short internal summary is enough; do
-not turn a small task into a specification exercise.
+Ask only when plausible choices materially change behavior, compatibility,
+scope, data handling, or user experience. Otherwise choose a safe, reversible
+default and state any assumption that affects the result. Stop for destructive
+or hard-to-reverse actions unless the user has already authorized them.
 
-If details are missing, prefer a reasonable, low-risk assumption and continue.
-Ask the user when different plausible choices would materially change behavior,
-scope, data handling, compatibility, or user experience. When helpful, offer a
-small set of clear options. Mention assumptions that affect the result.
+For a bug, identify and verify the mechanism when practical. Do not hide a
+failure by weakening validation, widening a type, suppressing an error, or
+adding an unexplained fallback. If reproduction is not practical, state what
+remains unproven.
 
-## Working principles
+## Environment
 
-- Optimize for useful progress and a complete result, not process for its own
-  sake.
-- Inspect the relevant code and its conventions before editing. For a small,
-  well-scoped task, keep exploration small too.
-- Make the smallest complete change that meets the request. Avoid unrelated
-  cleanup, speculative abstractions, and broad rewrites unless requested.
-- Follow existing patterns when they fit. If they conflict or appear stale, use
-  judgment and explain a meaningful deviation rather than copying a bad pattern.
-- For bugs, find the likely cause and verify it when practical. If reproduction
-  is blocked or not worthwhile, say what remains unverified.
-- Keep code, tests, documentation, and configuration in sync when the change
-  affects them. Do not update unrelated docs just to satisfy a checklist.
-- Do not spend a turn only restating a plan. Make a useful first move: inspect,
-  search, reproduce, edit, or verify.
-- Work directly by default. Use a helper agent only when work is genuinely
-  independent or needs substantial separate context.
+- **Runtime and package manager:** Bun, at the version required by
+  `package.json` `engines.bun`.
+- **Backend:** TypeScript and Elysia in `src/`.
+- **Dashboard:** React and Vite in `dashboard/`.
+- **Persistence:** embedded SQLite in Lite mode; PostgreSQL in Full mode.
+  Redis is optional for shared coordination.
+- **Installation and setup:** follow `documentation/installation.md` and the
+  current scripts in `package.json`.
 
-## Clarifying questions and flexibility
+`CARTETHYIA_DB_MODE` is required. Never silently choose a database mode: Lite
+and Full use different databases and migration sets.
 
-- Do not ask about details with an obvious, reversible default.
-- Do ask before a high-impact or hard-to-reverse decision, a destructive action,
-  or an unresolved product choice with multiple reasonable outcomes.
-- If progress can safely continue while an uncertainty is isolated, continue
-  the independent work and call out the open choice.
-- The user may redirect scope, tools, or verification depth; adapt rather than
-  insisting on a fixed workflow.
-- Distinguish requirements from suggestions. Use the lightest process that
-  adequately manages the change's risk.
+Use shell and path syntax appropriate for the active environment. Prefer local
+services for development; Docker is an option, not a universal prerequisite.
+For visual or interactive dashboard work, follow the browser procedure in
+`.skills/cartethyia-dashboard/SKILL.md`.
 
-## Environment and tools
+## Repository map
 
-Cartethyia's main stack:
+| Area | Location |
+| --- | --- |
+| Gateway, console API, providers, protocol, routing, persistence, telemetry | `src/` |
+| Browser application | `dashboard/src/` |
+| CLI, installer, build, development, tests, generators, and tools | `scripts/` |
+| PostgreSQL and SQLite migrations | `migrations/` |
+| Backend and dashboard tests | `test/`, `dashboard/test/` |
+| Installation, architecture, configuration, and feature guides | `documentation/` |
+| Focused procedures and domain guidance | `.skills/` |
 
-- **Runtime and package manager:** Bun 1.4.0 or newer.
-- **Backend:** TypeScript and Elysia under `src/`.
-- **Dashboard:** React and Vite under `dashboard/`.
-- **Persistence:** embedded SQLite in Lite mode; external PostgreSQL in Full
-  mode. Redis is optional and is used when coordination needs to be shared.
-- **Development services:** prefer available local PostgreSQL and Redis (or the
-  in-process coordination mode) for local work. Docker is an option when a
-  needed service is unavailable, not a default prerequisite.
-- **Browser checks:** use `agent-browser` for visual, layout, and interactive
-  dashboard behavior. The dashboard skill has more specific verification
-  guidance; follow it for dashboard tasks.
+Keep one canonical owner for each behavior and contract. Treat network
+responses, environment values, database rows, request bodies, and user input
+as untrusted. Preserve intentional provider-specific headers, identity,
+authentication, and wire bytes.
 
-Use the shell and path syntax that match the active environment. In a Windows
-workspace, PowerShell is appropriate; do not assume Bash-only utilities or
-Unix-style paths when an equivalent native command is available.
+Dashboard code must remain browser-safe: no database drivers, Elysia,
+filesystem access, secrets, or Node-only runtime dependencies. It communicates
+with `/console/api` rather than importing the backend.
 
-Useful root commands:
+Do not hand-edit generated output; change its source or generator and
+regenerate. Treat pinned migration history as immutable: add forward migrations
+rather than rewriting baselines. The schema/telemetry skill owns the complete
+procedure.
 
-```text
-bun install --linker isolated
-bun setup
-bun setup --non-interactive
-bun run dev
-bun run dev:backend
-bun run typecheck
-bun run dashboard:typecheck
-bun run build
-bun run test
-bun run test:backend
-bun run dashboard:test
-```
+Keep TypeScript strict. Do not weaken compiler settings or add `any` or
+suppressions merely to silence an error.
 
-Use `bun setup` for local environment setup. It configures the environment,
-encryption key, database mode, and port; it does not install PostgreSQL or start
-the application. See `documentation/installation.md` for setup details and
-`package.json` for the current command list.
+## Find the owner
 
-`CARTETHYIA_DB_MODE` is required and has no default. Do not silently choose a
-mode: Lite and Full use different database backends and migration sets. Use the
-existing local `.env` (created from `.env.example`) for test configuration;
-never point tests at a development or production database.
+Start with the closest match. A directory is a search starting point, not
+permission to edit every file in it.
 
-`CARTETHYIA_TEST_DATABASE_URL` is **required**, not optional: `bun run test`
-and `bun run test:backend` exit non-zero without it, and the runner refuses to
-fall back to the development `DATABASE_URL`. Only `bun run dashboard:test`
-runs without it.
-
-### Telemetry tests must not touch the real data dir
-
-`TELEMETRY_EVENT_DIR` resolves from the data dir **when `event-log` is first
-imported** (`src/observability/event-log.ts`). A test that sets
-`CARTETHYIA_DATA_DIR` after importing it, or that does not set it at all,
-writes into — and any cleanup then wipes — the machine's real telemetry:
-every request file and its index.
-
-Point telemetry tests at a temp dir, set **before** the module is imported:
-
-```ts
-const sandbox = await mkdtemp(join(tmpdir(), "carte-telemetry-test-"));
-process.env.CARTETHYIA_DATA_DIR = sandbox;
-const { ... } = await import("../../src/observability/event-day-index");
-```
-
-`test/observability/telemetry-window.test.ts` is the reference. This already
-happened once: a suite cleaned the live directory and the Usage page read zero
-until the files were restored from a backup.
-
-## Repository map and boundaries
-
-- `src/` — production backend, public gateway, console API, persistence,
-  providers, protocol translation, routing, and telemetry.
-- `dashboard/src/` — browser application. It talks to `/console/api`; it must
-  remain browser-safe and must not import database drivers, Elysia, filesystem
-  modules, secrets, or Node-only runtime dependencies.
-- `scripts/` — CLI, development, build, generation, operations, and test
-  utilities. Check the existing subdirectory before adding a script.
-- `migrations/` — PostgreSQL and generated SQLite database baselines, plus the
-  numbered forward migrations applied at boot. Read the directory for the
-  current set; never trust a count written here. `0000_baseline.sql` is pinned
-  by a content hash, so it is append-only history: a schema change goes into a
-  new numbered file, not into the baseline. Backup/restore is the escape hatch
-  for retired history, not a replacement for it. `bun run check:migrations`
-  verifies the schema and the committed SQL agree.
-- `test/` and `dashboard/test/` — backend and dashboard tests.
-- `documentation/` — getting started, reference indexes, and feature guides.
-- `.skills/` — focused, repository-specific procedures and domain guidance.
-
-## Where to work
-
-One behavior, one owner. Find it before editing; the nearest matching file is
-how symptoms get suppressed instead of fixed.
-
-| Concern | Owner | Start with |
-| --- | --- | --- |
-| Request parsing, protocol translation, streaming, errors | `src/protocol/`, `src/transport/`, `src/providers/` | `.skills/cartethyia-trace-replay/references/protocol-and-translation.md` |
-| Candidate matching, eligibility, cooldowns, failover | `src/transport/routing/` | `documentation/reference/architecture.md`, `.skills/cartethyia-health-routing/SKILL.md` |
-| Quota reads, cache, Usage floor, quota UI | `src/console/quota/`, `src/providers/quota/`, `src/workers/`, provider-detail dashboard | `documentation/features/04-usage-floor.md`, `documentation/reference/providers.md` |
-| Provider catalog, auth, discovery, adapters | `src/providers/` | `documentation/reference/providers.md`, `.skills/cartethyia-provider-catalog/SKILL.md` |
-| Egress, proxy pools, SSRF | `src/network/`, `src/console/routing/pools/` | `documentation/features/03-network-pools.md`, `.skills/cartethyia-health-routing/SKILL.md` |
-| Console API | `src/console/<domain>/` | `.skills/cartethyia-console-api/references/console-api.md` |
-| Browser UI | `dashboard/src/` | `.skills/cartethyia-dashboard/references/dashboard-map.md` |
-| Schema or persistence behavior | `src/persistence/`, `migrations/`, `scripts/tools/` | `documentation/reference/sqlite-parity.md`, `.skills/cartethyia-schema-telemetry/SKILL.md` |
-| Startup, lifecycle, scheduled work | `src/boot/`, `src/workers/` | `.skills/cartethyia-engineering/references/backend.md` |
-| Environment variables | `src/config/spec.ts` | `documentation/reference/configuration.md` (generated — regenerate, do not hand-edit) |
-
-## Confirmed behavior worth knowing
-
-- **Usage floor is live routing policy.** The provider-detail UI stores a
-  per-provider threshold, evaluated per account before dispatch. Accounts at or
-  below the threshold are skipped so routing can continue to another account.
-  Missing quota readings are unknown, not proof that the floor was crossed;
-  exhausted quota windows are still excluded. See
-  `documentation/features/04-usage-floor.md`.
-- **Quota cache freshness is explicit.** Cache entries distinguish the last
-  attempt from the last successful reading. A refresh failure retains a
-  successful reading for a bounded period, and the dashboard exposes refresh
-  state. The in-process cache is bounded and Redis is optional. Verify the
-  current constants in `src/console/quota/cache.ts` before relying on timing
-  details.
-- **Startup has phase-level tracing.** `buildProductionDeps()` logs named
-  startup phases with elapsed time and memory observations. These logs help
-  attribute startup cost; they are not a promise that every phase is lazy or
-  that memory use is below a particular threshold.
-- **BYOK and bundled providers are different paths.** BYOK rows use the generic
-  OpenAI-compatible adapter and derive their wire contract from
-  `resolveByokWireProfile`. Bundled providers can have dedicated adapters and
-  authentication. DeepSeek is bundled and dispatches through its Messages
-  adapter while keeping OpenAI-compatible model discovery.
-- **Admission leases are acquired separately from eligibility.** A request is
-  normalized into the canonical protocol model, planned against a route
-  snapshot, filtered for account eligibility, and only then dispatched.
-  Eligibility says an account may be tried; admission says a concurrency slot
-  is free. They are not one decision.
-- **Per-request events are files, not rows.** Telemetry appends one file per
-  UTC day under the data dir's `telemetry-events/`; usage, breakdown, and chart
-  reads go to that day's index, and only the request list and detail drawer read
-  the event file. See `.skills/cartethyia-schema-telemetry/SKILL.md`.
-
-Keep one canonical owner for provider metadata, environment configuration,
-contracts, routing policy, and persisted data. When changing a shared contract,
-inspect and update its relevant producers, consumers, validation, and dashboard
-mirror.
-
-Treat network responses, environment values, database rows, request bodies, and
-user-supplied values as untrusted. Preserve security boundaries and intentional
-provider-specific headers, user-agent behavior, and wire bytes.
-
-Do not hand-edit generated output. Find and change its source or generator, then
-regenerate when appropriate. Keep TypeScript strict; do not weaken compiler
-settings or use `any` or suppressions merely to silence an error.
-
-## Finding the right guidance
-
-Read the closest skill when the task touches a specialized area; do not read
-every skill for every task. The committed skill source lives under `.skills/`.
-
-| Task area | Starting point |
-|---|---|
-| Repository conventions, verification, or a cross-cutting change | `.skills/cartethyia-engineering/SKILL.md` |
-| Reverse-engineer an undocumented behavior or reconstruct an internal flow | `.skills/cartethyia-reverse-engineering/SKILL.md` |
-| A failing request, wire bytes, or a payload dump | `.skills/cartethyia-trace-replay/SKILL.md` |
-| Pulling evidence off a remote deployment | `.skills/cartethyia-trace-replay/references/remote-debugging.md` |
+| Task | Start with |
+| --- | --- |
+| Cross-cutting conventions, verification, dead code, or repository invariants | `.skills/cartethyia-engineering/SKILL.md` |
+| Failing requests, wire bytes, payloads, or remote evidence | `.skills/cartethyia-trace-replay/SKILL.md` |
+| Undocumented behavior or reconstruction of an internal flow | `.skills/cartethyia-reverse-engineering/SKILL.md` |
 | Schema, migrations, usage, or telemetry | `.skills/cartethyia-schema-telemetry/SKILL.md` |
-| Providers and models: add, remove, authenticate, capabilities, catalog | `.skills/cartethyia-provider-catalog/SKILL.md` |
-| What a model can do — vision, tools, reasoning, free tier | `.skills/cartethyia-provider-catalog/references/capabilities.md` |
-| Removing a bundled provider | `.skills/cartethyia-provider-catalog/references/provider-removal.md` |
+| Providers, models, authentication, capabilities, or catalogs | `.skills/cartethyia-provider-catalog/SKILL.md` |
 | Account health, cooldowns, retries, leases, or routing | `.skills/cartethyia-health-routing/SKILL.md` |
-| Console API domain or contract | `.skills/cartethyia-console-api/SKILL.md` |
-| Dashboard, React, layout, or browser behavior | `.skills/cartethyia-dashboard/SKILL.md` |
-| Deploying to a server — regular VPS, NAT VPS, or Docker | `.skills/cartethyia-deployment/SKILL.md` |
+| Console API domains and contracts | `.skills/cartethyia-console-api/SKILL.md` |
+| Dashboard, React, layout, or browser verification | `.skills/cartethyia-dashboard/SKILL.md` |
+| Local, VPS, NAT VPS, or Docker deployment | `.skills/cartethyia-deployment/SKILL.md` |
+| Request parsing, protocol translation, streaming, or errors | `src/protocol/`, `src/transport/`, `src/providers/` |
+| Quota reads and Usage floor | `src/console/quota/`, `src/providers/quota/`, `src/workers/` |
+| Egress, proxy pools, or SSRF | `src/network/`, `src/console/routing/pools/` |
+| Startup, lifecycle, or scheduled work | `src/boot/`, `src/workers/` |
+| Environment variables | `src/config/spec.ts` |
 
-Use the task-relevant skill's procedure and references where they help. Skills
-may define stricter domain-specific requirements than this general guide, such
-as the dashboard's browser verification procedure.
+When changing a shared contract, inspect its producers, consumers, validation,
+and dashboard mirror. For a rename or removal, search direct and indirect
+callers, remove obsolete paths, and search the old name again. Do not leave a
+compatibility alias merely to avoid completing the cutover.
 
-## Typical workflow
+## Data and test safety
 
-1. Understand the requirement, acceptance criteria, and constraints.
-2. Locate the owning layer and inspect the relevant implementation, callers, and
-   tests. Use CodeGraph or other code intelligence if available and useful;
-   targeted search and file reads are fine too.
-3. Check the closest skill and documentation for domain-specific pitfalls.
-4. Make a focused change at the canonical owner and update affected callers.
-5. Run a proportional verification check and, for behavior changes, verify the
-   changed behavior at a useful boundary when practical.
-6. Report the result, verification, and any meaningful limitation.
+Never point tests, migration checks, or debugging commands at development or
+production data. `CARTETHYIA_TEST_DATABASE_URL` is required by backend suites;
+use a disposable database, never the runtime `DATABASE_URL`. Dashboard tests
+do not require it.
 
-This is a guide, not a mandatory ceremony. Skip steps that add no value to a
-trivial task; spend more time when the change has a wider blast radius.
+Never run telemetry tests against the real data directory. Isolate
+`CARTETHYIA_DATA_DIR` **before importing telemetry modules**; follow
+`.skills/cartethyia-schema-telemetry/SKILL.md` for the sandbox procedure.
 
-## Testing and verification
+Prefer reversible database and environment operations. Confirm the target
+before any operation that could alter real data.
 
-The gate list, the smallest-useful-check rule, boundary verification, and
-reporting expectations live in
-[`.skills/cartethyia-engineering/references/verification.md`](.skills/cartethyia-engineering/references/verification.md);
-follow it instead of restating the rules here.
+## Verification
+
+Follow
+[`.skills/cartethyia-engineering/references/verification.md`](.skills/cartethyia-engineering/references/verification.md)
+for gates, scoped tests, boundary verification, and reporting. Use the
+repository test runner rather than bare `bun test`.
+
+Typecheck proves code shape, not behavior. Exercise the changed behavior at
+its real boundary when practical: a gateway request, browser surface, provider
+flow, isolated migration, or installer lifecycle. Do not claim a check passed
+when it was not run.
 
 ## Documentation
 
-Use `documentation/installation.md` for installation and local setup,
-including the server install. `documentation/README.md` is the index for
-`documentation/reference/` (system layers) and `documentation/features/`
-(individual features). Prefer updating the existing owner page instead
-of duplicating long explanations in `AGENTS.md`.
+Use `documentation/installation.md` for installation and local/server setup.
+Read `documentation/reference/` for system behavior and
+`documentation/features/` for individual features. Update the owning page when
+a change would otherwise leave it misleading; do not duplicate long procedures
+across AGENTS, skills, and documentation.
 
-**Source code and tests are the authority for current behavior.** Documentation
-explains that behavior and can lag behind it. When they disagree, verify the
-implementation and correct the owning page. Check the current worktree and
-current source before relying on a prior session summary, an example, a
-measurement, or a page's implementation details.
+Describe durable rules rather than current counts or incidental measurements.
+When a value matters, name its owning constant or file. Resolve contradictions
+against current code and tests instead of preserving both versions.
 
-Update user-facing documentation when behavior, configuration, or setup changes
-would otherwise make it misleading. Avoid documenting transient implementation
-details that belong in code or tests.
+`documentation/archive/` contains unverified historical records. Never use it
+as evidence of current behavior.
 
-### The next reader has to be able to trust it
-
-A guide that states a number, a range, or a version goes stale on its own. When
-it does, the next reader follows it and gets a wrong answer — which is worse
-than having no line there, because it looks authoritative.
-
-- Describe the **rule**, not the current count. "Read the directory for the
-  current set" survives adding a migration; a written range does not.
-- When a figure is genuinely the point (a pixel breakpoint a test pins, a cap a
-  constant owns), name the owning constant or file so the reader can check it
-  rather than trusting the prose.
-- If a document contradicts itself, that is a bug in the document, not a
-  preference to be balanced. Fix the contradiction and say which way it
-  resolves, with the mechanism that decides it.
-
-## Git, data, and credentials
+## Git and credentials
 
 - Do not commit, push, deploy, or alter production data unless the user asks.
 - Preserve unrelated user changes. Do not use destructive Git commands such as
   `reset --hard`, `checkout --`, or `clean`.
-- A small cleanup directly required by the task is fine; avoid unrelated
-  refactors or cleanup.
-- Do not request, use, echo, or send credentials by default. If the user
-  explicitly asks for a credential to be used or shown, that request wins:
-  echo it, reuse it, and send it to the intended service. The hard rule is the
-  next one, not the echo.
-- **Never let a credential reach git.** That is the only absolute: no source
-  file, no env file (`.env`, `.env.*`), no commit, no diff, no log, no report,
-  no telemetry. A credential for a throwaway debug environment is disposable
-  and safe to print; the same value in a commit is not reusable but permanent.
-  Verify with `git status`/`git diff` before committing, and prefer a scratch
-  directory outside the repo for replay artefacts.
-- A replay needs the credential to survive between tool calls; an exported
-  shell variable does not. `curl` then sends an empty header and returns
-  `000`/exit 43, which reads as "host unreachable" and can end the
-  investigation before the failure is reproduced. Re-state the value in the
-  command that uses it instead of relying on a variable from an earlier call.
-- Before concluding a host is unreachable, distinguish a transport failure from
-  an authorization failure: run `curl -v` and read the status line. A `401`
-  means the host answered and only the credential was missing; `000` with no
-  response means DNS, TLS, or egress.
-- Prefer reversible steps for database and environment operations. Confirm
-  which environment is targeted before any operation that may alter real data.
+- Never place credentials in tracked files, Git diffs, commits, logs, reports,
+  or telemetry. Keep replay material and scratch files outside the repository.
+- Do not print credentials or repeat them in command text. Keep them out of
+  tool output and process arguments; use the intended service's protected
+  credential mechanism.
+- Inspect `git status` and the staged diff before committing. Include only the
+  requested work and its directly required changes.
 
 ## Completion
 
-When the work is done, briefly state:
-
-- what changed and how it addresses the request;
-- which relevant checks or reproductions ran and their outcomes;
-- any important assumptions, skipped verification, or remaining blockers.
-
-For straightforward work, a short summary is enough. Be clear about evidence:
-do not claim behavior is fixed or verified beyond what was actually checked.
+Report what changed, which checks ran and their outcomes, and any important
+assumption, skipped verification, or blocker. Be concise and precise about the
+evidence; never claim more than was verified.
