@@ -3,10 +3,6 @@
     "staticInline": 0,
     "arbitrary": 6
   },
-  "src/apps/share/page.tsx": {
-    "staticInline": 0,
-    "arbitrary": 13
-  },
   "src/apps/share/stats.tsx": {
     "staticInline": 0,
     "arbitrary": 4

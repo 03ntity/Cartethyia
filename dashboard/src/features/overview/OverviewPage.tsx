@@ -1,12 +1,167 @@
-import { Check, Copy, Globe, RadioTower } from "lucide-react";
+import { Check, Copy, Globe, Loader2, RadioTower } from "lucide-react";
+import { useState } from "react";
+import { useEffect } from "react";
 import { type ReactNode } from "react";
 import { Button } from "../../components/ui/button";
 import { Card, CardBody, CardHeader } from "../../components/ui/card";
+import { Switch } from "../../components/ui/switch";
 import { Stack } from "../../components/ui/stack";
 import { ApiKeysPanel } from "../../components/ApiKeysPanel";
 import { CompressionPanel } from "../../components/CompressionPanel";
 import { useClipboard } from "../../hooks/use-clipboard";
+import {
+  useRemoteSupport,
+  useStartRemoteSupport,
+  useStopRemoteSupport,
+} from "../../hooks/remote-support";
+import type { RemoteSupportTool } from "../../data/contracts";
 import { toast } from "../../lib/toast";
+
+const REMOTE_SUPPORT_LABEL: Readonly<Record<RemoteSupportTool, string>> = {
+  cloudflared: "cloudflared",
+  tailscale: "Tailscale",
+};
+
+const REMOTE_SUPPORT_BLURB: Readonly<Record<RemoteSupportTool, string>> = {
+  cloudflared: "Publish a temporary public URL without opening a port.",
+  tailscale: "Give a helper a private address on your own tailnet.",
+};
+
+/**
+ * Brand marks, drawn inline rather than pulled from an icon set.
+ *
+ * Neither Cloudflare nor Tailscale ships in `lucide-react` (it carries no
+ * third-party logos), so the paths are inlined here. Both are single-colour
+ * glyphs painted with `currentColor` so they follow the surrounding text and
+ * stay legible across the light and dark themes; `aria-hidden` keeps them out
+ * of the accessibility tree because the heading beside each one already names
+ * the tool.
+ */
+function RemoteSupportLogo({ tool }: { readonly tool: RemoteSupportTool }): ReactNode {
+  if (tool === "cloudflared") {
+    // Cloudflare's cloud: the small mark tucked under the larger one.
+    return (
+      <svg viewBox="0 0 24 24" className="size-8 shrink-0" aria-hidden="true" fill="currentColor">
+        <path d="M16.5 18.4a4.6 4.6 0 0 1-3.2-1.3l-6-5.9a2.4 2.4 0 0 0-3.3 0 2.3 2.3 0 0 0 0 3.3l5.4 5.3a.9.9 0 0 1-1.3 1.3L2.7 15.8a4.1 4.1 0 0 1 0-5.8 4.2 4.2 0 0 1 5.8 0l6 5.9a2.4 2.4 0 0 0 3.3 0 2.3 2.3 0 0 0 0-3.3l-4.2-4.1a.9.9 0 0 1 1.3-1.3l4.2 4.1a4.1 4.1 0 0 1 0 5.8 4.2 4.2 0 0 1-2.6 1.3Z" />
+        <path d="M7.6 18.4a4.5 4.5 0 0 1-3-1.1 5.4 5.4 0 0 1-1.5-3.5 6 6 0 0 1 .4-2 .9.9 0 0 1 1.7.6 4.2 4.2 0 0 0-.3 1.4 3.6 3.6 0 0 0 1 2.3 2.7 2.7 0 0 0 1.8.7.9.9 0 0 1 0 1.8Z" />
+      </svg>
+    );
+  }
+  // Tailscale's stylised "T" formed by two interlocking rounded strokes.
+  return (
+    <svg viewBox="0 0 24 24" className="size-8 shrink-0" aria-hidden="true" fill="currentColor">
+      <path d="M12 3.2a4.4 4.4 0 0 0-4.4 4.4v2.2H4.6a2.2 2.2 0 0 0 0 4.4h3v2.2a4.4 4.4 0 0 0 8.8 0v-2.2h1.1a3.3 3.3 0 0 0 0-6.6h-1.1V7.6A4.4 4.4 0 0 0 12 3.2Zm0 2.2a2.2 2.2 0 0 1 2.2 2.2v6.6a2.2 2.2 0 0 1-4.4 0V7.6A2.2 2.2 0 0 1 12 5.4Z" />
+      <path d="M6.6 11h4.2v2.2H6.6zM13.2 11h4.2v2.2h-4.2z" />
+    </svg>
+  );
+}
+
+/**
+ * One publisher's row: a toggle that starts or stops it, and the URL it
+ * published once it is up.
+ *
+ * The toggle reflects server state, not local optimism: `checked` is derived
+ * from the polled status, so a tunnel stopped out of band (or crashed) shows as
+ * off without a click being lost.
+ */
+function RemoteSupportToggle({ tool }: { readonly tool: RemoteSupportTool }) {
+  const status = useRemoteSupport();
+  const start = useStartRemoteSupport();
+  const stop = useStopRemoteSupport();
+  const { copied, copy } = useClipboard(2000);
+  const active = status.data?.active === tool;
+  const pending = start.isPending || stop.isPending;
+  const url = active ? status.data?.url ?? null : null;
+  const [notice, setNotice] = useState<string | null>(null);
+  const [localChecked, setLocalChecked] = useState(active);
+  useEffect(() => {
+    if (!start.isPending && !stop.isPending) setLocalChecked(active);
+  }, [active, start.isPending, stop.isPending]);
+  const flip = async (next: boolean) => {
+    setLocalChecked(next);
+    try {
+      const result = next ? await start.mutateAsync(tool) : await stop.mutateAsync(tool);
+      if (result.blocker !== null && result.message !== null) {
+        setNotice(result.message);
+        toast.error(result.message);
+        setLocalChecked(!next);
+        return;
+      }
+      setNotice(null);
+      toast.success(next ? `${REMOTE_SUPPORT_LABEL[tool]} started` : `${REMOTE_SUPPORT_LABEL[tool]} stopped`);
+    } catch {
+      toast.error(`Could not ${next ? "start" : "stop"} ${REMOTE_SUPPORT_LABEL[tool]}`);
+      setLocalChecked(!next);
+    }
+  };
+  const copyUrl = async () => {
+    if (url === null) return;
+    if (await copy(url)) {
+      toast.success("Remote URL copied", url);
+      return;
+    }
+    toast.error("Clipboard unavailable on this origin");
+  };
+  return (
+    <div className="rounded-control border border-inner-border bg-surface-2 p-5">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <RemoteSupportLogo tool={tool} />
+          <h3 className="text-caption font-semibold">{REMOTE_SUPPORT_LABEL[tool]}</h3>
+        </div>
+        <Switch
+          checked={localChecked}
+          disabled={pending}
+          onChange={(next) => void flip(next)}
+          aria-label={`Toggle ${REMOTE_SUPPORT_LABEL[tool]} remote support`}
+        />
+      </div>
+      {start.isPending ? (
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-badge text-text-secondary">
+            <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+            <span className="animate-pulse">Waiting for address…</span>
+          </div>
+          <Button variant="secondary" size="sm" onClick={() => void flip(false)}>
+            Cancel
+          </Button>
+        </div>
+      ) : url !== null ? (
+        <div className="mt-3 flex items-center gap-3">
+          <code className="min-w-0 flex-1 truncate font-mono text-badge text-text-primary" title={url}>
+            {url}
+          </code>
+          <Button variant="secondary" size="sm" onClick={() => void copyUrl()}>
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? "Copied" : "Copy"}
+          </Button>
+        </div>
+      ) : notice !== null ? (
+        <div className="mt-2 rounded-control border border-warning/30 bg-warning/10 p-3 text-badge leading-normal text-text-secondary">
+          <p className="font-medium text-warning">Setup needed</p>
+          <p className="mt-1 whitespace-pre-wrap break-words">{notice}</p>
+          {(() => {
+            const m = notice.match(/https:\/\/login\.tailscale\.com\/f\/serve\?[^\s]+/);
+            return m ? (
+              <a
+                href={m[0]}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-block font-medium text-accent underline"
+              >
+                Enable Tailscale Serve →
+              </a>
+            ) : null;
+          })()}
+        </div>
+      ) : (
+        <p className="mt-2 text-badge leading-normal text-text-tertiary">
+          {REMOTE_SUPPORT_BLURB[tool]}
+        </p>
+      )}
+    </div>
+  );
+}
 
 
 function ApiEndpointCard() {
@@ -71,6 +226,7 @@ function ApiEndpointCard() {
  * collapses the peer address onto loopback.
  */
 function RemoteSupportCard() {
+  const status = useRemoteSupport();
   return (
     <Card>
       <CardHeader
@@ -81,46 +237,21 @@ function RemoteSupportCard() {
       <CardBody>
         <Stack gap="10px">
           <div className="grid grid-cols-2 gap-4 max-medium:grid-cols-1">
-            <section
-              aria-labelledby="remote-support-cloudflared"
-              className="rounded-control border border-inner-border bg-surface-2 p-5"
-            >
-              <h3 id="remote-support-cloudflared" className="text-caption font-semibold">
-                cloudflared
-              </h3>
-              <p className="mt-2 text-caption leading-normal text-text-secondary">
-                Publish a temporary public URL without opening a port:
-              </p>
-              <code className="mt-3 block overflow-x-auto rounded-inset border border-inner-border bg-code-surface px-4 py-3 font-mono text-badge text-text-primary">
-                cloudflared tunnel --url http://localhost:12800
-              </code>
-              <p className="mt-3 text-badge leading-normal text-text-tertiary">
-                Best for one-off help. The URL changes each run unless you use a named
-                tunnel.
-              </p>
-            </section>
-            <section
-              aria-labelledby="remote-support-tailscale"
-              className="rounded-control border border-inner-border bg-surface-2 p-5"
-            >
-              <h3 id="remote-support-tailscale" className="text-caption font-semibold">
-                Tailscale
-              </h3>
-              <p className="mt-2 text-caption leading-normal text-text-secondary">
-                Give a helper a private address on your own tailnet:
-              </p>
-              <code className="mt-3 block overflow-x-auto rounded-inset border border-inner-border bg-code-surface px-4 py-3 font-mono text-badge text-text-primary">
-                tailscale serve --bg --https=443 http://localhost:12800
-              </code>
-              <p className="mt-3 text-badge leading-normal text-text-tertiary">
-                Best for ongoing access. Nothing is exposed to the public internet.
-              </p>
-            </section>
+            <RemoteSupportToggle tool="cloudflared" />
+            <RemoteSupportToggle tool="tailscale" />
           </div>
+          {status.data?.blocker !== null && status.data?.message !== null ? (
+            <p className="text-badge leading-normal text-red-primary">{status.data?.message}</p>
+          ) : null}
           <p className="text-caption leading-normal text-text-secondary">
             Either way the gateway still sees the tunnel&apos;s address as the client, so set{" "}
             <code className="font-mono">TRUSTED_PROXY_CIDRS</code> to the edge that forwards to
             it — otherwise every remote caller is recorded as the loopback address.
+          </p>
+          <p className="text-badge leading-normal text-text-tertiary">
+            cloudflared and Tailscale are not installed by Cartethyia — install either one
+            yourself first. The tunnel is launched detached from this process, so it survives a
+            gateway restart.
           </p>
         </Stack>
       </CardBody>

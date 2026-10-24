@@ -855,7 +855,7 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
             </div>
           ) : null}
           {/* Two-column layout: Model Access left, everything else right. Collapses to single column on medium screens. */}
-          <div className="grid grid-cols-[1fr_1.4fr] gap-5 min-w-0 max-medium:grid-cols-1">
+          <div className="grid grid-cols-access gap-5 min-w-0 max-medium:grid-cols-1">
             {/* ── Left column: Model access ── */}
             <section aria-labelledby="model-access-heading" className="flex flex-col gap-3 min-w-0 rounded-card border border-inner-border bg-surface-1 p-4">
               <h4 id="model-access-heading" className="inline-flex items-center gap-2 text-caption font-bold text-text-primary">

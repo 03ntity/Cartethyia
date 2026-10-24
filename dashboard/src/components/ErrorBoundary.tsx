@@ -10,6 +10,9 @@ interface ErrorBoundaryProps {
 
 interface ErrorBoundaryState {
   readonly error: Error | null;
+  /** Which component threw. Surfaced in the UI because the console log is not
+   * reachable from a browser the operator only sees the rendered page on. */
+  readonly componentStack: string | null;
 }
 
 /**
@@ -18,14 +21,15 @@ interface ErrorBoundaryState {
  * renders a recoverable surface and offers a full reload as the last resort.
  */
 export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  override state: ErrorBoundaryState = { error: null };
+  override state: ErrorBoundaryState = { error: null, componentStack: null };
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { error };
+    return { error, componentStack: null };
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error("[console] route render failed:", error, info.componentStack);
+    this.setState({ componentStack: info.componentStack ?? null });
   }
 
   override componentDidUpdate(previousProps: ErrorBoundaryProps): void {
@@ -51,6 +55,16 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
             <span className="select-text break-words">
               {this.state.error.message}
             </span>
+            {this.state.componentStack ? (
+              <pre className="mt-4 max-h-80 overflow-auto whitespace-pre-wrap break-words text-badge text-text-tertiary">
+                {this.state.componentStack.trim()}
+              </pre>
+            ) : null}
+            {this.state.error.stack ? (
+              <pre className="mt-4 max-h-80 overflow-auto whitespace-pre-wrap break-words text-badge text-text-tertiary">
+                {this.state.error.stack}
+              </pre>
+            ) : null}
           </div>
 
           <button

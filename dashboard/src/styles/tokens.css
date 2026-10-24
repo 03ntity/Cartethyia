@@ -221,6 +221,17 @@
      use it. The thinking pill's brain glyph pulses with it while reasoning. */
   --animate-pulse-subtle: pulse-subtle 1.6s ease-in-out infinite;
   --leading-chat: 1.35;
+  /* Body-copy leading and the two tracking steps the share page's kawaii
+     styling asked for as bracketed literals. Named once here so the values are
+     themeable and the styling ratchet stays at zero arbitrary utilities. */
+  --leading-snug: 1.3;
+  --leading-loose: 1.55;
+  --tracking-tight: -0.03em;
+  --tracking-wide: 0.06em;
+  --grid-template-columns-qris: 280px minmax(0, 1fr);
+  --grid-template-columns-qris-compact: 140px minmax(0, 1fr);
+  --grid-template-columns-access: minmax(0, 1fr) minmax(0, 1.4fr);
+  --container-qris-badge: 220px;
   --container-bubble-narrow: 88%;
   --container-bubble-form: 70vw;
   --height-route: calc(100dvh - 104px);

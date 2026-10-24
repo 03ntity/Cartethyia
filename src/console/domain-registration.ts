@@ -36,6 +36,9 @@ import { createModelAbuseRoutes } from "./admin/model-abuse/routes";
 import { DrizzleAuditReadStore } from "./audit/store";
 import { createPerformanceRoutes } from "./observability/performance";
 import { createUpdateRoutes } from "./updates/routes";
+import { createRemoteSupportRoutes } from "./remote-support/routes";
+import { createRemoteSupportService } from "./remote-support/service";
+import { resolvePort } from "../config/runtime";
 import { createBackupRoutes } from "./backup/routes";
 import { BackupService } from "./backup/service";
 import type { ConsoleCredentialService } from "./auth/credentials";
@@ -240,6 +243,10 @@ export function registerConsoleDomains(
   console.use(createUpdateRoutes({
     accessResolver: ctx.accessResolver,
     observabilityStore,
+  }));
+  console.use(createRemoteSupportRoutes({
+    accessResolver: ctx.accessResolver,
+    service: createRemoteSupportService({ port: resolvePort() }),
   }));
   console.use(createAuditRoutes({ store: auditReadStore, accessResolver: ctx.accessResolver }));
   if (ctx.modelStrikes) {

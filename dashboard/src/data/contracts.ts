@@ -1,5 +1,13 @@
 import type { healthStatus } from "../../../src/persistence/schema";
 import type { SessionStatusResponse } from "../../../src/console/auth/session";
+// Remote-support tunnel types come from the backend contract module, which is
+// free of Elysia and Node imports and therefore safe in the browser bundle.
+export type {
+  RemoteSupportStatus,
+  RemoteSupportStartResponse,
+  RemoteSupportTool,
+} from "../../../src/console/remote-support/contracts";
+export { REMOTE_SUPPORT_TOOLS } from "../../../src/console/remote-support/contracts";
 /**
  * Type-only projections of the console API contracts.
  *

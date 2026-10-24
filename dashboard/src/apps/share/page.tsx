@@ -84,7 +84,7 @@ function ModelCard({
         <span className="inline-flex size-13 shrink-0 items-center justify-center rounded-lg bg-teal-soft text-teal" aria-hidden="true">
           <Bot size={14} />
         </span>
-        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-caption font-semibold leading-[1.35] text-text-primary" title={id}>
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-caption font-semibold leading-chat text-text-primary" title={id}>
           {label}
         </span>
       </div>
@@ -397,7 +397,7 @@ export function SharePage(): ReactElement {
         <div className="share-backdrop" aria-hidden="true" />
       <header className="share-header" data-scrolled={scrolled}>
         <div className="share-header-inner" data-scrolled={scrolled}>
-          <a className="inline-flex items-center gap-5 font-head text-lead tracking-[-0.03em] text-text-primary no-underline" href="/">
+          <a className="inline-flex items-center gap-5 font-head text-lead tracking-tight text-text-primary no-underline" href="/">
             <span className="grid size-17 place-items-center overflow-hidden rounded-control border border-inner-border bg-accent-soft text-accent" aria-hidden="true">
               <img
                 className="block size-full object-cover"
@@ -457,14 +457,14 @@ export function SharePage(): ReactElement {
               </p>
               <h1>{data.name || "Shared API access"}</h1>
               {data.kind === "handoff" ? (
-                <p className="mt-2.5 text-text-secondary text-body leading-[1.55]">
+                <p className="mt-2.5 text-text-secondary text-body leading-loose">
                   The API key for this gateway, provided through a share link. It is subject to the
                   limits below.
                 </p>
               ) : null}
               <div className="mt-5 flex flex-wrap items-center gap-2">
                 {data.expiresAt ? (
-                  <span className="inline-flex min-h-7 items-center gap-1.5 rounded-chip border border-inner-border bg-surface-2 px-2.5 py-1 text-text-secondary font-mono text-micro leading-[1.3]">
+                  <span className="inline-flex min-h-7 items-center gap-1.5 rounded-chip border border-inner-border bg-surface-2 px-2.5 py-1 text-text-secondary font-mono text-micro leading-snug">
                     <Clock size={12} aria-hidden="true" />
                     Link expires {new Date(data.expiresAt).toLocaleString()}
                   </span>
@@ -487,7 +487,7 @@ export function SharePage(): ReactElement {
                     aria-label="Copy Base URL"
                   />
                 </div>
-                <p className="text-caption leading-[1.55] text-text-secondary">Point your SDK, Opencode, Claude Code, Droid, and any other CLI</p>
+                <p className="text-caption leading-loose text-text-secondary">Point your SDK, Opencode, Claude Code, Droid, and any other CLI</p>
 
               </Card>
               <div ref={apiKeyPanelRef} tabIndex={-1}>
@@ -521,7 +521,7 @@ export function SharePage(): ReactElement {
                         </Button>
                         <span>Prefix {data.keyPrefix ?? "—"}</span>
                       </div>
-                      <p className="text-caption leading-[1.55] text-text-secondary">
+                      <p className="text-caption leading-loose text-text-secondary">
                         This link reveals the key itself, so anyone holding the URL can read it.
                         Keep the URL private; the link owner regenerates it to replace this key.
                       </p>
@@ -533,7 +533,7 @@ export function SharePage(): ReactElement {
                   )
                 ) : visibleSecret ? (
                   <div className="flex w-full min-w-0 flex-col gap-5" role="status">
-                    <p className="font-mono text-micro font-bold tracking-[0.06em] text-orange">GENERATED ONCE · COPY AND KEEP IT</p>
+                    <p className="font-mono text-micro font-bold tracking-wide text-orange">GENERATED ONCE · COPY AND KEEP IT</p>
                     <code className="block min-w-0 flex-1 overflow-hidden rounded-inset border border-inner-border bg-code-surface p-5 font-mono text-caption leading-normal text-text-primary [overflow-wrap:anywhere] [user-select:all]">{visibleSecret.key}</code>
                     <div className="flex flex-wrap items-center gap-5 [&>span]:font-mono [&>span]:text-micro [&>span]:text-text-tertiary">
                       <ClipboardButton
@@ -558,7 +558,7 @@ export function SharePage(): ReactElement {
                       </Button>
                       <span>Key ID {visibleSecret.keyId.slice(0, 12)}…</span>
                     </div>
-                    <p className="text-caption leading-[1.55] text-text-secondary">
+                    <p className="text-caption leading-loose text-text-secondary">
                       Saved in this browser while this enrollment link remains valid. It is not
                       shown again from another browser, and an expired, revoked, or unavailable
                       link does not restore a local copy.
@@ -614,13 +614,13 @@ export function SharePage(): ReactElement {
 
             {data.sharePopup.enabled && data.sharePopup.hasImage ? (
               <Card surface="muted" className="min-w-0 overflow-hidden border-glass-border-2 bg-glass-bg backdrop-blur-md backdrop-saturate-150">
-                <div className="grid grid-cols-[280px_1fr] gap-0 max-sm:grid-cols-[140px_1fr]">
+                <div className="grid grid-cols-qris gap-0 max-sm:grid-cols-qris-compact">
                   {/* Left: QRIS image */}
                   <div className="relative flex items-center justify-center bg-white p-4">
                     <img
                       src={"/share/" + linkToken + "/popup-image"}
                       alt={data.sharePopup.title ?? "Support QR code"}
-                      className="block w-full max-w-[220px] rounded-control"
+                      className="block w-full max-w-qris-badge rounded-control"
                     />
                   </div>
                   {/* Right: title, body, download, project info */}
