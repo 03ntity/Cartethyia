@@ -20,6 +20,7 @@ export function shareCodeMessage(code: string | undefined): string | undefined {
   if (code === "link_disabled")
     return "This share link's API key is paused. Ask whoever shared this link to re-enable it.";
   if (code === "link_expired") return "This share link has expired.";
-  if (code === "link_revoked") return "This share link has been revoked.";
+  if (code === "link_revoked")
+    return "This share link's API key has been revoked, so the link can no longer be used. Ask whoever shared this link for a new one — a revoked key cannot be re-enabled.";
   return undefined;
 }

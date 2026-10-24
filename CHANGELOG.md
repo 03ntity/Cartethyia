@@ -8,6 +8,77 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.5.6] - 2026-10-24
+
+### Added
+
+- **Remote support is a card on the Overview.** The Overview grows a Remote
+  Support card ahead of API Credentials, holding one row per publisher:
+  cloudflared and Tailscale. Each row carries the publisher's own logo, a
+  toggle, and the address it published.
+
+  Turning a publisher on launches it **detached**, so the tunnel is not a child
+  of the gateway: a gateway restart, a hot reload, or a Ctrl-C in the owning
+  terminal cannot kill a live support session. The launch waits for an address
+  and reports it in the card; until one arrives the row says
+  "Waiting for address…" beside a Cancel button.
+
+  The product never installs anything. A publisher that is not on PATH is
+  reported as missing with its own install hint, and installation is detected
+  once per process rather than re-probed on every poll.
+
+### Fixed
+
+- **A revoked share link says so, and says what to do.** The gateway already
+  refused a revoked link, but the public page titled every refusal
+  "Link not available" — so a revoked key and a paused key read identically to
+  a recipient while asking for opposite things. The heading now names the cause
+  (`Key revoked`, `Key paused`, `Link expired`), and the revoked copy states
+  that a revoked key cannot be re-enabled and a new link is needed. A revoked
+  link also clears the key this browser kept, so a dead credential is not left
+  on screen.
+
+- **Tailscale's own setup step is surfaced.** Tailscale requires "serve" to be
+  enabled on the tailnet, and until it is, the launch fails with a message from
+  Tailscale itself. That message is now shown in the card as a setup notice,
+  with a link straight to the enable page, instead of a generic failure.
+
+- **Tailscale stop and status are detected from Tailscale.** Tailscale runs as
+  a system service, so the launcher's pid file could not describe it: stopping
+  left the tunnel serving, and status reported it stopped while it was up.
+  Stopping now resets the serve, and status asks Tailscale whether a serve is
+  live.
+
+- **The Remote Support toggle reflects the click, not just the poll.** The
+  toggle read server state alone, so turning a publisher off left it showing
+  "on" until the next poll landed. It now follows the click immediately and
+  falls back to the last server reading if the action fails.
+
+- **CodeBuddy tool calls written as markup are recovered.** A tool call
+  serialized as DSML markup instead of a native tool block reached the client
+  as literal text. It is parsed back into a real tool call; the tool-name
+  allowlist stays strict only when the caller supplied one.
+
+- **Encrypted reasoning is replayed under the id it was issued for.** Codex
+  rejected a turn whose reasoning item id had been re-derived
+  (`item_id did not match the target item id`). The id the payload arrived with
+  is now carried through unchanged, and a payload with no surviving id is
+  dropped rather than sent with a made-up one.
+
+- **A share link no longer clears the key's name.** Creating or rotating a
+  share link left the key list showing a key with no name. The list is now
+  refreshed after either action.
+
+### Changed
+
+- **The QRIS support card is inline on the share page.** It used to open as a
+  modal; it is now a card on the page itself, image left and copy right, with a
+  download button, and it keeps its two-column layout on a narrow screen.
+
+- **The share page's kawaii styling is themed.** The leading and tracking steps
+  it needed as bracketed literals are named tokens now, which also clears the
+  styling ratchet's last two entries.
+
 ## [2.5.5] - 2026-10-23
 
 ### Added

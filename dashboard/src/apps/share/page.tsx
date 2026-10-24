@@ -34,6 +34,24 @@ function message(payload: ApiError): string {
   return payload.error?.message ?? payload.message ?? "Unable to generate an API key.";
 }
 
+/**
+ * The heading over a refused share link, keyed by the gateway's refusal code.
+ *
+ * A revoked key and a paused key read the same to a recipient — "it doesn't
+ * work" — but ask for opposite things: a revoked key is gone and needs a new
+ * link, while a paused one still exists and only needs re-enabling. The title
+ * names which, so the message under it reads as an instruction instead of a
+ * dead end. An unknown code falls back to a neutral title.
+ */
+const SHARE_REFUSAL_TITLE: Readonly<Record<string, string>> = {
+  link_revoked: "Key revoked",
+  link_expired: "Link expired",
+  link_disabled: "Key paused",
+  link_not_found: "Link not available",
+  link_expired_or_used: "Link expired",
+  key_unavailable: "Key unavailable",
+};
+
 export function tokenFromPathname(pathname: string): string {
   const path = pathname.replace(/\/$/, "");
   return path.slice(path.lastIndexOf("/") + 1);
@@ -442,7 +460,7 @@ export function SharePage(): ReactElement {
           <Card surface="muted" className="min-w-0 border-glass-border-2 bg-glass-bg backdrop-blur-md backdrop-saturate-150 p-5">
             <CardBody>
               <ErrorState
-                title={state.code === "link_disabled" ? "Key paused" : "Link not available"}
+                title={SHARE_REFUSAL_TITLE[state.code ?? ""] ?? "Link not available"}
                 message={state.error}
                 onRetry={() => window.location.reload()}
               />
