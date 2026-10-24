@@ -8,6 +8,15 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.5.8] - 2026-10-24
+
+### Fixed
+
+- **The npm CLI finds its runtime modules.** `carte` imported
+  `scripts/build/compile.ts` and `scripts/health.ts`, both missing from the
+  2.5.7 tarball — so `carte` crashed with "Cannot find module '../build/compile'"
+  immediately after `cartethyia setup`. Both folders are now packaged.
+
 ## [2.5.7] - 2026-10-24
 
 ### Fixed
