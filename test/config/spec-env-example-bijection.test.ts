@@ -43,6 +43,14 @@ const SPEC_ONLY_KEYS: Readonly<Record<string, true>> = {
   CARTETHYIA_TELEMETRY_COMPACT_AFTER_DAYS: true,
   CARTETHYIA_TELEMETRY_COMPACT_INTERVAL_MINUTES: true,
   CARTETHYIA_OAUTH_CALLBACK_PORT: true,
+  // Provider-specific overrides. Readers live in `src/config/providers.ts`;
+  // every operator who needs one goes through the reference doc, and sampling
+  // them in `.env.example` would advertise flags the vast majority of
+  // installs do not care about.
+  CARTETHYIA_KIMI_OAUTH_HOST: true,
+  CARTETHYIA_KIMI_QUOTA_BASE_URL: true,
+  CARTETHYIA_GITHUB_ENTERPRISE_DOMAIN: true,
+  CARTETHYIA_OPENCODE_UNAVAILABLE_FREE: true,
 };
 
 /** Keys in `.env.example` that `CONFIG_SPEC` does not declare. */
@@ -62,16 +70,8 @@ const ENV_EXAMPLE_ONLY_KEYS: Readonly<Record<string, true>> = {
   DATABASE_STATEMENT_TIMEOUT_MS: true,
   DATABASE_IDLE_IN_TXN_TIMEOUT_MS: true,
   DATABASE_LOCK_TIMEOUT_MS: true,
-  CARTETHYIA_SETUP_MODE: true,
   CARTETHYIA_TELEMETRY_PAYLOAD_FILE_MAX_BYTES: true,
   CARTETHYIA_TELEMETRY_PAYLOAD_RETENTION_MS: true,
-  CARTETHYIA_INSTALL_ID_DIR: true,
-  CARTETHYIA_TEST_DATABASE_URL: true,
-  CARTETHYIA_TEST_REDIS_URL: true,
-  CARTETHYIA_DEV_ADMIN_USER: true,
-  CARTETHYIA_DEV_ADMIN_PASSWORD: true,
-  CARTETHYIA_VISUAL_PORT: true,
-  CARTETHYIA_BROWSER_AGENT: true,
 };
 
 const envExamplePath = resolve(process.cwd(), ".env.example");
