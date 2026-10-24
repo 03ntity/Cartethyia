@@ -125,5 +125,83 @@ runtime but still need companion dashboard/migration assets and writable state.
 These channels are alternatives to the Bun local installer, not extra local
 prerequisites.
 
-See [getting started](getting-started.md) for application configuration,
-backups, migrations, and verification.
+## Database modes and configuration
+
+Lite stores embedded SQLite at `<CARTETHYIA_DATA_DIR>/cartethyia.sqlite` and
+uses one process/writer. Full uses PostgreSQL through `DATABASE_URL` and can
+serve multiple instances. Features are otherwise the same.
+
+`CARTETHYIA_DB_MODE` is required and has no implicit default. The gateway
+refuses to boot without it rather than guessing which database and migration
+set to use. `CARTETHYIA_ENCRYPTION_KEY` is a required 256-bit secret; the
+installer/setup generates it when missing. Keep it out of version control.
+`CARTETHYIA_PUBLIC_ORIGIN` must match the browser-facing scheme, host, and
+port so OAuth callbacks point to the right place.
+
+For manual source setup instead of the one-command installer:
+
+```bash
+bun install --linker isolated
+bun setup
+bun run build
+bun run start
+```
+
+`bun setup` creates config, selects Lite/Full and a port, checks PostgreSQL
+when Full is selected, and checks Redis only when configured. It does not
+install PostgreSQL or start the gateway. `bun run start` requires the compiled
+binary from `bun run build`. Development uses `bun run dev` or
+`bun run dev:watch`; the dashboard development server listens on 5173 and
+proxies to the same gateway port.
+
+Useful runtime endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `/health`, `/health/ready` | Liveness and database/migration readiness |
+| `/metrics` | Prometheus metrics |
+| `/v1/*` | Gateway API |
+| `/console` | Dashboard and first-boot wizard |
+| `/share/:token` | Public child-key enrollment |
+
+## Migrations and backups
+
+Numbered migrations under `migrations/full-postgres/` and
+`migrations/lite-sqlite3/` run automatically at boot. Lite-to-Full movement is
+a backup transfer, not a backend switch in place: export JSON from **Settings →
+Backup**, start Full with an empty/new database, wait for readiness, then
+import the backup. Backups contain sensitive configuration and credentials;
+store them securely.
+
+## Development verification
+
+Backend tests require `CARTETHYIA_TEST_DATABASE_URL` pointing to a disposable
+database, never the development or production `DATABASE_URL`.
+
+```bash
+bun run test-db:up       # optional disposable PostgreSQL in Docker
+bun run test-db:check
+bun run test:backend
+bun run test-db:down
+```
+
+The Compose test URL is documented in `docker-compose.test.yml`. Add it to the
+existing local `.env` or shell when using that service.
+
+Run the relevant gates:
+
+```bash
+bun run typecheck
+bun run dashboard:typecheck
+bun run test:backend
+bun run dashboard:test
+bun run build
+```
+
+Use `bun run test`, `test:backend`, or `dashboard:test`, not bare `bun test`.
+The runner `scripts/test/run.ts` supplies the TLS certificate bundle and keeps
+backend/dashboard/script scopes separate. Typechecking is not runtime proof;
+exercise the changed behavior at its actual boundary.
+
+See [the documentation index](README.md) for architecture, configuration, and
+feature references.

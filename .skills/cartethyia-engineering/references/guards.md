@@ -70,9 +70,6 @@ or a newly found drift class — not after a single surprise.
 A skill teaches a reusable decision or verification step, not a one-off
 implementation note.
 
-`documentation/archive/` is the one place staleness is intentional — it is a
-historical record and is never read as current. See `AGENTS.md`.
-
 ## Proved deadness
 
 Before deleting a symbol, check imports, re-exports, dynamic imports, callbacks,

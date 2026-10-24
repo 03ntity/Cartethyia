@@ -5,12 +5,12 @@ This page covers contribution workflow, code conventions, and pull requests.
 For requirements, PostgreSQL/Redis setup, local development, Docker, commands,
 migrations, and verification, use the single source of truth:
 
-- [Getting started](documentation/getting-started.md)
+- [Installation](documentation/installation.md)
 
 ## Before changing code
 
 1. Read the relevant part of `README.md` and
-   `documentation/getting-started.md` when the change affects user-facing behavior
+   `documentation/installation.md` when the change affects user-facing behavior
    or runtime setup.
 2. State the goal, acceptance criteria, and hard constraints.
 3. Use CodeGraph first for blast search when available. Otherwise use the available
@@ -58,7 +58,7 @@ migrations, and verification, use the single source of truth:
 The repository carries an active test suite (`test/`, `dashboard/test/`, run via
 `bun run test` / `test:backend` / `dashboard:test`). Database suites use the
 disposable `CARTETHYIA_TEST_DATABASE_URL` in the local `.env` or shell, never
-the dev database. Use the gates in `documentation/getting-started.md`, then
+the dev database. Use the gates in `documentation/installation.md`, then
 exercise the real boundary for behavior changes: a gateway request, browser
 surface, provider flow, or isolated database migration.
 

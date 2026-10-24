@@ -89,7 +89,7 @@ bun run dashboard:test
 
 Use `bun setup` for local environment setup. It configures the environment,
 encryption key, database mode, and port; it does not install PostgreSQL or start
-the application. See `documentation/getting-started.md` for setup details and
+the application. See `documentation/installation.md` for setup details and
 `package.json` for the current command list.
 
 `CARTETHYIA_DB_MODE` is required and has no default. Do not silently choose a
@@ -254,7 +254,7 @@ follow it instead of restating the rules here.
 
 ## Documentation
 
-Use `documentation/getting-started.md` for installation and local setup,
+Use `documentation/installation.md` for installation and local setup,
 including the server install. `documentation/README.md` is the index for
 `documentation/reference/` (system layers) and `documentation/features/`
 (individual features). Prefer updating the existing owner page instead
@@ -265,19 +265,6 @@ explains that behavior and can lag behind it. When they disagree, verify the
 implementation and correct the owning page. Check the current worktree and
 current source before relying on a prior session summary, an example, a
 measurement, or a page's implementation details.
-
-### `documentation/archive/` is off-limits
-
-`documentation/archive/` holds point-in-time records that are no longer tied to
-the code: investigations that were open when they were written, and snapshots
-that are stale by nature. **Do not read it to answer a question about current
-behavior, and never cite it as evidence.** Its `file:line`, symbol, path, and
-measurement claims were true when written and have not been kept in sync —
-reading one as current is worse than reading nothing, because it looks
-authoritative. Read it only when a person asks for the historical record by
-name, and treat every claim in it as unverified. If something there matters
-again, write the current behavior into the page that owns it; do not restore
-the archive.
 
 Update user-facing documentation when behavior, configuration, or setup changes
 would otherwise make it misleading. Avoid documenting transient implementation

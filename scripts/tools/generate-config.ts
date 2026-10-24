@@ -150,7 +150,7 @@ export function renderConfigReference(): string {
     "`CARTETHYIA_TELEMETRY_PAYLOAD_DIR`, `CARTETHYIA_DATA_DIR`,",
     "`CARTETHYIA_INSTALL_ID_DIR`, `CARTETHYIA_CONFIG_DIR`,",
     "`CARTETHYIA_TEST_DATABASE_URL`, and the Compose-only",
-    "`CARTETHYIA_REDIS_URL`. See `documentation/getting-started.md`.",
+    "`CARTETHYIA_REDIS_URL`. See `documentation/installation.md`.",
     "",
   ];
 

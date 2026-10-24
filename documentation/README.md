@@ -7,7 +7,7 @@ not here; `AGENTS.md` routes you to the right skill.
 
 | Page | Covers |
 | --- | --- |
-| [Getting started](getting-started.md) | Requirements, database mode, `bun setup`, encryption key, starting the stack, Docker, migrations, the test database, verification gates — and the server install (VPS, systemd, reverse proxy, one-shot script) |
+| [Installation](installation.md) | One-command local/VPS/Docker install, requirements, lifecycle, database mode, configuration, migrations, backups, and development verification |
 | [Why Cartethyia](why-cartethyia.md) | The problem it was built for, how it differs from plain forwarders, the Bun + Elysia choice, and the reverse-engineering method for provider gates |
 
 ## How it is built — one page per layer
@@ -42,21 +42,12 @@ manuals; add a page under `features/` instead.
 
 ```text
 documentation/
-├── getting-started.md    installing and running it, local and on a server
+├── installation.md       install, configure, run, back up, and verify
 ├── why-cartethyia.md     the problem it was built for and how it differs
-├── archive/              UNTRUSTED historical record — see below
 ├── assets/screenshots/   console screenshots the README showcases
 ├── reference/            how it is built, one page per layer
 └── features/             one page per feature
 ```
-
-## `archive/` is not for reading
-
-[`archive/`](archive/README.md) holds point-in-time records that are no longer
-tied to the code — investigations that were open when they were written, and a
-source-line snapshot. **Do not read it to answer a question about current
-behavior, and never cite it as evidence.** Every `file:line`, symbol, path, and
-measurement in there was true when it was written and has not been kept in sync.
 
 ## Procedure is in `.skills/`
 

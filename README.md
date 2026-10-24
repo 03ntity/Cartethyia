@@ -51,7 +51,7 @@ npm uninstall -g cartethyia # uninstall
 ```
 
 Full install guide, modes, Docker, VPS, systemd, and the one-shot script:
-[getting started](documentation/getting-started.md). To remove it:
+[the installation guide](documentation/installation.md). To remove it:
 `npm uninstall -g cartethyia`.
 
 ## <img src="https://api.iconify.design/lucide/sparkles.svg?color=%238b949e" width="20" height="20" alt=""> What it actually does
@@ -147,7 +147,7 @@ Docker Compose defaults to Full. A local `.env` defaults to Lite. When Lite
 gets tight, export a JSON backup and restore it into Full. You do not rebuild
 the config.
 
-Details: [Getting started](documentation/getting-started.md#2-choose-a-database-mode).
+Details: [Database modes and configuration](documentation/installation.md#database-modes-and-configuration).
 
 ## <img src="https://api.iconify.design/lucide/scale.svg?color=%238b949e" width="20" height="20" alt=""> License
 

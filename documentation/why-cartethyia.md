@@ -126,5 +126,5 @@ telemetry, and the console API — is this project's own.
 
 ## Where to go next
 
-- [Getting started](getting-started.md) — install and choose a database mode.
+- [Installation](installation.md) — install and choose a database mode.
 - [Documentation index](README.md) — one page per layer and per feature.

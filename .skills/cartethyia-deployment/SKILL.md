@@ -58,7 +58,7 @@ Supporting references, independent of shape:
 ## Order of work
 
 1. Identify the topology (Step 1).
-2. Prefer [`scripts/install.sh`](../../../scripts/install.sh) with `--vps` and
+2. Prefer [`scripts/install.sh`](../../scripts/install.sh) with `--vps` and
    `--regular`/`--nat` — it does
    steps 3–5 and is idempotent. Read the manual references when it fails, or
    when you need to change something it does not cover.
