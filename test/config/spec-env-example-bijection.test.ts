@@ -51,6 +51,10 @@ const SPEC_ONLY_KEYS: Readonly<Record<string, true>> = {
   CARTETHYIA_KIMI_QUOTA_BASE_URL: true,
   CARTETHYIA_GITHUB_ENTERPRISE_DOMAIN: true,
   CARTETHYIA_OPENCODE_UNAVAILABLE_FREE: true,
+  // Telemetry retention baseline. Tenants override from the Settings panel;
+  // the deployment-level knob stays in CONFIG_SPEC but is doc-only.
+  CARTETHYIA_TELEMETRY_RETENTION_DAYS: true,
+  CARTETHYIA_TELEMETRY_PAYLOAD_MAX_BYTES: true,
 };
 
 /** Keys in `.env.example` that `CONFIG_SPEC` does not declare. */
@@ -66,12 +70,6 @@ const ENV_EXAMPLE_ONLY_KEYS: Readonly<Record<string, true>> = {
   CARTETHYIA_CONFIG_DIR: true,
   DASHBOARD_PORT: true,
   VITE_BACKEND_URL: true,
-  DATABASE_POOL_MAX: true,
-  DATABASE_STATEMENT_TIMEOUT_MS: true,
-  DATABASE_IDLE_IN_TXN_TIMEOUT_MS: true,
-  DATABASE_LOCK_TIMEOUT_MS: true,
-  CARTETHYIA_TELEMETRY_PAYLOAD_FILE_MAX_BYTES: true,
-  CARTETHYIA_TELEMETRY_PAYLOAD_RETENTION_MS: true,
 };
 
 const envExamplePath = resolve(process.cwd(), ".env.example");
