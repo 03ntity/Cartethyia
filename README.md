@@ -12,21 +12,22 @@ Built with Bun, TypeScript, Elysia, embedded SQLite or external PostgreSQL, and 
 
 > **Repository availability**
 >
-> The primary repository (`risunCode/Cartethyia`) is currently hidden from
-> public view. GitHub restricted it after automated star activity looked like
-> vote manipulation rather than real interest — the project itself is
-> unaffected, and this was not a code, security, or licensing issue.
+> The original repository (`risunCode/Cartethyia`) was hidden from public view
+> by GitHub after automated star activity looked like vote manipulation rather
+> than real interest — the project itself is unaffected, and this was not a
+> code, security, or licensing issue. The project moved to a reachable
+> primary.
 >
-> Until it is restored, use one of these. They carry the same history and the
-> same releases:
+> Reachable primaries, all carrying the same history and releases:
 >
-> - **GitHub (mirror):** <https://github.com/risunCodex/Cartethyia>
+> - **GitHub:** <https://github.com/risunCodex/Cartethyia>
 > - **GitLab:** <https://gitlab.com/risuncode/cartethyia>
 > - **npm:** <https://www.npmjs.com/package/cartethyia>
 >
-> Stars and forks are appreciated on the mirror, where they can actually be
-> counted. The dashboard and console link to the mirror by default so release
-> checks keep working while the primary is hidden.
+> Stars and forks are appreciated on the GitHub primary where they can
+> actually be counted. The dashboard and console point at this primary; the
+> hidden original is kept linked in `dashboard/src/lib/links.ts` as the
+> historical alt so a reader who still has access to it is not stranded.
 
 ## <img src="https://api.iconify.design/lucide/download.svg?color=%238b949e" width="20" height="20" alt=""> Installation
 

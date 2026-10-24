@@ -7,10 +7,11 @@
  * nobody can act on. The request is made here, server-side, and any failure
  * degrades to "no update known" rather than an error the operator must read.
  *
- * Releases are read from the ALTERNATIVE repository (`risunCodex`), not the
- * primary: the primary repository is hidden from public view, so its releases
- * endpoint answers 404 and the console would report "no update known" forever —
- * a silent failure that reads exactly like "you are up to date".
+ * Releases are read from the primary repository `risunCodex/Cartethyia`. The
+ * historical original `risunCode/Cartethyia` is hidden from public view, so
+ * its releases endpoint answers 404; the primary is where releases are
+ * published and where this check must point so the update indicator does not
+ * silently read "no update known" forever.
  */
 const REPOSITORY = "risunCodex/Cartethyia";
 

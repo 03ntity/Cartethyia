@@ -40,7 +40,7 @@ bash scripts/install.sh --docker --full   # requires external DATABASE_URL
 For a fresh local/VPS host, the same script can fetch the source checkout:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/risunCode/Cartethyia/dev/scripts/install.sh \
+curl -fsSL https://raw.githubusercontent.com/risunCodex/Cartethyia/dev/scripts/install.sh \
   | bash -s -- --vps --regular --full --domain app.example.com
 ```
 

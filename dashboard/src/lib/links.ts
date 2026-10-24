@@ -1,11 +1,11 @@
 /**
  * Public source and distribution links, in one place.
  *
- * `risunCode/Cartethyia` is the primary repository. GitHub hid it from public
- * view after automated star activity was flagged as manipulation, so
- * `risunCodex/Cartethyia` is published as a mirror with the same history — the
- * split button surfaces both so a reader who cannot reach the primary still
- * has somewhere to go.
+ * `risunCodex/Cartethyia` is the primary repository. The original
+ * `risunCode/Cartethyia` was hidden from public view by GitHub after
+ * automated star activity was flagged as manipulation; it is kept here as the
+ * `GITHUB_ALT_REPO` for operators who still have access to it, but every
+ * public surface points at `risunCodex` first.
  *
  * These were declared twice: one copy in the console shell built them from a
  * repo slug, and the share page's badge component carried its own hardcoded URL
@@ -14,19 +14,17 @@
  * at the old project, so every link and every badge resolves from here.
  */
 
-/** The primary repository. Currently hidden from public view by GitHub. */
-export const GITHUB_REPO = "risunCode/Cartethyia";
+/** The primary repository, publicly reachable. */
+export const GITHUB_REPO = "risunCodex/Cartethyia";
 export const GITHUB_REPO_URL = `https://github.com/${GITHUB_REPO}`;
 export const GITHUB_RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
 
 /**
- * The published alternative. Same history, different account, reachable.
- *
- * Star and fork counts are read from this one: the primary's badges would
- * render zero or fail to load while the repository is hidden, and a badge that
- * reports a number the reader cannot act on is worse than no badge.
+ * The hidden original. Same history, different account, kept as a fallback
+ * for anyone who still has access and so a rename does not drop the historical
+ * link entirely.
  */
-export const GITHUB_ALT_REPO = "risunCodex/Cartethyia";
+export const GITHUB_ALT_REPO = "risunCode/Cartethyia";
 export const GITHUB_ALT_REPO_URL = `https://github.com/${GITHUB_ALT_REPO}`;
 export const GITHUB_ALT_RELEASES_URL = `https://github.com/${GITHUB_ALT_REPO}/releases`;
 

@@ -6,7 +6,7 @@ all install policy. Do not add a second implementation in shell wrappers.
 
 ```bash
 # Fresh Regular VPS, Full mode
-curl -fsSL https://raw.githubusercontent.com/risunCode/Cartethyia/dev/scripts/install.sh \
+curl -fsSL https://raw.githubusercontent.com/risunCodex/Cartethyia/dev/scripts/install.sh \
   | bash -s -- --vps --regular --full --domain app.example.com
 
 # From a checkout

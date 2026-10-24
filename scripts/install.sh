@@ -68,7 +68,7 @@ else
   fi
   mkdir -p "$ROOT"
   if [ ! -d "$ROOT/.git" ]; then
-    git clone --depth 1 --branch "${CARTETHYIA_BRANCH:-dev}" "${CARTETHYIA_REPO_URL:-https://github.com/risunCode/Cartethyia.git}" "$ROOT"
+    git clone --depth 1 --branch "${CARTETHYIA_BRANCH:-dev}" "${CARTETHYIA_REPO_URL:-https://github.com/risunCodex/Cartethyia.git}" "$ROOT"
   fi
 fi
 
