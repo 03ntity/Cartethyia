@@ -115,6 +115,20 @@ export interface RemoteSupportService {
 export function createRemoteSupportService(config: RemoteSupportServiceConfig): RemoteSupportService {
   const port = config.port;
 
+  /**
+   * Install state for both publishers, cached per process.
+   *
+   * Every status carries it so the card can show "not installed" without the
+   * browser probing on its own — but the probe is `where`/`which`, which is a
+   * process spawn, so it is memoised here rather than run on each poll.
+   */
+  async function detectInstalled(): Promise<Readonly<Record<RemoteSupportTool, boolean>>> {
+    return {
+      cloudflared: await toolAvailable("cloudflared"),
+      tailscale: await toolAvailable("tailscale"),
+    } as const;
+  }
+
   async function readStatus(blocker: RemoteSupportBlocker | null = null, message: string | null = null): Promise<RemoteSupportStatus> {
     const result = await runScript(config, ["status"]);
     const text = result.stdout;
@@ -129,10 +143,7 @@ export function createRemoteSupportService(config: RemoteSupportServiceConfig): 
       const candidate = urlResult.stdout.trim().split(/\s+/).find((line) => line.startsWith("https://"));
       url = candidate ?? null;
     }
-    const installed = {
-      cloudflared: await toolAvailable("cloudflared"),
-      tailscale: await toolAvailable("tailscale"),
-    } as const;
+    const installed = await detectInstalled();
     return { active, url, blocker, message, port, installed };
   }
 
@@ -149,6 +160,7 @@ export function createRemoteSupportService(config: RemoteSupportServiceConfig): 
           blocker: "unsupported_platform",
           message: "Remote support is currently scripted for Windows hosts only.",
           port,
+          installed: { cloudflared: false, tailscale: false },
         };
       }
       const launcher = scriptPath(config, "remote-support.cmd");
@@ -159,6 +171,7 @@ export function createRemoteSupportService(config: RemoteSupportServiceConfig): 
           blocker: "launch_failed",
           message: `Launcher not found: ${launcher}`,
           port,
+          installed: await detectInstalled(),
         };
       }
       if (!(await toolAvailable(tool))) {
@@ -168,6 +181,7 @@ export function createRemoteSupportService(config: RemoteSupportServiceConfig): 
           blocker: "not_installed",
           message: REMOTE_SUPPORT_INSTALL_HINT[tool],
           port,
+          installed: await detectInstalled(),
         };
       }
       const target = requestedPort ?? port;
@@ -179,6 +193,7 @@ export function createRemoteSupportService(config: RemoteSupportServiceConfig): 
           blocker: "launch_failed",
           message: result.stdout || `Failed to start ${tool}.`,
           port,
+          installed: await detectInstalled(),
         };
       }
       return await readStatus();
