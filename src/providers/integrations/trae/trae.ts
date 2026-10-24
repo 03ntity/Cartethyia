@@ -1,9 +1,8 @@
 // Trae adapter.
 //
 // Realm-aware: `trae` (intl) and `traecn` (CN) share this code but nothing of
-// the address, the authorization scheme, or the roster. The intl deployment
-// additionally gates on the *current* client version, which is why the version
-// here comes from `getTraeVersion()` (a live resolver) rather than a constant.
+// the address or the roster. Both realms authenticate with
+// `Authorization: Cloud-IDE-JWT <token>` per the Trae 1.107.1 bundle.
 
 import { GatewayError } from "../../../protocol/gateway-error";
 import type { CanonicalEvent, CanonicalRequest, CanonicalStopReason } from "../../../protocol/canonical-model";
@@ -16,7 +15,6 @@ import {
   type ProviderId,
 } from "../../provider-contracts";
 import { mapUpstreamHttpError } from "../../../transport/failure-policy";
-import { getTraeVersion } from "../../operations/client-versions";
 import { abortGatewayError, createUpstreamDeadlineLifecycle } from "../../operations/upstream-deadline";
 import { TRAE_CN_MODELS, TRAE_INTL_MODELS, traeMaxContextWindow } from "./trae-catalog";
 import { buildTraeHeaders } from "./trae-headers";
@@ -124,9 +122,6 @@ class TraeAdapter implements ProviderAdapter {
     const outboundFetch =
       (context.outbound_fetch as unknown as typeof fetch | undefined) ?? this.fetchFn;
 
-    // intl refuses a stale client version with 4015, so the resolved version is
-    // part of every request rather than a startup detail.
-    const version = getTraeVersion();
     const auth = traeAuth(secret, context.credential.account_id);
     const body = buildTraeChatBody(modelId, request, this.realm);
     /**
@@ -144,7 +139,6 @@ class TraeAdapter implements ProviderAdapter {
       realm: this.realm,
       token: auth.token,
       uid: auth.uid,
-      clientVersion: version,
       stream: true,
     });
 

@@ -1,15 +1,18 @@
 // Trae request headers: auth + device fingerprint.
 //
-// The two realms do not authenticate the same way. CN sends
-// `Authorization: Cloud-IDE-JWT <token>`; intl overrides it to `Bearer <token>`
-// and additionally sends the *current* client version, because intl
-// `llm_raw_chat` answers `4015` (risk control) when the version is stale. That
-// is why the version here is resolved rather than pinned.
+// Aligned with Trae 1.107.1 (Linux x64 bundle, unpacked from TRAE-linux-x64.rpm).
+// The canonical client sends:
+//   - Authorization: Cloud-IDE-JWT <token>  (both realms, no Bearer)
+//   - X-App-Id, x-plugin-channel, x-ide-version-code
+//   - X-Device-Cpu, X-Device-Id, X-Machine-Id, X-Device-Brand,
+//     X-Device-Type, X-Os-Version  (all encodeURIComponent'd)
+//   - User-Agent: TraeClient/TTNet
 //
-// Sourced from the donor hub `Public/trae2api-hub` (`auth_headers` in
-// `trae_client.py`, `trae_device_headers` in `trae_fingerprint.py`).
+// It does NOT send: x-ide-token (separate header), x-ide-version,
+// x-app-version, store-country-code, X-Request-Id. Those were inherited
+// from the donor hub and are dropped here.
 
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   TRAE_APP_ID,
   TRAE_PLUGIN_CHANNEL,
@@ -58,23 +61,13 @@ export const TRAE_OS_VERSION = "Windows 11 Pro";
 /** Reported hardware brand, same reasoning as the OS string. */
 export const TRAE_DEVICE_BRAND = "Default string";
 
-/** Per-request correlation id. Random, not derived — decoupled from the device. */
-export function traeRequestId(): string {
-  return randomUUID();
-}
-
 /** Inputs for {@link buildTraeHeaders}. */
 export interface TraeHeaderInput {
   readonly realm: TraeRealm;
-  /** Access token, sent as both `x-ide-token` and the Authorization bearer. */
+  /** Access token, sent as `Authorization: Cloud-IDE-JWT <token>`. */
   readonly token: string;
   /** Account id the device fingerprint is derived from. */
   readonly uid: string;
-  /**
-   * Current client version, e.g. `3.6.2`. Sent by intl as `x-ide-version` and
-   * `x-app-version`; a stale value is refused with 4015.
-   */
-  readonly clientVersion?: string;
   /** Version code sent as `x-ide-version-code`. */
   readonly versionCode?: string;
   /** True for the streaming chat call, which overrides `Accept`. */
@@ -95,31 +88,17 @@ export function buildTraeHeaders(input: TraeHeaderInput): Record<string, string>
     "X-App-Id": TRAE_APP_ID,
     "x-plugin-channel": TRAE_PLUGIN_CHANNEL,
     "x-ide-version-code": input.versionCode ?? config.versionCode,
-    "x-ide-token": input.token,
     Authorization: `Cloud-IDE-JWT ${input.token}`,
     "Content-Type": "application/json",
     Accept: "application/json",
-    "User-Agent": config.userAgent,
-    "X-Device-Cpu": "Intel",
-    "X-Device-Id": device.deviceId,
-    "X-Machine-Id": device.machineId,
+    "User-Agent": "TraeClient/TTNet",
+    "X-Device-Cpu": encodeURIComponent("Intel"),
+    "X-Device-Id": encodeURIComponent(device.deviceId),
+    "X-Machine-Id": encodeURIComponent(device.machineId),
     "X-Device-Brand": encodeURIComponent(TRAE_DEVICE_BRAND),
-    "X-Device-Type": "windows",
+    "X-Device-Type": encodeURIComponent("windows"),
     "X-Os-Version": encodeURIComponent(TRAE_OS_VERSION),
-    "X-Request-Id": traeRequestId(),
   };
-
-  if (input.realm === "intl") {
-    // intl raw_chat requires Bearer (not Cloud-IDE-JWT) *and* the current
-    // client version on four headers; a stale version is answered 4015.
-    const version = input.clientVersion ?? intlVersionFallback(config.userAgent);
-    headers["Authorization"] = `Bearer ${input.token}`;
-    headers["x-ide-token"] = input.token;
-    headers["x-ide-version"] = version;
-    headers["x-app-version"] = version;
-    headers["User-Agent"] = "TraeClient/TTNet";
-    headers["store-country-code"] = "us";
-  }
 
   if (input.stream === true) {
     headers["Accept"] = "text/event-stream";
@@ -136,14 +115,3 @@ export function buildTraeHeaders(input: TraeHeaderInput): Record<string, string>
   return headers;
 }
 
-/**
- * Last-resort intl version: the one baked into the realm's own User-Agent.
- *
- * Only reached when the version resolver has not answered yet. It is the
- * donor's last observed version rather than an invented number, so a cold
- * process sends something upstream has accepted before.
- */
-function intlVersionFallback(userAgent: string): string {
-  const match = userAgent.match(/(\d+\.\d+\.\d+)/);
-  return match?.[1] ?? "3.6.2";
-}

@@ -163,15 +163,15 @@ describe("buildTraeHeaders", () => {
   test("CN authenticates with Cloud-IDE-JWT", () => {
     const headers = buildTraeHeaders({ realm: "cn", token: "t", uid: "1" });
     expect(headers["Authorization"]).toBe("Cloud-IDE-JWT t");
-    expect(headers["x-ide-token"]).toBe("t");
+    expect(headers["x-ide-token"]).toBeUndefined();
   });
 
-  test("intl overrides to Bearer and sends the client version", () => {
-    // intl answers 4015 without the current version on these headers.
-    const headers = buildTraeHeaders({ realm: "intl", token: "t", uid: "1", clientVersion: "3.6.0" });
-    expect(headers["Authorization"]).toBe("Bearer t");
-    expect(headers["x-ide-version"]).toBe("3.6.0");
-    expect(headers["x-app-version"]).toBe("3.6.0");
+  test("intl uses the same Cloud-IDE-JWT scheme as CN", () => {
+    // Trae 1.107.1 bundle: both realms send Cloud-IDE-JWT, not Bearer.
+    const headers = buildTraeHeaders({ realm: "intl", token: "t", uid: "1" });
+    expect(headers["Authorization"]).toBe("Cloud-IDE-JWT t");
+    expect(headers["x-ide-version"]).toBeUndefined();
+    expect(headers["x-app-version"]).toBeUndefined();
     expect(headers["User-Agent"]).toBe("TraeClient/TTNet");
   });
 
@@ -185,9 +185,9 @@ describe("buildTraeHeaders", () => {
       realm: "cn",
       token: "t",
       uid: "1",
-      extra: { "x-ide-token": "other", "X-Request-Id": null },
+      extra: { "X-App-Id": "other", "X-Request-Id": null },
     });
-    expect(headers["x-ide-token"]).toBe("other");
+    expect(headers["X-App-Id"]).toBe("other");
     expect(headers["X-Request-Id"]).toBeUndefined();
   });
 });
