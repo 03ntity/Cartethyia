@@ -822,9 +822,30 @@ export function dropEmptyBuddyMessages(messages: Array<Record<string, unknown>>)
     if (Array.isArray(message["tool_calls"]) && message["tool_calls"].length > 0) return true;
     if (typeof message["tool_call_id"] === "string" && message["tool_call_id"].trim().length > 0)
       return true;
-    if (typeof message["reasoning_content"] === "string") return true;
     const content = message["content"];
-    if (typeof content === "string") return content.trim().length > 0;
+    if (typeof content === "string") {
+      if (content.trim().length > 0) return true;
+      // `content === ""` on a bare assistant turn (no tool_calls, no
+      // tool_call_id) is unverifiable by the receiving model regardless of
+      // what `reasoning_content` carries. The upstream rejects it with
+      // code `11151 "history not found"` for both shapes observed in the
+      // wild:
+      //   (a) `reasoning_content: ""` — the Chat encoder's output for a
+      //       canonical `reasoning` part with no `.summary` and a non-string
+      //       `.payload` (signature-less thinking block already stripped on
+      //       an earlier hop), and
+      //   (b) `reasoning_content: "reasoning unavailable"` — the OMP client's
+      //       sentinel in a Responses `reasoning` input item of shape
+      //       `{summary: [], content: [{type: "reasoning_text",
+      //       text: "reasoning unavailable"}]}`, emitted when the client
+      //       strips the previous turn's trace on a model switch.
+      // Both are unverifiable: the receiving model never issued that
+      // signature, so nothing is round-trippable. Verifiable signatures
+      // round-trip on `tool_calls` turns (kept by the guard above) via the
+      // `reasoning_content` side channel; a signature on a bare turn with
+      // no tool_calls is not a shape any upstream in this family accepts.
+      return false;
+    }
     if (Array.isArray(content)) return content.length > 0;
     // Null content with no tool/reasoning load is a bare turn the upstream
     // rejects — drop it rather than dispatch a known-invalid payload.

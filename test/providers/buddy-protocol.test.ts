@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { buddyPrePayloadCommon, buildBuddyPromptCacheKey } from "../../src/providers/integrations/buddy/buddy-chat-shared";
+import {
+  applyBuddySystemPrompt,
+  dropEmptyBuddyMessages,
+} from "../../src/providers/integrations/buddy/buddy-chat-shared";
 import { codeBuddyCnPrePayload } from "../../src/providers/integrations/buddy/codebuddy/cn-provider";
 import { readBuddyDeviceToken, workbuddyHeaders } from "../../src/providers/integrations/buddy/workbuddy/shared";
 import { fetchTencentBillingQuota } from "../../src/providers/integrations/buddy/buddy-quota-shared";
@@ -520,5 +524,116 @@ describe("Buddy upstream protocol alignment", () => {
     });
 
     expect(result.windows.map((entry) => entry.accounting)).toEqual(["pooled", "pooled"]);
+  });
+});
+
+describe("Buddy empty-reasoning drop (upstream 11151 'history not found')", () => {
+  // Reproduction: a client switches from one thinking model to another
+  // (Claude Opus 4.7 1M → Kimi K3.1 Pro observed), and the second request
+  // carries a canonical `reasoning` input item with no `.summary` and a
+  // `null` `.payload` — a signature-less thinking block that was already
+  // stripped on an earlier hop. The chat encoder produced
+  // `{role:"assistant", content:"", reasoning_content:""}`; the previous
+  // `dropEmptyBuddyMessages` guard treated `reasoning_content` of ANY
+  // string length as load-bearing and kept the stub. WorkBuddy / Kimi then
+  // rejected the whole request with code 11151 ("history not found").
+
+  test("drops an assistant turn whose reasoning_content is the empty string", () => {
+    const messages: Array<Record<string, unknown>> = [
+      { role: "user", content: "hi" },
+      // The exact shape the chat encoder emits for a reasoning-only canonical
+      // turn with no summary and a non-string payload. Empty `content`, empty
+      // `reasoning_content`, no tool_calls, no tool_call_id.
+      { role: "assistant", content: "", reasoning_content: "" },
+      { role: "user", content: "next turn" },
+    ];
+    dropEmptyBuddyMessages(messages);
+    expect(messages.map((m) => m["role"])).toEqual(["user", "user"]);
+  });
+
+  test("also drops a bare assistant stub carrying only an unverifiable placeholder trace", () => {
+    // The OMP client's observed sentinel: when the client switches thinking
+    // models mid-conversation, every historical reasoning item in the
+    // Responses `input` is replaced with
+    // `{summary: [], content: [{type: "reasoning_text",
+    // text: "reasoning unavailable"}]}`. The chat encoder dutifully forwards
+    // that text as `reasoning_content: "reasoning unavailable"`, but no model
+    // in the receiving install issued that signature — so forwarding it to
+    // WorkBuddy/Kimi gets rejected with the same 11151 as the empty case.
+    // A `content: ""` assistant turn with no `tool_calls` and no
+    // `tool_call_id` is unverifiable regardless of `reasoning_content` value
+    // and must be dropped.
+    const messages: Array<Record<string, unknown>> = [
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "", reasoning_content: "reasoning unavailable" },
+      { role: "user", content: "next turn" },
+    ];
+    dropEmptyBuddyMessages(messages);
+    expect(messages.map((m) => m["role"])).toEqual(["user", "user"]);
+  });
+
+  test("keeps an assistant tool_calls turn even with empty reasoning_content", () => {
+    // Tool-call turns are kept by the `tool_calls.length > 0` guard, not by
+    // reasoning_content. An `omitted`-display thinking block that still
+    // carried a signature-less reasoning side channel on a tool_calls turn
+    // must still ride through: the chat encoder deliberately emits the
+    // empty string there because the upstream demands the FIELD back on a
+    // thinking turn, even when its text is empty.
+    const messages: Array<Record<string, unknown>> = [
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [{ id: "c1", function: { name: "read", arguments: "{}" } }],
+        reasoning_content: "",
+      },
+      { role: "tool", tool_call_id: "c1", content: "ok" },
+    ];
+    dropEmptyBuddyMessages(messages);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.["role"]).toBe("assistant");
+  });
+
+  test("full WorkBuddy envelope still drops the stub after applyBuddySystemPrompt runs", () => {
+    // The real pipeline the production bug followed: the WorkBuddy
+    // pre-payload hook calls `applyBuddySystemPrompt`, which installs the
+    // fixed system prompt, rebuilds user content shapes, then runs
+    // `finalizeBuddyMessages` → `dropEmptyBuddyMessages`. The stub must be
+    // gone before the request leaves the gateway.
+    const messages: Array<Record<string, unknown>> = [
+      { role: "user", content: "halo" },
+      // Assistant tool-call turn (real) — must survive.
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [{ id: "c1", function: { name: "read", arguments: "{\"path\":\"x\"}" } }],
+      },
+      { role: "tool", tool_call_id: "c1", content: "file contents" },
+      // The problem child: reasoning-only turn with no payload text.
+      { role: "assistant", content: "", reasoning_content: "" },
+      { role: "user", content: "berikutnya" },
+    ];
+    applyBuddySystemPrompt(messages, "You are a pragmatic and direct software engineering assistant.");
+    // The system prompt is prepended, the tool-call turn is kept, and the
+    // empty assistant stub is dropped. No message with content === "" and
+    // reasoning_content === "" survives.
+    const roles = messages.map((m) => m["role"]);
+    expect(roles[0]).toBe("system");
+    expect(roles).toContain("assistant");
+    expect(roles).toContain("tool");
+    for (const m of messages) {
+      const content = m["content"];
+      const reasoning = m["reasoning_content"];
+      const hasToolCalls = Array.isArray(m["tool_calls"]) && (m["tool_calls"] as unknown[]).length > 0;
+      const hasToolCallId = typeof m["tool_call_id"] === "string" && (m["tool_call_id"] as string).length > 0;
+      const emptyContent =
+        content === null ||
+        content === undefined ||
+        (typeof content === "string" && content.length === 0) ||
+        (Array.isArray(content) && content.length === 0);
+      const emptyReasoning = reasoning === undefined || (typeof reasoning === "string" && reasoning.length === 0);
+      if (emptyContent && emptyReasoning) {
+        expect(hasToolCalls || hasToolCallId).toBe(true);
+      }
+    }
   });
 });

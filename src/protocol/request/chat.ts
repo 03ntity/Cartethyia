@@ -353,7 +353,19 @@ export function canonicalToChatPayload(
           // `display: "omitted"`, and dropping it stripped the replay the
           // provider demands on the next request. `reasoning_content` is an
           // assistant-only field, so it is emitted here and nowhere else.
-          if (m.role === "assistant" && hasReasoning) {
+          //
+          // Load-bearing requires *content* in the replay: a non-empty summary
+          // or a non-empty serialised payload. Pushing `{content:"",
+          // reasoning_content:""}` is the opposite of load-bearing — the
+          // upstream reads it as "thinking mode with the reasoning stripped"
+          // and rejects the whole request (`WorkBuddy/CodeBuddy 11151 "history
+          // not found"`). The canonical form that reaches this branch with no
+          // trace is an input `reasoning` item whose `summary` was absent and
+          // whose `payload` was `null` — a signature-less thinking block
+          // emitted under `display: "omitted"` and already stripped by an
+          // earlier hop. There is nothing to replay, so the turn is dropped
+          // instead of being forwarded as an invalid stub.
+          if (m.role === "assistant" && hasReasoning && reasoningContent.length > 0) {
             messages.push({
               role: "assistant",
               content: "",
@@ -361,6 +373,9 @@ export function canonicalToChatPayload(
             });
             continue;
           }
+          // No trace to carry: skip the turn entirely rather than emit an
+          // empty assistant message the upstream will reject.
+          if (m.role === "assistant" && hasReasoning) continue;
           if (m.role !== "assistant" && hasReasoning && reasoningContent.length > 0) {
             const last = messages[messages.length - 1];
             if (last !== undefined && last["role"] === "tool") {
