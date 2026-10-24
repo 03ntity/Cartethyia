@@ -622,13 +622,15 @@ async function insertRows(
   // *inside* the outer restore transaction — without this, Postgres marks the
   // outer transaction as aborted on the first error and the per-row diagnostic
   // fallback would itself fail with "current transaction is aborted".
-  const insertChunk = async (chunk: readonly Record<string, unknown>[]): Promise<number | null> => {
+  const insertChunk = async (
+    chunk: readonly Record<string, unknown>[],
+  ): Promise<{ count: number } | { error: unknown }> => {
     try {
       // `tx.transaction(...)` nests as a `SAVEPOINT ... ROLLBACK TO SAVEPOINT`
       // on both Postgres and SQLite drivers Drizzle supports here, which is
       // exactly what the fallback needs: on failure the outer transaction
       // stays writable and the per-row path can isolate the offending row.
-      return await tx.transaction(async (innerTx) => {
+      const count = await tx.transaction(async (innerTx) => {
         // Drizzle types the nested transaction callback with the dialect's
         // own transaction handle; cast once to a named local with a reason,
         // never inline on member access.
@@ -660,11 +662,15 @@ async function insertRows(
         });
         return chunk.length;
       });
-    } catch {
+      return { count };
+    } catch (error) {
       // Signal "re-run row by row": a bulk failure must not swallow the
       // specific row's error, because the per-row path is what names the
-      // offending row to the operator.
-      return null;
+      // offending row to the operator. Keep the bulk error too: when the
+      // per-row fallback also fails (connection drop, aborted transaction,
+      // oversized statement), the derived row error would otherwise hide the
+      // real cause from the operator.
+      return { error };
     }
   };
 
@@ -695,14 +701,24 @@ async function insertRows(
     }
     const chunk = prepared.slice(groupStart, groupEnd);
     const bulk = await insertChunk(chunk);
-    if (bulk !== null) {
-      inserted += bulk;
+    if ("count" in bulk) {
+      inserted += bulk.count;
     } else {
-    // Diagnostic fallback: let the single statement that actually errors
-    // reach the caller with the row that caused it.
-    for (const values of chunk) {
-      inserted += await insertOne(values);
-    }
+      // Diagnostic fallback: let the single statement that actually errors
+      // reach the caller with the row that caused it. If the fallback itself
+      // fails, the row-level error is derived — chain the original bulk error
+      // so a connection-level fault is not reported as a bad row.
+      try {
+        for (const values of chunk) {
+          inserted += await insertOne(values);
+        }
+      } catch (perRowError) {
+        const bulkMessage = bulk.error instanceof Error ? bulk.error.message : String(bulk.error);
+        throw new Error(
+          `bulk insert into ${tableName(table)} failed (${bulkMessage}); per-row diagnostic also failed`,
+          { cause: perRowError },
+        );
+      }
     }
     groupStart = groupEnd;
   }
@@ -740,6 +756,14 @@ export async function applyRestore(
     // its PK is `id`, so a conflict means "already there" rather than an error.
     // The payload's tenant is forced to the restoring tenant — a payload naming
     // someone else's tenant id must not create or claim that tenant.
+    //
+    // Current exports deliberately omit the `tenants` section, so
+    // `tenantRows` is normally empty. Child rows still carry
+    // `tenant_id = tenantId`, which means a restore into a tenant that does
+    // not exist yet would fail the `api_keys` (and other) foreign keys unless
+    // we ensure the receiving tenant here. The minimal placeholder row is
+    // written only for a tenant that did not already exist; on conflict it is
+    // a no-op and the existing tenant's name/status are left untouched.
     if (validation.tenantRows.length > 0) {
       let inserted = 0;
       for (const row of validation.tenantRows) {
@@ -751,6 +775,15 @@ export async function applyRestore(
         inserted += result.length;
       }
       restored["tenants"] = inserted;
+    } else {
+      const result = await insertRow(scoped, TENANT_TABLE, {
+        id: tenantId,
+        name: "restored",
+        status: "active",
+      })
+        .onConflictDoNothing()
+        .returning({ id: sql<number>`1` });
+      restored["tenants"] = result.length;
     }
 
     const replaceTables = order.filter(

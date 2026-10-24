@@ -7,6 +7,10 @@ import { t } from "elysia";
 import type { AccessDecision } from "../../security/access-control";
 import type { RedisBackend } from "../../persistence/redis";
 import type { ConsoleSettingsPreferences } from "../../persistence/schema";
+import { RTK_LEVELS } from "../../transport/request/rtk/rtk-constants";
+import { PONYTAIL_LEVELS } from "../../transport/request/rtk/ponytail-prompt";
+
+export { RTK_LEVELS, PONYTAIL_LEVELS };
 
 export interface RuntimeSettingsResponse {
   readonly redisBackendActual: RedisBackend;
@@ -105,10 +109,8 @@ export type TelemetryPayloadRetentionMinutes =
 export const PRIVACY_MODES = ["masked", "full"] as const;
 /** Provider/model label privacy accepted by the runtime-settings PATCH. */
 export type PrivacyMode = (typeof PRIVACY_MODES)[number];
-export const PONYTAIL_LEVELS = ["lite", "full", "ultra"] as const;
 /** PonyTail directive intensity accepted by the runtime-settings PATCH. */
 export type PonyTailLevel = (typeof PONYTAIL_LEVELS)[number];
-export const RTK_LEVELS = ["lite", "full", "ultra"] as const;
 /** RTK prune strength accepted by the runtime-settings PATCH. */
 export type RtkLevel = (typeof RTK_LEVELS)[number];
 

@@ -21,6 +21,7 @@
  */
 import type { BackupPayload, BackupRow } from "./contracts";
 import { BACKUP_APP, BACKUP_VERSION } from "./contracts";
+import { isRecord } from "../../protocol/codecs";
 import { hashSecret } from "../../security/crypto";
 import {
   AUTH_STATE_KEYS,
@@ -97,7 +98,7 @@ const OAUTH_PROVIDERS = new Set(["claude", "codex", "antigravity", "kimi", "clin
 
 /** The non-secret per-account config, as our `auth_state` bag. */
 function authStateOf(entry: Row): Record<string, unknown> {
-  const specific = isRecord(entry.providerSpecificData) ? entry.providerSpecificData : {};
+  const specific = isRecord(entry.providerSpecificData) ? entry.providerSpecificData as Row : {};
   const state: Record<string, unknown> = {};
   for (const key of AUTH_STATE_KEYS) {
     const value = specific[key];
@@ -109,10 +110,6 @@ function authStateOf(entry: Row): Record<string, unknown> {
 function emailOf(entry: Row): Record<string, unknown> {
   const email = text(entry.email);
   return email === null ? {} : { account_email: email };
-}
-
-function isRecord(value: unknown): value is Row {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

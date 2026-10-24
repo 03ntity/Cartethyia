@@ -24,9 +24,9 @@ export const CODEBUDDY_CN_USAGE_URL =
   `${providerBaseUrl("cbcn")}/billing/meter/get-user-resource`;
 export const CODEBUDDY_INTL_USAGE_URL =
   `${providerBaseUrl("cb")}/billing/meter/get-user-resource`;
-export const CODEBUDDY_CN_REQUEST_USAGE_URL =
+const CODEBUDDY_CN_REQUEST_USAGE_URL =
   `${providerBaseUrl("cbcn")}/billing/meter/get-user-request-usage`;
-export const CODEBUDDY_INTL_REQUEST_USAGE_URL =
+const CODEBUDDY_INTL_REQUEST_USAGE_URL =
   `${providerBaseUrl("cb")}/billing/meter/get-user-request-usage`;
 
 type CodeBuddyProviderId = "cb" | "cbcn";
@@ -152,14 +152,3 @@ export async function fetchCodeBuddyRequestUsage(
   });
 }
 
-export const fetchCodeBuddyCnRequestUsage = (
-  credential: string,
-  fetcher: FetchLike,
-  days: number = 30,
-): Promise<BuddyUsageResult> => fetchCodeBuddyRequestUsage(credential, fetcher, "cbcn", days);
-
-export const fetchCodeBuddyIntlRequestUsage = (
-  credential: string,
-  fetcher: FetchLike,
-  days: number = 30,
-): Promise<BuddyUsageResult> => fetchCodeBuddyRequestUsage(credential, fetcher, "cb", days);

@@ -38,11 +38,6 @@ const WORKBUDDY_CN_BILLING_BASE_URL = "https://www.codebuddy.cn";
 export const WORKBUDDY_USAGE_URL =
   `${providerBaseUrl("workbuddy")}/v2/billing/meter/get-user-resource`;
 
-export const WORKBUDDY_REQUEST_USAGE_URL =
-  `${providerBaseUrl("workbuddy")}/billing/meter/get-user-request-usage`;
-export const WORKBUDDY_CN_REQUEST_USAGE_URL =
-  `${providerBaseUrl("workbuddycn")}/billing/meter/get-user-request-usage`;
-
 async function billingHeaders(
   domain: string,
   clientVersion: string,
@@ -164,9 +159,3 @@ export async function fetchWorkBuddyRequestUsage(
   });
 }
 
-export const fetchWorkBuddyCnRequestUsage = (
-  credential: string,
-  fetcher: FetchLike,
-  days: number = 30,
-): Promise<BuddyUsageResult> =>
-  fetchWorkBuddyRequestUsage(credential, fetcher, { providerId: "workbuddycn", days });

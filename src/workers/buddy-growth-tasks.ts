@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import type { CartethyiaDatabase } from "../persistence/db-handle";
 import { buddyTaskLedger, providerAccounts } from "../persistence/schema";
 import { log } from "../observability/logger";
+import { sleep } from "../shared/sleep";
 import { buddyAccountUid } from "../providers/integrations/buddy/buddy-oauth-shared";
 import {
   adoptFirstBuddy,
@@ -207,12 +208,6 @@ async function forAccount(
   return run(call);
 }
 
-/** Pause between accounts, so one pass does not look like a burst upstream. */
-function sleep(ms: number): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>();
-  setTimeout(resolve, ms);
-  return promise;
-}
 /** Walks the accounts, skipping any already settled today. */
 async function runTask(
   deps: BuddyTaskDeps,

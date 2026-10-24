@@ -80,7 +80,7 @@ import type { ShutdownDrainSource } from "../transport/contracts";
  * discriminant narrows `deps` to `ProductionAppDeps`. Listing them here would
  * let a caller pass a value the shell silently ignores.
  */
-export interface GatewayShellDeps {
+interface GatewayShellDeps {
   readonly mode: "route-only";
   readonly dashboardDist?: string;
   readonly checkDb?: () => Promise<void>;
@@ -159,7 +159,7 @@ export interface ProductionAppDeps {
 }
 
 /** Either app mode. The discriminant decides which builder path runs. */
-export type GatewayAppDeps = GatewayShellDeps | ProductionAppDeps;
+type GatewayAppDeps = GatewayShellDeps | ProductionAppDeps;
 
 function checkDatabaseConnection(): Promise<void> {
   return getDbHandle()

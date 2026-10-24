@@ -365,6 +365,11 @@ export function canonicalToChatPayload(
           // emitted under `display: "omitted"` and already stripped by an
           // earlier hop. There is nothing to replay, so the turn is dropped
           // instead of being forwarded as an invalid stub.
+          // This non-empty echo is load-bearing for non-buddy
+          // OpenAI-compatible providers. Buddy providers deliberately drop
+          // the resulting bare stub later in `dropEmptyBuddyMessages`
+          // (`providers/integrations/buddy/buddy-chat-shared.ts`) because
+          // their upstream rejects that shape with 11151.
           if (m.role === "assistant" && hasReasoning && reasoningContent.length > 0) {
             messages.push({
               role: "assistant",

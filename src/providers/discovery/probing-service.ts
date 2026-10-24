@@ -1073,32 +1073,43 @@ export class ProviderProbingService {
     // thrown probe into a failed result for that account only — matching the
     // dashboard's existing per-account expectation.
     const results: ProbeAllAccountsResult["results"][number][] = new Array(accounts.length);
+    if (accounts.length === 0) return { providerId, modelId: request.modelId, results: [] };
+
+    const runOne = async (account: { id: string }, slot: number): Promise<void> => {
+      try {
+        const result = await this.probeModel(tenantId, providerId, {
+          ...request,
+          accountId: account.id,
+        });
+        // No health write here: a probe that genuinely fails already reports
+        // through `recordAccountFailure`, which classifies the real status;
+        // matching answer text is not a health signal.
+        results[slot] = { ...result, accountId: account.id };
+      } catch (error) {
+        results[slot] = {
+          ok: false,
+          latencyMs: 0,
+          accountId: account.id,
+          error: error instanceof Error ? error.message : String(error),
+        } as ProbeAllAccountsResult["results"][number];
+      }
+    };
+
+    // As in probeAllModels, the first probe primes OAuth token caches and
+    // connection pools before concurrent workers start. Ten simultaneous cold
+    // refreshes could otherwise trip provider rate limits and mark healthy
+    // accounts as broken during a "test all" run.
+    await runOne(accounts[0]!, 0);
+    const restAccounts = accounts.slice(1);
     let cursor = 0;
     const worker = async (): Promise<void> => {
       while (true) {
         const index = cursor++;
-        if (index >= accounts.length) return;
-        const account = accounts[index]!;
-        try {
-          const result = await this.probeModel(tenantId, providerId, {
-            ...request,
-            accountId: account.id,
-          });
-          // No health write here: a probe that genuinely fails already reports
-          // through `recordAccountFailure`, which classifies the real status;
-          // matching answer text is not a health signal.
-          results[index] = { ...result, accountId: account.id };
-        } catch (error) {
-          results[index] = {
-            ok: false,
-            latencyMs: 0,
-            accountId: account.id,
-            error: error instanceof Error ? error.message : String(error),
-          } as ProbeAllAccountsResult["results"][number];
-        }
+        if (index >= restAccounts.length) return;
+        await runOne(restAccounts[index]!, index + 1);
       }
     };
-    const workerCount = Math.min(PROBE_ACCOUNT_CONCURRENCY, accounts.length);
+    const workerCount = Math.min(PROBE_ACCOUNT_CONCURRENCY, restAccounts.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
     return { providerId, modelId: request.modelId, results };

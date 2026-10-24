@@ -19,6 +19,7 @@
 // claim short-circuits the day, so a restart cannot double-post.
 
 import { providerBaseUrl } from "../../provider-metadata";
+import { sleep } from "../../../shared/sleep";
 import { WORKBUDDY_DOMAIN } from "./workbuddy/shared";
 import { BUDDY_PROVIDER_IDS } from "../../provider-metadata";
 import {
@@ -366,10 +367,6 @@ function asTextField(payload: unknown): string | null {
 function isRetryableClaim(error: unknown, status: number | null): boolean {
   if (status !== null) return status >= 500;
   return !(error instanceof DOMException && error.name === "AbortError");
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

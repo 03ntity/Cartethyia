@@ -170,8 +170,7 @@ export function resolveAccountDisabledRecoveryMs(): number {
 
 /**
  * Resets all cached cooldown values. Call this in tests that override
- * cooldown env-vars between test cases — mirrors `resetTimeoutCacheForTests`
- * in `config/timeouts.ts`.
+ * cooldown env-vars between test cases.
  */
 export function resetCooldownCacheForTests(): void {
   _rateLimitCooldown = undefined;

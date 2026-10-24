@@ -7,6 +7,7 @@
  */
 
 import { exponentialBackoff, type BackoffOptions } from "./backoff";
+import { sleep as defaultSleep } from "../shared/sleep";
 
 export interface RetryOptions {
   readonly maxRetries?: number;
@@ -17,8 +18,6 @@ export interface RetryOptions {
   /** Returns true to retry; defaults to retrying every error. */
   readonly shouldRetry?: (error: unknown, attempt: number) => boolean;
 }
-
-const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Runs `fn`, retrying on failure with exponential backoff (100 ms, 200 ms,

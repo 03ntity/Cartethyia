@@ -29,6 +29,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Switching between thinking models no longer breaks WorkBuddy/CodeBuddy
+  history.** Clients that replace an earlier model's reasoning with an
+  unavailable placeholder could produce an empty assistant turn that the
+  upstream rejected with `11151 "history not found"`. Those bare turns are
+  now removed while tool calls and verifiable reasoning remain intact.
+
+- **A backup can restore into a fresh tenant.** Current exports deliberately
+  omit the tenant row, but the restore previously created it only when that
+  row was present in the file. Restoring could therefore fail on the
+  `api_keys` foreign key before any configuration was written. The receiving
+  tenant is now ensured before child rows are inserted; an existing tenant is
+  left unchanged.
+
+- **Restore failures retain the original bulk-insert error.** When both the
+  bulk write and the row-by-row diagnostic fail, the reported error now names
+  the bulk failure and retains the diagnostic error as its cause instead of
+  hiding a connection or transaction fault behind a derived row error.
+
 - **A revoked share link says so, and says what to do.** The gateway already
   refused a revoked link, but the public page titled every refusal
   "Link not available" — so a revoked key and a paused key read identically to
@@ -70,6 +88,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   refreshed after either action.
 
 ### Changed
+
+- **Backup export and restore do less waiting.** Independent table reads run
+  concurrently, and restore groups compatible rows into bulk inserts with a
+  savepoint-protected per-row fallback for precise diagnostics.
+
+- **Model and account probes keep their concurrency windows full.** Workers
+  start the next probe as soon as one finishes rather than waiting for the
+  slowest member of a fixed batch. Both probe paths now run one sequential
+  warm-up first to prime credentials and connections before concurrent work.
 
 - **The QRIS support card is inline on the share page.** It used to open as a
   modal; it is now a card on the page itself, image left and copy right, with a

@@ -22,11 +22,6 @@ const PROCESS_CONCURRENCY_RETRY_MS = 3_000;
 
 let inFlight = 0;
 
-/** The current in-flight count. Exposed for tests; not a control surface. */
-export function processInFlight(): number {
-  return inFlight;
-}
-
 export function createProcessConcurrencyMiddleware(): Elysia {
   return new Elysia()
     .beforeHandle(({ request }) => {

@@ -23,6 +23,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
+import { sleep } from "../../shared/sleep";
 import { providerAccounts, providerOauthStates } from "../../persistence/schema";
 import { decryptCredentialToString, encryptCredential } from "../../security/crypto";
 import { invalidateCredentialCache } from "../operations/provider-credential-service";
@@ -310,10 +311,6 @@ async function markStaticToken(db: CartethyiaDatabase, accountId: string): Promi
       lastErrorAt: null,
     })
     .where(eq(providerAccounts.id, accountId));
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function failureMessage(error: unknown): string {

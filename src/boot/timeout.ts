@@ -24,19 +24,8 @@ export function withTimeout<T>(
 }
 
 /**
- * Creates a standalone timeout promise that rejects after the specified duration.
- * The timer is unref'd to prevent keeping the event loop alive.
- */
-export function timeoutAfter(ms: number, message: string): Promise<never> {
-  return new Promise<never>((_, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), ms);
-    if (typeof timer.unref === "function") timer.unref();
-  });
-}
-
-/**
- * Cancellable variant of {@link timeoutAfter}: the loser timer is cleared
- * when the raced operation wins, instead of firing later against nothing.
+ * The loser timer is cleared when the raced operation wins, instead of firing
+ * later against nothing.
  */
 export function cancellableTimeout(ms: number, message: string): { promise: Promise<never>; cancel: () => void } {
   let timer: ReturnType<typeof setTimeout> | undefined;

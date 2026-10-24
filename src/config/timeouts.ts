@@ -51,12 +51,6 @@ let cachedUpstreamTimeoutMs: number | undefined;
 let cachedStreamStallTimeoutMs: number | undefined;
 let cachedInflightTtlSeconds: number | undefined;
 
-/** Clears the memoized timeout cache; tests that mutate env mid-process only. */
-export function resetTimeoutCacheForTests(): void {
-  cachedUpstreamTimeoutMs = undefined;
-  cachedStreamStallTimeoutMs = undefined;
-  cachedInflightTtlSeconds = undefined;
-}
 
 /**
  * Crash-recovery TTL, in seconds, for a distributed inflight slot.
