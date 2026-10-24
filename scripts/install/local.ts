@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { readEnvFile } from "../cli/env";
 import { ensureDrainToken, attachGateway, stopAttachedGateway } from "../cli/instance";
 import { startGateway } from "../cli/gateway";
-import { runHealthChecks, hasRequiredFailure, skippedRuntimeCheck, type HealthDependencies } from "../health";
+import { runHealthChecks, hasRequiredFailure, skippedRuntimeCheck, type HealthDependencies } from "../cli/health";
 import { writeEnvAtomic, assertModeChangeAllowed, ensureEncryptionKey, prepareStateDirectories } from "./config";
 import { hostExecutor, type HostExecutor } from "./host";
 import { installDependencies, prepareSource, provisionPostgres, provisionRedis } from "./runtime";

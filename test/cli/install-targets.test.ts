@@ -7,7 +7,7 @@ import type { HostExecutor, HostResult } from "../../scripts/install/host";
 import { parseInstallArgs } from "../../scripts/install/plan";
 import { installVps } from "../../scripts/install/vps";
 import { mkdir } from "node:fs/promises";
-import type { HealthDependencies } from "../../scripts/health";
+import type { HealthDependencies } from "../../scripts/cli/health";
 import { statSync } from "node:fs";
 
 async function sandbox(): Promise<string> { return mkdtemp(join(tmpdir(), "carte-docker-test-")); }

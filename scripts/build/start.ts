@@ -1,5 +1,5 @@
 /** Runs the compiled binary from the repository root. */
-import { compiledBinaryPath } from "./compile";
+import { compiledBinaryPath } from "../../src/config/package-paths";
 
 /** Runs the compiled binary with inherited stdio; resolves to its exit code. */
 export async function startBinary(): Promise<number> {

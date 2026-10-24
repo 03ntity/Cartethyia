@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { hasRequiredFailure, runHealthChecks, type HealthContext } from "../../scripts/health";
+import { hasRequiredFailure, runHealthChecks, type HealthContext } from "../../scripts/cli/health";
 
 function context(env: Record<string, string>, phases: HealthContext["phases"] = ["configuration", "runtime"]): HealthContext {
   return { target: "local", env, envPath: "C:/missing-cartethyia-test-env", port: 12800, phases };

@@ -24,23 +24,7 @@
  *
  * Usage: `bun run scripts/build/compile.ts [--outfile dist/cartethyia]`
  */
-const DEFAULT_OUTFILE = "dist/cartethyia";
-
-/**
- * The artifact path `bun build --compile` actually writes for `outfile`.
- *
- * Bun appends `.exe` when it compiles for Windows, so the extensionless
- * `dist/cartethyia` handed to it never exists on that platform. This is the one
- * place that knows where the compiled binary lands; `start-production.ts`
- * resolves its target from here instead of re-deriving the name, because a
- * launcher that probed the requested path reported "run bun run build first"
- * immediately after a successful build.
- */
-export function compiledBinaryPath(outfile: string = DEFAULT_OUTFILE): string {
-  return process.platform === "win32" && !outfile.toLowerCase().endsWith(".exe")
-    ? `${outfile}.exe`
-    : outfile;
-}
+import { DEFAULT_BINARY_OUTFILE, compiledBinaryPath } from "../../src/config/package-paths";
 
 /** Reads `--outfile <path>`, falling back to a positional path or the default. */
 export function resolveOutfile(argv: readonly string[]): string {
@@ -52,11 +36,11 @@ export function resolveOutfile(argv: readonly string[]): string {
     }
     return value;
   }
-  return argv.find((arg) => arg.length > 0 && !arg.startsWith("-")) ?? DEFAULT_OUTFILE;
+  return argv.find((arg) => arg.length > 0 && !arg.startsWith("-")) ?? DEFAULT_BINARY_OUTFILE;
 }
 
 export async function buildBinary(
-  outfile: string = DEFAULT_OUTFILE,
+  outfile: string = DEFAULT_BINARY_OUTFILE,
   buildFn: typeof Bun.build = Bun.build,
 ): Promise<void> {
   // Baked into the output; see the note above before changing it. Substituted

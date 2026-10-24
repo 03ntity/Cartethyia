@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { readEnvFile } from "../cli/env";
-import { runHealthChecks, hasRequiredFailure, skippedRuntimeCheck, type HealthDependencies } from "../health";
+import { runHealthChecks, hasRequiredFailure, skippedRuntimeCheck, type HealthDependencies } from "../cli/health";
 import { assertModeChangeAllowed, ensureEncryptionKey, writeEnvAtomic, prepareStateDirectories } from "./config";
 import { hostExecutor, type HostExecutor } from "./host";
 import { installDependencies, prepareSource, provisionPostgres, provisionRedis } from "./runtime";

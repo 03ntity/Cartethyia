@@ -3,10 +3,10 @@ import { constants } from "node:fs";
 import { join, resolve } from "node:path";
 import { Client } from "pg";
 import Redis from "ioredis";
-import { hasPlaceholderSecrets, readEnvFile } from "./cli/env";
-import { parseServiceUrl, probeTcpService } from "./cli/services";
-import { resolveDataDir, resolveDbMode } from "../src/persistence/db-mode";
-import { bunVersionAtLeast, readRequiredBunVersion } from "./cli/version";
+import { hasPlaceholderSecrets, readEnvFile } from "./env";
+import { parseServiceUrl, probeTcpService } from "./services";
+import { resolveDataDir, resolveDbMode } from "../../src/persistence/db-mode";
+import { bunVersionAtLeast, readRequiredBunVersion } from "./version";
 
 export type CheckPhase = "preflight" | "configuration" | "runtime";
 export type CheckStatus = "pass" | "warn" | "fail" | "skip";

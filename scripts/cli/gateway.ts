@@ -7,8 +7,7 @@ import {
   writeInstanceLock,
 } from "./instance";
 import { join } from "node:path";
-import { PACKAGE_ROOT, resolvePackagePath } from "../../src/config/package-paths";
-import { compiledBinaryPath } from "../build/compile";
+import { PACKAGE_ROOT, compiledBinaryPath, resolvePackagePath } from "../../src/config/package-paths";
 import { spawn as spawnDetached, type ChildProcess } from "node:child_process";
 import {
   blockedPortMessage,

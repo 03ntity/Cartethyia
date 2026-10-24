@@ -1,6 +1,6 @@
 import { ENV_PATH } from "./env";
 import { getLocalPlatform } from "./platform";
-import { hasRequiredFailure, runHealthChecks, type CheckPhase } from "../health";
+import { hasRequiredFailure, runHealthChecks, type CheckPhase } from "./health";
 
 const phases: readonly CheckPhase[] = ["preflight", "configuration", "runtime"];
 

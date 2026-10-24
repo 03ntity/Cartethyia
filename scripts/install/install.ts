@@ -79,7 +79,7 @@ export async function install(
   }
   if (request.check) {
     const { readEnvFile } = await import("../cli/env");
-    const { runHealthChecks } = await import("../health");
+    const { runHealthChecks } = await import("../cli/health");
     const { join } = await import("node:path");
     const env = await readEnvFile(join(request.root, ".env"));
     const results = await runHealthChecks({ target: request.target, env, envPath: join(request.root, ".env"), port: request.port, phases: ["preflight", "configuration"] });

@@ -8,6 +8,39 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.5.10] - 2026-10-24
+
+### Fixed
+
+- **Remote Support runs on every host.** The service used to shell out to a
+  Windows-only `.cmd`/`.ps1` launcher pair, and if the npm tarball shipped
+  without them (or on macOS/Linux at all) every Overview card reported
+  "Launcher not found" or "Remote support is currently scripted for Windows
+  hosts only." The launcher pair is deleted; the service now spawns
+  `cloudflared` and `tailscale` directly with `child_process.spawn`,
+  detached from the gateway so a gateway restart cannot kill a live session.
+  State and logs live under the per-user config dir
+  (`<config>/remote-support/<tool>.{pid,url,log,err}`).
+
+### Changed
+
+- **`compiledBinaryPath()` and the health checks live beside what ships.** The
+  helper the CLI launcher resolves the compiled binary from moved from
+  `scripts/build/compile.ts` into `src/config/package-paths.ts`, and the
+  health-check module moved from `scripts/health.ts` into
+  `scripts/cli/health.ts`. The `files` whitelist is back to its pre-2.5.6
+  shape (`scripts/cli/`, `src/`, `migrations/`, `dist/dashboard/`,
+  `.env.example`, `README.md`) — a shipped module no longer imports anything
+  outside the whitelist. Adapted from the proposal in risunCodex PR #3 by
+  @elliottophellia.
+
+- **Packaging regressions can no longer sneak past checkout tests.**
+  `test/cli/package-manifest.test.ts` asks `bun pm pack` what would publish,
+  walks every import of every shipped file, and fails on any relative import
+  that would dangle, any bare import that is a devDependency rather than a
+  runtime dependency, and any `bin`/install-lifecycle target that is not in
+  the tarball. Replaces the earlier hard-coded whitelist string-list guard.
+
 ## [2.5.9] - 2026-10-24
 
 ### Fixed
