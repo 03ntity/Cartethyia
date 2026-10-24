@@ -248,7 +248,9 @@ class UnixTray implements Tray {
     // exited would leave it pending forever and hang the shutdown after it.
     if (helper.exitCode !== null || helper.signalCode !== null) return;
     try {
-      this.#tray.kill();
+      // `false`: systray2 otherwise calls `process.exit(0)` when the helper
+      // exits, which discards the exit code this close was given.
+      await this.#tray.kill(false);
     } catch {
       // The helper may already be gone.
     }
