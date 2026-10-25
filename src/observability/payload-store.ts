@@ -69,7 +69,68 @@ function isFrameFileName(name: string): boolean {
 const MAX_FRAME_BYTES = 256 * 1024 * 1024;
 const DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024;
 const DEFAULT_DIRECTORY = "./data/telemetry-payloads";
-let writeTail: Promise<void> = Promise.resolve();
+
+/**
+ * Backlog bounds for the payload writer: per-process, in front of the
+ * append-only file writes.
+ *
+ * The writer used to be an unbounded promise chain: every capture appended
+ * another link, so a slow disk (or a burst of large captures) accumulated
+ * every waiting frame's bytes in memory with no ceiling — the exact
+ * unbounded-growth failure this phase exists to remove. Items are counted
+ * before queueing in their exact serialized frame bytes (the same buffers
+ * that will be written), so 64 MiB of backlog means 64 MiB of real memory,
+ * not an estimate.
+ */
+export const MAX_PAYLOAD_BACKLOG_ITEMS = 32;
+export const MAX_PAYLOAD_BACKLOG_BYTES = 64 * 1024 * 1024;
+
+/** Raised when the payload writer's backlog is at its bound. */
+export class PayloadBacklogFullError extends Error {
+  constructor(
+    readonly boundedBy: "items" | "bytes",
+  ) {
+    super(`telemetry payload writer backlog full (${boundedBy})`);
+    this.name = "PayloadBacklogFullError";
+  }
+}
+
+interface BacklogEntry {
+  readonly estimatedBytes: number;
+  run: () => Promise<void>;
+}
+
+let backlog: BacklogEntry[] = [];
+let backlogBytes = 0;
+let draining = false;
+
+/** Test/diagnostic seam: current backlog occupancy. */
+export function payloadWriterBacklog(): { readonly items: number; readonly bytes: number } {
+  return { items: backlog.length, bytes: backlogBytes };
+}
+
+/**
+ * Runs the backlog to completion. One drain at a time: entries execute in
+ * FIFO order, which preserves the append-only file semantics the previous
+ * promise chain provided.
+ */
+function drainBacklog(): void {
+  if (draining) return;
+  draining = true;
+  const step = (): void => {
+    const entry = backlog.shift();
+    if (entry === undefined) {
+      draining = false;
+      return;
+    }
+    backlogBytes -= entry.estimatedBytes;
+    entry
+      .run()
+      .catch(() => undefined)
+      .finally(() => step());
+  };
+  step();
+}
 
 /**
  * Single source of truth for the telemetry payload directory: the
@@ -371,8 +432,38 @@ export function writePayloadFrame(
     ? prebuiltFrameParts(id, expires, prebuilt.capturedAt, prebuilt.requestId, prebuilt.signals, prebuilt.bodies)
     : undefined;
   const frame: PayloadFrame = { version: 1, id, expiresAt: expires, payload };
-  const task = writeTail.then(() => appendFrame(frame, parts));
-  writeTail = task.then(() => undefined, () => undefined);
+  // Accounted in exact serialized frame bytes: the prebuilt parts are the
+  // buffers that will be written; the non-prebuilt path serializes here once
+  // (the same buffer the append would build anyway). Counting before queueing
+  // is what makes the byte bound real rather than an estimate.
+  const estimatedBytes = parts
+    ? parts.reduce((total, part) => total + part.byteLength, 0)
+    : Buffer.byteLength(JSON.stringify(frame), "utf8");
+  if (backlog.length >= MAX_PAYLOAD_BACKLOG_ITEMS) {
+    throw new PayloadBacklogFullError("items");
+  }
+  if (backlogBytes + estimatedBytes > MAX_PAYLOAD_BACKLOG_BYTES) {
+    throw new PayloadBacklogFullError("bytes");
+  }
+  const task = new Promise<PayloadFileReference>((resolve, reject) => {
+    // The entry settles the caller's promise itself: the drain loop's own
+    // `.catch(() => undefined)` is only there so one failed write cannot
+    // stop the rest of the backlog from running. Bytes are charged here, on
+    // queue, and discharged when the entry starts running — the window
+    // between is exactly the memory the bound exists to cap.
+    backlogBytes += estimatedBytes;
+    backlog.push({
+      estimatedBytes,
+      run: async () => {
+        try {
+          resolve(await appendFrame(frame, parts));
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      },
+    });
+  });
+  drainBacklog();
   return task;
 }
 

@@ -17,7 +17,7 @@ import {
   type EarlyRejectionState,
 } from "../../src/transport/guards/early-rejection-capture";
 
-function sink(behavior: () => Promise<unknown>): EarlyRejectionCaptureSink {
+function sink(behavior: () => Promise<{ id: string; expiresAt: Date; payloadCaptureState?: string }>): EarlyRejectionCaptureSink {
   return { capture: behavior };
 }
 
@@ -27,7 +27,7 @@ function state(capture: EarlyRejectionCaptureSink): EarlyRejectionState {
 
 describe("captureEarlyRejectionPayload records why", () => {
   test("a successful capture is recorded as captured", async () => {
-    const s = state(sink(async () => ({ id: "p1" })));
+    const s = state(sink(async () => ({ id: "p1", expiresAt: new Date() })));
     await captureEarlyRejectionPayload(s, { tenantId: "t1" });
     expect(s.payloadCaptureState).toBe("captured");
   });
@@ -53,7 +53,7 @@ describe("captureEarlyRejectionPayload records why", () => {
   test("no ingress body leaves the state unset", async () => {
     const s: EarlyRejectionState = {
       requestId: "req-1",
-      payloadCapture: sink(async () => ({ id: "p1" })),
+      payloadCapture: sink(async () => ({ id: "p1", expiresAt: new Date() })),
     };
     await captureEarlyRejectionPayload(s, { tenantId: "t1" });
     expect(s.payloadCaptureState).toBeUndefined();

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { captureEarlyRejectionPayload, type EarlyRejectionCapture } from "../../src/transport/guards/early-rejection-capture";
 
 /** Records what a capture received, so no database is involved. */
-function recorder(): { captured: EarlyRejectionCapture[]; capture: (input: EarlyRejectionCapture) => Promise<unknown> } {
+function recorder(): { captured: EarlyRejectionCapture[]; capture: (input: EarlyRejectionCapture) => Promise<{ id: string; expiresAt: Date; payloadCaptureState?: string }> } {
   const captured: EarlyRejectionCapture[] = [];
   return {
     captured,

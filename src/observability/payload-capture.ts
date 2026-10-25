@@ -1,7 +1,8 @@
 import type { CartethyiaDatabase } from "../persistence/db-handle";
 import { DrizzleTelemetryStore } from "../persistence/stores/telemetry-store";
-import { prunePayloadFrames, writePayloadFrame } from "./payload-store";
+import { PayloadBacklogFullError, prunePayloadFrames, writePayloadFrame } from "./payload-store";
 import { resolveTelemetryPayloadMaxBytes } from "../config/telemetry";
+import { metrics } from "./metrics";
 import { preferencesReaderFor } from "../persistence/tenant-preferences";
 import type {
   TelemetryPayloadDepth,
@@ -155,7 +156,9 @@ export type PayloadCaptureState =
   /** The preference read failed, and capture fails closed. */
   | "skipped_preference_read_failed"
   /** The storage write failed after the decision to capture. */
-  | "failed_write";
+  | "failed_write"
+  /** The payload writer's backlog was at its bound, so the frame was dropped. */
+  | "failed_backlog";
 
 export interface PayloadCaptureInput {
   tenantId: string;
@@ -414,7 +417,12 @@ export class TelemetryPayloadCapture {
     this.store = new DrizzleTelemetryStore(db);
   }
 
-  async capture(input: PayloadCaptureInput): Promise<{ id: string; expiresAt: Date }> {
+  async capture(input: PayloadCaptureInput): Promise<{
+    id: string;
+    expiresAt: Date;
+    /** Terminal capture state for the request row (`failed_backlog` on a dropped frame). */
+    payloadCaptureState?: PayloadCaptureState;
+  }> {
     if (!isCaptureAllowed(input)) {
       throw Object.assign(new Error("payload capture not opted in"), {
         code: "capture_not_opted_in",
@@ -431,14 +439,33 @@ export class TelemetryPayloadCapture {
       input.maxBytes ?? resolveTelemetryPayloadMaxBytes(),
       retentionMs,
     );
-    const reference = await writePayloadFrame(record, record.expires_at, record._serialized
-      ? {
-          requestId: record.request_id,
-          capturedAt: record.captured_at.toISOString(),
-          signals: record.signals,
-          bodies: record._serialized,
-        }
-      : undefined);
+    let reference;
+    try {
+      reference = await writePayloadFrame(record, record.expires_at, record._serialized
+        ? {
+            requestId: record.request_id,
+            capturedAt: record.captured_at.toISOString(),
+            signals: record.signals,
+            bodies: record._serialized,
+          }
+        : undefined);
+    } catch (error) {
+      if (error instanceof PayloadBacklogFullError) {
+        // The writer's backlog is at its bound: the frame is dropped here,
+        // counted, and surfaced on the request as its own terminal state —
+        // distinct from a storage failure, because "the disk is slow" and
+        // "capture burst past the backlog bound" need different fixes. No
+        // `telemetry_payloads` row is inserted: a row without a frame would
+        // read as a corrupt reference.
+        metrics.cartethyia_payload_backlog_dropped_total.inc(1);
+        return {
+          id: "",
+          expiresAt: record.expires_at,
+          payloadCaptureState: "failed_backlog",
+        };
+      }
+      throw error;
+    }
     // Typed columns only — bodies live in the frame file. The schema has no
     // jsonb body column, so a body cannot be written to Postgres here.
     return this.store.insertPayload({

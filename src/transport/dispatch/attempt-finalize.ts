@@ -461,7 +461,7 @@ async function captureTerminalPayload(
         note("captured_metadata");
         return;
       }
-      await new TelemetryPayloadCapture(db).capture({
+      const metadataCapture = await new TelemetryPayloadCapture(db).capture({
         tenantId,
         requestId,
         requestBody: null,
@@ -471,13 +471,13 @@ async function captureTerminalPayload(
         scope: "tenant",
         tenantOptIn: true,
       });
-      note("captured_metadata");
+      note(metadataCapture.payloadCaptureState ?? "captured_metadata");
       return;
     }
     const maxBytes = captureDepthMaxBytes(depth);
     const providerRequest = providerCapture?.request ?? null;
     const providerResponse = await resolvedProviderResponse(providerCapture);
-    await new TelemetryPayloadCapture(db).capture({
+    const terminalCapture = await new TelemetryPayloadCapture(db).capture({
       tenantId,
       requestId,
       requestBody: requestBody ?? null,
@@ -490,7 +490,7 @@ async function captureTerminalPayload(
       scope: "tenant",
       tenantOptIn: true,
     });
-    note("captured");
+    note(terminalCapture.payloadCaptureState ?? "captured");
   } catch (error) {
     note("failed_write");
     reportCaptureFailure(error);

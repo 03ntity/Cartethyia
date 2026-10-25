@@ -283,6 +283,8 @@ export class PrometheusRegistry {
   readonly proxy_provider_adapter_load_ms: HistogramMetric;
   readonly pool_cooldown_record_failed: CounterMetric;
   readonly quota_cache_invalidate_failed: CounterMetric;
+  /** Payload frames dropped because the writer backlog was at its bound. */
+  readonly cartethyia_payload_backlog_dropped_total: CounterMetric;
 
   private readonly all: RenderableMetric[] = [];
 
@@ -376,6 +378,10 @@ export class PrometheusRegistry {
     this.quota_cache_invalidate_failed = this.counter(
       "quota_cache_invalidate_failed",
       "Quota cache invalidations that failed",
+    );
+    this.cartethyia_payload_backlog_dropped_total = this.counter(
+      "cartethyia_payload_backlog_dropped_total",
+      "Payload captures dropped because the payload writer backlog was full",
     );
   }
 

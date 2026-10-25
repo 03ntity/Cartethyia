@@ -14,7 +14,11 @@
 import type { PayloadCaptureState } from "../../observability/payload-capture";
 /** The capture surface this helper needs; matches the real capture's method. */
 export interface EarlyRejectionCaptureSink {
-  capture(input: EarlyRejectionCapture): Promise<unknown>;
+  capture(input: EarlyRejectionCapture): Promise<{
+    id: string;
+    expiresAt: Date;
+    payloadCaptureState?: string;
+  }>;
 }
 
 /** One early-rejection payload frame. */
@@ -56,7 +60,7 @@ export async function captureEarlyRejectionPayload(
   if (capture === undefined) return;
   if (state.ingressBody === undefined) return;
   try {
-    await capture.capture({
+    const result = await capture.capture({
       tenantId: authorization.tenantId,
       requestBody: state.ingressBody,
       // No provider exchange: the request never reached one.
@@ -66,7 +70,8 @@ export async function captureEarlyRejectionPayload(
       tenantOptIn: true,
       requestId: state.requestId,
     });
-    state.payloadCaptureState = "captured";
+    state.payloadCaptureState =
+      (result.payloadCaptureState as PayloadCaptureState | undefined) ?? "captured";
   } catch {
     // A capture failure is not a request failure; the telemetry row stands.
     state.payloadCaptureState = "failed_write";
