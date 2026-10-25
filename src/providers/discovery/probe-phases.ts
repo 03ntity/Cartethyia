@@ -36,6 +36,8 @@ import { OpenAICompatibleAdapter } from "../adapters/compatible-adapter";
 import { resolveByokWireProfile } from "../operations/byok-wire-profile";
 import { recordAccountFailure, recordAccountSuccess } from "../operations/account-health-service";
 import { buildCapabilityProfile } from "../../transport/routing/route-catalog";
+import { payloadRetentionMs, resolvePayloadCapture } from "../../observability/payload-capture";
+import type { TelemetryPayloadDepth } from "../../console/settings/contracts";
 import { classifyUpstreamFailure } from "../../transport/failure-policy";
 import { terminalFailure } from "../../transport/dispatch/attempt-finalize";
 import { GatewayError } from "../../protocol/gateway-error";
@@ -448,7 +450,23 @@ export interface ProbeReasoning {
 /** Tenant probe preferences that shape the request and telemetry. */
 export interface ProbePreferences {
   readonly probeReasoning: ProbeReasoning | undefined;
-  readonly payloadCaptureEnabled: boolean;
+  /**
+   * The tenant's resolved capture policy for the probe, through the same
+   * `resolvePayloadCapture` path every dispatched request uses.
+   *
+   * `none` (and a failed preference read — capture fails closed) captures
+   * nothing; `metadata` captures stage presence only; `full` keeps bodies at
+   * the tenant's own depth and retention. The previous boolean collapsed all
+   * three into "capture on", so a probe teed bodies at the flat deployment
+   * cap for a tenant whose choice was `metadata` — and whose live requests
+   * stored none.
+   */
+  readonly payloadCapture: {
+    readonly enabled: boolean;
+    readonly mode: "none" | "metadata" | "full";
+    readonly depth: TelemetryPayloadDepth;
+    readonly retentionMs: number;
+  };
 }
 
 /**
@@ -465,7 +483,12 @@ export async function loadProbePreferences(args: {
 }): Promise<ProbePreferences> {
   const { db, tenantId, wireFamily, request } = args;
   let probeReasoning: ProbeReasoning | undefined;
-  let payloadCaptureEnabled = false;
+  let payloadCapture: ProbePreferences["payloadCapture"] = {
+    enabled: false,
+    mode: "none",
+    depth: "minimum",
+    retentionMs: payloadRetentionMs(),
+  };
   // `auto` (and an omitted effort) means "send no reasoning intent": the probe
   // must reflect what the route does by itself, and a model that does not
   // support reasoning would otherwise fail a probe that should have passed.
@@ -483,10 +506,23 @@ export async function loadProbePreferences(args: {
     const raw = preferences?.responsesReasoningSummary;
     const mode: "auto" | "concise" | "detailed" =
       raw === "auto" || raw === "concise" || raw === "detailed" ? raw : "detailed";
-    // Unset matches the settings default: off. Only an explicit choice captures.
-    payloadCaptureEnabled =
-      preferences?.telemetryPayloads === "full" ||
-      preferences?.telemetryPayloads === "metadata";
+    // Unset matches the settings default: off. Only an explicit choice
+    // captures, and at the tenant's own depth/retention — the same resolution
+    // `resolvePayloadCapture` performs for dispatched requests, read from the
+    // same preferences row this phase already loaded.
+    const captureMode = preferences?.telemetryPayloads;
+    if (captureMode === "full" || captureMode === "metadata") {
+      const resolved = await resolvePayloadCapture(db, tenantId);
+      payloadCapture = resolved.ok
+        ? {
+            enabled: true,
+            mode: resolved.mode,
+            depth: resolved.depth,
+            retentionMs: resolved.retentionMs,
+          }
+        : // Failed preference read: capture fails closed.
+          { enabled: false, mode: "none", depth: "minimum", retentionMs: payloadRetentionMs() };
+    }
     if (wireFamily === "responses" && requestedEffort !== undefined) {
       probeReasoning = {
         effort: requestedEffort,
@@ -501,7 +537,7 @@ export async function loadProbePreferences(args: {
       };
     }
   }
-  return { probeReasoning, payloadCaptureEnabled };
+  return { probeReasoning, payloadCapture };
 }
 
 /**

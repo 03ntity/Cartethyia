@@ -164,7 +164,7 @@ export async function resolveCaptureRetentionForRequest(
  * much of large bodies survives. Moderate and maximum spike CPU/memory while
  * active; minimum is light enough to leave on.
  */
-function captureDepthMaxBytes(depth: TelemetryPayloadDepth): number {
+export function captureDepthMaxBytes(depth: TelemetryPayloadDepth): number {
   if (depth === "moderate") return 8 * 1024 * 1024;
   if (depth === "maximum") return 16 * 1024 * 1024;
   return 1 * 1024 * 1024;

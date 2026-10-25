@@ -181,6 +181,11 @@ export function createTransportPipeline(context: TransportPipelineContext): Tran
             (resolved) => (resolved.ok ? resolved.retentionMs : payloadRetentionMs()),
           ),
         ),
+        // The early-rejection capture resolves the tenant's capture mode
+        // through the same preference path dispatched requests use, instead of
+        // capturing bodies under the deployment default regardless of the
+        // tenant's none/metadata choice.
+        db: context.db,
       });
     } else {
       registerRequestCleanup(rootApp, { stateStore: context.stateStore });

@@ -26,13 +26,14 @@ function state(capture: EarlyRejectionCaptureSink): EarlyRejectionState {
 }
 
 describe("captureEarlyRejectionPayload records why", () => {
-  test("a successful capture is recorded as captured", async () => {
+  test("a tenant in full mode records captured", async () => {
     const s = state(sink(async () => ({ id: "p1", expiresAt: new Date() })));
+    s.payloadCapturePreference = { ok: true, mode: "full", depth: "minimum", retentionMs: 60_000 };
     await captureEarlyRejectionPayload(s, { tenantId: "t1" });
     expect(s.payloadCaptureState).toBe("captured");
   });
 
-  test("a failed write is recorded as failed_write, not silently as empty", async () => {
+  test("a failed write in full mode is recorded as failed_write, not silently as empty", async () => {
     // The distinction is the point: "we tried and storage failed" and "we never
     // tried" need different fixes, and both used to render as four blank panels.
     const s = state(
@@ -40,8 +41,30 @@ describe("captureEarlyRejectionPayload records why", () => {
         throw new Error("disk full");
       }),
     );
+    s.payloadCapturePreference = { ok: true, mode: "full", depth: "minimum", retentionMs: 60_000 };
     await captureEarlyRejectionPayload(s, { tenantId: "t1" });
     expect(s.payloadCaptureState).toBe("failed_write");
+  });
+
+  test("a tenant in none mode captures nothing at all", async () => {
+    // The bypass this gate exists to close: an early rejection used to capture
+    // the ingress body under the deployment default regardless of the tenant's
+    // choice. `none` now captures nothing and says why.
+    const recorder = sink(async () => ({ id: "must-not-run", expiresAt: new Date() }));
+    const s = state(recorder);
+    s.payloadCapturePreference = { ok: true, mode: "none", depth: "minimum", retentionMs: 60_000 };
+    await captureEarlyRejectionPayload(s, { tenantId: "t1" });
+    expect(s.payloadCaptureState).toBe("skipped_mode_none");
+  });
+
+  test("a tenant in metadata mode records stage presence, not bodies", async () => {
+    // No frame is written: the ingress body is exactly what metadata mode
+    // declines to retain, and there is no provider exchange to record.
+    const recorder = sink(async () => ({ id: "must-not-run", expiresAt: new Date() }));
+    const s = state(recorder);
+    s.payloadCapturePreference = { ok: true, mode: "metadata", depth: "minimum", retentionMs: 60_000 };
+    await captureEarlyRejectionPayload(s, { tenantId: "t1" });
+    expect(s.payloadCaptureState).toBe("captured_metadata");
   });
 
   test("no capture surface leaves the state unset rather than claiming one", async () => {
