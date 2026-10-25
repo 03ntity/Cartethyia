@@ -151,7 +151,14 @@ export class FirstBootSetupService {
           // that no longer matches the key the operator was shown.
           keyPrefix: defaultApiKey === undefined ? generated.prefix : secret.slice(0, 3),
           keyEncrypted: encryptCredential(secret),
-          requestsPerMinute: 240,
+          // Unset, not a number: a rate limit the operator never chose is a
+          // refusal they will meet without knowing where it came from. The
+          // gateway key is created at first boot and is the one every early
+          // request rides on, so seeding it with 240 made a ceiling out of a
+          // value nobody picked. Unset reads as unlimited in the UI and in
+          // admission, which is what an operator expects from a key they have
+          // not configured.
+          requestsPerMinute: null,
           isDefault: true,
         });
       }
