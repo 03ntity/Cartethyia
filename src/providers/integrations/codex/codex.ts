@@ -369,16 +369,21 @@ function authHeadersForCodex(
 }
 
 /**
- * Path of the Codex model registry, relative to the ChatGPT backend root.
+ * Paths of the Codex model registry, in the order they are tried.
  *
- * Donor `packages/catalog/src/discovery/codex.ts:9` tries `/codex/models` first
- * and `/models` second. Only the first path is used here: it is the one the
- * donor's own tests assert against
- * (`packages/coding-agent/test/model-discovery.test.ts:568,598`), and the
- * fallback exists upstream to accommodate relay base URLs this adapter does not
- * support.
+ * The donor tries `/codex/models` first and `/models` second
+ * (`packages/catalog/src/discovery/codex.ts:9`), both relative to the
+ * `https://chatgpt.com/backend-api` root (`packages/catalog/src/wire/codex.ts:5`)
+ * — so the first candidate is the same URL this file always used.
+ *
+ * The fallback used to be omitted on the ground that it exists upstream only
+ * for relay base URLs this adapter does not support. It is restored because
+ * fetching models failed outright with no listing endpoint reported: a single
+ * candidate means one upstream shape change removes discovery entirely, while
+ * trying both costs one extra request only when the first misses.
  */
-const CODEX_MODELS_PATH = "/backend-api/codex/models";
+const CODEX_MODELS_PATHS = ["/backend-api/codex/models", "/backend-api/models"] as const;
+const CODEX_MODELS_PATH = CODEX_MODELS_PATHS[0];
 
 /**
  * Shapes a client version may take for the `client_version` query parameter.
@@ -410,7 +415,7 @@ const CODEX_CLIENT_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
  */
 export function buildCodexModelsUrl(
   baseUrl: string,
-  path = CODEX_MODELS_PATH,
+  path: string = CODEX_MODELS_PATH,
   clientVersion = getCodexVersion(),
 ): string {
   const root = baseUrl.replace(/\/+$/, "");
@@ -471,39 +476,58 @@ export async function discoverCodexModels(input: {
       ? {}
       : { "x-openai-internal-codex-residency": residency }),
   };
+  const fetcher = input.fetcher ?? globalThis.fetch;
+  const root = input.baseUrl ?? DEFAULT_CHATGPT_BASE_URL;
+  let entries: readonly unknown[] | undefined;
   try {
-    const response = await (input.fetcher ?? globalThis.fetch)(
-      buildCodexModelsUrl(input.baseUrl ?? DEFAULT_CHATGPT_BASE_URL, CODEX_MODELS_PATH, version),
-      {
-        method: "GET",
-        headers,
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-      },
-    );
-    if (!response.ok) return null;
-    const payload = (await response.json()) as unknown;
-    const entries = boundedUpstreamArray(isRecord(payload) ? payload["models"] : undefined);
-    if (entries === undefined) return null;
-    const byId = new Map<string, ModelDefinition>();
-    for (const entry of entries) {
-      if (!isRecord(entry)) continue;
-      const id = sanitizeUpstreamLabel(entry["slug"] ?? entry["id"]);
-      if (id === undefined) continue;
-      const contextLimit = boundedUpstreamNumber(entry["context_window"], { min: 1, max: 1_000_000_000 });
-      const outputLimit = boundedUpstreamNumber(entry["max_output_tokens"], { min: 1, max: 1_000_000_000 });
-      byId.set(
-        id,
-        codexResponsesModel(
-          id,
-          contextLimit ?? DEFAULT_CODEX_DISCOVERY_CONTEXT_LIMIT,
-          outputLimit ?? DEFAULT_CODEX_DISCOVERY_OUTPUT_LIMIT,
-        ),
-      );
+    // Each candidate is tried in order and the first usable roster wins. The
+    // loop is what the donor does (`packages/catalog/src/discovery/codex.ts:138`);
+    // a non-200 or an unparseable body just advances to the next path, and
+    // exhausting them is the same "no roster" outcome as before.
+    for (const path of CODEX_MODELS_PATHS) {
+      let response: Response;
+      try {
+        response = await fetcher(buildCodexModelsUrl(root, path, version), {
+          method: "GET",
+          headers,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+        });
+      } catch {
+        continue;
+      }
+      if (!response.ok) continue;
+      let payload: unknown;
+      try {
+        payload = (await response.json()) as unknown;
+      } catch {
+        continue;
+      }
+      const found = boundedUpstreamArray(isRecord(payload) ? payload["models"] : undefined);
+      if (found === undefined) continue;
+      entries = found;
+      break;
     }
-    return [...byId.values()].sort((a, b) => a.modelId.localeCompare(b.modelId));
   } catch {
     return null;
   }
+  if (entries === undefined) return null;
+  const byId = new Map<string, ModelDefinition>();
+  for (const entry of entries) {
+    if (!isRecord(entry)) continue;
+    const id = sanitizeUpstreamLabel(entry["slug"] ?? entry["id"]);
+    if (id === undefined) continue;
+    const contextLimit = boundedUpstreamNumber(entry["context_window"], { min: 1, max: 1_000_000_000 });
+    const outputLimit = boundedUpstreamNumber(entry["max_output_tokens"], { min: 1, max: 1_000_000_000 });
+    byId.set(
+      id,
+      codexResponsesModel(
+        id,
+        contextLimit ?? DEFAULT_CODEX_DISCOVERY_CONTEXT_LIMIT,
+        outputLimit ?? DEFAULT_CODEX_DISCOVERY_OUTPUT_LIMIT,
+      ),
+    );
+  }
+  return [...byId.values()].sort((a, b) => a.modelId.localeCompare(b.modelId));
 }
 
 /** Reads just enough of an untyped body to tell SSE from JSON, then replays it. */

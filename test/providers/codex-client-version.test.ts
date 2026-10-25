@@ -137,6 +137,35 @@ describe("discoverCodexModels", () => {
     expect(models?.[0]?.outputLimit).toBe(128_000);
   });
 
+  test("tries the second registry path when the first yields no roster", async () => {
+    // The registry path is a single point of failure otherwise: one upstream
+    // shape change removes discovery entirely, and the caller sees "codex
+    // publishes no model-listing endpoint" — which is a claim about the
+    // provider, not about the one path we happened to ask.
+    const urls: string[] = [];
+    const fetcher: FetchLike = (async (input: Request | string | URL) => {
+      const url = String(input);
+      urls.push(url);
+      // The primary answers 200 with a body that carries no `models` array —
+      // the shape that used to end discovery with a null and no second try.
+      if (url.includes("/backend-api/codex/models")) return Response.json({ unrelated: 1 });
+      return Response.json({ models: [{ slug: "gpt-6-astra", context_window: 922_000 }] });
+    }) as unknown as FetchLike;
+
+    const models = await discoverCodexModels({ credential: "chatgpt-oauth-token", fetcher });
+    expect(urls).toHaveLength(2);
+    expect(urls[1]).toContain("/backend-api/models");
+    expect(models?.map((model) => model.modelId)).toEqual(["gpt-6-astra"]);
+  });
+
+  test("stops at the first path that yields a roster", async () => {
+    // Trying both is a fallback, not a preference: a usable answer on the
+    // primary must not cost a second request.
+    const calls = await runDiscovery({ models: [{ slug: "gpt-6.1-sol" }] });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toContain("/backend-api/codex/models");
+  });
+
   test("returns null instead of throwing when the upstream rejects the call", async () => {
     // Discovery is an enrichment over the static catalog: a failure must fall
     // back to CODEX_MODELS, never publish an empty model list.
