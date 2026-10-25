@@ -1063,7 +1063,34 @@ export async function recordAccountFailure(
   options?: AccountFailureEvidence,
 ): Promise<AccountErrorClassification | null> {
   const classification = classifyAccountError(error, options);
-  if (!classification.mutatesAccount) return classification;
+  /**
+   * Logged even when the classification does not mutate the account.
+   *
+   * `rate_limit_transient` seen on a stream frame carries no credential
+   * detail, so it classifies at provider scope and `mutatesAccount` is false
+   * — nothing is cooled and the account stays `active`. That part is correct:
+   * the upstream's own remedy ("switch to the other models") only works if the
+   * account keeps serving. But this returned without writing anything, so a
+   * rate-limited request showed up in the request log while the account's
+   * health log stayed empty — a symptom with no recorded cause.
+   *
+   * The row is the whole point of this branch: it records the failure without
+   * moving the account. Both status sides are the classification's own, so the
+   * dialog names the cause without claiming a transition that never happened.
+   */
+  if (!classification.mutatesAccount) {
+    void writeHealthEvent(db, {
+      entityKind: "account",
+      accountId,
+      fromStatus: classification.status,
+      toStatus: classification.status,
+      reason: classification.reason,
+      errorCategory: classification.category,
+      modelId: options?.modelId ?? null,
+      createdAt: new Date(),
+    }).catch(() => undefined);
+    return classification;
+  }
 
   const persist = async (client: CartethyiaDatabase): Promise<AccountErrorClassification | null> => {
     // Projected, not a bare `select()`: this runs on *every* attempt outcome,

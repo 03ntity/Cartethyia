@@ -160,6 +160,54 @@ describe("recordAccountFailure — a cooling deadline only ever moves later", ()
   });
 });
 
+describe("recordAccountFailure — a rate limit that changes nothing is still logged", () => {
+  test("a provider-scoped rate limit writes a health row", async () => {
+    // The opencode case: the request table showed `rate_limit_transient` while
+    // the account's health log was empty. A stream frame carries no credential
+    // detail, so the classification does not mutate — nothing is cooled and the
+    // account stays active, which is correct — but it returned before writing
+    // anything, so the operator had the symptom and no cause.
+    const { db, captured } = dbDouble(coolingAccount());
+    await recordAccountFailure(db, "acc-1", new Error("429 too many requests"), {
+      origin: "network",
+      scope: "provider",
+      statusCode: 429,
+      modelId: "gpt-5",
+    });
+    expect(captured.events).toHaveLength(1);
+    expect(captured.events[0]).toMatchObject({
+      errorCategory: "rate_limit_transient",
+      modelId: "gpt-5",
+    });
+  });
+
+  test("logging it does not move the account", async () => {
+    // The reason the row is safe to write: this branch must stay a log. No
+    // UPDATE reaches the account, so routing sees exactly what it saw before.
+    const { db, captured } = dbDouble(coolingAccount());
+    await recordAccountFailure(db, "acc-1", new Error("429 too many requests"), {
+      origin: "network",
+      scope: "provider",
+      statusCode: 429,
+    });
+    expect(captured.updates).toHaveLength(0);
+  });
+
+  test("the row does not claim a status transition that never happened", async () => {
+    // A same-status row is what the dialog renders as "ACTIVE → ACTIVE" beside
+    // the real cause. Claiming `active → cooldown` here would contradict the
+    // account status shown in the same dialog.
+    const { db, captured } = dbDouble(coolingAccount());
+    await recordAccountFailure(db, "acc-1", new Error("429 too many requests"), {
+      origin: "network",
+      scope: "provider",
+      statusCode: 429,
+    });
+    const row = captured.events[0]!;
+    expect(row["fromStatus"]).toBe(row["toStatus"]);
+  });
+});
+
 describe("recordAccountFailure — consecutiveFailures is a backoff level", () => {
   test("each further consecutive failure doubles an unstated fallback", async () => {
     // The base rate-limit fallback is 15m. Level 2 doubles it twice.
