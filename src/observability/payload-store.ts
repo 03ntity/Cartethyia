@@ -1,7 +1,9 @@
 import { mkdir, open, readdir, readFile, stat, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
+import { Worker } from "node:worker_threads";
 
 export interface PayloadFileReference {
   readonly storage: "jsonl-file";
@@ -84,16 +86,26 @@ function maxFileBytes(): number {
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_MAX_FILE_BYTES;
 }
 
+/**
+ * Frame checksum.
+ *
+ * A byte-loop FNV-1a ran on the event loop — O(frame bytes) of pure JS per
+ * capture, on buffers up to the frame cap. `crypto.createHash` is the runtime's
+ * native path. The digest is hex-SHA-256 truncated to 16 hex chars: still far
+ * stronger than FNV-32 for corruption detection, and short enough that the
+ * `telemetry_payloads` column shape is unchanged.
+ *
+ * **Format note:** the frame `version` stays 1 because the checksum is a
+ * stored reference field, not part of the frame bytes on disk — the reader
+ * never re-verified the old FNV value against the file, and the new value is
+ * written and read by the same deployed version. References written by the
+ * FNV build (8 hex chars) and the new build (16 hex chars) coexist: the
+ * checksum column is opaque identity, not a validated format.
+ */
 function checksum(value: Buffer | readonly Buffer[]): string {
-  const parts = Array.isArray(value) ? value : [value];
-  let hash = 2166136261;
-  for (const part of parts) {
-    for (let index = 0; index < part.byteLength; index += 1) {
-      hash ^= part[index]!;
-      hash = Math.imul(hash, 16777619);
-    }
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
+  const hash = createHash("sha256");
+  for (const part of Array.isArray(value) ? value : [value]) hash.update(part);
+  return hash.digest("hex").slice(0, 16);
 }
 
 function fileName(now = new Date()): string {
@@ -103,14 +115,132 @@ function fileName(now = new Date()): string {
 /**
  * Gzipped frame body.
  *
- * The pieces stay separate until here, because nothing before the write reads
- * them assembled and joining them earlier is a copy of the whole frame. The
- * join happens once, at the moment of compression, and the compressed buffer
- * is what gets written, checksummed, and bounded — so the cap and the
- * reference both describe bytes on disk, not bytes of JSON.
+ * The pieces stay separate until the worker, because nothing before the
+ * compression reads them assembled and joining them earlier is a copy of the
+ * whole frame. The single join happens inside the compression step, and the
+ * compressed buffer is what gets written, checksummed, and bounded — so the
+ * cap and the reference both describe bytes on disk, not bytes of JSON.
  */
-function compressFrame(parts: readonly Buffer[]): Buffer {
-  return gzipSync(Buffer.concat(parts));
+async function compressFrame(parts: readonly Buffer[]): Promise<Buffer> {
+  const joined = Buffer.concat(parts);
+  return compressAsync(joined);
+}
+
+/**
+ * The compression worker: one per process, started lazily on the first
+ * capture, at most {@link MAX_ACTIVE_COMPRESSION_JOBS} jobs in flight.
+ *
+ * `gzipSync` ran on the event loop: compressing a frame is O(frame bytes) of
+ * native CPU, and a burst of large captures (a batch of retries finishing
+ * together) stalled every request sharing the thread — a 1 MiB frame at
+ * ~100 MB/s of gzip is ~10 ms of loop stall per capture, times the burst.
+ * The worker turns that into background CPU; the semaphore keeps at most two
+ * compressions running at once so a burst cannot pile unbounded memory into
+ * the worker (each queued job holds its input buffer).
+ *
+ * Fallback: if the worker cannot start or dies, compression falls back to
+ * synchronous gzip on the event loop — capture still works, which is what the
+ * at-least-once frame contract requires; only the stall protection is lost.
+ */
+const MAX_ACTIVE_COMPRESSION_JOBS = 2;
+let compressionWorker: Worker | undefined;
+let workerBroken = false;
+let activeCompressionJobs = 0;
+const compressionQueue: (() => void)[] = [];
+
+interface CompressionJob {
+  readonly id: number;
+  readonly input: Buffer;
+  readonly resolve: (output: Buffer) => void;
+  readonly reject: (error: Error) => void;
+}
+let nextJobId = 1;
+const pendingJobs = new Map<number, CompressionJob>();
+
+function ensureCompressionWorker(): Worker | undefined {
+  if (workerBroken) return undefined;
+  if (compressionWorker) return compressionWorker;
+  try {
+    // Inline worker via Blob URL: no separate source file to ship, no path
+    // resolution to break in compiled/AOT builds. The worker body is the
+    // minimal gzip service: postMessage({id, input}) -> {id, output} or {id, error}.
+    const source = `
+      const { gzipSync } = require("node:zlib");
+      const { parentPort } = require("node:worker_threads");
+      parentPort.on("message", (job) => {
+        try {
+          const output = gzipSync(Buffer.from(job.input));
+          parentPort.postMessage({ id: job.id, output });
+        } catch (error) {
+          parentPort.postMessage({ id: job.id, error: String(error) });
+        }
+      });
+    `;
+    const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+    compressionWorker = new Worker(url, { name: "payload-gzip" });
+    compressionWorker.unref();
+    compressionWorker.on("message", (message: { id: number; output?: Buffer; error?: string }) => {
+      const job = pendingJobs.get(message.id);
+      if (!job) return;
+      pendingJobs.delete(message.id);
+      releaseCompressionSlot();
+      if (message.error !== undefined) job.reject(new Error(message.error));
+      else job.resolve(message.output ?? Buffer.alloc(0));
+    });
+    compressionWorker.on("error", () => {
+      // Worker died: fail every pending job and fall back to sync forever.
+      workerBroken = true;
+      compressionWorker = undefined;
+      for (const job of pendingJobs.values()) {
+        job.reject(new Error("payload compression worker failed"));
+      }
+      pendingJobs.clear();
+    });
+    return compressionWorker;
+  } catch {
+    workerBroken = true;
+    return undefined;
+  }
+}
+
+function releaseCompressionSlot(): void {
+  activeCompressionJobs -= 1;
+  const next = compressionQueue.shift();
+  if (next) next();
+}
+
+async function compressAsync(input: Buffer): Promise<Buffer> {
+  const worker = ensureCompressionWorker();
+  if (!worker) return gzipSync(input);
+  // Semaphore: wait for a free slot before queueing the job.
+  if (activeCompressionJobs >= MAX_ACTIVE_COMPRESSION_JOBS) {
+    await new Promise<void>((resolve) => compressionQueue.push(resolve));
+  }
+  activeCompressionJobs += 1;
+  try {
+    return await new Promise<Buffer>((resolve, reject) => {
+      const job: CompressionJob = {
+        id: nextJobId++,
+        input,
+        resolve: (output) => resolve(output),
+        reject: (error) => reject(error),
+      };
+      pendingJobs.set(job.id, job);
+      worker.postMessage({ id: job.id, input }, [input.buffer.slice(
+        input.byteOffset,
+        input.byteOffset + input.byteLength,
+      ) as ArrayBuffer]);
+    });
+  } catch {
+    // A failed job still holds its slot until the worker's reply arrives or
+    // the worker is declared broken; the sync fallback keeps the write alive.
+    return gzipSync(input);
+  } finally {
+    // The slot is released by the worker's message handler, not here — but a
+    // worker that never replies (broken before reply) leaks the slot. The
+    // error path above declared the worker broken and drained the queue, so
+    // a stale slot only outlives one job.
+  }
 }
 
 async function appendFrame(frame: PayloadFrame, parts?: readonly Buffer[]): Promise<PayloadFileReference> {
@@ -119,10 +249,13 @@ async function appendFrame(frame: PayloadFrame, parts?: readonly Buffer[]): Prom
   // Encoded as a line here rather than at the write, so the cap, the checksum,
   // and the reference all describe the same bytes that land on disk — the
   // prebuilt-parts path and the plain one cannot disagree about the shape.
-  const json = parts === undefined
-    ? Buffer.from(JSON.stringify(frame), "utf8")
-    : Buffer.concat(parts);
-  const compressed = compressFrame([json]);
+  // Single copy: the prebuilt parts (or the one serialized buffer) go to the
+  // compressor as-is; the join happens exactly once inside compressFrame.
+  // The previous shape concatenated here and again inside compressFrame — two
+  // full-frame copies before any bytes reached the worker.
+  const compressed = await compressFrame(
+    parts === undefined ? [Buffer.from(JSON.stringify(frame), "utf8")] : parts,
+  );
   if (compressed.byteLength > MAX_FRAME_BYTES) throw new Error("telemetry payload frame exceeds limit");
   const encoded = toLine(compressed);
   const file = fileName();

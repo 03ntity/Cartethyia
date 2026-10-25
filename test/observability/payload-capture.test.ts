@@ -299,6 +299,7 @@ describe("payload capture — UTF-8 byte budget", () => {
       tenantId: "tenant-1",
       requestId: "request-1",
       requestBody: { prompt },
+      responseBody: null,
       scope: "tenant" as const,
       tenantOptIn: true,
     };
@@ -360,7 +361,7 @@ describe("payload capture — UTF-8 byte budget", () => {
     // never splitting a code point.
     const providerResponse = await capture.response;
     expect(typeof providerResponse).toBe("string");
-    const keptText = providerResponse as string;
+    const keptText = providerResponse as unknown as string;
     expect(Buffer.byteLength(keptText, "utf8")).toBeLessThanOrEqual(ONE_MIB);
     expect(Buffer.byteLength(keptText, "utf8")).toBeGreaterThan(ONE_MIB - 16);
     // Every character complete: no lone surrogate or replacement char.

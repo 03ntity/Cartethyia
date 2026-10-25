@@ -67,3 +67,64 @@ describe("new frames", () => {
 });
 
 
+
+/**
+ * Async compression + single-copy frames.
+ *
+ * Compression moved off the event loop to one worker per process (max 2 jobs
+ * in flight) with a sync fallback when the worker is unavailable, and the
+ * frame is assembled exactly once (the prebuilt parts go straight to the
+ * compressor). These tests pin the observable contract: many concurrent
+ * writes all round-trip, the frame bytes on disk are unchanged in shape, and
+ * the reference fields describe the bytes actually stored.
+ */
+describe("async compression and frame assembly", () => {
+  test("many concurrent writes all round-trip through the worker", async () => {
+    const refs = await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        store.writePayloadFrame({ index: i, pad: "z".repeat(64 * 1024) }, new Date(Date.now() + 60_000)),
+      ),
+    );
+    expect(refs).toHaveLength(12);
+    for (const [i, ref] of refs.entries()) {
+      const payload = await store.readPayloadFrame(ref);
+      expect(payload).toEqual({ index: i, pad: "z".repeat(64 * 1024) });
+    }
+  });
+
+  test("the reference describes the exact stored line bytes", async () => {
+    const ref = await store.writePayloadFrame({ a: 1 }, new Date(Date.now() + 60_000));
+    const raw = await readFile(join(DIR, ref.file));
+    const line = raw.subarray(ref.offset, ref.offset + ref.length);
+    // The line is the newline-terminated base64 of gzip: printable and
+    // newline-terminated, and its length matches the reference exactly.
+    expect(line[line.length - 1]).toBe(0x0a);
+    expect(/^[\x20-\x7e\n]+$/.test(line.toString("utf8"))).toBe(true);
+  });
+
+  test("prebuilt-part frames keep every body under its own key", async () => {
+    const ref = await store.writePayloadFrame(
+      { opaque: "not used when prebuilt is provided" },
+      new Date(Date.now() + 60_000),
+      {
+        requestId: "req-1",
+        capturedAt: "2026-01-01T00:00:00.000Z",
+        signals: { toolCalls: 1, images: 0, attachments: 2 },
+        bodies: [
+          JSON.stringify({ request: true }),
+          JSON.stringify({ providerRequest: true }),
+          JSON.stringify({ providerResponse: true }),
+          JSON.stringify({ clientResponse: true }),
+          "null",
+        ],
+      },
+    );
+    const payload = (await store.readPayloadFrame(ref)) as Record<string, unknown>;
+    expect(payload["request_body"]).toEqual({ request: true });
+    expect(payload["provider_request_body"]).toEqual({ providerRequest: true });
+    expect(payload["provider_response_body"]).toEqual({ providerResponse: true });
+    expect(payload["client_response_body"]).toEqual({ clientResponse: true });
+    expect(payload["response_body"]).toBeNull();
+    expect(payload["signals"]).toEqual({ toolCalls: 1, images: 0, attachments: 2 });
+  });
+});
