@@ -10,8 +10,7 @@ import { globalOrOwnedBy, ownedByOnly } from "../../../persistence/tenant-scope"
 import { nextSortIndex, reorderSortIndex } from "../../../persistence/sort-order";
 import type { CartethyiaDatabase } from "../../../persistence/db-handle";
 import { buddyTaskLedger, models, providerAccounts, providerOauthStates, providers, telemetryUsageTotals, tenantDisabledModels } from "../../../persistence/schema";
-import { queryTelemetryEvents } from "../../../observability/event-log";
-import { isGatewayError } from "../../../observability/telemetry-status";
+import { breakdownTelemetry } from "../../../observability/event-query";
 import type { WireFamily } from "../../../protocol/canonical-model";
 import { listAccountHealthEvents, recoverAccount, deleteAccountHealthEvents, type AccountHealthEventRecord } from "../../../providers/operations/account-health-service";
 import { invalidateCredentialCache } from "../../../providers/operations/provider-credential-service";
@@ -957,17 +956,23 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
     const accountIds = rows.map((row) => row.id);
-    const todayEvents = await queryTelemetryEvents({ tenantId, accountIds, since: todayStart });
-    const todayByAccount = new Map<string, { requests: number; errors: number; inputTokens: number; outputTokens: number }>();
-    for (const event of todayEvents) {
-      if (!event.accountId) continue;
-      const bucket = todayByAccount.get(event.accountId) ?? { requests: 0, errors: 0, inputTokens: 0, outputTokens: 0 };
-      bucket.requests += 1;
-      if (isGatewayError(event.status, event.httpStatus)) bucket.errors += 1;
-      bucket.inputTokens += event.inputTokens ?? 0;
-      bucket.outputTokens += event.outputTokens ?? 0;
-      todayByAccount.set(event.accountId, bucket);
-    }
+    // Today's per-account usage is one GROUP BY, not a read of every event
+    // since midnight. `breakdownTelemetry("account")` is capped at 100 groups;
+    // a page of accounts never exceeds it, and the lookup below is by id, so a
+    // group that fell outside the cap simply reads as "no usage today" — the
+    // same value an account with no traffic gets.
+    const todayGroups = await breakdownTelemetry(this.db, tenantId, "account", todayStart);
+    const todayByAccount = new Map(
+      todayGroups.map((group) => [
+        group.key,
+        {
+          requests: group.requests,
+          errors: group.errors,
+          inputTokens: group.inputTokens,
+          outputTokens: group.outputTokens,
+        },
+      ]),
+    );
     const [lifetimeRows] = await Promise.all([
       this.db
         .select()

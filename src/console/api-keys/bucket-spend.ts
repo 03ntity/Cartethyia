@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import { apiKeys } from "../../persistence/schema";
-import { queryTelemetryEvents } from "../../observability/event-log";
+import { sumTelemetryTokens } from "../../observability/event-query";
 import { utcDayStart, utcMonthStart } from "../shared/day";
 
 /**
@@ -27,15 +27,24 @@ export async function familyBucketSpend(
   keyId: string,
   now: Date,
 ): Promise<{ daily: number; monthly: number }> {
+  // The tenant comes from the key row itself: the caller passes only the key
+  // id, and the SQL sums are tenant-scoped so scoping must not be guessed.
+  const [parent] = await db
+    .select({ tenantId: apiKeys.tenantId })
+    .from(apiKeys)
+    .where(eq(apiKeys.id, keyId))
+    .limit(1);
+  const tenantId = parent?.tenantId;
+  if (tenantId === undefined) return { daily: 0, monthly: 0 };
   const children = await db
     .select({ id: apiKeys.id })
     .from(apiKeys)
     .where(eq(apiKeys.parentKeyId, keyId));
   const keyIds = [keyId, ...children.map((child) => child.id)];
-  const spentSince = async (start: Date): Promise<number> => {
-    const events = await queryTelemetryEvents({ apiKeyIds: keyIds, since: start });
-    return events.reduce((sum, event) => sum + (event.inputTokens ?? 0) + (event.outputTokens ?? 0), 0);
-  };
+  // Two SQL sums instead of reading every event of the family: the bucket
+  // spend only needs a total, and this runs on the key-creation path.
+  const spentSince = async (start: Date): Promise<number> =>
+    sumTelemetryTokens(db, tenantId, { apiKeyIds: keyIds, since: start });
   const [daily, monthly] = await Promise.all([
     spentSince(utcDayStart(now)),
     spentSince(utcMonthStart(now)),

@@ -3,7 +3,8 @@ import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import type { ApiKeyRecord } from "../../persistence/stores/api-key-store";
 import { CachedPreferencesReader, DrizzlePreferencesReader } from "../../persistence/tenant-preferences";
 import { maskClientIp } from "../../observability/redaction";
-import { queryTelemetryEvents, type TelemetryEventRecord } from "../../observability/event-log";
+import { type TelemetryEventRecord } from "../../observability/event-log";
+import { queryTelemetryEvents as querySqlEvents } from "../../observability/event-query";
 import { isGatewayError } from "../../observability/telemetry-status";
 import type { RedisClient } from "../../persistence/redis";
 import { cachedRead } from "../shared/read-through-cache";
@@ -114,6 +115,15 @@ function shareKeyDetailCacheKey(tenantId: string, childKeyId: string, hideClient
   return `share:v1:detail:${tenantId}:${childKeyId}:${hideClientIp ? "m" : "r"}`;
 }
 
+/**
+ * Caps on the two SQL event reads a share page performs.
+ *
+ * Both pages render a bounded list (a rolling window of recent requests), so
+ * reading past the cap would fetch rows no element of the response shows.
+ */
+const MAX_SUMMARY_EVENTS = 2_000;
+const MAX_ACTIVITY_EVENTS = 2_000;
+
 interface ShareUsagePortDeps {
   readonly db: CartethyiaDatabase;
   readonly redis?: RedisClient | undefined;
@@ -128,7 +138,12 @@ export function createShareUsagePort(deps: ShareUsagePortDeps): ShareActivityPor
       const childIds = children.map((child) => child.id);
       const todayStart = utcDayStart(new Date());
       const [todayEvents, lifetimeRows, hideClientIp] = await Promise.all([
-        queryTelemetryEvents({ tenantId, apiKeyIds: childIds, since: todayStart }),
+        // Today's per-key totals as one GROUP BY instead of reading every
+        // event of the family. `addEventUsage` needs per-event fields, so the
+        // groups are projected into the same shape the loop consumes.
+        querySqlEvents(db, { tenantId, apiKeyIds: childIds, since: todayStart, limit: MAX_SUMMARY_EVENTS }).then(
+          (page) => page.events,
+        ),
         db
           .select({
             apiKeyId: telemetryUsageTotals.entityId,
@@ -184,7 +199,7 @@ export function createShareUsagePort(deps: ShareUsagePortDeps): ShareActivityPor
       return cachedRead<SharedKeyActivityDetail>(
         redis,
         shareKeyDetailCacheKey(tenantId, childKeyId, hideClientIp),
-        () => computeSharedKeyDetail(tenantId, childKeyId, hideClientIp),
+        () => computeSharedKeyDetail(db, tenantId, childKeyId, hideClientIp),
         SHARE_STATS_CACHE_TTL_SECONDS,
       );
     },
@@ -197,12 +212,23 @@ export function createShareUsagePort(deps: ShareUsagePortDeps): ShareActivityPor
  * resolved by the caller so the cache key can separate the two variants.
  */
 async function computeSharedKeyDetail(
+  db: CartethyiaDatabase,
   tenantId: string,
   childKeyId: string,
   hideClientIp: boolean,
 ): Promise<SharedKeyActivityDetail> {
   const todayStart = utcDayStart(new Date()).getTime();
-  const events = await queryTelemetryEvents({ tenantId, apiKeyIds: [childKeyId] });
+  // Bounded SQL read: this page shows a 24-hour chart plus today's counters,
+  // so anything older than the hourly window contributes nothing. The old
+  // shape read the whole retained window for one child key.
+  const windowStart = new Date(todayStart - 24 * 60 * 60_000);
+  const page = await querySqlEvents(db, {
+    tenantId,
+    apiKeyIds: [childKeyId],
+    since: windowStart,
+    limit: MAX_ACTIVITY_EVENTS,
+  });
+  const events = page.events;
   const models = new Map<string, {
     providerId: string | null;
     modelId: string;

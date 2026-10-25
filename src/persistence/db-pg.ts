@@ -250,3 +250,16 @@ export function createPgHandle(): PgHandle {
     },
   };
 }
+
+/**
+ * A Drizzle handle over an existing pool.
+ *
+ * Production builds one at boot from `getPool()`; a test that already owns a
+ * pool (the suite's shared, migrated one) needs the same query builder without
+ * booting a second connection set.
+ */
+export function pgHandleFromPool(pool: Pool): CartethyiaDatabase {
+  // No `logger`: drizzle's default logger prints the statement *and its bound
+  // parameters* on failure, which on the auth path includes a key hash.
+  return drizzle(pool, { schema: fullSchema });
+}

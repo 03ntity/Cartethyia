@@ -20,7 +20,6 @@
 import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import type { CartethyiaDatabase } from "../persistence/db-handle";
 import { telemetryEvents } from "../persistence/schema";
-import { resolveDbMode } from "../persistence/db-mode";
 import type { TelemetryEventRecord } from "./event-log";
 import { gatewayErrorSql } from "./telemetry-status";
 
@@ -43,11 +42,19 @@ export interface EventPage {
 
 export interface EventListQuery {
   readonly tenantId: string;
-  readonly since: Date;
+  /**
+   * Lower bound. Omitting it means "the whole retained window" — the SQL table
+   * is pruned by the same retention rule as the raw files, so an unbounded
+   * query is bounded by retention rather than unbounded in effect. (Backup
+   * export is the one caller that needs the full window.)
+   */
+  readonly since?: Date;
   readonly until?: Date;
   readonly apiKeyIds?: readonly string[];
   readonly accountIds?: readonly string[];
   readonly requestId?: string;
+  /** Several request ids at once — the backup restore's "already present" check. */
+  readonly requestIds?: readonly string[];
   readonly id?: string;
   readonly httpStatus?: number;
   readonly limit?: number;
@@ -58,6 +65,9 @@ export interface EventListQuery {
 export interface UsageSummary {
   readonly requests: number;
   readonly errors: number;
+  /** Lifecycle breakdown: cancelled and truncated counts, for the summary card. */
+  readonly cancelled: number;
+  readonly truncated: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cachedInputTokens: number;
@@ -81,6 +91,12 @@ export interface BreakdownGroup {
   readonly errors: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
+  /** Summed estimated cost; null when no row in the group carried a price. */
+  readonly costUsd: number | null;
+  /** Mean tokens/sec across rows that reported one; 0 when none did. */
+  readonly avgTokensPerSec: number;
+  /** Cached-input share of the prompt, summed for the group. */
+  readonly cachedInputTokens: number;
 }
 
 export interface ChartBucket {
@@ -188,20 +204,30 @@ export function eventRecordFromRow(row: {
 }
 
 /**
- * True when this deployment's backend is PostgreSQL.
+ * True when this handle speaks PostgreSQL.
  *
- * Detected from the resolved database mode, not from a property of the Drizzle
- * handle: `CartethyiaDatabase` is the pg-typed builder on both backends (the
- * SQLite adapter shares the type), so any handle-shape guess picks the wrong
- * branch and `percentile_cont` — which SQLite lacks — reaches SQLite.
+ * Read off the live dialect rather than `resolveDbMode()`/`handle.kind`:
+ * `CartethyiaDatabase` is the pg-typed builder on both backends (the SQLite
+ * adapter shares the type), and a test can build a SQLite handle while the
+ * process' mode is `full` — a mode-based guess then sends `percentile_cont`,
+ * which SQLite lacks, to SQLite. The dialect is the thing that actually
+ * renders the SQL, so it is the only answer that cannot disagree with it.
  */
-function isPostgres(): boolean {
-  return resolveDbMode() === "full";
+function isPostgres(db: CartethyiaDatabase): boolean {
+  const dialect = (db as unknown as { dialect?: { constructor?: { name?: string } } }).dialect;
+  return dialect?.constructor?.name === "PostgresDialect";
 }
 
-/** The shared tenant + window predicate every statement in this module adds. */
-function scoped(tenantId: string, since: Date) {
-  return and(eq(telemetryEvents.tenantId, tenantId), gte(telemetryEvents.createdAt, since));
+/**
+ * The tenant predicate — the scope every read shares — plus the window when
+ * one is given.
+ *
+ * Tenant is NOT optional: every statement here is tenant-scoped, and a query
+ * that forgot it would read another tenant's traffic.
+ */
+function scoped(tenantId: string, since?: Date) {
+  const tenant = eq(telemetryEvents.tenantId, tenantId);
+  return since === undefined ? tenant : and(tenant, gte(telemetryEvents.createdAt, since));
 }
 
 /**
@@ -229,6 +255,9 @@ export async function queryTelemetryEvents(
   }
   if (query.requestId !== undefined) {
     conditions.push(eq(telemetryEvents.requestId, query.requestId));
+  }
+  if (query.requestIds !== undefined) {
+    conditions.push(inArray(telemetryEvents.requestId, [...query.requestIds]));
   }
   if (query.id !== undefined) {
     conditions.push(eq(telemetryEvents.id, query.id));
@@ -302,6 +331,8 @@ export async function summarizeTelemetry(
     .select({
       requests: sql<number>`count(*)`,
       errors: sql<number>`sum(case when ${IS_GATEWAY_ERROR_SQL} then 1 else 0 end)`,
+      cancelled: sql<number>`sum(case when ${telemetryEvents.status} = 'cancelled' then 1 else 0 end)`,
+      truncated: sql<number>`sum(case when ${telemetryEvents.status} = 'truncated' then 1 else 0 end)`,
       inputTokens: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}), 0)`,
       outputTokens: sql<number>`coalesce(sum(${telemetryEvents.outputTokens}), 0)`,
       cachedInputTokens: sql<number>`coalesce(sum(${telemetryEvents.cachedInputTokens}), 0)`,
@@ -317,6 +348,8 @@ export async function summarizeTelemetry(
     return {
       requests: 0,
       errors: 0,
+      cancelled: 0,
+      truncated: 0,
       inputTokens: 0,
       outputTokens: 0,
       cachedInputTokens: 0,
@@ -333,6 +366,8 @@ export async function summarizeTelemetry(
   return {
     requests: numeric(row.requests),
     errors: numeric(row.errors),
+    cancelled: numeric(row.cancelled),
+    truncated: numeric(row.truncated),
     inputTokens: numeric(row.inputTokens),
     outputTokens: numeric(row.outputTokens),
     cachedInputTokens: numeric(row.cachedInputTokens),
@@ -360,7 +395,7 @@ async function latencyPercentiles(
   const base = [scoped(tenantId, since), isNotNull(telemetryEvents.latencyMs)];
 
   // Postgres: one statement computing all three continuous percentiles.
-  if (isPostgres()) {
+  if (isPostgres(db)) {
     const [row] = await db
       .select({
         p50: sql<number>`percentile_cont(0.50) within group (order by ${telemetryEvents.latencyMs})`,
@@ -401,6 +436,9 @@ function dimensionColumn(dimension: string) {
   if (dimension === "account") return telemetryEvents.accountId;
   if (dimension === "api_key" || dimension === "key") return telemetryEvents.apiKeyId;
   if (dimension === "client") return telemetryEvents.clientName;
+  // `client_ip` groups on the raw address; masking stays a post-grouping
+  // presentation step in the console, unchanged.
+  if (dimension === "client_ip" || dimension === "ip") return telemetryEvents.clientIp;
   if (dimension === "status") return telemetryEvents.httpStatus;
   if (dimension === "endpoint") return telemetryEvents.endpoint;
   return telemetryEvents.requestedModel;
@@ -433,6 +471,9 @@ export async function breakdownTelemetry(
       errors: sql<number>`sum(case when ${IS_GATEWAY_ERROR_SQL} then 1 else 0 end)`,
       inputTokens: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}), 0)`,
       outputTokens: sql<number>`coalesce(sum(${telemetryEvents.outputTokens}), 0)`,
+      cachedInputTokens: sql<number>`coalesce(sum(${telemetryEvents.cachedInputTokens}), 0)`,
+      costUsd: sql<number>`coalesce(sum(${telemetryEvents.estimatedCostUsd}), 0)`,
+      avgTokensPerSec: sql<number>`coalesce(avg(${telemetryEvents.tokensPerSec}), 0)`,
     })
     .from(telemetryEvents)
     .where(scoped(tenantId, since))
@@ -445,6 +486,11 @@ export async function breakdownTelemetry(
     errors: numeric(row.errors),
     inputTokens: numeric(row.inputTokens),
     outputTokens: numeric(row.outputTokens),
+    cachedInputTokens: numeric(row.cachedInputTokens),
+    // A group whose rows carried no price reports null, matching the console's
+    // "cost is unknown" reading rather than a false zero.
+    costUsd: numeric(row.costUsd) > 0 ? numeric(row.costUsd) : null,
+    avgTokensPerSec: numeric(row.avgTokensPerSec),
   }));
 }
 
@@ -462,7 +508,7 @@ export async function chartTelemetry(
   bucketSeconds: number,
 ): Promise<ChartBucket[]> {
   const width = Math.max(1, Math.trunc(bucketSeconds));
-  const bucketExpression = isPostgres()
+  const bucketExpression = isPostgres(db)
     ? sql<number>`(cast(extract(epoch from ${telemetryEvents.createdAt}) as bigint) / ${width}) * ${width}`
     : sql<number>`(cast(strftime('%s', ${telemetryEvents.createdAt}) as integer) / ${width}) * ${width}`;
   const rows = await db
@@ -546,4 +592,99 @@ export async function sumTelemetryTokens(
     .from(telemetryEvents)
     .where(and(...conditions));
   return numeric(row?.total ?? 0);
+}
+
+/**
+ * The health card's latency and throughput figures for one window.
+ *
+ * Same principle as {@link summarizeTelemetry}: `avg(tokens_per_sec)` and the
+ * latency percentiles are computed by the database. The console's health card
+ * used to pull every retained event into an array to average `tokensPerSec`
+ * and sort latencies in JavaScript.
+ */
+export interface HealthPerformance {
+  readonly latencyAvgMs: number | null;
+  readonly latencyP50Ms: number | null;
+  readonly latencyP95Ms: number | null;
+  readonly latencyP99Ms: number | null;
+  readonly avgTokensPerSec: number;
+}
+
+export async function summarizeHealthPerformance(
+  db: CartethyiaDatabase,
+  tenantId: string,
+  since: Date,
+): Promise<HealthPerformance> {
+  const [row] = await db
+    .select({
+      latencyAvg: sql<number>`avg(${telemetryEvents.latencyMs})`,
+      sampled: sql<number>`count(${telemetryEvents.latencyMs})`,
+      avgTokensPerSec: sql<number>`coalesce(avg(${telemetryEvents.tokensPerSec}), 0)`,
+    })
+    .from(telemetryEvents)
+    .where(scoped(tenantId, since));
+  const sampled = numeric(row?.sampled ?? 0);
+  const percentiles = await latencyPercentiles(db, tenantId, since, sampled);
+  return {
+    latencyAvgMs: numericNullable(row?.latencyAvg ?? null),
+    latencyP50Ms: percentiles.p50,
+    latencyP95Ms: percentiles.p95,
+    latencyP99Ms: percentiles.p99,
+    avgTokensPerSec: numeric(row?.avgTokensPerSec ?? 0),
+  };
+}
+
+/**
+ * The Usage summary's performance block, computed in SQL.
+ *
+ * Replaces `summarizeUsagePerformance` (which sorted a latency array in
+ * JavaScript): `avg(resolve_ms)` and `avg(tokens_per_sec)` are SQL averages,
+ * and the latency percentiles come from the same database-side percentile
+ * path {@link summarizeTelemetry} uses.
+ */
+export interface UsagePerformanceTotals {
+  readonly avgResolveMs: number;
+  readonly avgDurationMs: number;
+  /**
+   * Percentiles as plain numbers: an empty window reports 0, which is what the
+   * JS-side `summarizeUsagePerformance` reported and what the summary card's
+   * contract expects. (The health reader keeps null so "no samples" stays
+   * distinguishable from a genuine near-zero latency.)
+   */
+  readonly latencyP50Ms: number;
+  readonly latencyP95Ms: number;
+  readonly latencyP99Ms: number;
+  readonly latencySampleCount: number;
+  readonly resolveSampleCount: number;
+  readonly avgTokensPerSec: number;
+}
+
+export async function summarizeUsagePerformanceSql(
+  db: CartethyiaDatabase,
+  tenantId: string,
+  since: Date,
+): Promise<UsagePerformanceTotals> {
+  const [row] = await db
+    .select({
+      sampled: sql<number>`count(${telemetryEvents.latencyMs})`,
+      latencyAvg: sql<number>`avg(${telemetryEvents.latencyMs})`,
+      resolveSum: sql<number>`coalesce(sum(${telemetryEvents.resolveMs}), 0)`,
+      resolveCount: sql<number>`count(${telemetryEvents.resolveMs})`,
+      avgTokensPerSec: sql<number>`coalesce(avg(${telemetryEvents.tokensPerSec}), 0)`,
+    })
+    .from(telemetryEvents)
+    .where(scoped(tenantId, since));
+  const sampled = numeric(row?.sampled ?? 0);
+  const resolveCount = numeric(row?.resolveCount ?? 0);
+  const percentiles = await latencyPercentiles(db, tenantId, since, sampled);
+  return {
+    avgResolveMs: resolveCount > 0 ? numeric(row?.resolveSum ?? 0) / resolveCount : 0,
+    avgDurationMs: numericNullable(row?.latencyAvg ?? null) ?? 0,
+    latencyP50Ms: percentiles.p50 ?? 0,
+    latencyP95Ms: percentiles.p95 ?? 0,
+    latencyP99Ms: percentiles.p99 ?? 0,
+    latencySampleCount: sampled,
+    resolveSampleCount: resolveCount,
+    avgTokensPerSec: numeric(row?.avgTokensPerSec ?? 0),
+  };
 }

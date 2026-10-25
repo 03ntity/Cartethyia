@@ -12,7 +12,7 @@
  * the cache is a Map-backed fake with the same `{ get, set }` shape as
  * `read-through-cache.test.ts`.
  */
-import { appendFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
@@ -25,9 +25,22 @@ const previousDataDir = process.env.CARTETHYIA_DATA_DIR;
 process.env.CARTETHYIA_DATA_DIR = sandbox;
 
 const { createShareStatsPort, SHARE_STATS_CACHE_TTL_SECONDS } = await import("../../src/console/share/share-stats");
-const { TELEMETRY_EVENT_DIR } = await import("../../src/observability/event-log");
+const { telemetryEvents, tenants } = await import("../../src/persistence/schema");
+const { createSqliteDatabase, applySqliteMigrations, buildSqliteHandle } = await import("../../src/persistence/db-sqlite");
 
-const FIXTURE_FILE = join(TELEMETRY_EVENT_DIR, "share-stats-cache-test.jsonl");
+// The port reads telemetry_events (the SQL record), so this needs a migrated
+// database rather than a raw file fixture.
+const dbPath = join(sandbox, "share-stats-cache.sqlite");
+const sqliteDb = createSqliteDatabase(dbPath);
+await applySqliteMigrations(sqliteDb);
+const db = buildSqliteHandle(sqliteDb).db;
+
+/** Creates the tenant a set of events is written under (FK parent). */
+async function createTenant(id: string): Promise<void> {
+  await db
+    .insert(tenants)
+    .values({ id, name: `share-${id}`, slug: `share-${id}`, status: "active" } as never);
+}
 
 interface Recorded {
   readonly reads: string[];
@@ -63,9 +76,9 @@ async function writeEvent(
   apiKeyId: string,
   overrides: Record<string, unknown> = {},
 ): Promise<void> {
-  await mkdir(TELEMETRY_EVENT_DIR, { recursive: true });
   const requestId = crypto.randomUUID();
-  const line = JSON.stringify({
+  await createTenant(tenantId).catch(() => undefined);
+  await db.insert(telemetryEvents).values({
     id: requestId,
     requestId,
     tenantId,
@@ -74,12 +87,11 @@ async function writeEvent(
     requestedModel: "claude-sonnet-4-6",
     stream: true,
     status: "completed",
-    createdAt: new Date().toISOString(),
+    createdAt: new Date(),
     inputTokens: 100,
     outputTokens: 50,
     ...overrides,
-  });
-  await appendFile(FIXTURE_FILE, `${line}\n`, "utf8");
+  } as never);
 }
 
 const RECIPIENTS = { total: 2, active: 1 } as const;
@@ -87,7 +99,15 @@ const RECIPIENTS = { total: 2, active: 1 } as const;
 afterAll(async () => {
   if (previousDataDir === undefined) delete process.env.CARTETHYIA_DATA_DIR;
   else process.env.CARTETHYIA_DATA_DIR = previousDataDir;
-  await rm(sandbox, { recursive: true, force: true });
+  sqliteDb.close();
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await rm(sandbox, { recursive: true, force: true });
+      break;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
 });
 
 /**
@@ -106,7 +126,7 @@ describe("createShareStatsPort — the Redis tier", () => {
     await writeEvent(tenantId, keyId);
     const stored = new Map<string, string>();
     const { client, recorded } = fakeClient(stored);
-    const port = createShareStatsPort({ redis: client as never });
+    const port = createShareStatsPort({ db, redis: client as never });
 
     const first = await port.getFamilyStats(tenantId, [keyId], RECIPIENTS);
 
@@ -139,7 +159,7 @@ describe("createShareStatsPort — the Redis tier", () => {
     await writeEvent(tenantId, keyId);
     const stored = new Map<string, string>();
     const { client, recorded } = fakeClient(stored);
-    const port = createShareStatsPort({ redis: client as never });
+    const port = createShareStatsPort({ db, redis: client as never });
 
     const first = await port.getFamilyStats(tenantId, [keyId], { total: 1, active: 1 });
     const second = await port.getFamilyStats(tenantId, [keyId], { total: 9, active: 4 });
@@ -159,9 +179,10 @@ describe("createShareStatsPort — the Redis tier", () => {
     await writeEvent(tenantId, keyId, { inputTokens: 5, outputTokens: 7, status: "failed", httpStatus: 502 });
 
     const cached = await createShareStatsPort({
+      db,
       redis: fakeClient(new Map()).client as never,
     }).getFamilyStats(tenantId, [keyId], RECIPIENTS);
-    const direct = await createShareStatsPort().getFamilyStats(tenantId, [keyId], RECIPIENTS);
+    const direct = await createShareStatsPort({ db }).getFamilyStats(tenantId, [keyId], RECIPIENTS);
 
     expect(cached).toEqual(direct);
     expect(direct.totals.requests).toBe(2);
@@ -173,7 +194,7 @@ describe("createShareStatsPort — the Redis tier", () => {
     const keyId = crypto.randomUUID();
     await writeEvent(tenantId, keyId);
     const { client } = fakeClient(new Map(), { failGet: true });
-    const port = createShareStatsPort({ redis: client as never });
+    const port = createShareStatsPort({ db, redis: client as never });
 
     const stats = await port.getFamilyStats(tenantId, [keyId], RECIPIENTS);
     expect(stats.totals.requests).toBe(1);
@@ -184,7 +205,7 @@ describe("createShareStatsPort — the Redis tier", () => {
     const keyId = crypto.randomUUID();
     await writeEvent(tenantId, keyId);
     const { client } = fakeClient(new Map(), { failSet: true });
-    const port = createShareStatsPort({ redis: client as never });
+    const port = createShareStatsPort({ db, redis: client as never });
 
     const stats = await port.getFamilyStats(tenantId, [keyId], RECIPIENTS);
     expect(stats.totals.requests).toBe(1);
@@ -194,7 +215,7 @@ describe("createShareStatsPort — the Redis tier", () => {
     // A freshly created link with no issued keys has no traffic to read, so it
     // must not touch Redis at all.
     const { client, recorded } = fakeClient(new Map());
-    const port = createShareStatsPort({ redis: client as never });
+    const port = createShareStatsPort({ db, redis: client as never });
     const stats = await port.getFamilyStats(crypto.randomUUID(), [], RECIPIENTS);
     expect(stats.totals.requests).toBe(0);
     expect(recorded.reads).toHaveLength(0);
@@ -210,7 +231,7 @@ describe("createShareStatsPort — the Redis tier", () => {
     await writeEvent(tenantId, a);
     const stored = new Map<string, string>();
     const { client, recorded } = fakeClient(stored);
-    const port = createShareStatsPort({ redis: client as never });
+    const port = createShareStatsPort({ db, redis: client as never });
 
     await port.getFamilyStats(tenantId, [a], RECIPIENTS);
     await port.getFamilyStats(tenantId, [b], RECIPIENTS);
