@@ -351,10 +351,13 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
       const children = await store.sumChildrenConsumed(apiKeyId);
       return (row.lifetimeTokensConsumed ?? 0) + children;
     },
-    // Slack above every key's concurrency limit. Deployment-wide rather than
-    // per key: it is operator configuration, not something a key can carry
-    // about itself to loosen its own ceiling.
-    () => resolveConcurrencyTolerance(),
+    // Slack above every key's concurrency limit. A tenant preference an
+    // operator sets in the runtime settings modal, falling back to the
+    // deployment default so an unset row does not silently lose the allowance.
+    (tenantId) =>
+      preferencesReaderFor(db)
+        .readPreferences(tenantId)
+        .then((prefs) => prefs?.concurrencyTolerance ?? resolveConcurrencyTolerance()),
   );
   const ipStore = redis
     ? new RedisIpAbuseStore(redis)

@@ -42,6 +42,11 @@ export interface RuntimeSettingsResponse {
    * reachable so the switch can be turned back off from the UI that set it.
    */
   readonly invokeDisabled: boolean;
+  /**
+   * Slack above every key's concurrency limit; `null` means none. The
+   * effective ceiling is `maxConcurrentRequests + concurrencyTolerance`.
+   */
+  readonly concurrencyTolerance: number | null;
   /** Per-tenant upstream request timeout in seconds; null means deployment default. */
   readonly upstreamTimeoutSeconds: number | null;
   /** Captured payload detail lifetime in minutes; null means deployment default. */
@@ -206,6 +211,9 @@ export const runtimeUpdateBody = t.Object({
    */
   forceDisableCooldown: t.Optional(t.Boolean()),
   invokeDisabled: t.Optional(t.Boolean()),
+  concurrencyTolerance: t.Optional(
+    t.Union([t.Null(), t.Number({ minimum: 0, maximum: 1024 })]),
+  ),
   upstreamTimeoutSeconds: t.Optional(
     t.Union([t.Null(), t.Number({ minimum: 5, maximum: 600 })]),
   ),

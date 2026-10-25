@@ -105,6 +105,12 @@ function normalizeImageClampMaxBytes(value: unknown): number | null {
   return normalizeBoundedNumber(value, 64 * 1024, 100 * 1024 * 1024);
 }
 
+/** Concurrency slack: 0–1024, and `null`/absent means no allowance. */
+function normalizeConcurrencyTolerance(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  return normalizeBoundedNumber(value, 0, 1024);
+}
+
 function mapRuntimeSettingsRow(
   row: typeof consoleSettings.$inferSelect | undefined,
   redisBackend: RedisBackend,
@@ -134,6 +140,7 @@ function mapRuntimeSettingsRow(
     ponyTailLevel: normalizePonyTailLevel(prefs.ponyTailLevel),
     forceDisableCooldown: prefs.forceDisableCooldown === true,
     invokeDisabled: prefs.invokeDisabled === true,
+    concurrencyTolerance: normalizeConcurrencyTolerance(prefs.concurrencyTolerance),
     upstreamTimeoutSeconds: normalizeUpstreamTimeoutSeconds(prefs.upstreamTimeoutSeconds),
     telemetryWindowMinutes: normalizeTelemetryWindowMinutes(prefs.telemetryWindowMinutes),
     imageClampMaxBytes: normalizeImageClampMaxBytes(prefs.imageClampMaxBytes),
@@ -179,6 +186,8 @@ export class DrizzleRuntimeSettingsStore implements RuntimeSettingsStore {
       patchPrefs.forceDisableCooldown = patch.forceDisableCooldown === true;
     if (patch.invokeDisabled !== undefined)
       patchPrefs.invokeDisabled = patch.invokeDisabled === true;
+    if (patch.concurrencyTolerance !== undefined)
+      patchPrefs.concurrencyTolerance = normalizeConcurrencyTolerance(patch.concurrencyTolerance);
     if (patch.upstreamTimeoutSeconds !== undefined)
       patchPrefs.upstreamTimeoutSeconds = normalizeUpstreamTimeoutSeconds(patch.upstreamTimeoutSeconds);
     if (patch.telemetryWindowMinutes !== undefined)

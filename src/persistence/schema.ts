@@ -1069,6 +1069,16 @@ export interface ConsoleSettingsPreferences {
    */
   invokeDisabled?: boolean;
   /**
+   * Slack added on top of every key's concurrency limit for this tenant.
+   *
+   * `maxConcurrentRequests` is the number an operator chose and what a
+   * refusal names; this is deliberate allowance above it so a run landing a
+   * few over is not refused at that number. Effective ceiling is
+   * `limit + tolerance`, and only requests past it are refused — never ones
+   * already admitted.
+   */
+  concurrencyTolerance?: number | null;
+  /**
    * Per-tenant upstream request timeout in seconds, overriding
    * `CARTETHYIA_UPSTREAM_TIMEOUT_MS`. `null` or absent means use the
    * deployment default.

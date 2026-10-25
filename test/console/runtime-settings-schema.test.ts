@@ -35,6 +35,7 @@ const REQUEST_KEYS: readonly (keyof UpdateRuntimeSettingsRequest)[] = [
   "ponyTailLevel",
   "forceDisableCooldown",
   "invokeDisabled",
+  "concurrencyTolerance",
   "upstreamTimeoutSeconds",
   "telemetryWindowMinutes",
   "imageClampMaxBytes",

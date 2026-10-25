@@ -40,7 +40,9 @@ export class ApiKeyAdmissionService {
      * than read from the snapshot so the number is operator configuration,
      * not something a key can carry about itself.
      */
-    private readonly concurrencyTolerance?: () => Promise<number | null> | number | null,
+    private readonly concurrencyTolerance?: (
+      tenantId: string,
+    ) => Promise<number | null> | number | null,
   ) {
     if (!store) throw new Error("ApiKeyAdmissionService requires an admission store");
   }
@@ -102,7 +104,7 @@ export class ApiKeyAdmissionService {
     const reservationId = `${apiKeyId}:${now}:${crypto.randomUUID()}`;
     const rawTenantLimit = this.tenantConcurrencyProvider(snapshot.tenant_id);
     const tenantLimit = rawTenantLimit instanceof Promise ? await rawTenantLimit : rawTenantLimit;
-    const rawTolerance = this.concurrencyTolerance?.();
+    const rawTolerance = this.concurrencyTolerance?.(snapshot.tenant_id);
     const tolerance = rawTolerance instanceof Promise ? await rawTolerance : rawTolerance;
 
     try {
