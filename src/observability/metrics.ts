@@ -285,6 +285,11 @@ export class PrometheusRegistry {
   readonly quota_cache_invalidate_failed: CounterMetric;
   /** Payload frames dropped because the writer backlog was at its bound. */
   readonly cartethyia_payload_backlog_dropped_total: CounterMetric;
+  /**
+   * Telemetry backfill conflicts: same (tenant, request) identity with
+   * different content. Reported, never overwritten.
+   */
+  readonly cartethyia_telemetry_raw_conflicts_total: CounterMetric;
 
   private readonly all: RenderableMetric[] = [];
 
@@ -382,6 +387,10 @@ export class PrometheusRegistry {
     this.cartethyia_payload_backlog_dropped_total = this.counter(
       "cartethyia_payload_backlog_dropped_total",
       "Payload captures dropped because the payload writer backlog was full",
+    );
+    this.cartethyia_telemetry_raw_conflicts_total = this.counter(
+      "cartethyia_telemetry_raw_conflicts_total",
+      "Telemetry backfill conflicts (same tenant/request identity, different content)",
     );
   }
 

@@ -105,42 +105,52 @@ export class DrizzleTelemetryStore {
     this.eventWriter = eventWriter;
   }
 
-  private async applyUsageDeltas(deltas: readonly UsageTotalDelta[], direction: 1 | -1): Promise<void> {
+  /**
+   * Applies usage deltas inside an enclosing transaction.
+   *
+   * Takes the transaction handle, not this.db: `insertEvents` runs the event
+   * insert and the aggregate upsert in ONE transaction, so usage is charged
+   * from the rows actually inserted — never from rows that `ON CONFLICT DO
+   * NOTHING` skipped. The deltas are computed by the caller from the
+   * inserted-rows result for exactly that reason.
+   */
+  private async applyUsageDeltas(
+    tx: Parameters<Parameters<CartethyiaDatabase["transaction"]>[0]>[0],
+    deltas: readonly UsageTotalDelta[],
+  ): Promise<void> {
     if (deltas.length === 0) return;
+    // Deterministic order so two processes racing the same identities lock
+    // rows in the same order and cannot deadlock.
     const ordered = [...deltas].sort((left, right) =>
       left.tenantId.localeCompare(right.tenantId)
       || left.identityType.localeCompare(right.identityType)
       || left.entityId.localeCompare(right.entityId));
-    await this.db.transaction(async (tx) => {
-      const now = new Date();
-      await tx
-        .insert(telemetryUsageTotals)
-        .values(ordered.map((delta) => ({
-          ...delta,
-          requests: direction * delta.requests,
-          errors: direction * delta.errors,
-          inputTokens: direction * delta.inputTokens,
-          outputTokens: direction * delta.outputTokens,
-          lastUsedAt: now,
-        })))
-        .onConflictDoUpdate({
-          target: [
-            telemetryUsageTotals.tenantId,
-            telemetryUsageTotals.identityType,
-            telemetryUsageTotals.entityId,
-          ],
-          set: {
-            requests: sql`${telemetryUsageTotals.requests} + excluded.requests`,
-            errors: sql`${telemetryUsageTotals.errors} + excluded.errors`,
-            inputTokens: sql`${telemetryUsageTotals.inputTokens} + excluded.input_tokens`,
-            outputTokens: sql`${telemetryUsageTotals.outputTokens} + excluded.output_tokens`,
-            // Do not alter lastUsedAt on a compensating upsert. A portable
-            // CASE keeps the original timestamp on either SQL backend.
-            lastUsedAt: sql`CASE WHEN excluded.requests < 0 THEN ${telemetryUsageTotals.lastUsedAt} ELSE ${laterOf(sql`${telemetryUsageTotals.lastUsedAt}`, sql`excluded.last_used_at`, this.db)} END`,
-            updatedAt: currentTimestamp(),
-          },
-        });
-    });
+    const now = new Date();
+    await tx
+      .insert(telemetryUsageTotals)
+      .values(ordered.map((delta) => ({
+        ...delta,
+        requests: delta.requests,
+        errors: delta.errors,
+        inputTokens: delta.inputTokens,
+        outputTokens: delta.outputTokens,
+        lastUsedAt: now,
+      })))
+      .onConflictDoUpdate({
+        target: [
+          telemetryUsageTotals.tenantId,
+          telemetryUsageTotals.identityType,
+          telemetryUsageTotals.entityId,
+        ],
+        set: {
+          requests: sql`${telemetryUsageTotals.requests} + excluded.requests`,
+          errors: sql`${telemetryUsageTotals.errors} + excluded.errors`,
+          inputTokens: sql`${telemetryUsageTotals.inputTokens} + excluded.input_tokens`,
+          outputTokens: sql`${telemetryUsageTotals.outputTokens} + excluded.output_tokens`,
+          lastUsedAt: laterOf(sql`${telemetryUsageTotals.lastUsedAt}`, sql`excluded.last_used_at`, this.db),
+          updatedAt: currentTimestamp(),
+        },
+      });
   }
 
   /** Writes raw events and maintains their durable identity aggregates. */
@@ -149,34 +159,54 @@ export class DrizzleTelemetryStore {
     // The file accepts anything, so a malformed row would be written and then
     // retried forever without ever failing. Rejecting it here keeps the buffer's
     // drop-and-count contract: one bad row fails the batch, once.
+    const unique: Array<typeof telemetryEvents.$inferInsert> = [];
+    const ids = new Set<string>();
     for (const row of rows) {
       if (!UUID_RE.test(row.tenantId)) {
         throw new Error("telemetry event rejected: tenantId is not a uuid");
       }
+      // In-batch dedupe on the stable id: keep the first occurrence. A batch
+      // containing the same request twice (a buffer bug or a replayed
+      // enqueue) writes one row and charges once, instead of relying on the
+      // DB to skip the second insert silently.
+      if (row.id !== undefined) {
+        if (ids.has(row.id)) continue;
+        ids.add(row.id);
+      }
+      unique.push(row);
     }
-    const deltas = aggregateUsage(rows);
-    // The per-request row goes to an append-only file, not to Postgres. The
-    // database keeps only the durable aggregate below, so a request never
-    // adds a row to the largest table. Readers of recent requests read the
-    // file; readers of long-term totals read the aggregate.
-    await this.applyUsageDeltas(deltas, 1);
-    // The aggregate commits before the file append so an invalid row is not
-    // rewritten on every database retry. A failed append is compensated below;
-    // only a failure of that compensation itself needs external reconciliation.
-    try {
-      await this.eventWriter.append(rows);
-    } catch (error) {
-      // Do not let the retry charge this batch twice. Compensation is itself
-      // a transaction, so a partial database outage cannot unwind only some
-      // identities in this batch. Surface both failures if that also fails.
-      await this.applyUsageDeltas(deltas, -1).catch((compensationError: unknown) => {
-        throw new AggregateError(
-          [error, compensationError],
-          "telemetry raw append failed and aggregate compensation also failed",
-        );
-      });
-      throw error;
-    }
+    // The raw append happens FIRST: the file is the at-least-once mirror. A
+    // crash after the append but before the SQL commit is recovered by
+    // `carte telemetry reconcile` (the backfill skips rows the unique index
+    // already holds). A raw append failure rejects the whole store call so
+    // the buffer retries the batch; nothing is committed, nothing charged.
+    await this.eventWriter.append(unique);
+    // One transaction: insert (skip conflicts), then charge usage from the
+    // rows actually inserted. A retried drain or a cross-process race
+    // converges to one row and one charge; no compensation transactions.
+    await this.db.transaction(async (tx) => {
+      const inserted = await tx
+        .insert(telemetryEvents)
+        .values(unique)
+        .onConflictDoNothing({
+          target: [telemetryEvents.tenantId, telemetryEvents.requestId],
+        })
+        .returning({
+          tenantId: telemetryEvents.tenantId,
+          requestId: telemetryEvents.requestId,
+          accountId: telemetryEvents.accountId,
+          apiKeyId: telemetryEvents.apiKeyId,
+          status: telemetryEvents.status,
+          httpStatus: telemetryEvents.httpStatus,
+          inputTokens: telemetryEvents.inputTokens,
+          outputTokens: telemetryEvents.outputTokens,
+        });
+      // Usage is charged only from what actually landed. `returning` on
+      // `ON CONFLICT DO NOTHING` yields exactly the inserted rows on both
+      // backends; skipped conflicts contribute nothing.
+      const deltas = aggregateUsage(inserted);
+      await this.applyUsageDeltas(tx, deltas);
+    });
   }
 
   /** Inserts one redacted payload and returns its generated identity. */
