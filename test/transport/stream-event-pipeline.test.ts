@@ -115,7 +115,9 @@ describe("stream event pipeline capture-mode gating", () => {
 
       // Gated diagnostics: empty transcript and no client-response copy.
       const transcript = pipeline.telemetryEventTranscript;
-      expect(Array.isArray(transcript) ? transcript.length : transcript.events.length).toBe(0);
+      // Gated modes return the plain array form (nothing was ever recorded).
+      expect(Array.isArray(transcript)).toBe(true);
+      if (Array.isArray(transcript)) expect(transcript).toHaveLength(0);
       expect(pipeline.clientResponseText).toBe("");
 
       // Completion-path fields preserved.

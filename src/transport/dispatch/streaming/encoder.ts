@@ -127,6 +127,9 @@ export class StreamEventPipeline {
   get telemetryEventTranscript():
     | readonly (CanonicalEvent & { timestamp: number })[]
     | TruncatedEventTranscript {
+    // Gated modes recorded nothing, so the transcript is the plain empty
+    // array — no truncated-marker object for content that was never kept.
+    if (this.diagnosticsCaptureMode !== "full") return [];
     const tail = this.eventTranscriptTail.slice(this.eventTranscriptTailStart).map((entry) => entry.event);
     const events = [...this.eventTranscriptHead, ...tail];
     const omittedEvents = this.totalEventCount - events.length;

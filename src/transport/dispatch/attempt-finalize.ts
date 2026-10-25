@@ -362,11 +362,16 @@ export function captureProviderExchange(
       method: init?.method ?? "GET",
       url,
       ...(headers === undefined ? {} : { headers }),
-      // Capped the same way the response is. A capture is a diagnostic, and an
-      // unbounded translated request body per attempt — up to `maxAttempts` of
-      // them, all alive until the loop returns — costs more than it can tell
-      // an operator.
-      ...(rawBody === null ? {} : { body: parseCapturedBody(rawBody.slice(0, maxBytes)) }),
+      // `captureBody=false` is the `none`/`metadata` path: record that a body
+      // was sent and how big it was, without slicing or parsing it. The old
+      // shape sliced up to `maxBytes` of the translated body and ran it through
+      // `JSON.parse` for every attempt — content a metadata-mode tenant had
+      // explicitly declined to retain, paid on every dispatch.
+      ...(rawBody === null
+        ? {}
+        : captureBody
+          ? { body: parseCapturedBody(rawBody.slice(0, maxBytes)) }
+          : { body_present: true, body_bytes: Buffer.byteLength(rawBody, "utf8") }),
     };
     const response = await inner(input, init);
     sink.response =

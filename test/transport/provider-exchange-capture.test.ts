@@ -132,3 +132,50 @@ describe("provider exchange capture", () => {
     expect(JSON.stringify(capture.request)).not.toContain("******");
   });
 });
+
+/**
+ * Metadata-mode provider capture: stage presence + size, no content.
+ *
+ * `captureBody=false` used to slice up to `maxBytes` of the translated request
+ * body and JSON.parse it on every attempt — content the tenant explicitly
+ * declined to retain, paid on every dispatch. Now the request line records
+ * `body_present` + `body_bytes` (UTF-8) and the body is never touched.
+ */
+describe("provider exchange capture — metadata mode", () => {
+  test("records presence and UTF-8 size without slicing or parsing the body", async () => {
+    // CJK-heavy body: 3 bytes per code point, so UTF-8 byte accounting is
+    // distinguishable from code-unit accounting (9 vs 3 here).
+    const body = JSON.stringify({ text: "汉汉汉" });
+    const capture = { request: null, response: Promise.resolve(null) };
+    const fetcher = captureProviderExchange(
+      async () => new Response("{}", { headers: { "content-type": "application/json" } }),
+      capture,
+      false,
+      providerCaptureMaxBytes("maximum"),
+    );
+    await fetcher("https://example.test/v1/chat/completions", { method: "POST", body });
+
+    const request = capture.request as Record<string, unknown>;
+    expect(request["method"]).toBe("POST");
+    expect(request["url"]).toBe("https://example.test/v1/chat/completions");
+    expect(request["body_present"]).toBe(true);
+    expect(request["body_bytes"]).toBe(Buffer.byteLength(body, "utf8"));
+    // No body content retained.
+    expect(request["body"]).toBeUndefined();
+    // Response tee skipped in metadata mode.
+    expect(await capture.response).toBeNull();
+  });
+
+  test("a request with no body records neither presence nor bytes", async () => {
+    const capture = { request: null, response: Promise.resolve(null) };
+    const fetcher = captureProviderExchange(
+      async () => new Response("{}", { headers: { "content-type": "application/json" } }),
+      capture,
+      false,
+    );
+    await fetcher("https://example.test/v1/models", { method: "GET" });
+    const request = capture.request as Record<string, unknown>;
+    expect(request["body_present"]).toBeUndefined();
+    expect(request["body_bytes"]).toBeUndefined();
+  });
+});
