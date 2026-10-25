@@ -65,6 +65,10 @@ const BUDDY_IMAGE_MODEL_IDS: readonly { id: string; endpoint: string; ctx: numbe
   { id: "gemini-3.1-flash-image", endpoint: "/chat/completions", ctx: 1_000_000, out: 64_000 },
   { id: "gpt-image-2", endpoint: "/chat/completions", ctx: 400_000, out: 128_000 },
   { id: "gpt-image-2.5-sunburst", endpoint: "/chat/completions", ctx: 400_000, out: 128_000 },
+  // Published by /v3/config only, tagged `text-to-image` + `image-to-image`.
+  // Upstream declares no token limits for it, so the roster floor is used
+  // rather than inventing a number the upstream never sent.
+  { id: "hy-image-3.5", endpoint: "/chat/completions", ctx: 1_000_000, out: 64_000 },
 ];
 
 /**
@@ -79,6 +83,11 @@ const BUDDY_IMAGE_MODEL_IDS: readonly { id: string; endpoint: string; ctx: numbe
  */
 const BUDDY_VIDEO_MODEL_IDS: readonly { id: string; endpoint: string; ctx: number; out: number }[] = [
   { id: "seedance-2.5", endpoint: "/videos/generations", ctx: 1_000_000, out: 128_000 },
+  // Published by /v3/config only, tagged `text-to-video` + `image-to-video`.
+  // Upstream declares capabilities in a `videoGeneration` block instead of
+  // token limits (720P/1080P/4K, 16:9/9:16/1:1, 3-15s, switchable audio,
+  // first/last-frame control), so the token columns carry the roster floor.
+  { id: "kling-video-v3", endpoint: "/videos/generations", ctx: 1_000_000, out: 128_000 },
 ];
 
 /**
@@ -254,11 +263,19 @@ export function makeBuddyModel(
  * output ceilings), so it keeps its own table.
  */
 export const BUDDY_SHARED_RAW: readonly BuddyRawEntry[] = [
-  ["auto", "Auto", true, true, 168_000, null],
+  ["auto", "Auto", false, true, 176_000, 24_000],
+  // The three named tiers and `gpt-6-astra` are published by /v3/config and sit
+  // in the CLI roster, but had no static row: a client asking for
+  // `fast-model` resolved to nothing and the model was invisible. Added with
+  // the limits upstream declares for them.
+  ["fast-model", "Fast", true, true, 200_000, 32_000, true],
+  ["balanced-model", "Balanced", true, true, 256_000, 32_000, true],
+  ["primary-model", "Primary", true, true, 272_000, 72_000, true],
+  ["gpt-6-astra", "GPT-6 Astra", true, true, 1_000_000, 128_000],
   ["claude-opus-4.6", "Claude Opus 4.6", true, true, 200_000, 64_000],
   ["claude-opus-4.7-1m", "Claude Opus 4.7 1M", true, true, 1_000_000, 64_000],
   ["claude-sonnet-4.6", "Claude Sonnet 4.6", true, true, 200_000, 32_000],
-  ["deepseek-v4.1-flash", "DeepSeek V4.1 Flash", true, true, 1_000_000, 384_000],
+  ["deepseek-v4.1-flash", "DeepSeek V4.1 Flash", true, true, 1_000_000, 128_000],
   ["deepseek-v4.1-flash-sg", "DeepSeek V4.1 Flash SG", true, true, 1_000_000, 128_000],
   ["gemini-2.5-flash-image", "Gemini 2.5 Flash Image", true, true, 1_000_000, 64_000],
   ["gemini-3.0-pro-image", "Gemini 3.0 Pro Image", true, true, 1_000_000, 64_000],
@@ -267,23 +284,23 @@ export const BUDDY_SHARED_RAW: readonly BuddyRawEntry[] = [
   ["gemini-3.5-flash", "Gemini 3.5 Flash", true, true, 1_048_576, 65_536],
   ["gemini-3.8-flash", "Gemini 3.8 Flash", true, true, 1_000_000, 65_536, true],
   ["glm-5.1", "GLM-5.1", true, false, 200_000, 131_072],
-  ["glm-5.2", "GLM-5.2", true, false, 1_000_000, 131_072],
-  ["glm-5.3", "GLM-5.3", true, false, 1_000_000, 131_072],
-  ["glm-5.3-flash", "GLM-5.3 Flash", true, false, 1_000_000, 131_072],
+  ["glm-5.2", "GLM-5.2", true, true, 1_000_000, 48_000],
+  ["glm-5.3", "GLM-5.3", true, true, 1_000_000, 48_000],
+  ["glm-5.3-flash", "GLM-5.3 Flash", true, true, 1_000_000, 32_000],
   ["glm-5v-turbo", "GLM-5V Turbo", true, true, 200_000, 131_072],
   ["gpt-5.3-codex", "GPT-5.3 Codex", true, true, 400_000, 128_000],
-  ["gpt-5.4", "GPT-5.4", true, true, 1_050_000, 128_000],
-  ["gpt-5.5", "GPT-5.5", true, true, 1_050_000, 128_000],
-  ["gpt-5.6-luna", "GPT-5.6 Luna", true, true, 1_050_000, 128_000],
-  ["gpt-5.6-sol", "GPT-5.6 Sol", true, true, 1_050_000, 128_000],
-  ["gpt-5.6-terra", "GPT-5.6 Terra", true, true, 1_050_000, 128_000],
-  ["gpt-6-luna", "GPT-6 Luna", true, true, 1_050_000, 128_000],
+  ["gpt-5.4", "GPT-5.4", true, true, 272_000, 72_000],
+  ["gpt-5.5", "GPT-5.5", true, true, 1_000_000, 128_000],
+  ["gpt-5.6-luna", "GPT-5.6 Luna", true, true, 1_000_000, 128_000],
+  ["gpt-5.6-sol", "GPT-5.6 Sol", true, true, 1_000_000, 128_000],
+  ["gpt-5.6-terra", "GPT-5.6 Terra", true, true, 1_000_000, 128_000],
+  ["gpt-6-luna", "GPT-6 Luna", true, true, 1_000_000, 128_000],
   ["gpt-6-sol", "GPT-6 Sol", true, true, 1_000_000, 128_000, true],
-  ["gpt-6.1-sol", "GPT-6.1 Sol", true, true, 1_050_000, 128_000],
+  ["gpt-6.1-sol", "GPT-6.1 Sol", true, true, 1_000_000, 128_000],
   ["gpt-image-2", "GPT-Image-2", true, true, 400_000, 128_000],
   ["grok-4.6", "Grok 4.6", true, true, 500_000, 500_000],
-  ["grok-4.7", "Grok 4.7", true, true, 500_000, 500_000],
-  ["hy3", "Hy3", true, false, 192_000, 64_000, true],
+  ["grok-4.7", "Grok 4.7", true, true, 500_000, 128_000],
+  ["hy3", "Hy3", true, true, 192_000, 64_000, true],
   ["hy3-preview", "Hy3 Preview", true, false, 262_144, 64_000],
   ["hy4-preview", "Hy4 Preview", true, true, 1_000_000, 64_000, true],
   ["hy4-preview-f", "Hy4 Preview F", true, true, 1_000_000, 64_000, true],
@@ -291,9 +308,10 @@ export const BUDDY_SHARED_RAW: readonly BuddyRawEntry[] = [
   ["kimi-k2.6", "Kimi K2.6", true, false, 256_000, 262_144],
   ["kimi-k2.7", "Kimi K2.7", true, false, 256_000, 65_536],
   ["kimi-k2.8-preview", "Kimi K2.8 Preview", true, false, 1_048_576, 65_536],
-  ["kimi-k3", "Kimi K3", true, false, 1_048_576, 131_072],
-  ["kimi-k3.1-pro", "Kimi K3.1 Pro", true, true, 1_000_000, 64_000],
-  ["kimi-k3.1-pro-highspeed", "Kimi K3.1 Pro Highspeed", true, true, 1_000_000, 64_000],
+  ["kimi-k3", "Kimi K3", true, true, 1_000_000, 32_000],
+  ["kimi-k3.1-pro", "Kimi K3.1 Pro", true, true, 1_000_000, 32_000],
+  ["kimi-k3.1-pro-highspeed", "Kimi K3.1 Pro Highspeed", true, true, 1_000_000, 32_000],
   ["minimax-m3", "MiniMax-M3", true, false, 512_000, 512_000],
+  ["minimax-m3.1-flash", "MiniMax-M3.1 Flash", true, true, 1_000_000, 128_000],
   ["step-5-preview", "Step-5-Preview", true, true, 1_000_000, 64_000, true],
 ];

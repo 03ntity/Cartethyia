@@ -87,7 +87,10 @@ describe("Buddy upstream protocol alignment", () => {
       max_tokens: 200_000,
     };
     buddyPrePayloadCommon(payload, request, "intl");
-    expect(payload["max_tokens"]).toBe(131_072);
+    // 48,000 is what /v3/config publishes for glm-5.2. The catalog carried
+    // 131,072, which no endpoint reports; the clamp is only as correct as the
+    // limit it clamps to, so this pins the live number.
+    expect(payload["max_tokens"]).toBe(48_000);
   });
 
   test("an effort the ladder serves as asked leaves max_tokens alone", () => {

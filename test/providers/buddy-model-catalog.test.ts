@@ -20,9 +20,17 @@ function luna(rows: readonly ModelDefinition[]) {
 }
 
 describe("live Buddy CLI models on the shared roster", () => {
-  test("omits GPT-6 Astra from both international catalogs", () => {
+  test("publishes GPT-6 Astra on both international catalogs", () => {
+    // It is in the live CLI roster of /v3/config, so omitting it made a
+    // servable model invisible. Asserted with the limits upstream declares
+    // rather than merely asserted present, so a silent limit drift fails here.
     for (const rows of [CODEBUDDY_MODELS, WORKBUDDY_MODELS]) {
-      expect(rows.some((model) => model.modelId === "gpt-6-astra")).toBe(false);
+      const row = rows.find((model) => model.modelId === "gpt-6-astra");
+      expect(row).toBeDefined();
+      expect(row?.contextLimit).toBe(1_000_000);
+      expect(row?.outputLimit).toBe(128_000);
+      expect(row?.reasoning).toBe(true);
+      expect(row?.toolCall).toBe(true);
     }
   });
 
@@ -52,11 +60,18 @@ describe("live Buddy CLI models on the shared roster", () => {
     }
   });
 
-  test("omits the backend-selected aliases and kimi-k3.1", () => {
-    // These ids are not models a client should be offered: the four aliases
-    // resolve server-side, and kimi-k3.1 is not served. `auto` stays, and is
-    // no longer rewritten onto `default-model`.
-    for (const id of ["balanced-model", "default-model", "fast-model", "primary-model", "kimi-k3.1"]) {
+  test("publishes the named tiers, keeps default-model server-selected, omits kimi-k3.1", () => {
+    // `fast-model`, `balanced-model` and `primary-model` are first-class rows in
+    // the live CLI roster with published limits, so they belong in the catalog.
+    // `default-model` is different: it is the id `auto` is rewritten onto at
+    // dispatch (`BUDDY_AUTO_TARGET`), so publishing it would offer a client an
+    // id it never needs to send. `kimi-k3.1` is not in the roster at all.
+    for (const id of ["fast-model", "balanced-model", "primary-model"]) {
+      for (const rows of [CODEBUDDY_MODELS, WORKBUDDY_MODELS]) {
+        expect(rows.some((model) => model.modelId === id)).toBe(true);
+      }
+    }
+    for (const id of ["default-model", "kimi-k3.1"]) {
       for (const rows of [CODEBUDDY_MODELS, WORKBUDDY_MODELS]) {
         expect(rows.some((model) => model.modelId === id)).toBe(false);
       }
@@ -79,10 +94,11 @@ describe("gpt-6-luna on the buddy roster", () => {
   test("cb publishes it at the shared context window", () => {
     const row = luna(CODEBUDDY_MODELS);
     expect(row).toBeDefined();
-    // 1,050,000 is what `gpt-6.1-sol` carries on this roster, and what the
-    // bundled base catalog records for `gpt-6-luna`. Asserting against the
-    // sibling row rather than a literal keeps the two from drifting apart.
-    expect(row?.contextLimit).toBe(1_050_000);
+    // 1,000,000 is what /v3/config publishes for `gpt-6-luna` (and for every
+    // gpt-6 sibling). It was recorded as 1,050,000, a number no endpoint
+    // reports; asserting the sibling as the source of truth would have kept
+    // that error self-consistent instead of catching it.
+    expect(row?.contextLimit).toBe(1_000_000);
     expect(row?.outputLimit).toBe(128_000);
   });
 

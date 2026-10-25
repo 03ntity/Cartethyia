@@ -29,6 +29,7 @@ describe("Buddy Pro-only tagging follows measured account scope", () => {
       WORKBUDDY_MODELS.filter((row) => row.proOnly === true).map((row) => row.modelId),
     );
     const expected = new Set([
+      "primary-model",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
       "gpt-5.6-sol",
