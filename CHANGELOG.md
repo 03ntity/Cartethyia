@@ -8,6 +8,213 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.6.0] - 2026-10-25
+
+This is the lightweight-runtime release: a 1-core / 2 GiB deployment should
+again serve its users with the dashboard open, without adding RAM. It closes
+the regression traced to 2.5.10's raw-file analytics reader and removes the
+per-request costs that made a saturated box worse the more it was asked to do.
+
+Migration `0020_add_telemetry_event_analytics.sql` ships in both
+`migrations/full-postgres/` and `migrations/lite-sqlite3/`. An existing
+database applies it; a fresh one builds from the current baseline.
+
+### Added
+
+- **`carte telemetry reconcile --apply|--verify`.** Recovers events that
+  reached the raw JSONL mirror but not the SQL analytics table — the window
+  left behind by any earlier release, and by a crash between the raw append
+  and the SQL commit. It streams each raw file from a committed byte offset,
+  inserts at most 500 events per transaction, and never touches lifetime usage
+  totals (those events were already charged). `--verify` only reports: rows
+  missing from SQL, rows whose content conflicts, and SQL-only rows by hour.
+  Conflicts are reported, never overwritten. A second concurrent run is
+  rejected by lease.
+
+- **Optional multi-process operation.** `CARTETHYIA_PROCESS_COUNT` (1–16) and
+  `CARTETHYIA_PROCESS_INDEX` (0–N-1) run several gateway processes over one
+  database. Count above 1 requires Linux, `CARTETHYIA_DB_MODE=full`, and a
+  *reachable* Redis; boot fails with a named reason rather than starting a
+  fleet that cannot coordinate. Lite stays single-process. Single-process
+  deployments are unchanged.
+
+- **`CARTETHYIA_PROCESS_CONCURRENCY_LIMIT`** (1–64) overrides the derived
+  in-flight ceiling. An override above the derived value is logged as
+  intentional, so a box running hotter than its memory suggests is a recorded
+  decision rather than an invisible one.
+
+- **Buddy image and video models are routable.** `hy-image-3.5` (cb/workbuddy)
+  and `kling-video-v3` (video, `/videos/generations`) are published upstream
+  but were absent from the catalog, so a request for them resolved to nothing.
+  On the CN realm `hunyuan-image-alpha` is published the same way, and the CN
+  adapter now routes image generation instead of sending it to
+  `/chat/completions`.
+
+- **A repeatable catalog capture.** `scripts/tools/capture-buddy-catalogs.ts`
+  regenerates `data/provider-catalogs/` from a live directory read; earlier
+  captures were produced by a script that was never committed and so could not
+  be reproduced. `--check` reports drift without writing.
+
+### Fixed
+
+- **The landing and share headers point at `risunCodex/Cartethyia`.** The
+  landing nav's "Community" item was a link to the old repository, and the
+  GitHub badge — shared by the landing and share pages — linked to and counted
+  `risunCode`, the account GitHub hid. Both now link to the primary repository,
+  the star and fork badges count it instead of the mirror, and the console's
+  version badge opens its releases page. `risunCode` stays reachable as a
+  labelled secondary entry in the source menu, listed after the primary. The
+  landing nav also gains a real GitHub item and the community item now points at
+  Discord, which is what it always claimed to be.
+
+- **Runtime logging goes through the logger.** Three modules called
+  `console.warn` directly (qoder and trae quota misses, the trusted-proxy
+  collapse warning), which bypasses level filtering, sanitization and the
+  console's own log view — so the message written for an operator was invisible
+  in the dashboard that operator reads. All three use `log.warn`. The
+  `ip-boundary` case was exempted on the stated ground that importing the
+  logger would make it unimportable; the logger pulls in only pino, the console
+  log ring and its own sanitizer, none of which import the boundary, so there
+  was no cycle to avoid.
+
+
+- **Console analytics read SQL instead of scanning raw files.** This is the
+  regression: 2.5.10 restored the raw JSONL reader as the analytics source,
+  so usage, charts, breakdowns, health and the requests list each read the
+  whole retained window from disk on every call. `telemetry_events` was
+  already written transactionally by the production path and already holds the
+  same bounded metadata, so the read side now queries it: aggregates execute
+  in SQL, list and detail use keyset pagination, and percentiles are ranked by
+  the database instead of by shipping latency arrays into JavaScript. For the
+  measured 20-user case this is the difference between 122 ms and 2.665 ms.
+
+- **A 304 no longer pays for a scan.** `usageRequests()` read the event files
+  *before* the ETag read-through, so a cache hit still cost the full read. The
+  file access moved after it.
+
+- **Metadata capture mode truly stores no bodies.** Stream diagnostics
+  JSON-serialized every event into a 512 KiB transcript and buffered a 512 KiB
+  copy of the client response even when the tenant's mode was `none` or
+  `metadata`. Both are now gated on the resolved capture mode; terminal event,
+  usage and every timing field are still recorded. Provider-exchange capture in
+  `metadata` mode records stage presence and sizes instead of parsing and
+  slicing the provider request body.
+
+- **1 MiB means 1 MiB of UTF-8.** Payload caps were counted in UTF-16 code
+  units, so a CJK-heavy body was truncated at roughly a third of the intended
+  budget. Budgets are now `Buffer.byteLength` and truncation never splits a
+  code point. The provider tee floor in `full` mode rose from 256 KiB to
+  1 MiB.
+
+- **Early rejections and discovery probes honor the tenant's capture policy.**
+  Both bypassed mode, depth and retention and fell back to the 16 MiB default
+  body cap, so a tenant who configured `none` could still have bodies written.
+
+- **Privacy and crash consistency for telemetry writes.** Event rows now take
+  `id = requestId`, giving a stable cross-process idempotency boundary backed
+  by a unique `(tenant_id, request_id)`; the raw writer appends to a
+  process-owned file instead of using positioned writes with truncate, so two
+  processes cannot interleave into one file. A repeated insert charges usage
+  once, and a crash between the raw append and the SQL commit is recovered by
+  `reconcile`.
+
+- **Memory admission measured against the real limit.** The headroom guard
+  compared RSS against `os.totalmem()` — the host, not the container — so on a
+  capped box it never shed and the process OOM'd instead. It now compares
+  against `resolveMemoryLimitBytes()` (override → cgroup → 512 MiB fallback).
+  The in-flight ceiling is derived from that limit and the configured body
+  size: `floor(limit × 0.25 / (2 × body))`, so at 2 GiB with a 4 MiB body an
+  instance admits 64, with a 50 MB body 5. Rejected requests no longer
+  decrement a count they never incremented.
+
+- **Retention only reaps hours that are closed.** Pruning could delete a raw
+  file whose hour could still receive appends, silently losing events. It now
+  skips the current and preceding UTC hour and recognises both the new
+  writer-UUID filenames and the two legacy formats.
+
+- **Buddy catalogs corrected against a live directory read.** Limits and
+  capability flags had drifted on both realms — 17 rows on the shared
+  international roster and 13 on CN. The largest: `gpt-5.4` was published at
+  1,050,000 / 128,000 where upstream reports 272,000 / 72,000; `grok-4.7` at
+  500,000 output where upstream reports 128,000; `kimi-k3` at 1,048,576 /
+  131,072 with vision off where upstream reports 1,000,000 / 32,000 with
+  vision on. 1,050,000 appeared on seven international rows and is reported by
+  no endpoint. Added `fast-model`, `balanced-model`, `primary-model` and
+  `gpt-6-astra` (international) and `kimi-k3-1`, `minimax-m2.7` (CN), which
+  were live but had no row, so asking for them resolved to nothing. Removed 16
+  CN rows upstream no longer publishes — they survived only because a
+  reference fallback table listed them, and a fallback row for a retired model
+  routes to an id that answers 400.
+
+### Changed
+
+- **Per-plan admission no longer runs `KEYS`.** `snapshotAccountInflight()`
+  issued `KEYS admission:inflight:*` plus an unbounded `MGET` on every
+  `RoutingEngine.plan()` whenever any bounded candidate existed — an O(keys)
+  scan on the request path. It is replaced by `readAccountInflight(candidates)`,
+  which reads exactly the deduped candidate buckets via bounded `MGET` chunks
+  and issues no command at all for empty input. `KEYS` and `SCAN` are now
+  absent from the request path.
+
+- **Route resolution is O(candidates), not O(candidates × models).** The
+  model string was re-parsed and the candidate list rescanned for every
+  candidate on every plan. A per-snapshot index is built once and reused.
+
+- **Payload compression moved off the event loop.** `gzipSync` ran
+  synchronously per capture, and a byte-loop FNV checksum walked every frame
+  byte on the hot turn. Compression now runs in one worker per process with at
+  most two active jobs — never a worker per capture — and checksums use a
+  chunked native path. The frame is built in a single copy instead of two
+  `Buffer.concat` passes.
+
+- **Payload writer backlog is bounded.** An unbounded promise chain could
+  queue without limit; the writer now caps at 32 queued items / 64 MiB, and a
+  full backlog produces a typed drop (`payloadCaptureState: failed_backlog`, no
+  `telemetry_payloads` row, `cartethyia_payload_backlog_dropped_total`) rather
+  than growing until the process dies. The attempt loop also keeps only the
+  last fired capture instead of every attempt's.
+
+- **Maintenance tasks coordinate across processes.** Previously one process
+  could start retention while another was mid-run. A Redis lease now serialises
+  the side-effecting tasks (payload cleanup, retention, session sweep, account
+  health, OAuth and quota refresh, client-version monitor); the lease is
+  token-checked on renew and release, never unconditionally deleted. Within a
+  process, one task runs at a time and a busy tick skips rather than queues, so
+  there are no catch-up storms.
+
+- **`/v1/models` is cached** for 3 s (256 entries), invalidated by api-key,
+  provider, model, alias and backup-restore changes, and published across
+  processes when Redis is configured.
+
+- **Log payloads are bounded.** Every safe-copy and stringify path now
+  short-circuits when the level is filtered out — `logError` included — and
+  structural sanitization caps depth, array length, key count, string length
+  and total nodes with stable `[truncated]` markers.
+
+- **Amortized in-memory work.** RPM pruning no longer copies the surviving
+  suffix on every prune; reservation cleanup is expiry-ordered instead of
+  scanning the whole map; round-robin and capability caches share one bounded
+  LRU whose capability key includes the modality set, so a modality edit
+  invalidates.
+
+### Notes
+
+- **VPS capacity numbers are not yet measured.** The formulas, defaults and
+  correctness gates are implemented and tested on a 12-core / 16 GiB host; the
+  1-core / 2 GiB acceptance matrix has not been run, so this release claims no
+  concurrency or throughput figure for that box. `reports/F2-RESULTS.md`
+  records what was measured and what was not.
+
+- **Migration and cutover order** for an existing install: drain and stop the
+  old writers, apply migration 0020, run `carte telemetry reconcile --apply`
+  then `--verify`, then start the new processes. Running old file-only writers
+  beside new SQL readers is an unsupported window.
+
+- **The raw JSONL mirror is retained** as the at-least-once recovery source.
+  SQL uniqueness plus backfill dedupe is the consistency boundary; torn raw
+  tails are skipped and conflicts are reported rather than silently
+  overwritten.
+
 ## [2.5.10] - 2026-10-25
 
 ### Fixed

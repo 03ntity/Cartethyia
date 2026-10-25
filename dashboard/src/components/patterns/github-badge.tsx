@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactElement } from "react";
 import {
-  GITHUB_ALT_REPO,
   GITHUB_ALT_REPO_URL,
+  GITHUB_REPO,
   GITHUB_REPO_URL,
   NPM_PACKAGE_URL,
   SOURCE_LINKS,
@@ -27,9 +27,10 @@ export const BADGE_IMAGE_ORIGIN = "https://img.shields.io";
  * figure — a reader who needs the exact number follows the link to the
  * repository, which is the only place it is authoritative.
  *
- * Read from the alternative repository, not the primary: the primary account is
- * hidden, so its badges would render zero or fail to load, and a badge showing
- * a count the reader cannot act on is worse than no badge at all.
+ * Read from the primary repository. These used to read from the alternative
+ * one on the assumption the primary account was still hidden and would render
+ * zero; it is public again, so counting the mirror showed a number for a
+ * project the badge no longer links to.
  */
 function badgeUrl(metric: "stars" | "forks", color: string): string {
   const params = new URLSearchParams({
@@ -37,7 +38,7 @@ function badgeUrl(metric: "stars" | "forks", color: string): string {
     labelColor: "0b1220",
     color,
   });
-  return `${BADGE_IMAGE_ORIGIN}/github/${metric}/${GITHUB_ALT_REPO}?${params.toString()}`;
+  return `${BADGE_IMAGE_ORIGIN}/github/${metric}/${GITHUB_REPO}?${params.toString()}`;
 }
 
 /** The GitHub mark, inlined so no brand-icon dependency is needed. */
@@ -157,7 +158,7 @@ export function GithubBadge({ className = "" }: { className?: string }): ReactEl
       <div className="github-split">
       <a
         className="github-badge"
-        href={GITHUB_ALT_REPO_URL}
+        href={GITHUB_REPO_URL}
         target="_blank"
         rel="noreferrer"
         aria-label="Cartethyia on GitHub"

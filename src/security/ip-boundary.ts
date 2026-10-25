@@ -2,6 +2,7 @@
 
 import { isIP } from "node:net";
 import type { TrustedProxyBoundary } from "../config/network";
+import { log } from "../observability/logger";
 
 function ipv4ToNumber(address: string): number | undefined {
   const parts = address.split(".");
@@ -319,9 +320,12 @@ function maybeWarnIgnoredForwardedHeaders(
   if (collapseWarned) return;
   if (!isSuspectedProxyCollapse(request, boundary, peer)) return;
   collapseWarned = true;
-  // Not `log`, to keep this module importable without the logger's transport
-  // (and usable from the boundary tests, which construct bare `Request`s).
-  console.warn(
+  // Via `log`, so this ships through the same transport as everything else and
+  // is level-filtered. It was `console.warn` to keep the module importable
+  // without the logger, but the logger pulls in only pino, the console log ring
+  // and its own sanitizer — none of which import this module — so there is no
+  // cycle and the boundary tests import it the same way production does.
+  log.warn(
     `[ip-boundary] A forwarded client-address header arrived from a loopback peer ` +
       `(${unwrapMappedIpv4(peer)}) but the trusted-proxy boundary does not trust it, so ` +
       `the client address is the loopback peer for every caller. Every caller behind this ` +

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { Activity, ArrowRight, ArrowUpRight, Home, LogIn, MessageCircle, Network, ShieldCheck, Sparkles, Terminal } from "lucide-react";
-import { GITHUB_ALT_REPO_URL } from "../../lib/links";
-import { GithubBadge } from "../../components/patterns/github-badge";
+import { DISCORD_INVITE_URL, GITHUB_REPO_URL } from "../../lib/links";
+import { GithubBadge, GithubMark } from "../../components/patterns/github-badge";
 import { useReducedMotion } from "../../hooks/use-reduced-motion";
 
 type SignalIconName = "activity" | "network" | "shield" | "sparkles" | "terminal";
@@ -298,7 +298,11 @@ export function LandingPage(): ReactElement {
               <Terminal size={14} aria-hidden={true} />
               Console
             </a>
-            <a href={GITHUB_ALT_REPO_URL} target="_blank" rel="noreferrer">
+            <a href={GITHUB_REPO_URL} target="_blank" rel="noreferrer">
+              <GithubMark size={14} />
+              GitHub
+            </a>
+            <a href={DISCORD_INVITE_URL} target="_blank" rel="noreferrer">
               <MessageCircle size={14} aria-hidden={true} />
               Community
             </a>

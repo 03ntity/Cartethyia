@@ -41,7 +41,7 @@ import { useSystemHealth, useLatestRelease, useNotifications } from "../../hooks
 import { useProviders } from "../../hooks/providers";
 import { DASHBOARD_RELEASE_LABEL, DASHBOARD_VERSION } from "../../lib/version";
 import { formatUptime } from "../../lib/format/numbers";
-import { GITHUB_ALT_REPO_URL } from "../../lib/links";
+import { GITHUB_RELEASES_URL } from "../../lib/links";
 import { isNewerRelease, type SystemHealthResponse } from "../../data/contracts";
 import type { SessionUser } from "../../data/contracts";
 
@@ -827,7 +827,7 @@ export function DashboardShell({
                 <span>Cartethyia</span>
               </div>
               <div className="brand-version-badge">
-                <a href={GITHUB_ALT_REPO_URL} target="_blank" rel="noreferrer" className="brand-version-link">{DASHBOARD_RELEASE_LABEL}</a>
+                <a href={GITHUB_RELEASES_URL} target="_blank" rel="noreferrer" className="brand-version-link">{DASHBOARD_RELEASE_LABEL}</a>
                 {updateAvailable ? (
                   // A button, not a link to GitHub: the badge says an update
                   // exists and the dialog tells the operator how to install it.

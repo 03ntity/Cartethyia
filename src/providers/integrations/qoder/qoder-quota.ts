@@ -34,6 +34,7 @@ import {
   record,
 } from "../../quota/quota-contracts";
 import type { QuotaCollectionContext } from "../../quota/quota-support";
+import { log } from "../../../observability/logger";
 import { QODER_REALMS, type QoderRealm } from "./qoder-realm";
 
 /** Paths on the realm's openapi host. */
@@ -87,7 +88,7 @@ function creditWindow(
  */
 /** Records an unreadable body where an operator can act on it, not as an error. */
 function logQoderQuotaMiss(detail: string): void {
-  console.warn(`[quota] qoder quota unreadable: ${detail}`);
+  log.warn(`[quota] qoder quota unreadable: ${detail}`);
 }
 
 export async function fetchQoderQuota(

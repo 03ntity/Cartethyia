@@ -36,6 +36,7 @@ import {
 import type { QuotaCollectionContext } from "../../quota/quota-support";
 import { decodeJwtPayload } from "../../authentication/oauth-flow-store";
 import { buildTraeHeaders } from "./trae-headers";
+import { log } from "../../../observability/logger";
 import {
   TRAE_ENT_USAGE_PATH,
   TRAE_REGION_CORE_HOSTS,
@@ -246,7 +247,7 @@ function parseEntitlement(payload: unknown): {
  */
 function logTraeQuotaMiss(errors: readonly string[]): void {
   if (errors.length === 0) return;
-  console.warn(`[quota] trae surfaces unavailable: ${errors.join("; ")}`);
+  log.warn(`[quota] trae surfaces unavailable: ${errors.join("; ")}`);
 }
 
 /**

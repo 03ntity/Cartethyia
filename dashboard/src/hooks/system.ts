@@ -4,6 +4,7 @@ import { queryKeys } from "../data/query-keys";
 import type { SessionUser, UsageDimension } from "../data/contracts";
 import { assertAuditListPage, assertLatestRelease, assertSystemHealth, assertUsageBy, assertUsageChart, assertUsageRequestDetail, assertUsageRequests, assertUsageSummary, querySignal } from "../data/assert";
 import { DASHBOARD_QUERY_OPTIONS, POLL } from "../data/query-policy";
+import { GITHUB_RELEASES_URL } from "../lib/links";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -38,9 +39,12 @@ function readNotification(value: unknown): NotificationItem | undefined {
     message: item.message,
     createdAt: item.createdAt,
     level: item.level,
-    ...(item.href === "https://github.com/risunCodex/Cartethyia/releases"
-      ? { href: item.href }
-      : {}),
+    // Only the project's own release URL is trustworthy enough to render as a
+    // link; anything else a notification might carry is shown as plain text.
+    // Compared against the shared constant, not a literal: a rename would
+    // otherwise silently stop matching and strip the link from every
+    // update-available notification.
+    ...(item.href === GITHUB_RELEASES_URL ? { href: item.href } : {}),
   };
   return notification;
 }

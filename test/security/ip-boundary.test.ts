@@ -30,6 +30,7 @@ import {
   resolveClientIdentity,
 } from "../../src/security/ip-boundary";
 import type { TrustedProxyBoundary } from "../../src/config/network";
+import { log } from "../../src/observability/logger";
 
 /** No proxy trust: the raw TCP peer is the client. */
 const DISABLED: TrustedProxyBoundary = { mode: "disabled" };
@@ -491,9 +492,15 @@ describe("isSuspectedProxyCollapse — the tunnel signature", () => {
     // count is driven through it, and the seam resets the guard so the
     // assertion is about once-only and not about which suite ran first.
     resetProxyCollapseWarningForTests();
-    const original = console.warn;
+    // Spied on `log.warn`, not `console.warn`: the warning goes through the
+    // logger like every other runtime message, so a console spy would see
+    // nothing and this would pass vacuously — asserting zero messages while
+    // the warning still fires.
+    const original = log.warn;
     const messages: string[] = [];
-    console.warn = (message?: unknown) => {
+    (log as { warn: (message: string, ...args: unknown[]) => void }).warn = (
+      message?: unknown,
+    ) => {
       messages.push(String(message));
     };
     try {
@@ -505,7 +512,7 @@ describe("isSuspectedProxyCollapse — the tunnel signature", () => {
         expect(resolveClientIdentity(request(headers), boundary, "127.0.0.1")).toBe("127.0.0.1");
       }
     } finally {
-      console.warn = original;
+      (log as { warn: (message: string, ...args: unknown[]) => void }).warn = original;
     }
     expect(messages.length).toBe(1);
     // It names the fix, so the operator is not left with a diagnosis and no

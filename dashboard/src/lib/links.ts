@@ -1,11 +1,13 @@
 /**
  * Public source and distribution links, in one place.
  *
- * `risunCodex/Cartethyia` is the primary repository. The original
- * `risunCode/Cartethyia` was hidden from public view by GitHub after
- * automated star activity was flagged as manipulation; it is kept here as the
- * `GITHUB_ALT_REPO` for operators who still have access to it, but every
- * public surface points at `risunCodex` first.
+ * `risunCodex/Cartethyia` is the primary repository and the destination of
+ * every public surface — header links, the GitHub badge, and the star/fork
+ * counts. The original `risunCode/Cartethyia` was hidden from public view by
+ * GitHub after automated star activity was flagged as manipulation; it is kept
+ * here as `GITHUB_ALT_REPO` so operators who still have access keep a path to
+ * the historical repository, and so a rename cannot drop that link entirely.
+ * It is offered as a secondary menu entry, never as the visible default.
  *
  * These were declared twice: one copy in the console shell built them from a
  * repo slug, and the share page's badge component carried its own hardcoded URL
@@ -56,21 +58,21 @@ export interface SourceLink {
 /**
  * The split button's menu, primary destination first.
  *
- * The alternative leads because the primary is hidden: leading with a
- * link that may not load defeats the purpose of offering a choice.
+ * The primary leads: it is the repository the badge counts and the one a
+ * reader should land on. The alternative follows as a labelled mirror.
  */
 export const SOURCE_LINKS: readonly SourceLink[] = [
-  {
-    id: "github-alt",
-    label: "GitHub (alt)",
-    href: GITHUB_ALT_REPO_URL,
-    hint: "Mirror — star, fork, and releases",
-  },
   {
     id: "github",
     label: "GitHub",
     href: GITHUB_REPO_URL,
     hint: "Primary repository",
+  },
+  {
+    id: "github-alt",
+    label: "GitHub (alt)",
+    href: GITHUB_ALT_REPO_URL,
+    hint: "Historical mirror — original account",
   },
   {
     id: "gitlab",
