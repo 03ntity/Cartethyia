@@ -17,6 +17,30 @@
  *
  * `--check` exits nonzero when a live roster differs from the stored one, which
  * is the useful form for CI or a scheduled refresh check.
+ *
+ * Endpoint survey (probed live 2026-10-25 against both hosts, one credential):
+ *
+ *   200 /v3/config                        29 models, 27 in the CLI roster  <-- used
+ *   200 /v2/enterprises/personal/models   18 models, 17 in the CLI roster  (stale)
+ *   500 /console/enterprises/personal/models  (CN-only path; 500 on intl hosts)
+ *   404 /v1/models, /v3/models, /v2/models, /v4/config, /api/v3/config,
+ *       /v3/config/models, /v3/agent/config, /v1/enterprises/personal/models
+ *
+ * The personal-models path answers and is the runtime's fallback, but it is
+ * BEHIND: it lacks every model added since (gpt-6*, grok-4.7, kimi-k3.1*,
+ * gemini-3.8-flash, minimax-m3.1-flash, step-5-preview) and still lists retired
+ * ones (deep-model, kimi-k2.6, gemini-3.5-flash) plus gpt-5.3-codex. Capturing
+ * from it would silently regress the roster by ~11 models, so /v3/config is the
+ * source of record and the fallback is only for hosts that do not answer it.
+ *
+ * `x-product` does not change the roster: SaaS, IDE, Cli and an empty value all
+ * return the same 29/27. The per-model shape is identical across both paths
+ * (credits, descriptionEn/Zh, id, isDefault, maxAllowedSize, maxInputTokens,
+ * maxOutputTokens, name, supportsImages, supportsToolCall, temperature, vendor).
+ *
+ * The 29 -> 27 drop is the text-to-image/video filter: hy-image-3.5 carries
+ * `text-to-image` and kling-video-v3 carries `text-to-video`, which the runtime
+ * discovery path also excludes. Not a capture defect.
  */
 
 import { parseArgs } from "node:util";
@@ -65,6 +89,21 @@ const SITES: readonly { providerId: string; host: string }[] = [
   { providerId: "workbuddy", host: "www.workbuddy.ai" },
 ];
 
+/**
+ * Every path that answers, captured — not just the one we trust.
+ *
+ * `/v2/enterprises/personal/models` is the runtime's fallback and is stale by
+ * ~11 models. Recording it anyway is the point: the drift between the two is
+ * the evidence that /v3/config must stay the source of record, and a reader who
+ * only sees the good roster cannot tell that the fallback would regress it.
+ *
+ * Order matters: index 0 is the source of record.
+ */
+const ENDPOINTS: readonly { path: string; label: string }[] = [
+  { path: "/v3/config", label: "GET /v3/config" },
+  { path: "/v2/enterprises/personal/models", label: "GET /v2/enterprises/personal/models" },
+];
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -97,9 +136,11 @@ async function captureSite(
   providerId: string,
   host: string,
   credential: string,
+  endpointPath: string,
+  endpointLabel: string,
 ): Promise<Catalog> {
   const uid = accountUid(credential);
-  const response = await fetch(`https://${host}/v3/config`, {
+  const response = await fetch(`https://${host}${endpointPath}`, {
     method: "GET",
     headers: {
       accept: "application/json",
@@ -116,7 +157,7 @@ async function captureSite(
   const empty: Catalog = {
     providerId,
     host,
-    endpoint: "GET /v3/config",
+    endpoint: endpointLabel,
     identityUserAgent: IDENTITY_USER_AGENT,
     httpStatus: response.status,
     envelopeCode: null,
@@ -222,18 +263,30 @@ if (typeof token !== "string" || token.length === 0) {
 
 const catalogs: Catalog[] = [];
 for (const site of SITES) {
-  const captured = await captureSite(site.providerId, site.host, token);
-  catalogs.push(captured);
-  console.log(
-    `[capture] ${site.host}: http=${captured.httpStatus} code=${captured.envelopeCode} ` +
-      `models=${captured.models.length} cli=${captured.cliModelIds.length}`,
-  );
+  for (const endpoint of ENDPOINTS) {
+    const captured = await captureSite(
+      site.providerId,
+      site.host,
+      token,
+      endpoint.path,
+      endpoint.label,
+    );
+    catalogs.push(captured);
+    console.log(
+      `[capture] ${site.host} ${endpoint.path}: http=${captured.httpStatus} ` +
+        `code=${captured.envelopeCode} models=${captured.models.length} cli=${captured.cliModelIds.length}`,
+    );
+  }
 }
 
-const failed = catalogs.filter((c) => c.models.length === 0);
+// Only the source-of-record endpoint is required to answer. A secondary
+// endpoint coming back empty is a finding, not a reason to abort — the whole
+// point of capturing it is that it may be empty or stale.
+const failed = catalogs.filter((c) => c.endpoint === ENDPOINTS[0]!.label && c.models.length === 0);
 if (failed.length > 0) {
   console.error(
-    `[capture] ${failed.map((c) => c.host).join(", ")} returned no models — ` +
+    `[capture] ${failed.map((c) => c.host).join(", ")} returned no models on ` +
+      `${ENDPOINTS[0]!.label} — ` +
       `refusing to overwrite a working catalog with an empty roster.`,
   );
   process.exit(1);
@@ -251,10 +304,12 @@ if (typeof values.check === "string") {
   const stored = (await Bun.file(values.check).json().catch(() => null)) as
     | { catalogs?: readonly Catalog[] }
     | null;
-  const previous = new Map((stored?.catalogs ?? []).map((c) => [c.providerId, c]));
+  const previous = new Map(
+    (stored?.catalogs ?? []).map((c) => [`${c.providerId}|${c.endpoint}`, c]),
+  );
   let drift = 0;
   for (const current of catalogs) {
-    const before = previous.get(current.providerId);
+    const before = previous.get(`${current.providerId}|${current.endpoint}`);
     const beforeIds = new Set((before?.models ?? []).map((m) => m.id));
     const nowIds = new Set(current.models.map((m) => m.id));
     const added = [...nowIds].filter((id) => !beforeIds.has(id));
@@ -262,7 +317,7 @@ if (typeof values.check === "string") {
     if (added.length > 0 || removed.length > 0) {
       drift++;
       console.log(
-        `[check] ${current.providerId}: +${added.length} added (${added.join(", ") || "-"}) ` +
+        `[check] ${current.providerId} ${current.endpoint}: +${added.length} added (${added.join(", ") || "-"}) ` +
           `-${removed.length} removed (${removed.join(", ") || "-"})`,
       );
     } else {
