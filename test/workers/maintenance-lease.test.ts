@@ -38,7 +38,7 @@ function fakeRedis(): {
   const keys = new Map<string, string>();
   const calls: string[] = [];
   const client = {
-    async eval(script: string, numKeys: number, ...args: (string | number)[]) {
+    async eval(script: string, _numKeys: number, ...args: (string | number)[]) {
       const key = String(args[0]);
       const token = String(args[1]);
       if (script.includes("'set'") && script.includes("'NX'")) {
