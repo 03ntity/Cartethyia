@@ -233,7 +233,10 @@ try {
   // On Windows the spawned PID is the `bun run perf-start.ts` launcher, not the
   // gateway: the launcher's RSS is a constant ~30 MB that says nothing about the
   // process under test. Resolve the launcher's child, which is the gateway.
-  const childPids = process.platform === "win32" ? await childrenOf(workerPids) : [];
+  // Order matters: the listening-socket owner is authoritative. Falling back to
+  // the spawned PID reports the LAUNCHER's RSS, which is why earlier runs
+  // showed a flat RSS that tracked nothing the gateway did.
+  const childPids = gatewayPids.length > 0 ? [] : process.platform === "win32" ? await childrenOf(workerPids) : [];
   const attributedPids =
     gatewayPids.length > 0 ? gatewayPids : childPids.length > 0 ? childPids : workerPids;
   const workersFile = `/tmp/carte-perf-workers-${name}.txt`;
@@ -308,25 +311,51 @@ try {
  * appearing or the budget runs out.
  */
 async function resolveGatewayPids(port: number, expected: number): Promise<number[]> {
+  void expected;
+  // Whoever holds the LISTENING socket on the gateway port IS the gateway.
+  //
+  // The previous two attempts were both wrong and both silently degraded:
+  //   - the console health route answers 401 (bearer token does not satisfy the
+  //     console access resolver), so it never yields a pid;
+  //   - falling back to the spawned PID yields the `bun run perf-start.ts`
+  //     LAUNCHER, whose RSS is a flat ~30 MB no matter what the gateway does.
+  // That is how earlier reports claimed "RSS flat at 126 MB" while measuring
+  // the wrong process. Asking the OS who owns the port cannot degrade: if no
+  // process owns it, the gateway is genuinely not up.
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const pids = await pidsListeningOn(port);
+    if (pids.length > 0) return pids;
+    await Bun.sleep(250);
+  }
+  return [];
+}
+
+/** PIDs with a LISTENING socket on the port (Windows netstat, Linux ss/lsof). */
+async function pidsListeningOn(port: number): Promise<number[]> {
+  const commands: string[][] = process.platform === "win32"
+    ? [["netstat", "-ano"]]
+    : [["ss", "-lptnH"], ["lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]];
   const found = new Set<number>();
-  const deadline = Date.now() + 8_000;
-  // The console health route goes through the console access resolver, which a
-  // bearer token does not satisfy — so this returns 401 rather than a pid, and
-  // the caller falls back to the spawned PIDs. Kept because the route is the
-  // only place the gateway names its own process, and it may become reachable
-  // if the console is ever served without a session.
-  while (Date.now() < deadline && found.size < expected) {
+  for (const cmd of commands) {
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/console/api/observability/system/health`, {
-        signal: AbortSignal.timeout(2_000),
-      });
-      if (!response.ok) break;
-      const body = (await response.json()) as { pid?: number };
-      if (typeof body.pid === "number") found.add(body.pid);
+      const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" });
+      const text = await new Response(proc.stdout).text();
+      await proc.exited;
+      for (const line of text.split("\n")) {
+        if (!line.includes("LISTEN") && process.platform !== "win32") continue;
+        if (!new RegExp(`[:.]${port}\s`).test(line) && !line.includes(`:${port} `)) continue;
+        // Windows netstat puts the PID last; ss writes pid=NNN; lsof -t is bare.
+        const m = /pid=(\d+)/.exec(line) ?? /\s(\d+)\s*$/.exec(line);
+        if (m) {
+          const pid = Number(m[1]);
+          if (Number.isInteger(pid) && pid > 0) found.add(pid);
+        }
+      }
+      if (found.size > 0) break;
     } catch {
-      break;
+      /* tool unavailable; try the next one */
     }
-    await Bun.sleep(200);
   }
   return [...found];
 }
