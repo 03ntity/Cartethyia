@@ -166,3 +166,67 @@ describe("an unclassified failure is a cooldown, never a parked account", () => 
     expect(classification.cooldownMs).toBe(900_000);
   });
 });
+
+describe("a reset window the upstream stated in structured fields", () => {
+  /** The body a real provider returned: no window in the prose at all. */
+  const USAGE_LIMIT_BODY = JSON.stringify({
+    error: {
+      type: "usage_limit_reached",
+      message: "The usage limit has been reached",
+      plan_type: "free",
+      resets_at: 1795019113,
+      eligible_promo: null,
+      limit_window_minutes: 43200,
+      resets_in_seconds: 2072028,
+    },
+  });
+
+  function withRawBody(message: string, raw: string): GatewayError {
+    const error = new GatewayError("upstream_error" as never, 429, message, {}, "upstream" as never);
+    Object.assign(error.details, { raw });
+    return error;
+  }
+
+  const evidence = { origin: "upstream", scope: "account", credentialEvidence: true } as const;
+
+  test("wins over the 15-minute fallback", () => {
+    // The message names no window, so parsing prose alone left this account
+    // cooling for 15 minutes on a limit the provider said resets in ~23 days.
+    const classification = classifyAccountError(
+      withRawBody("The usage limit has been reached", USAGE_LIMIT_BODY),
+      { ...evidence, statusCode: 429 },
+    );
+    expect(classification.category).toBe("rate_limit_transient");
+    expect(classification.providerStated).toBe(true);
+    // Bounded to a day: a longer window is a plan-level limit, and parking an
+    // account for a month on one field is the operator's call, not automatic.
+    expect(classification.cooldownMs).toBe(86_400_000);
+    expect(classification.cooldownMs).toBeGreaterThan(900_000);
+  });
+
+  test("reads a relative reset the caller passes directly", () => {
+    const classification = classifyAccountError(
+      new GatewayError("upstream_error" as never, 429, "rate limit exceeded"),
+      { ...evidence, statusCode: 429, upstreamBody: { resets_in_seconds: 600 } },
+    );
+    expect(classification.cooldownMs).toBe(600_000);
+  });
+
+  test("a reset already in the past is not a window", () => {
+    // A stale `resets_at` would otherwise compute a negative delay and, at
+    // worst, return the account to rotation immediately.
+    const classification = classifyAccountError(
+      withRawBody("rate limit exceeded", JSON.stringify({ error: { resets_at: 1 } })),
+      { ...evidence, statusCode: 429 },
+    );
+    expect(classification.cooldownMs).toBe(900_000);
+  });
+
+  test("a body that is not JSON keeps the fallback", () => {
+    const classification = classifyAccountError(
+      withRawBody("rate limit exceeded", "<html>not json</html>"),
+      { ...evidence, statusCode: 429 },
+    );
+    expect(classification.cooldownMs).toBe(900_000);
+  });
+});

@@ -206,6 +206,17 @@ export interface AccountFailureEvidence {
    * count it reads itself.
    */
   readonly modelBlockHits?: number;
+  /**
+   * The upstream's own error body, when the caller has it.
+   *
+   * Providers state a reset window in structured fields far more reliably than
+   * in prose — a body carrying `resets_at`, `resets_in_seconds` or
+   * `limit_window_minutes` is an exact statement, while the same body's
+   * `message` ("The usage limit has been reached") names no window at all.
+   * Without this the classifier falls back to a fixed 15-minute cooldown for a
+   * limit the provider said resets in 23 days.
+   */
+  readonly upstreamBody?: unknown;
 }
 
 export interface AccountErrorClassification {
@@ -327,6 +338,76 @@ function accountDeadlineMs(
   return latest > 0 ? new Date(latest) : null;
 }
 
+/**
+ * Bounded to a day, matching `MAX_COOLDOWN_MS` in the failure policy: a stated
+ * window longer than that is a monthly or plan-level limit, and parking an
+ * account for a month on one upstream field is a decision for the operator,
+ * not an automatic one.
+ */
+const MAX_UPSTREAM_STATED_COOLDOWN_MS = 24 * 3600 * 1000;
+
+/** Parses the stored upstream text as JSON. Returns `undefined` when it is not. */
+function tryParseUpstreamBody(text: string): unknown {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return typeof parsed === "object" && parsed !== null ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Reads a reset window the upstream stated in structured fields.
+ *
+ * A body like `{"error":{"type":"usage_limit_reached","resets_at":1795019113,
+ * "resets_in_seconds":2072028}}` states the window exactly, while its own
+ * `message` ("The usage limit has been reached") states none — so parsing only
+ * prose leaves a 23-day limit cooling for the 15-minute fallback, and the
+ * account re-enters rotation hours before it can serve.
+ *
+ * Both spellings are read because providers use both: an absolute epoch
+ * (`resets_at`, seconds or milliseconds) and a relative delay
+ * (`resets_in_seconds`). The later of the two wins, since they are the same
+ * claim computed at slightly different instants.
+ */
+function parseUpstreamBodyReset(body: unknown): number | null {
+  if (typeof body !== "object" || body === null) return null;
+  const record = body as Record<string, unknown>;
+  // Some providers nest under `error`, some return it at the top level.
+  const candidates = [record, (record["error"] as Record<string, unknown> | undefined) ?? undefined];
+  let best: number | null = null;
+  for (const candidate of candidates) {
+    if (typeof candidate !== "object" || candidate === null) continue;
+    const now = Date.now();
+
+    const absolute = candidate["resets_at"] ?? candidate["reset_at"];
+    if (typeof absolute === "number" && Number.isFinite(absolute) && absolute > 0) {
+      // Seconds vs milliseconds: a plausible epoch in seconds is ~10 digits, in
+      // milliseconds ~13, and the two are four orders of magnitude apart — so
+      // the smaller is scaled up rather than guessed from a threshold date.
+      const epochMs = absolute < 1e11 ? absolute * 1000 : absolute;
+      const delay = epochMs - now;
+      if (delay > 0) best = best === null ? delay : Math.max(best, delay);
+    }
+
+    const relative =
+      candidate["resets_in_seconds"] ??
+      candidate["reset_in_seconds"] ??
+      candidate["retry_after_seconds"];
+    if (typeof relative === "number" && Number.isFinite(relative) && relative > 0) {
+      const delay = relative * 1000;
+      best = best === null ? delay : Math.max(best, delay);
+    }
+
+    const minutes = candidate["limit_window_minutes"] ?? candidate["reset_in_minutes"];
+    if (typeof minutes === "number" && Number.isFinite(minutes) && minutes > 0) {
+      const delay = minutes * 60_000;
+      best = best === null ? delay : Math.max(best, delay);
+    }
+  }
+  return best === null ? null : Math.min(MAX_UPSTREAM_STATED_COOLDOWN_MS, Math.round(best));
+}
+
 
 export function classifyAccountError(
   error: unknown,
@@ -380,15 +461,33 @@ export function classifyAccountError(
     options?.retryAfterMs ??
     parseUpstreamBackoff({ get: getHeader });
   const messageCooldown = parseProviderResetDuration(message);
-  // Whether the provider itself named a window. Decided once, from the
-  // evidence, so every branch of this classification agrees about it.
-  const providerStated = headerCooldown !== null || messageCooldown !== null;
   const rawUpstreamResponse =
     origin === "upstream" &&
     error instanceof GatewayError &&
     typeof error.details.raw === "string"
       ? error.details.raw
       : undefined;
+  // The body's own fields, when they can be reached. Checked alongside the
+  // header and the prose rather than instead of them: a provider may state the
+  // window in any of the three, and the longest honest statement wins.
+  //
+  // `details.raw` is tried even when no caller passed a parsed body, because
+  // that is where the upstream's JSON actually reaches this function — the
+  // dispatch path stores the response text there. A structured window read from
+  // it is the difference between a 15-minute fallback and the 23 days the
+  // provider stated.
+  const bodyCooldown =
+    parseUpstreamBodyReset(options?.upstreamBody) ??
+    (rawUpstreamResponse === undefined ? null : parseUpstreamBodyReset(tryParseUpstreamBody(rawUpstreamResponse)));
+  // Whether the provider itself named a window. Decided once, from the
+  // evidence, so every branch of this classification agrees about it.
+  const providerStated =
+    headerCooldown !== null || messageCooldown !== null || bodyCooldown !== null;
+  const statedCooldownMs =
+    [headerCooldown, messageCooldown, bodyCooldown].reduce<number | null>(
+      (best, value) => (value === null ? best : best === null ? value : Math.max(best, value)),
+      null,
+    );
   const reason = (prefix: string): string => `${prefix}: ${message.slice(0, 160)}`;
   const result = (
     category: AccountErrorCategory,
@@ -458,7 +557,7 @@ export function classifyAccountError(
   const modelFrequencyWindow =
     lower.includes("frequency limit") && lower.includes("switch to the other models");
   if (modelFrequencyWindow) {
-    const cooldownMs = messageCooldown ?? headerCooldown ?? DEFAULT_QUOTA_COOLDOWN_MS();
+    const cooldownMs = statedCooldownMs ?? DEFAULT_QUOTA_COOLDOWN_MS();
     return result(
       "rate_limit_transient",
       "cooldown",
@@ -789,13 +888,12 @@ export function classifyAccountError(
       lower.includes("included free usage") ||
       lower.includes("rolling 24-hour") ||
       lower.includes("rolling 24 hour");
-    const statedCooldown = messageCooldown ?? headerCooldown;
     const buddyCreditsExhausted = providerCode === "14018" || lower.includes("credits exhausted");
     const cooldownMs = grokFreeTier
-      ? (statedCooldown ?? GROK_QUOTA_COOLDOWN_MS)
+      ? (statedCooldownMs ?? GROK_QUOTA_COOLDOWN_MS)
       : buddyCreditsExhausted
-        ? (statedCooldown ?? 12 * 60 * 60 * 1000)
-        : (statedCooldown ?? DEFAULT_QUOTA_COOLDOWN_MS());
+        ? (statedCooldownMs ?? 12 * 60 * 60 * 1000)
+        : (statedCooldownMs ?? DEFAULT_QUOTA_COOLDOWN_MS());
     // The caller records against the concrete account that just failed
     // upstream, so a provider-scoped quota error still cools THAT account
     // down (enables fallback to the next account). Local-origin quota must
@@ -821,7 +919,7 @@ export function classifyAccountError(
     lower.includes("tpm limit") ||
     lower.includes("rpm limit");
   if (rateSignal) {
-    const cooldownMs = headerCooldown ?? messageCooldown ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS();
+    const cooldownMs = statedCooldownMs ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS();
     // Same per-account reasoning as quota above: the failing account (or
     // its model, when modelId is present) backs off so routing tries the
     // next candidate instead of hammering the same key.
@@ -844,7 +942,7 @@ export function classifyAccountError(
     lower.includes("capacity exceeded") ||
     lower.includes("temporarily unavailable");
   if (capacitySignal) {
-    const cooldownMs = headerCooldown ?? messageCooldown ?? MODEL_CAPACITY_COOLDOWN_MS();
+    const cooldownMs = statedCooldownMs ?? MODEL_CAPACITY_COOLDOWN_MS();
     const modelScopedMutation = origin === "upstream" && options?.modelId !== undefined;
     return result(
       "model_capacity",
