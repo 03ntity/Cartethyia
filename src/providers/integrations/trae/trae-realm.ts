@@ -159,8 +159,21 @@ export const TRAE_REALMS: Readonly<Record<TraeRealm, TraeRealmConfig>> = {
     modelListSupported: true,
   },
   intl: {
-    core: "https://core-normal.traeapi.us",
-    coreFallbacks: ["https://core-normal.trae.ai", "https://coresg-normal.trae.ai"],
+    // SG is the primary, not a fallback. Region-routing is a property of the
+    // account, not the deployment: an account provisioned into `sg` only
+    // authenticates against the SG host, and sending it to the US core answers
+    // `1001 "we are not able to authenticate you"`. Accounts with a captured
+    // region still resolve to their own host through `TRAE_REGION_CORE_HOSTS`,
+    // so moving the default only changes the answer for accounts whose region
+    // was never recorded — and SG serves the wider international roster, which
+    // makes it the better bet for those than US.
+    // Inlined rather than read from `TRAE_REGION_CORE_HOSTS` below: that map is
+    // declared after this one, and a `const` forward reference throws at module
+    // init. The value must stay identical to `TRAE_REGION_CORE_HOSTS.sg`.
+    core: "https://coresg-normal.trae.ai",
+    // US stays reachable as a fallback: an account that really is US-provisioned
+    // but has no stored region still has to have somewhere to land.
+    coreFallbacks: ["https://core-normal.traeapi.us", "https://core-normal.trae.ai"],
     account: "https://grow-normal.trae.ai",
     accountFallbacks: ["https://grow-normal.traeapi.us"],
     pay: "https://grow-normal.traeapi.us",

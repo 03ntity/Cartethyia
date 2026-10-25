@@ -97,6 +97,24 @@ describe("trae realms", () => {
     expect(TRAE_REGION_CORE_HOSTS["us"]).toBe("https://core-normal.traeapi.us");
   });
 
+  test("intl defaults to SG, with US still reachable", () => {
+    // The default is SG, not US. Region routing is a property of the account, so
+    // this decides only accounts whose region was never captured — and SG
+    // serves the wider international roster. US is demoted to a fallback rather
+    // than removed: a genuinely US-provisioned account with no stored region
+    // still needs somewhere to land.
+    expect(TRAE_REALMS.intl.core).toBe("https://coresg-normal.trae.ai");
+    expect(TRAE_REALMS.intl.core).toBe(TRAE_REGION_CORE_HOSTS["sg"] ?? "<missing>");
+    expect(traeCoreCandidates("intl")).toContain("https://core-normal.traeapi.us");
+  });
+
+  test("an intl account with no stored region is not sent to US first", () => {
+    // The behavior that actually changed: `traeCoreForAccount` falls through to
+    // the realm default when the account carries no region, so the empty-region
+    // case must resolve to SG.
+    expect(traeCoreCandidates("intl")[0]).toBe("https://coresg-normal.trae.ai");
+  });
+
   test("the realms do not share a core host", () => {
     // A shared host would mean one of them is dispatched to the wrong
     // deployment, which upstream refuses outright.
