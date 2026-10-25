@@ -10,7 +10,9 @@ describe("provider capture size follows the capture depth", () => {
   // depth to Maximum still saw a quarter-megabyte translated request and an
   // empty raw response on any larger exchange.
   test("the cap grows with the depth", () => {
-    expect(providerCaptureMaxBytes("minimum")).toBe(256 * 1024);
+    // Minimum tees a full MiB in `full` mode: the record budget at this depth
+    // is 1 MiB and a 256 KiB tee clipped bodies the record could keep whole.
+    expect(providerCaptureMaxBytes("minimum")).toBe(1024 * 1024);
     expect(providerCaptureMaxBytes("moderate")).toBe(2 * 1024 * 1024);
     expect(providerCaptureMaxBytes("maximum")).toBe(4 * 1024 * 1024);
   });
@@ -155,7 +157,7 @@ describe("provider exchange capture — metadata mode", () => {
     );
     await fetcher("https://example.test/v1/chat/completions", { method: "POST", body });
 
-    const request = capture.request as Record<string, unknown>;
+    const request = capture.request as unknown as Record<string, unknown>;
     expect(request["method"]).toBe("POST");
     expect(request["url"]).toBe("https://example.test/v1/chat/completions");
     expect(request["body_present"]).toBe(true);
@@ -174,7 +176,7 @@ describe("provider exchange capture — metadata mode", () => {
       false,
     );
     await fetcher("https://example.test/v1/models", { method: "GET" });
-    const request = capture.request as Record<string, unknown>;
+    const request = capture.request as unknown as Record<string, unknown>;
     expect(request["body_present"]).toBeUndefined();
     expect(request["body_bytes"]).toBeUndefined();
   });

@@ -26,6 +26,45 @@ export function payloadRetentionMs(): number {
 export const MAX_PAYLOAD_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
 /**
+ * Truncates a string to at most `maxBytes` UTF-8 bytes without splitting a
+ * code point.
+ *
+ * The budget contract everywhere in this module is **bytes**, not UTF-16 code
+ * units: `.length` on a CJK-heavy body counts one per character while the same
+ * text costs three bytes on the wire and on disk, so a "1 MiB" cap kept ~3 MiB
+ * of CJK content and dropped 3× more Latin content than the operator asked
+ * for. Slicing at a raw byte boundary can split a multi-byte sequence; this
+ * helper backs up to the last complete sequence so the truncated text stays
+ * valid.
+ */
+export function truncateUtf8(value: string, maxBytes: number): string {
+  if (maxBytes <= 0) return "";
+  const totalBytes = Buffer.byteLength(value, "utf8");
+  if (totalBytes <= maxBytes) return value;
+  const sliced = Buffer.from(value, "utf8").subarray(0, maxBytes);
+  // Walk back from the cut (at most 3 bytes: the longest UTF-8 sequence is 4
+  // bytes) to the lead byte of the sequence the cut landed inside, then drop
+  // that whole sequence. A cut that lands between sequences stays put.
+  for (let back = 0; back < 4 && sliced.length - back > 0; back += 1) {
+    const byte = sliced[sliced.length - back - 1]!;
+    if ((byte & 0xc0) !== 0x80) {
+      // This is a lead byte (or ASCII): the sequence it starts has n bytes.
+      const sequenceLength =
+        byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
+      // The cut is `back` bytes into this sequence. If the sequence does not
+      // fully fit within the slice, drop the whole sequence.
+      if (back + 1 < sequenceLength) {
+        return sliced.subarray(0, sliced.length - back - 1).toString("utf8");
+      }
+      return sliced.toString("utf8");
+    }
+    // Continuation byte: the lead byte is further back.
+  }
+  // Degenerate slice of only continuation bytes: nothing complete to keep.
+  return "";
+}
+
+/**
  * Settings-gated payload capture. Request-event metadata is always retained;
  * tenants opt into drawer capture through Settings → Privacy: `metadata`
  * keeps only the Proxy→Provider request line, `full` keeps redacted bodies
@@ -275,6 +314,8 @@ export function buildPayloadRecord(
   const kept: unknown[] = [];
   let accounted = 0;
   const truncatedKeys = new Set<keyof StoredPayload>();
+  // A fully-dropped body's own byte size, for the marker the drawer renders.
+  const truncatedOriginalBytes = new Map<keyof StoredPayload, number>();
   /**
    * Whether a surface kept a *body* — not whether it is merely non-null.
    *
@@ -291,13 +332,21 @@ export function buildPayloadRecord(
       continue;
     }
     const text = JSON.stringify(body);
-    if (accounted + text.length > maxBytes) {
+    // Accounted in UTF-8 bytes: the cap is a storage budget, and the bytes a
+    // body costs on disk are its UTF-8 size. Code-unit accounting under-counts
+    // multi-byte content ~3x (CJK) and over-allocates Latin content.
+    const textBytes = Buffer.byteLength(text, "utf8");
+    if (accounted + textBytes > maxBytes) {
+      // Same drop-then-marker rule as before — only the accounting basis is
+      // now bytes. A partial head would be raw JSON text where the drawer
+      // renders a structured panel, so the body is kept whole or marked.
       truncatedKeys.add(key);
+      truncatedOriginalBytes.set(key, textBytes);
       stored[key] = null;
       serialized.push("null");
       continue;
     }
-    accounted += text.length;
+    accounted += textBytes;
     stored[key] = body;
     serialized.push(text);
     kept.push(body);
@@ -312,7 +361,7 @@ export function buildPayloadRecord(
     _original_bytes: originalBytes,
     _hint: "Truncated by the capture cap — raise Settings → Telemetry payloads → Capture depth to keep more.",
   });
-  for (const key of truncatedKeys) stored[key] = marker(accounted);
+  for (const key of truncatedKeys) stored[key] = marker(truncatedOriginalBytes.get(key) ?? 0);
   return {
     request_id: input.requestId ?? null,
     captured_at: now,

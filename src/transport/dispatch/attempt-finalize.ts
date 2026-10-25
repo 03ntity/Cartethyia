@@ -7,7 +7,7 @@ import type { UsageRecord } from "../../protocol/canonical-model";
 import { classifyUpstreamFailure } from "../failure-policy";
 import type { AdmissionLease } from "../../security/admission/contracts";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
-import { TelemetryPayloadCapture } from "../../observability/payload-capture";
+import { TelemetryPayloadCapture, truncateUtf8 } from "../../observability/payload-capture";
 import { payloadDirectory } from "../../observability/payload-store";
 import type { TelemetryBatchBuffer } from "../../observability/telemetry-buffer";
 import type { TelemetryPayloadDepth, TelemetryPayloadMode } from "../../console/settings/contracts";
@@ -58,7 +58,11 @@ export async function shouldCaptureProviderBody(
 export function providerCaptureMaxBytes(depth?: TelemetryPayloadDepth): number {
   if (depth === "moderate") return 2 * 1024 * 1024;
   if (depth === "maximum") return 4 * 1024 * 1024;
-  return 256 * 1024;
+  // Minimum depth still tees a full MiB in `full` mode: the record budget at
+  // this depth is 1 MiB (see captureDepthMaxBytes), and a 256 KiB tee clipped
+  // bodies the record could have kept whole. Metadata-mode callers never read
+  // the body at all, so the floor costs nothing there.
+  return 1024 * 1024;
 }
 
 /**
@@ -209,21 +213,24 @@ async function readBoundedBody(response: Response, maxBytes: number): Promise<st
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   // Collect decoded chunks and join once: `+=` per chunk reallocates the
-  // prefix (O(n^2)). Truncation stays at the same decoded-char boundary.
+  // prefix (O(n^2)). The budget is UTF-8 **bytes** — the same basis the record
+  // budget and the request-line slice use — measured per decoded chunk, with
+  // the final chunk trimmed by truncateUtf8 so a code point is never split.
   const parts: string[] = [];
-  let total = 0;
+  let totalBytes = 0;
   try {
-    while (total < maxBytes) {
+    while (totalBytes < maxBytes) {
       const { done, value } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
-      if (total + chunk.length > maxBytes) {
-        parts.push(chunk.slice(0, maxBytes - total));
-        total = maxBytes;
+      const chunkBytes = Buffer.byteLength(chunk, "utf8");
+      if (totalBytes + chunkBytes > maxBytes) {
+        parts.push(truncateUtf8(chunk, maxBytes - totalBytes));
+        totalBytes = maxBytes;
         break;
       }
       parts.push(chunk);
-      total += chunk.length;
+      totalBytes += chunkBytes;
     }
   } catch {
     // Best-effort capture must never fail the request path.
@@ -370,7 +377,7 @@ export function captureProviderExchange(
       ...(rawBody === null
         ? {}
         : captureBody
-          ? { body: parseCapturedBody(rawBody.slice(0, maxBytes)) }
+          ? { body: parseCapturedBody(truncateUtf8(rawBody, maxBytes)) }
           : { body_present: true, body_bytes: Buffer.byteLength(rawBody, "utf8") }),
     };
     const response = await inner(input, init);

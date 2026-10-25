@@ -67,12 +67,21 @@ describe("payload capture", () => {
     const kept = buildPayloadRecord(input, new Date("2026-01-01T00:00:00.000Z"), 10_000_000);
     expect(kept.request_body).toEqual({ prompt: "x".repeat(1000) });
     const truncated = buildPayloadRecord(input, new Date("2026-01-01T00:00:00.000Z"), 10);
+    // The marker reports the dropped body's own serialized UTF-8 byte size —
+    // the same basis the budget is accounted in. (It used to report the
+    // running total, which named the wrong body and read 0 for the first.)
+    const requestBytes = Buffer.byteLength(JSON.stringify(input.requestBody), "utf8");
+    const responseBytes = Buffer.byteLength(JSON.stringify(input.responseBody), "utf8");
     expect(truncated.request_body).toEqual({
       _truncated: true,
-      _original_bytes: 0,
+      _original_bytes: requestBytes,
       _hint: expect.stringContaining("Capture depth"),
     });
-    expect(truncated.response_body).toEqual(truncated.request_body);
+    expect(truncated.response_body).toEqual({
+      _truncated: true,
+      _original_bytes: responseBytes,
+      _hint: expect.stringContaining("Capture depth"),
+    });
   });
 
   test("a body that fits is kept and only the one past the cap is dropped", () => {
@@ -229,5 +238,132 @@ describe("payload retention", () => {
       }),
     ).toBe(30 * 60_000);
     expect(seen).toEqual([]);
+  });
+});
+
+/**
+ * UTF-8 byte budgets: 1 MiB means 1,048,576 bytes.
+ *
+ * The caps used to be counted in UTF-16 code units (`.length`), so CJK-heavy
+ * bodies — three bytes per character — kept ~3× the intended bytes, and Latin
+ * bodies lost budget to the under-counted ones ahead of them. These fixtures
+ * pin the byte basis on both the record budget and the provider tee.
+ */
+import { truncateUtf8 } from "../../src/observability/payload-capture";
+import { captureProviderExchange, providerCaptureMaxBytes } from "../../src/transport/dispatch/attempt-finalize";
+
+describe("truncateUtf8", () => {
+  test("never splits a code point at the cut", () => {
+    // Each CJK char is 3 UTF-8 bytes: 10 chars = 30 bytes. Cut at 29 keeps 9
+    // complete characters (27 bytes), not 9⅔.
+    const text = "汉字汉字汉字汉字汉字";
+    expect(truncateUtf8(text, 29)).toHaveLength(9);
+    expect(Buffer.byteLength(truncateUtf8(text, 29), "utf8")).toBe(27);
+  });
+
+  test("a cut at an exact character boundary keeps exactly that many bytes", () => {
+    const text = "汉字汉"; // 9 bytes
+    const cut = truncateUtf8(text, 6);
+    expect(cut).toBe("汉字");
+    expect(Buffer.byteLength(cut, "utf8")).toBe(6);
+  });
+
+  test("ASCII text truncates at the byte count directly", () => {
+    expect(truncateUtf8("abcdefghij", 4)).toBe("abcd");
+  });
+
+  test("within budget passes through untouched", () => {
+    const text = "汉字";
+    expect(truncateUtf8(text, 100)).toBe(text);
+    expect(truncateUtf8(text, 6)).toBe(text);
+  });
+
+  test("zero budget yields empty string", () => {
+    expect(truncateUtf8("abc", 0)).toBe("");
+  });
+});
+
+describe("payload capture — UTF-8 byte budget", () => {
+  const ONE_MIB = 1_048_576;
+
+  test("a 1,048,576-byte budget captures exactly that many UTF-8 bytes of CJK content", () => {
+    // CJK body: JSON.stringify escapes nothing for these characters, so the
+    // serialized text is ~3 bytes per character. The record budget of 1 MiB
+    // must keep exactly 1 MiB of serialized UTF-8 (the last character may be
+    // whole-body-dropped if it would cross, so assert ≤ and near-1).
+    // Size the body so its serialized UTF-8 (including the JSON wrapper) sits
+    // just under the 1 MiB budget: 3 bytes/char + wrapper bytes.
+    const characters = Math.floor((ONE_MIB - 64) / 3);
+    const prompt = "汉".repeat(characters);
+    const input = {
+      tenantId: "tenant-1",
+      requestId: "request-1",
+      requestBody: { prompt },
+      scope: "tenant" as const,
+      tenantOptIn: true,
+    };
+    const record = buildPayloadRecord(
+      input,
+      new Date("2026-01-01T00:00:00.000Z"),
+      ONE_MIB,
+    );
+    // The request body fit within the byte budget and was kept whole.
+    expect(record.request_body).toBe(input.requestBody);
+    expect(
+      Buffer.byteLength(JSON.stringify(record.request_body), "utf8"),
+    ).toBeLessThanOrEqual(ONE_MIB);
+    // ~3× the code-unit count: proving the budget is bytes, not `.length`.
+    expect(Buffer.byteLength(JSON.stringify(record.request_body), "utf8")).toBeGreaterThan(
+      ONE_MIB - 64,
+    );
+
+    // One more character would cross the cap: dropped with a marker whose
+    // original_bytes reports the full UTF-8 size (not the code-unit count).
+    const overflow = {
+      ...input,
+      requestBody: { prompt: "汉".repeat(characters + 100) },
+    };
+    const overflowed = buildPayloadRecord(
+      overflow,
+      new Date("2026-01-01T00:00:00.000Z"),
+      ONE_MIB,
+    );
+    const marker = overflowed.request_body as Record<string, unknown>;
+    expect(marker["_truncated"]).toBe(true);
+    expect(marker["_original_bytes"]).toBe(
+      Buffer.byteLength(JSON.stringify(overflow.requestBody), "utf8"),
+    );
+  });
+
+  test("the provider tee at minimum depth reads a full MiB in full mode", async () => {
+    // 700 KiB of CJK ≈ 2.1 MB UTF-8 — beyond the old 256 KiB tee in *bytes*,
+    // beyond the 1 MiB record budget too, but the tee itself must read a full
+    // MiB of decoded UTF-8 before parsing.
+    expect(providerCaptureMaxBytes("minimum")).toBe(ONE_MIB);
+    const big = "汉".repeat(700 * 1024);
+    const capture = { request: null, response: Promise.resolve(null) };
+    const fetcher = captureProviderExchange(
+      async () =>
+        new Response(JSON.stringify({ text: big }), {
+          headers: { "content-type": "application/json" },
+        }),
+      capture,
+      true,
+      providerCaptureMaxBytes("minimum"),
+    );
+    await fetcher("https://example.test/v1/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({ text: big }),
+    });
+    // A truncated JSON body no longer parses, so the capture keeps the raw
+    // truncated string — its UTF-8 size is exactly the tee's byte budget,
+    // never splitting a code point.
+    const providerResponse = await capture.response;
+    expect(typeof providerResponse).toBe("string");
+    const keptText = providerResponse as string;
+    expect(Buffer.byteLength(keptText, "utf8")).toBeLessThanOrEqual(ONE_MIB);
+    expect(Buffer.byteLength(keptText, "utf8")).toBeGreaterThan(ONE_MIB - 16);
+    // Every character complete: no lone surrogate or replacement char.
+    expect(keptText.includes("\ufffd")).toBe(false);
   });
 });
