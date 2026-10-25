@@ -10,7 +10,7 @@ import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import { TelemetryPayloadCapture } from "../../observability/payload-capture";
 import { payloadDirectory } from "../../observability/payload-store";
 import type { TelemetryBatchBuffer } from "../../observability/telemetry-buffer";
-import type { TelemetryPayloadDepth } from "../../console/settings/contracts";
+import type { TelemetryPayloadDepth, TelemetryPayloadMode } from "../../console/settings/contracts";
 import type { ProxyRequestOutcome, ProxyRequestState } from "../request/state";
 import type { PayloadCaptureState } from "../../observability/payload-capture";
 import { finalizeRequestTelemetry } from "../guards/error-lifecycle";
@@ -82,6 +82,29 @@ export async function shouldCaptureProviderBodyForRequest(
     | { readonly ok: true; readonly mode: string }
     | { readonly ok: false };
   return resolved.ok === true && resolved.mode === "full";
+}
+
+/**
+ * The tenant's capture mode, memoized on the request like the body answer.
+ *
+ * Resolved once so callers that gate diagnostics on the mode (the stream
+ * pipeline's transcript and client-response copies) share one preference read
+ * with the capture path itself; `none` is also the fail-closed answer for a
+ * failed preference read, which is the same answer `resolvePayloadCapture`
+ * itself gives.
+ */
+export async function resolveCaptureModeForRequest(
+  db: CartethyiaDatabase,
+  tenantId: string | null,
+  state: { payloadCapturePreference?: unknown },
+): Promise<TelemetryPayloadMode> {
+  if (state.payloadCapturePreference === undefined) {
+    state.payloadCapturePreference = await resolvePayloadCapture(db, tenantId);
+  }
+  const resolved = state.payloadCapturePreference as
+    | { readonly ok: true; readonly mode: TelemetryPayloadMode }
+    | { readonly ok: false };
+  return resolved.ok === true ? resolved.mode : "none";
 }
 
 /**

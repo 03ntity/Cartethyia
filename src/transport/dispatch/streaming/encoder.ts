@@ -78,6 +78,17 @@ export class StreamEventPipeline {
   // One decoder per stream: `new TextDecoder()` per chunk would allocate
   // on every upstream event for the telemetry transcript copy.
   private readonly clientResponseDecoder = new TextDecoder();
+  /**
+   * Resolved tenant capture mode. `none`/`metadata` gate the diagnostics the
+   * tenant will never be able to see: the JSON-serialized event transcript
+   * copy and the client-response accumulation are skipped entirely, so a
+   * privacy-lean tenant's streams cost neither the per-event `JSON.stringify`
+   * nor the up-to-512 KiB buffered client-response copy. The fields the
+   * completion path always needs (terminal, usage, timing, reported model,
+   * event count, client-visible flag) are recorded regardless — the Responses
+   * prelude retry depends on the flag, and the request row depends on the rest.
+   */
+  private readonly diagnosticsCaptureMode: "none" | "metadata" | "full";
   private readonly streamEncoder: DispatchStreamEncoder;
   // One splitter per stream: a thinking tag can straddle two provider chunks,
   // and the text/idle bookkeeping below must see the split result, not the raw
@@ -89,9 +100,11 @@ export class StreamEventPipeline {
     surface: SourceSurface,
     encoderOptions: Record<string, unknown>,
     recoverableResponsesPrelude: boolean,
+    diagnostics: { captureMode: "none" | "metadata" | "full" } = { captureMode: "full" },
   ) {
     this.streamEncoder = createDispatchStreamEncoder(surface, encoderOptions);
     this.recoverableResponsesPrelude = recoverableResponsesPrelude;
+    this.diagnosticsCaptureMode = diagnostics.captureMode;
   }
 
   /** Number of canonical events processed, including those omitted from diagnostics. */
@@ -140,6 +153,9 @@ export class StreamEventPipeline {
 
   private recordTelemetryEvent(event: CanonicalEvent & { timestamp: number }): void {
     this.totalEventCount += 1;
+    // Gated diagnostics: the transcript is only ever read by the terminal
+    // capture path in `full` mode, so `none`/`metadata` pay only the count.
+    if (this.diagnosticsCaptureMode !== "full") return;
     // Single serialization per event: the byte size is stored with the entry
     // so eviction subtracts without re-serializing the removed event.
     const eventBytes = Buffer.byteLength(JSON.stringify(event), "utf8");
@@ -179,6 +195,9 @@ export class StreamEventPipeline {
   }
 
   private appendClientResponse(bytes: Uint8Array): void {
+    // Gated diagnostics: the client-response copy feeds only the terminal
+    // capture's client panel, which exists only in `full` mode.
+    if (this.diagnosticsCaptureMode !== "full") return;
     if (this.clientResponseTruncated) return;
     const chunk = this.clientResponseDecoder.decode(bytes, { stream: true });
     if (this.clientResponseLength + chunk.length > CLIENT_RESPONSE_CAP) {

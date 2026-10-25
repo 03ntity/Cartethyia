@@ -47,6 +47,7 @@ import {
   captureProviderExchange,
   providerCaptureMaxBytes,
   resolveCaptureDepthForRequest,
+  resolveCaptureModeForRequest,
   shouldCaptureProviderBodyForRequest,
 } from "../attempt-finalize";
 import { resolveTenantImageClampMaxBytes } from "../../request/tenant-preferences";
@@ -179,6 +180,14 @@ export async function dispatchStreamingAttempt(input: StreamingDispatchInput): P
     prepared.authorization.snapshot.tenant_id,
     state,
   );
+  // Resolved once, before the pipeline exists: the pipeline's diagnostics are
+  // gated on it from construction, so `none`/`metadata` tenants never pay the
+  // transcript serialization or the client-response copy for any event.
+  const captureMode = await resolveCaptureModeForRequest(
+    deps.db,
+    prepared.authorization.snapshot.tenant_id,
+    state,
+  );
   const wrappedOutboundFetch = outboundFetch
     ? captureProviderExchange(
         outboundFetch,
@@ -276,6 +285,7 @@ export async function dispatchStreamingAttempt(input: StreamingDispatchInput): P
         ? { response_id: `msg-${crypto.randomUUID()}`, model: candidate.model_id }
         : streamOptions,
     recoverableResponsesPrelude,
+    { captureMode },
   );
   const finalizer = new StreamFinalizer(
     {

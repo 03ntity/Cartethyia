@@ -11,7 +11,7 @@ import type { CanonicalEvent } from "../../src/protocol/canonical-model";
 import { StreamEventPipeline } from "../../src/transport/dispatch/streaming/encoder";
 
 function pipeline(): StreamEventPipeline {
-  return new StreamEventPipeline("responses", {}, false);
+  return new StreamEventPipeline("responses", {}, false, { captureMode: "full" });
 }
 
 const controller = {
