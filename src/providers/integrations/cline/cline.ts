@@ -8,7 +8,6 @@ import { completeRequiredSchema, isRecord } from "../../../protocol/codecs";
 import { providerBaseUrl } from "../../provider-metadata";
 import { getCachedModelDiscovery } from "../../operations/model-discovery-cache";
 import { defineModel } from "../../provider-model-definition";
-import { openrouterFreeRoster } from "../../discovery/openrouter-free-roster";
 import { clinePlatform, clinePlatformVersion } from "../../operations/cli-platform";
 import {
   getClineCliVersion,
@@ -502,25 +501,112 @@ export async function fetchClineFreeModelIds(
 }
 
 /**
- * Static seed for Cline's free tier.
+ * Static seed for Cline: the zero-cost tier and the Cline Pass roster.
  *
  * Every id here is materialized into the `models` table at boot with
  * `source: "builtin"`, and `seedBundledModels` deletes any builtin row this
  * list no longer declares. That makes the list the *owner* of these rows: an id
  * Cline retires from its roster keeps its catalog card — and its route — until
  * it is removed here, because nothing else prunes a builtin row. The seed is
- * therefore kept to ids Cline currently serves on the free tier; a stale entry
- * is a card that can only ever fail a probe.
+ * therefore kept to ids Cline currently serves; a stale entry is a card that
+ * can only ever fail a probe.
  *
  * Cline's live roster (`/ai/cline/recommended-models`, read by
  * `fetchClineRecommendedModels`) is the authority for what is routable right
  * now, and "Fetch models" reconciles against it. This list is the offline seed
  * that makes a fresh install usable before the first fetch.
+ *
+ * Both sections came from a live probe of that endpoint with a real key, not
+ * from the OpenRouter listing Cline is backed by — the two disagree, and the
+ * endpoint's own buckets are what the account can route. It is its own list
+ * rather than {@link openrouterFreeRoster}, which Kilo and OpenRouter still
+ * use: one list for three providers is right for a catalog fact and wrong for
+ * an account fact.
+ *
+ * This is a floor, and live discovery still finds every id the account can
+ * route — including any absent here. A manual fetch is unaffected by what this
+ * list declares.
  */
-export const CLINE_MODELS: readonly ModelDefinition[] = openrouterFreeRoster({
-  providerId: CLINE_PROVIDER_ID,
-  endpoint: CLINE_CHAT_PATH,
-});
+interface ClineSeedRow {
+  readonly id: string;
+  readonly ctx: number;
+  readonly out: number;
+  readonly vision?: boolean;
+}
+
+function clineRow(
+  rows: readonly ClineSeedRow[],
+  extra: { free?: boolean; proOnly?: boolean },
+): readonly ModelDefinition[] {
+  return rows.map((row) =>
+    defineModel({
+      id: row.id,
+      providerId: CLINE_PROVIDER_ID,
+      wireFamily: "chat",
+      endpoint: CLINE_CHAT_PATH,
+      ctx: row.ctx,
+      out: row.out,
+      vision: row.vision ?? false,
+      reasoning: true,
+      toolCall: true,
+      ...(extra.free === true ? { free: true, freeTier: true } : {}),
+      ...(extra.proOnly === true ? { proOnly: true } : {}),
+    }),
+  );
+}
+
+/**
+ * The zero-cost tier, exactly as this account's `free` bucket publishes it.
+ *
+ * Probed against `/ai/cline/recommended-models` with a live key, not inferred
+ * from the OpenRouter listing. That matters because the two disagree: the
+ * `/models` listing names 17 `:free` ids, while the account's own `free` bucket
+ * names 5 and shares none of them. The listing is the upstream catalog; the
+ * bucket is what this account can actually route, and only the second is a
+ * fact worth seeding.
+ *
+ * Two ids carry the `cline-free/` prefix. That prefix is Cline's own namespace,
+ * not a tier marker — membership of the bucket is what makes a row free.
+ */
+const CLINE_FREE_ROWS: readonly ClineSeedRow[] = [
+  { id: "reflection/beam-free", ctx: 128_000, out: 32_000 },
+  { id: "cline-free/nemotron-3.5-super-vl", ctx: 1_000_000, out: 131_072, vision: true },
+  { id: "nvidia/nemotron-3.5-lightning-free", ctx: 1_000_000, out: 65_536 },
+  { id: "poolside/laguna-s-2.1-free", ctx: 262_144, out: 32_768 },
+  { id: "cline-free/solar-mini4", ctx: 524_288, out: 131_072 },
+];
+
+/**
+ * The Cline Pass subscription roster, as the account's `clinePass` bucket
+ * publishes it.
+ *
+ * Seeded with `proOnly`, matching how the buddy roster marks a row a free plan
+ * is refused: dispatching one without a subscription 401s, so the card should
+ * say so rather than fail at request time. Discovery reads `clineAccountHasPass`
+ * first and only asks for these rows when the account has one.
+ */
+const CLINE_PASS_ROWS: readonly ClineSeedRow[] = [
+  { id: "cline-pass/kimi-k3.1-pro", ctx: 1_000_000, out: 32_000 },
+  { id: "cline-pass/minimax-m3.1-flash", ctx: 1_000_000, out: 128_000 },
+  { id: "cline-pass/deepseek-v4.1-flash-1017", ctx: 1_000_000, out: 128_000 },
+  { id: "cline-pass/deepseek-v4.1-flash", ctx: 1_000_000, out: 128_000 },
+  { id: "cline-pass/mimo-v2.6-flash", ctx: 1_000_000, out: 128_000 },
+  { id: "cline-pass/mimo-v2.6-pro", ctx: 1_000_000, out: 128_000 },
+  { id: "cline-pass/glm-5.3", ctx: 1_000_000, out: 64_000 },
+  { id: "cline-pass/deepseek-v4-pro", ctx: 1_000_000, out: 128_000 },
+  { id: "cline-pass/qwen3.8-max", ctx: 1_000_000, out: 65_536 },
+  { id: "cline-pass/muse-spark-1.3-contributor", ctx: 1_000_000, out: 65_536 },
+  { id: "cline-pass/kimi-k3", ctx: 1_000_000, out: 32_000 },
+  { id: "cline-pass/glm-5.3-flash", ctx: 1_000_000, out: 32_000 },
+  { id: "cline-pass/qwen3.7-plus", ctx: 1_000_000, out: 65_536 },
+  { id: "cline-pass/qwen3.7-max", ctx: 1_000_000, out: 65_536 },
+  { id: "cline-pass/minimax-m3", ctx: 512_000, out: 64_000 },
+];
+
+export const CLINE_MODELS: readonly ModelDefinition[] = [
+  ...clineRow(CLINE_FREE_ROWS, { free: true }),
+  ...clineRow(CLINE_PASS_ROWS, { proOnly: true }),
+];
 
 
 export function createClineAdapter(fetchImpl?: typeof fetch): ProviderAdapter {

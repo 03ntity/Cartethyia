@@ -112,7 +112,7 @@ describe("cline auto-fetch: free means free", () => {
 });
 
 describe("the shared free roster", () => {
-  test("all three providers carry the same free ids", () => {
+  test("kilo and openrouter agree; cline seeds its own probed roster", () => {
     const cline = CLINE_MODELS.filter((m) => m.freeTier === true).map((m) => m.modelId).sort();
     const kilo = KILO_FREE_MODELS.filter((m) => m.freeTier === true).map((m) => m.modelId).sort();
     const openrouter = OPENROUTER_FREE_MODELS.filter((m) => m.freeTier === true)
@@ -121,16 +121,45 @@ describe("the shared free roster", () => {
     // Compared against each other, never against a pinned count. The roster is
     // a catalog fact that upstream changes — two rows were dropped as junk, and
     // nine more had already been withdrawn — so any number written here goes
-    // stale on the next catalog change and fails for the wrong reason. What
-    // must hold is that the three providers never diverge, since they seed from
-    // one shared roster.
+    // stale on the next catalog change and fails for the wrong reason.
+    expect(kilo.length).toBeGreaterThan(0);
+    expect(openrouter).toEqual(kilo);
+
+    // Cline seeds its own roster, probed from its account's `free` bucket. It
+    // is OpenRouter-backed, but the shared roster's ids are served by the
+    // openrouter and kilo accounts and not by Cline's — the listing names 17
+    // `:free` ids while Cline's own bucket names 5, sharing none. So Cline
+    // matches neither provider, and that divergence is the point: a seeded row
+    // that cannot serve is offered and then fails at dispatch.
     expect(cline.length).toBeGreaterThan(0);
-    expect(kilo).toEqual(cline);
-    expect(openrouter).toEqual(cline);
+    expect(cline.every((id) => !kilo.includes(id))).toBe(true);
+  });
+
+  test("cline's pass roster is marked pro-only and its free rows are not", () => {
+    // A pass row dispatched without a subscription 401s, so it must say so on
+    // the card. Asserted as a property of the id namespace rather than a count,
+    // because the subscription roster is what upstream changes most often.
+    for (const row of CLINE_MODELS) {
+      if (row.modelId.startsWith("cline-pass/")) {
+        expect(row.proOnly).toBe(true);
+        expect(row.freeTier).toBeUndefined();
+      } else if (row.freeTier === true) {
+        expect(row.proOnly).toBeUndefined();
+      }
+    }
+    expect(CLINE_MODELS.some((row) => row.modelId.startsWith("cline-pass/"))).toBe(true);
+    expect(CLINE_MODELS.some((row) => row.freeTier === true)).toBe(true);
   });
 
   test("every free row is priced at zero", () => {
-    for (const row of [...CLINE_MODELS, ...KILO_FREE_MODELS, ...OPENROUTER_FREE_MODELS]) {
+    // Filtered to the free rows: Cline's catalog also carries its subscription
+    // roster now, and a billed row is priced `unknown` rather than zero — which
+    // is correct, since the gateway does not know what a subscription costs.
+    const free = [...CLINE_MODELS, ...KILO_FREE_MODELS, ...OPENROUTER_FREE_MODELS].filter(
+      (row) => row.freeTier === true,
+    );
+    expect(free.length).toBeGreaterThan(0);
+    for (const row of free) {
       expect(row.cost).toEqual({ input: 0, output: 0, pricing_model: "pay-per-use" });
     }
   });
