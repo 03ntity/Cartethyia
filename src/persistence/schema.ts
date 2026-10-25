@@ -1060,6 +1060,15 @@ export interface ConsoleSettingsPreferences {
    */
   forceDisableCooldown?: boolean;
   /**
+   * Stops every invoke and route for this tenant. Off by default.
+   *
+   * A kill switch, not a routing tweak: while it is on, `/v1/*` returns 503 and
+   * nothing is dispatched upstream. The console keeps working, which is the
+   * point — an operator must be able to stop traffic and still reach the UI
+   * that turns it back on.
+   */
+  invokeDisabled?: boolean;
+  /**
    * Per-tenant upstream request timeout in seconds, overriding
    * `CARTETHYIA_UPSTREAM_TIMEOUT_MS`. `null` or absent means use the
    * deployment default.

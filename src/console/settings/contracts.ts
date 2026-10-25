@@ -37,6 +37,11 @@ export interface RuntimeSettingsResponse {
    * cooldown is still recorded and still recovered by the sweep.
    */
   readonly forceDisableCooldown: boolean;
+  /**
+   * Stops every invoke and route for this tenant while on. The console stays
+   * reachable so the switch can be turned back off from the UI that set it.
+   */
+  readonly invokeDisabled: boolean;
   /** Per-tenant upstream request timeout in seconds; null means deployment default. */
   readonly upstreamTimeoutSeconds: number | null;
   /** Captured payload detail lifetime in minutes; null means deployment default. */
@@ -154,10 +159,11 @@ export function createRuntimeSettingsOperations(deps: RuntimeSettingsConfig) {
           detail: patch as Record<string, unknown>,
         });
         // Saved preferences are routing changes: `forceDisableCooldown` decides
-        // candidate eligibility and `tenantConcurrencyLimit` decides admission,
-        // and both are read from the cached route snapshot. Invalidate after the
-        // write commits so the next `/v1/*` request uses them instead of the
-        // revision that was built before the save. A failure here must not fail
+        // candidate eligibility, `tenantConcurrencyLimit` decides admission, and
+        // `invokeDisabled` decides whether the request is refused at all — all
+        // three read from the cached route snapshot. Invalidate after the write
+        // commits so the next `/v1/*` request uses them instead of the revision
+        // that was built before the save. A failure here must not fail
         // the save — the row is already correct, and the snapshot rebuilds on
         // the next read anyway.
         await Promise.resolve(deps.snapshotInvalidator?.invalidate()).catch(() => undefined);
@@ -199,6 +205,7 @@ export const runtimeUpdateBody = t.Object({
    * rejected here rather than silently clamped on the way in.
    */
   forceDisableCooldown: t.Optional(t.Boolean()),
+  invokeDisabled: t.Optional(t.Boolean()),
   upstreamTimeoutSeconds: t.Optional(
     t.Union([t.Null(), t.Number({ minimum: 5, maximum: 600 })]),
   ),

@@ -389,6 +389,11 @@ export function createGatewayApp(deps: GatewayAppDeps) {
       ...(deps.runtimeMetricsSampler
         ? { memorySnapshot: () => deps.runtimeMetricsSampler?.memorySnapshot() }
         : {}),
+      // Reads the cached route snapshot, which the settings route invalidates
+      // when the switch is saved — so flipping it takes effect on the next
+      // request and adds no query to the proxy path.
+      isInvokeDisabled: async (tenantId) =>
+        (await deps.snapshotService.getSnapshot())?.invokeDisabledTenants?.has(tenantId),
     });
     transportPipeline.mountRoot(app);
     const proxyDeps: ProviderProxyHandlerDeps = {

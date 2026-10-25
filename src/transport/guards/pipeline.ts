@@ -67,6 +67,12 @@ export interface TransportPipelineContext {
    * and the sampler must be initialized at boot even before its first tick.
    */
   readonly memorySnapshot?: () => RuntimeMemorySnapshot | undefined;
+  /**
+   * Whether invoke is switched off for a tenant. Optional: without it the
+   * gateway never refuses on the kill switch, which is the pre-change
+   * behaviour rather than a failure.
+   */
+  readonly isInvokeDisabled?: (tenantId: string) => Promise<boolean | undefined>;
 }
 
 /**
@@ -113,6 +119,9 @@ export function createTransportPipeline(context: TransportPipelineContext): Tran
       db: context.db,
       stateStore: context.stateStore,
       ...(context.modelStrikes ? { modelStrikes: context.modelStrikes } : {}),
+      ...(context.isInvokeDisabled
+        ? { isInvokeDisabled: context.isInvokeDisabled }
+        : {}),
     }),
     createCanonicalRequestMiddleware({
       stateStore: context.stateStore,

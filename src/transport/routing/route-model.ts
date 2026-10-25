@@ -199,6 +199,15 @@ export interface RouteSnapshot {
   readonly providerRouting?: ProviderRoutingMap;
   /** Optional per-tenant pool selection strategy (absent = `least_loaded`). */
   readonly poolRouting?: Readonly<Record<string, PoolRoutingSetting>>;
+  /**
+   * Tenants whose invoke switch is off, so `/v1/*` must be refused outright.
+   *
+   * Read from the cached snapshot rather than per request: it is a console
+   * preference write, and the snapshot is already invalidated when one lands, so
+   * the switch takes effect on the next request without adding a query to the
+   * proxy path.
+   */
+  readonly invokeDisabledTenants?: ReadonlySet<string>;
 }
 
 export type EligibilityReason =

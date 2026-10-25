@@ -133,6 +133,7 @@ function mapRuntimeSettingsRow(
     ponyTailEnabled: prefs.ponyTailEnabled === true,
     ponyTailLevel: normalizePonyTailLevel(prefs.ponyTailLevel),
     forceDisableCooldown: prefs.forceDisableCooldown === true,
+    invokeDisabled: prefs.invokeDisabled === true,
     upstreamTimeoutSeconds: normalizeUpstreamTimeoutSeconds(prefs.upstreamTimeoutSeconds),
     telemetryWindowMinutes: normalizeTelemetryWindowMinutes(prefs.telemetryWindowMinutes),
     imageClampMaxBytes: normalizeImageClampMaxBytes(prefs.imageClampMaxBytes),
@@ -176,6 +177,8 @@ export class DrizzleRuntimeSettingsStore implements RuntimeSettingsStore {
     if (patch.ponyTailLevel !== undefined) patchPrefs.ponyTailLevel = patch.ponyTailLevel;
     if (patch.forceDisableCooldown !== undefined)
       patchPrefs.forceDisableCooldown = patch.forceDisableCooldown === true;
+    if (patch.invokeDisabled !== undefined)
+      patchPrefs.invokeDisabled = patch.invokeDisabled === true;
     if (patch.upstreamTimeoutSeconds !== undefined)
       patchPrefs.upstreamTimeoutSeconds = normalizeUpstreamTimeoutSeconds(patch.upstreamTimeoutSeconds);
     if (patch.telemetryWindowMinutes !== undefined)

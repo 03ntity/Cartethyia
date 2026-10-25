@@ -429,9 +429,13 @@ class RouteCatalogRepository {
      * preference's own doc.
      */
     const cooldownOverrideTenants = new Set<string>();
+    const invokeDisabledTenants = new Set<string>();
     for (const row of settingsRows ?? []) {
       if (row.preferences?.forceDisableCooldown === true && row.tenantId) {
         cooldownOverrideTenants.add(row.tenantId);
+      }
+      if (row.preferences?.invokeDisabled === true && row.tenantId) {
+        invokeDisabledTenants.add(row.tenantId);
       }
     }
     /**
@@ -851,6 +855,7 @@ class RouteCatalogRepository {
       combos,
       ...(routingMap ? { providerRouting: routingMap } : {}),
       ...(Object.keys(poolRouting).length > 0 ? { poolRouting } : {}),
+      ...(invokeDisabledTenants.size > 0 ? { invokeDisabledTenants } : {}),
     };
   }
 }

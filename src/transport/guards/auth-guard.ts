@@ -28,6 +28,12 @@ export function createApiKeyAuthenticationMiddleware(deps: {
    * console error, which is exactly the noise this layer exists to stop.
    */
   readonly modelStrikes?: Pick<ModelStrikeService, "check">;
+  /**
+   * Tenant invoke kill switch. Checked after the key resolves, because the
+   * tenant is a property of the key: the same gateway serves several tenants
+   * and one switching itself off must not stop the others.
+   */
+  readonly isInvokeDisabled?: (tenantId: string) => Promise<boolean | undefined>;
 }): Elysia {
   // Single policy for every `/v1/*` gateway route: authenticated, scoped to
   // `routing:invoke`, and tenant-bound (the snapshot's tenant is the only
@@ -73,6 +79,17 @@ export function createApiKeyAuthenticationMiddleware(deps: {
       });
       if (!decision.scopes.includes("routing:invoke"))
         throw new GatewayError("invalid_request", 403, "This API key is not allowed to invoke routing. Grant it the routing:invoke scope, or use a key that has it.");
+      // Kill switch: refuse before any upstream is touched. Distinct from the
+      // scope check above, which is a property of the key — this is the tenant
+      // having stopped all traffic, and it applies to every key the tenant owns.
+      // 503 rather than 403: nothing about the request is invalid, and the
+      // caller should retry later instead of "fixing" a request that is fine.
+      if ((await deps.isInvokeDisabled?.(authorization.tenantId)) === true)
+        throw new GatewayError(
+          "platform_unavailable",
+          503,
+          "This gateway has invoke switched off. Nothing upstream is being dialed while the switch is off; turn it back on from the dashboard overview to resume routing.",
+        );
       // A key may refuse a downstream router it has been resold to. This is a
       // policy check on the resolved key, so it belongs with the other
       // authorization decisions rather than in routing: the request is refused

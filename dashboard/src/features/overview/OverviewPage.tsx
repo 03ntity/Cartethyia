@@ -1,4 +1,4 @@
-import { Check, Copy, Globe, Loader2, RadioTower } from "lucide-react";
+import { Check, Copy, Globe, Loader2, PowerOff, RadioTower, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { useEffect } from "react";
 import { type ReactNode } from "react";
@@ -14,6 +14,7 @@ import {
   useStartRemoteSupport,
   useStopRemoteSupport,
 } from "../../hooks/remote-support";
+import { useRuntimeSettings, useUpdateRuntimeSettings } from "../../hooks/settings";
 import type { RemoteSupportTool } from "../../data/contracts";
 import { toast } from "../../lib/toast";
 
@@ -216,6 +217,70 @@ function ApiEndpointCard() {
 
 
 /**
+ * Global kill switch: stops every invoke and route for this tenant.
+ *
+ * Read as "invoke enabled" and stored as `invokeDisabled` because an absent
+ * preference means on. A switch whose off position is the destructive one is
+ * easy to misread, so the UI shows the positive state the operator is choosing
+ * and inverts on write.
+ */
+function InvokeKillSwitchCard() {
+  const settings = useRuntimeSettings();
+  const update = useUpdateRuntimeSettings();
+  const disabled = settings.data?.invokeDisabled === true;
+  const flip = (next: boolean) => {
+    update.mutate(
+      { invokeDisabled: !next },
+      {
+        onSuccess: () =>
+          toast.success(
+            next
+              ? "Invoke enabled — routing has resumed."
+              : "Invoke disabled — every request now returns 503 and nothing upstream is dialed.",
+          ),
+        onError: (err) => toast.error(err instanceof Error ? err.message : "Could not save the setting"),
+      },
+    );
+  };
+  return (
+    <Card>
+      <CardHeader
+        title="Invoke Switch"
+        subtitle="Stop every request without deleting anything"
+        icon={<PowerOff size={16} />}
+      />
+      <CardBody>
+        <Stack gap="10px">
+          <div className="flex items-center justify-between gap-4">
+            <p className="min-w-0 text-caption leading-normal text-text-secondary">
+              Off refuses every <code className="font-mono">/v1/*</code> request with 503. Nothing
+              is dispatched upstream, and no account, key, or model is changed — the dashboard stays
+              reachable so you can turn it back on.
+            </p>
+            <Switch
+              checked={!disabled}
+              disabled={settings.isLoading || update.isPending}
+              onChange={(next) => flip(next)}
+              aria-label="Toggle invoke for every request"
+            />
+          </div>
+          {disabled ? (
+            <p className="flex items-start gap-2 text-caption leading-normal text-warning">
+              <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <span>
+                Invoke is off. Every API request is being refused, and any client pointed at this
+                gateway will keep failing until you switch it back on.
+              </span>
+            </p>
+          ) : null}
+        </Stack>
+      </CardBody>
+    </Card>
+  );
+}
+
+
+/**
  * How to let someone reach this gateway from outside the local network.
  *
  * The gateway exposes no tunnel of its own and holds no tunnel state, so this
@@ -264,6 +329,7 @@ export default function Overview(): ReactNode {
   return (
     <Stack gap="16px">
       <ApiEndpointCard />
+      <InvokeKillSwitchCard />
       <RemoteSupportCard />
       <CompressionPanel />
       <ApiKeysPanel />
