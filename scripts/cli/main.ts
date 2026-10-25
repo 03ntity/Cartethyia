@@ -20,6 +20,7 @@ Usage:
   cartethyia doctor
   cartethyia admin reset-lockout <username> <clientIp>
   cartethyia admin reset-lockout --all
+  cartethyia telemetry reconcile --apply|--verify
   cartethyia update
 
 carte starts the gateway in the background and leaves only the console menu on
@@ -68,7 +69,7 @@ async function reportTrayFailed(message: string): Promise<void> {
 async function main(): Promise<void> {
   await assertBunVersion();
   const [command] = process.argv.slice(2);
-  if (command === "setup" || command === "start" || command === "stop" || command === "tray" || command === "menu" || command === "doctor" || command === "admin") {
+  if (command === "setup" || command === "start" || command === "stop" || command === "tray" || command === "menu" || command === "doctor" || command === "admin" || command === "telemetry") {
     await loadUserConfig();
   }
 
@@ -142,6 +143,16 @@ async function main(): Promise<void> {
       if (process.argv[3] !== "reset-lockout") throw new Error("Usage: cartethyia admin reset-lockout <username> <clientIp> | --all");
       const { resetLockout } = await import("./admin");
       await resetLockout(process.argv.slice(4));
+      return;
+    }
+    case "telemetry": {
+      if (process.argv[3] !== "reconcile") {
+        console.error("Usage: cartethyia telemetry reconcile --apply|--verify");
+        process.exitCode = 2;
+        return;
+      }
+      const { telemetry } = await import("./telemetry");
+      await telemetry(process.argv.slice(4));
       return;
     }
     case "update":

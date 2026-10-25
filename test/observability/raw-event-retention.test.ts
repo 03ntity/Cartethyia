@@ -156,3 +156,35 @@ test("a retry after an append failure does not charge its aggregate twice", asyn
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+/**
+ * Retention must delete only files whose hour is CLOSED.
+ *
+ * The current hour is still being appended to, and so is the previous one: a
+ * batch flushed just after an hour boundary carries events stamped in the hour
+ * that just ended, and the writer files them under that hour. With per-writer
+ * files (`<hour>-<uuid>.jsonl`) a process can also still hold the previous
+ * hour's file open. Deleting either would fail outright on Windows or unlink a
+ * file another writer is mid-write on.
+ */
+test("prune deletes expired files but never the current or previous hour", async () => {
+  const hourStamp = (offsetHours: number): string =>
+    new Date(Date.now() - offsetHours * 3_600_000)
+      .toISOString()
+      .slice(0, 13)
+      .replaceAll(":", "-");
+
+  await writeFile(join(TELEMETRY_EVENT_DIR, `${hourStamp(0)}-a.jsonl`), "");
+  await writeFile(join(TELEMETRY_EVENT_DIR, `${hourStamp(1)}-b.jsonl`), "");
+  await writeFile(join(TELEMETRY_EVENT_DIR, `${hourStamp(5)}-c.jsonl`), "");
+  await writeFile(join(TELEMETRY_EVENT_DIR, `${hourStamp(48)}-d.jsonl`), "");
+
+  // A cutoff already in the past: the two open hours must survive it.
+  await store.pruneTelemetry(new Date(Date.now() - 24 * 3_600_000));
+
+  const files = await readdir(TELEMETRY_EVENT_DIR);
+  expect(files.some((file) => file.endsWith("-a.jsonl"))).toBe(true);
+  expect(files.some((file) => file.endsWith("-b.jsonl"))).toBe(true);
+  expect(files.some((file) => file.endsWith("-c.jsonl"))).toBe(true);
+  expect(files.some((file) => file.endsWith("-d.jsonl"))).toBe(false);
+});

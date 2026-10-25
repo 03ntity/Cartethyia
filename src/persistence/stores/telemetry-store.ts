@@ -72,11 +72,22 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /**
  * Deletes hourly event files whose whole hour is older than the retention
- * cutoff. The current hour's file is never touched: it is still being appended.
+ * cutoff.
+ *
+ * The CURRENT and PREVIOUS hour are never touched. The current one is still
+ * being appended; the previous one is why retention cannot be an hour
+ * boundary: a batch flushed just after a boundary still carries events from
+ * the hour that just ended, and the writer files them under that hour. Under
+ * multi-process/multi-writer operation a file for the previous hour can also
+ * still be open, so deleting it would either fail (Windows) or unlink a file
+ * another writer has open (POSIX). Files are named `<hour>-<uuid>.jsonl` now,
+ * so an hour is complete only once it is two hours old.
  */
 async function pruneEventFiles(before: Date): Promise<void> {
   const files = await readdir(TELEMETRY_EVENT_DIR).catch(() => [] as string[]);
-  const cutoff = before.toISOString().slice(0, 13).replaceAll(":", "-");
+  // Two hours back: the current hour is open, the previous one can be too.
+  const floor = new Date(Math.min(before.getTime(), Date.now() - 2 * 3_600_000));
+  const cutoff = floor.toISOString().slice(0, 13).replaceAll(":", "-");
   for (const file of files) {
     if (!file.endsWith(".jsonl") || file.endsWith(".events.jsonl")) continue;
     const hour = file.slice(0, 13);
