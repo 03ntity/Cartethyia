@@ -1153,6 +1153,12 @@ export const telemetryEvents = pgTable(
     sourceSurface: telemetrySourceSurface("source_surface"),
     requestedModel: text("requested_model"),
     /**
+     * Canonical client name derived from `user_agent` at ingestion
+     * (`clientNameFromUserAgent`). Stamped once at write time so client
+     * breakdowns group in SQL; the raw `user_agent` stays for detail.
+     */
+    clientName: text("client_name"),
+    /**
      * The `model` the upstream put in its own response, verbatim.
      *
      * Separate from `requested_model` because they answer different questions:
@@ -1225,7 +1231,38 @@ export const telemetryEvents = pgTable(
   },
   (table) => [
     index("telemetry_events_created_at_idx").on(table.createdAt),
-    index("telemetry_events_tenant_created_idx").on(table.tenantId, table.createdAt),
+    // Keyset pagination, newest-first: `(created_at, id)` DESC breaks ties
+    // deterministically (created_at is second-resolution), so a cursor on the
+    // pair never skips or repeats rows at a boundary. Replaces the plain
+    // `(tenant_id, created_at)` index, which could not break ties.
+    index("telemetry_events_tenant_created_id_idx").on(
+      table.tenantId,
+      desc(table.createdAt),
+      desc(table.id),
+    ),
+    /**
+     * Cross-process idempotency boundary: one terminal event per
+     * (tenant, request). Retried drains and cross-process races converge to
+     * one row (and one usage charge) via `ON CONFLICT DO NOTHING`.
+     */
+    uniqueIndex("telemetry_events_tenant_request_uidx").on(
+      table.tenantId,
+      table.requestId,
+    ),
+    // Usage status breakdown: equality on `http_status`, keyset range+order.
+    index("telemetry_events_tenant_http_created_id_idx").on(
+      table.tenantId,
+      table.httpStatus,
+      desc(table.createdAt),
+      desc(table.id),
+    ),
+    // Per-key family spend: equality on `api_key_id`, keyset range+order.
+    index("telemetry_events_tenant_api_key_created_id_idx").on(
+      table.tenantId,
+      table.apiKeyId,
+      desc(table.createdAt),
+      desc(table.id),
+    ),
     index("telemetry_events_request_id_idx").on(table.requestId),
     index("telemetry_events_tenant_account_created_idx").on(
       table.tenantId,
@@ -1238,6 +1275,37 @@ export const telemetryEvents = pgTable(
      * it every share render scanned the largest table in the schema.
      */
     index("telemetry_events_api_key_created_idx").on(table.apiKeyId, table.createdAt),
+  ],
+);
+
+/**
+ * Backfill/reconciliation checkpoint for `carte telemetry reconcile`.
+ *
+ * One row per job name. The checkpoint (file_name, byte_offset) commits in
+ * the same transaction as each backfill batch, so a crash resumes from the
+ * last committed offset. The lease columns let exactly one worker run the
+ * job: a second worker is rejected until the lease expires.
+ */
+export const telemetryReconciliationState = pgTable(
+  "telemetry_reconciliation_state",
+  {
+    jobName: text("job_name").primaryKey(),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    fileName: text("file_name").notNull().default(""),
+    byteOffset: bigint("byte_offset", { mode: "number" }).notNull().default(0),
+    filesCompleted: bigint("files_completed", { mode: "number" }).default(0),
+    eventsExamined: bigint("events_examined", { mode: "number" }).default(0),
+    eventsInserted: bigint("events_inserted", { mode: "number" }).default(0),
+    conflicts: bigint("conflicts", { mode: "number" }).default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("telemetry_reconciliation_state_offset_nonneg", sql`${table.byteOffset} >= 0`),
+    check("telemetry_reconciliation_state_files_nonneg", sql`${table.filesCompleted} >= 0`),
+    check("telemetry_reconciliation_state_examined_nonneg", sql`${table.eventsExamined} >= 0`),
+    check("telemetry_reconciliation_state_inserted_nonneg", sql`${table.eventsInserted} >= 0`),
+    check("telemetry_reconciliation_state_conflicts_nonneg", sql`${table.conflicts} >= 0`),
   ],
 );
 
