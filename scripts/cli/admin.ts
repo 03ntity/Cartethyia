@@ -16,7 +16,7 @@ import { ENV_PATH, readEnvFile } from "./env";
 export async function exportBackup(
   port: number,
   token: string,
-): Promise<{ path: string; bytes: number; counts: Record<string, number> } | null> {
+): Promise<{ path: string; bytes: number; counts: Record<string, number> } | { error: string }> {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/admin/export-backup`, {
       method: "POST",
@@ -26,8 +26,7 @@ export async function exportBackup(
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      console.error(`The gateway refused the backup (HTTP ${response.status}). ${detail}`.trim());
-      return null;
+      return { error: `The gateway refused the backup (HTTP ${response.status}). ${detail}`.trim() };
     }
     return (await response.json()) as {
       path: string;
@@ -35,8 +34,7 @@ export async function exportBackup(
       counts: Record<string, number>;
     };
   } catch {
-    console.error("Could not reach the gateway. Is it still running?");
-    return null;
+    return { error: "Could not reach the gateway. Is it still running?" };
   }
 }
 

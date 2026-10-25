@@ -16,6 +16,9 @@ import { chooseFromMenu, confirmByTyping, confirmStep, type MenuRow } from "./pr
 import { renderWordmark } from "./wordmark";
 import { exportBackup, resetConsoleAccount } from "./admin";
 import { runDetachedUpdate } from "./update";
+import { acquireController } from "./controller";
+import { restoreControllerAfterFailedHandoff } from "./controller";
+import { attachGateway as attachRunningGateway } from "./instance";
 
 
 /**
@@ -25,6 +28,18 @@ import { runDetachedUpdate } from "./update";
  * and is never seen. `carte --tray` opts into the icon instead.
  */
 export async function startMenu(): Promise<void> {
+  const controller = acquireController("menu");
+  const releaseController = (): void => controller.release();
+  process.once("exit", releaseController);
+  try {
+    await runMenu(controller.handoff);
+  } finally {
+    controller.release();
+    process.removeListener("exit", releaseController);
+  }
+}
+
+async function runMenu(handoff: { readonly token: string; readonly parentPid: number }): Promise<void> {
   // A fresh install has no config file yet, and the gateway refuses to boot
   // without CARTETHYIA_DB_MODE — which surfaced as a stack trace about a
   // missing database mode rather than "you have not set this up". Run setup
@@ -136,6 +151,7 @@ export async function startMenu(): Promise<void> {
 
   let latestVersion = await readLatestPublishedVersion();
   let running = true;
+  let backupStatus: { readonly tone: "success" | "error"; readonly text: string } | undefined;
 
   while (running) {
     const upToDate = latestVersion === null || !isNewerRelease(currentVersion, latestVersion);
@@ -146,16 +162,15 @@ export async function startMenu(): Promise<void> {
     // action that matters.
     const versionCheckerLine =
       latestVersion === null
-        ? `Version Checker: ${currentVersion} \u00b7 could not reach the registry`
+        ? `${currentVersion} \u00b7 registry unavailable`
         : upToDate
-          ? `Version Checker: ${currentVersion} \u00b7 up to date`
-          : `Version Checker: ${currentVersion} \u2192 ${latestVersion} available`;
+          ? `${currentVersion} \u00b7 up to date`
+          : `${currentVersion} \u2192 ${latestVersion} available`;
     const header = [
       ...renderWordmark(),
-      `Cartethyia ${currentVersion} \u00b7 ${dashboardUrl}`,
-      versionCheckerLine,
+      `Console  ${dashboardUrl}`,
+      `Version  ${versionCheckerLine}`,
       "",
-      "Section menu",
     ];
 
     // Anything that talks to the gateway waits for it to be listening; the menu
@@ -167,30 +182,23 @@ export async function startMenu(): Promise<void> {
     const actions: readonly (() => Promise<void>)[] = [
       async () => openUrl(dashboardUrl),
       async () => {
-        // Drain first, then start the tray.
-        //
-        // The tray's own startup probe refuses to boot when the port is busy,
-        // so starting it before this process has let go made it fail with
-        // "already running on port" every time — while the menu still printed
-        // that everything was running, because a detached child with no stdio
-        // cannot report anything back. Releasing the port first is the fix, and
-        // waiting on the child's signal is what stops the menu from claiming
-        // success for a child that died.
-        console.log("Stopping the gateway to free the port…");
+        // Transfer the live gateway rather than draining it first. The tray
+        // adopts this instance through the ownership marker and reports ready
+        // before the menu returns to the shell.
         running = false;
         stopping = true;
         handedOff = true;
-        await shutDown();
         console.log("Starting the tray in the background…");
         const signalPath = join(tmpdir(), `cartethyia-tray-menu-${process.pid}-${randomUUID()}.json`);
         try {
           const url = await launchBackgroundWithStatus(
             ["run", resolvePackagePath("scripts", "cli", "main.ts"), "tray"],
-            { signalPath },
+            { signalPath, controllerHandoff: handoff },
           );
           console.log(`Cartethyia is running in the background at ${url || dashboardUrl}.`);
           console.log("The tray icon owns it; use Exit there to stop it.");
         } catch (error) {
+          restoreControllerAfterFailedHandoff(handoff);
           handedOff = false;
           console.error(
             `Could not hand off to the tray: ${error instanceof Error ? error.message : "unknown error"}`,
@@ -205,11 +213,12 @@ export async function startMenu(): Promise<void> {
         // the database, so the loopback token is the whole gate.
         await whenReady();
         const result = await exportBackup(port, drainToken);
-        if (result === null) return;
-        console.log(
-          `Backup written to ${result.path} (${(result.bytes / 1024).toFixed(1)} KiB, ${Object.keys(result.counts).length} tables).`,
-        );
-        console.log("Telemetry is not included: it is per-request history, not configuration.");
+        backupStatus = "error" in result
+          ? { tone: "error", text: `Backup failed: ${result.error}` }
+          : {
+              tone: "success",
+              text: `Backup saved at: ${result.path} (${(result.bytes / 1024).toFixed(1)} KiB)`,
+            };
       },
       async () => {
         // Deleting the console account is the only real password recovery:
@@ -266,23 +275,23 @@ export async function startMenu(): Promise<void> {
       : [...actions.slice(0, actions.length - 1), updateAction, actions[actions.length - 1] ?? (async () => undefined)];
 
     const rows: MenuRow[] = [
-      { kind: "action", label: "Open Console", hint: `browser \u00b7 ${dashboardUrl}` },
-      { kind: "action", label: "Hide to Tray", hint: "keep the gateway running" },
-      { kind: "action", label: "Backup", hint: "export config to Downloads" },
-      { kind: "action", label: "Reset", hint: "deletes the console account" },
+      { kind: "action", label: "Open Console", hint: "Open dashboard in browser" },
+      { kind: "action", label: "Hide to Tray", hint: "Keep the gateway running" },
+      { kind: "action", label: "Backup", hint: "Export config to Downloads" },
+      { kind: "action", label: "Reset", hint: "Delete console account" },
     ];
     if (!upToDate && latestVersion !== null) {
       rows.push({ kind: "action", label: `Update to ${latestVersion}`, hint: "installs now and exits" });
     }
     rows.push({ kind: "rule" });
-    rows.push({ kind: "action", label: "Exit", hint: "stop the gateway" });
+    rows.push({ kind: "action", label: "Exit", hint: "Stop the gateway" });
 
     // Focus the Update row by default when it exists, so the operator who
     // launched `carte` *because* they saw the version checker gets a one-key
     // path to the fix.
     const updateIndex = upToDate || latestVersion === null ? -1 : 4;
     const initialActionIndex = updateIndex >= 0 ? updateIndex : 0;
-    const choice = await chooseFromMenu(header, rows, { initialIndex: initialActionIndex });
+    const choice = await chooseFromMenu(header, rows, { initialIndex: initialActionIndex, ...(backupStatus ? { status: backupStatus } : {}) });
     if (choice === -1) break;
     const action = extendedActions[choice];
     if (action) await action();
@@ -291,7 +300,7 @@ export async function startMenu(): Promise<void> {
   // would stop the very process the tray just adopted, which is why the menu
   // appeared to hand over a gateway that was not listening.
   if (handedOff) return;
-  if (runningAttached !== null) {
+  if (runningAttached !== null || (await attachRunningGateway(port, drainToken)) !== null) {
     detachAttached();
     return;
   }

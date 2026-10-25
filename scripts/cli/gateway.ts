@@ -17,6 +17,17 @@ import {
   startupFailureMessage,
 } from "./port";
 
+/** Resolve a configured gateway without mistaking a Bun launcher for a compiled app. */
+export async function gatewayExecutable(configured: string | undefined): Promise<readonly string[]> {
+  const trimmed = configured?.trim();
+  const binary = trimmed ? resolvePackagePath(trimmed) : resolvePackagePath(compiledBinaryPath());
+  if (await Bun.file(binary).exists()) {
+    return binary.endsWith(".ts") ? [process.execPath, "run", binary] : [binary];
+  }
+  if (trimmed) throw new Error(`Configured gateway binary does not exist: ${trimmed}`);
+  return [process.execPath, "run", resolvePackagePath("src", "main.ts")];
+}
+
 function detachedSubprocess(executable: readonly string[], cwd: string, env: NodeJS.ProcessEnv, logFd: number | null): Bun.Subprocess {
   const child: ChildProcess = spawnDetached(executable[0]!, [...executable.slice(1)], {
     cwd,
@@ -149,14 +160,7 @@ export async function startGateway(
   if (logPath) {
     try { logOffset = statSync(logPath).size; } catch { logOffset = 0; }
   }
-  const configuredBinary = process.env.CARTETHYIA_GATEWAY_BINARY?.trim();
-  const defaultBinary = resolvePackagePath(compiledBinaryPath());
-  const binary = configuredBinary || defaultBinary;
-  const executable = await Bun.file(binary).exists()
-    ? [binary]
-    : configuredBinary
-      ? (() => { throw new Error(`Configured gateway binary does not exist: ${configuredBinary}`); })()
-      : [process.execPath, "run", resolvePackagePath("src", "main.ts")];
+  const executable = [...await gatewayExecutable(process.env.CARTETHYIA_GATEWAY_BINARY)];
   const child = options.detached
     ? detachedSubprocess(executable, PACKAGE_ROOT, { ...process.env, CARTETHYIA_DRAIN_TOKEN: drainToken }, logFd)
     : Bun.spawn(executable, {

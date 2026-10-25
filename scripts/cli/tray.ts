@@ -1,6 +1,6 @@
 import { resolvePackagePath } from "../../src/config/package-paths";
 import { resolvePort } from "../../src/config/runtime";
-import { ensureDrainToken } from "./instance";
+import { ensureDrainToken, attachGateway, stopAttachedGateway, type RunningGateway } from "./instance";
 import { startGateway } from "./gateway";
 import { stopGateway } from "./gateway";
 import { readInstalledVersion } from "./version";
@@ -8,6 +8,8 @@ import { reportTrayStartup } from "./startup-signal";
 import { createTray } from "./tray/index";
 import { openUrl } from "./background";
 import { exportBackup, resetConsoleAccount } from "./admin";
+import { acquireController, inheritedControllerHandoff } from "./controller";
+import { restoreControllerAfterFailedHandoff } from "./controller";
 
 /**
  * Runs the gateway with a tray icon. The tray is platform-specific (`tray/`):
@@ -39,6 +41,24 @@ const TRAY_HEALTH_POLL_MS = 10_000;
 const TRAY_HEALTH_MISSES_BEFORE_CLOSE = 3;
 
 export async function startTray(): Promise<void> {
+  const handoff = inheritedControllerHandoff();
+  const controller = acquireController("tray", handoff);
+  const releaseController = (): void => controller.release();
+  const failedHandoff = (): void => {
+    if (handoff) restoreControllerAfterFailedHandoff(handoff);
+  };
+  process.once("exit", failedHandoff);
+  process.once("exit", releaseController);
+  try {
+    await runTray();
+  } finally {
+    process.removeListener("exit", failedHandoff);
+    controller.release();
+    process.removeListener("exit", releaseController);
+  }
+}
+
+async function runTray(): Promise<void> {
   const port = resolvePort();
   const drainToken = ensureDrainToken();
   const dashboardUrl = `http://127.0.0.1:${port}/console`;
@@ -46,6 +66,7 @@ export async function startTray(): Promise<void> {
   const currentVersion = await readInstalledVersion();
 
   let gateway: Bun.Subprocess | null = null;
+  let adoptedGateway: RunningGateway | null = null;
   let closing = false;
   let resetArmed = false;
   let closePromise: Promise<void> | undefined;
@@ -83,6 +104,7 @@ export async function startTray(): Promise<void> {
       const current: Bun.Subprocess | null = gateway;
       gateway = null;
       if (current) await stopGateway(current, port, drainToken);
+      else if (adoptedGateway !== null) await stopAttachedGateway(adoptedGateway, drainToken);
       await tray.close();
       process.exitCode = exitCode;
     })();
@@ -96,7 +118,9 @@ export async function startTray(): Promise<void> {
     if (id === "version") return void (await openUrl(releasesUrl));
     if (id === "backup") {
       const result = await exportBackup(port, drainToken);
-      if (result !== null) {
+      if ("error" in result) {
+        console.error(result.error);
+      } else {
         console.log(
           `Backup written to ${result.path} (${(result.bytes / 1024).toFixed(1)} KiB). Telemetry is not included.`,
         );
@@ -129,7 +153,8 @@ export async function startTray(): Promise<void> {
     // down too and "Hide to tray" left nothing serving. `stopGateway` drains
     // over HTTP before it ever reaches for `kill()`, so detaching costs the
     // exit path nothing: the tray can still stop the gateway on Exit.
-    gateway = await startGateway(port, drainToken, { detached: true });
+    adoptedGateway = await attachGateway(port, drainToken);
+    if (adoptedGateway === null) gateway = await startGateway(port, drainToken, { detached: true });
     // The launcher that spawned this tray is blocked on a signal file: it
     // cannot read our stdio, because the tray is detached. Without this write
     // it waits out its 60 s deadline and reports a failure for a tray that is
@@ -146,7 +171,7 @@ export async function startTray(): Promise<void> {
     // is up reads as up regardless of who spawned it.
     while (!closing) {
       await Bun.sleep(TRAY_HEALTH_POLL_MS);
-      if (closing || gateway === null) continue;
+      if (closing || gateway === null && adoptedGateway === null) continue;
       const alive = await fetch(`http://127.0.0.1:${port}/health`, {
         signal: AbortSignal.timeout(2_000),
       }).then((response) => response.ok).catch(() => false);

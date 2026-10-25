@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { probeListenPort, blockedPortMessage, startupFailureMessage } from "../../scripts/cli/port";
-import { startGateway } from "../../scripts/cli/gateway";
+import { gatewayExecutable, startGateway } from "../../scripts/cli/gateway";
 import { install } from "../../scripts/install/install";
 import { parseInstallArgs } from "../../scripts/install/plan";
 import type { HostExecutor } from "../../scripts/install/host";
@@ -61,6 +61,14 @@ test("carte refuses a non-HTTP port blocker before spawning a gateway", async ()
     new RegExp(`port ${port} is already in use[\\s\\S]*change PORT[\\s\\S]*${configDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
   );
   expect(blockedPortMessage(port)).toContain("No process was stopped");
+});
+
+test("a TypeScript gateway override launches through Bun with the real package root", async () => {
+  const executable = await gatewayExecutable("src/main.ts");
+  expect(executable[0]).toBe(process.execPath);
+  expect(executable[1]).toBe("run");
+  expect(executable[2]).toBe(resolve(process.cwd(), "src/main.ts"));
+  expect(Bun.file(executable[2]!).exists()).resolves.toBe(true);
 });
 
 test("installer rejects a blocked custom port before host mutation or install lock", async () => {

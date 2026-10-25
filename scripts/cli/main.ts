@@ -161,7 +161,17 @@ async function main(): Promise<void> {
 
 main().catch(async (error: unknown) => {
   const message = error instanceof Error ? error.message : "unknown error";
-  if (process.argv[2] === "tray") await reportTrayFailed(message);
+  // Only the tray launched for this exact handoff may answer its parent's
+  // signal file. An independent `carte --tray` must never fail an unrelated
+  // menu that happens to be transferring ownership at the same time.
+  if (process.argv[2] === "tray" && process.env.CARTETHYIA_CONTROLLER_PARENT_PID) {
+    await reportTrayFailed(message);
+  }
+  if (message.includes("not starting another instance")) {
+    console.error(`Cartethyia is already running.\n${message}`);
+    process.exitCode = 1;
+    return;
+  }
   console.error(`Cartethyia failed: ${message}`);
   process.exitCode = 1;
 });
