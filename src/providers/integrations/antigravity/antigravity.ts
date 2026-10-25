@@ -44,6 +44,7 @@ import {
   getAntigravityModelWireProfile,
   getAntigravityUserAgent,
   loadAntigravityProject,
+  normalizeAntigravityToolSchemas,
 } from "./antigravity-protocol";
 import type { ImageGenerationOutcome, ProviderDispatchTarget, ProviderAdapter, ProviderDispatchContext, WebSearchOutcome, WebSearchResult } from "../../provider-contracts";
 import { providerBaseUrl } from "../../provider-metadata";
@@ -878,7 +879,7 @@ export function failoverAntigravityUrl(url: string, baseUrl: string): string | u
  * envelope `model`, while the Gemini `contents`/`tools`/`generationConfig`
  * ride inside `request` with Antigravity's `labels` telemetry.
  */
-function buildAntigravityEnvelope(
+export function buildAntigravityEnvelope(
   request: CanonicalRequest,
   projectId: string | undefined,
   wireModelId: string,
@@ -886,7 +887,13 @@ function buildAntigravityEnvelope(
   state: AntigravitySessionState,
   sessionSeed: string,
 ): Record<string, unknown> {
-  const geminiPayload = buildGeminiPayload(request);
+  // Tools first: a declaration whose real schema is nested under
+  // `parametersJsonSchema` (the spelling Cloud Code Assist sends) must be
+  // unwrapped *before* the shared Gemini builder, whose sanitizer has no entry
+  // for that key and would drop both the wrapper and the schema inside it —
+  // the tool would ship as `{"type":"object"}` with every property gone.
+  // Rewriting after the payload is built leaves nothing to recover.
+  const geminiPayload = buildGeminiPayload(normalizeAntigravityToolSchemas(request));
   const profile = getAntigravityModelWireProfile(wireModelId);
 
   const generationConfig = isRecord(geminiPayload["generationConfig"])

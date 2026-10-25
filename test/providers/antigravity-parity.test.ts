@@ -19,6 +19,7 @@ import {
   rememberAntigravityEndpoint,
   resetAntigravityEndpointMemory,
 } from "../../src/providers/integrations/antigravity/antigravity-protocol";
+import { buildAntigravityEnvelope } from "../../src/providers/integrations/antigravity/antigravity";
 import { buildGeminiPayload } from "../../src/protocol/request/gemini";
 import type { CanonicalRequest } from "../../src/protocol/canonical-model";
 
@@ -389,5 +390,70 @@ describe("3. Last-good-endpoint stickiness", () => {
     // Production recovers: the next successful turn re-sticks to it.
     rememberAntigravityEndpoint("https://base.example.com", PROD);
     expect(orderAntigravityEndpoints("https://base.example.com", [PROD, SANDBOX])[0]).toBe(PROD);
+  });
+});
+
+// ─── 7. The envelope actually applies the normalization ────────────────────
+
+describe("7. tool schemas survive the envelope", () => {
+  // The unit tests above pin `normalizeAntigravityToolSchema`, and every one of
+  // them passed while the helper was dead code: `buildAntigravityEnvelope`
+  // called `buildGeminiPayload` on the raw request, whose sanitizer has no
+  // `parametersJsonSchema` entry and dropped both the wrapper and the schema
+  // inside it. The declared tool shipped as `{"type":"object"}` and arrived
+  // unusable — every property gone. These assert the *dispatch* path, which is
+  // where that showed up and which nothing else covered.
+  const ccaTool = {
+    name: "read_file",
+    description: "Reads a file",
+    jsonSchema: {
+      parametersJsonSchema: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+      },
+    },
+  };
+
+  const envelopeFor = (tools: readonly unknown[]): Record<string, unknown> =>
+    buildAntigravityEnvelope(
+      {
+        messages: [{ role: "user", content: [{ kind: "text", text: "hi" }] }],
+        tools,
+        generation_controls: {},
+        reasoning: {},
+      } as unknown as CanonicalRequest,
+      undefined,
+      "gemini-2.5-pro",
+      "gemini-2.5-pro",
+      {},
+      "seed",
+    );
+
+  const firstDeclaration = (envelope: Record<string, unknown>): Record<string, unknown> => {
+    const inner = envelope["request"] as Record<string, unknown>;
+    const toolGroups = inner["tools"] as Record<string, unknown>[];
+    return (toolGroups[0]!["functionDeclarations"] as Record<string, unknown>[])[0]!;
+  };
+
+  test("a parametersJsonSchema declaration ships its real schema", () => {
+    const declaration = firstDeclaration(envelopeFor([ccaTool]));
+    expect(declaration["parameters"]).toEqual({
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+    });
+  });
+
+  test("an already-bare schema is not rewritten", () => {
+    const bare = {
+      name: "write_file",
+      description: "Writes",
+      jsonSchema: { type: "object", properties: { path: { type: "string" } } },
+    };
+    expect(firstDeclaration(envelopeFor([bare]))["parameters"]).toEqual({
+      type: "object",
+      properties: { path: { type: "string" } },
+    });
   });
 });

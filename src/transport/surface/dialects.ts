@@ -71,11 +71,14 @@ function parseToolObject(item: Record<string, unknown>, dialect: ToolDialect): T
     } else {
       const functionValue = item["function"];
       schema = isRecord(functionValue)
-        ? functionValue["parameters"] ?? functionValue["jsonSchema"] ?? {}
+        ? functionValue["parameters"] ??
+          functionValue["jsonSchema"] ??
+          functionValue["parametersJsonSchema"] ??
+          {}
         : // The Responses flat spelling (`{type:"function", parameters:…}`) is
           // common here too; without this a tool arrived with an empty schema
           // and the upstream rejected it.
-          item["parameters"] ?? item["input_schema"] ?? {};
+          item["parameters"] ?? item["input_schema"] ?? item["parametersJsonSchema"] ?? {};
     }
   } else if (dialect === "responses") {
     // A Responses caller may still send the Chat-shaped envelope — the two
@@ -88,8 +91,13 @@ function parseToolObject(item: Record<string, unknown>, dialect: ToolDialect): T
     schema =
       item["input_schema"] ??
       item["parameters"] ??
+      item["parametersJsonSchema"] ??
       (wrapped !== undefined
-        ? wrapped["parameters"] ?? wrapped["input_schema"] ?? wrapped["jsonSchema"] ?? {}
+        ? wrapped["parameters"] ??
+          wrapped["input_schema"] ??
+          wrapped["jsonSchema"] ??
+          wrapped["parametersJsonSchema"] ??
+          {}
         : item);
   } else {
     schema = item["input_schema"] ?? item["inputSchema"] ?? {};
