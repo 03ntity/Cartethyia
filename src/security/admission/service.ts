@@ -104,8 +104,13 @@ export class ApiKeyAdmissionService {
     const reservationId = `${apiKeyId}:${now}:${crypto.randomUUID()}`;
     const rawTenantLimit = this.tenantConcurrencyProvider(snapshot.tenant_id);
     const tenantLimit = rawTenantLimit instanceof Promise ? await rawTenantLimit : rawTenantLimit;
-    const rawTolerance = this.concurrencyTolerance?.(snapshot.tenant_id);
-    const tolerance = rawTolerance instanceof Promise ? await rawTolerance : rawTolerance;
+    // The key's own allowance wins; the deployment default is only the answer
+    // for a key that has never been given one. Set in the Edit API Key modal
+    // beside the limit it widens, so both numbers are chosen in one place.
+    const keyTolerance = snapshot.max_concurrent_tolerance;
+    const rawFallback = this.concurrencyTolerance?.(snapshot.tenant_id);
+    const fallback = rawFallback instanceof Promise ? await rawFallback : rawFallback;
+    const tolerance = keyTolerance != null ? keyTolerance : fallback;
 
     try {
       await this.store.reserve({

@@ -1,0 +1,13 @@
+-- Slack above a key's concurrency limit.
+--
+-- `max_concurrent_requests` is the number an operator chose and the number a
+-- refusal names. This is deliberate allowance above it: a run that lands a few
+-- requests over is not refused at the number it was told. The effective ceiling
+-- is `max_concurrent_requests + max_concurrent_tolerance`, and only requests
+-- past that are refused — never ones already admitted.
+--
+-- Nullable on purpose: absent means "no allowance", which keeps the existing
+-- behaviour for every key that has never seen this field. A default of 0 would
+-- be indistinguishable from unset and would need its own "is this a deliberate
+-- zero" question on every read.
+ALTER TABLE api_keys ADD COLUMN max_concurrent_tolerance integer;

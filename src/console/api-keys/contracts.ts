@@ -49,6 +49,8 @@ export interface CreateApiKeyRequest {
   monthlyTokenLimit?: number | null;
   lifetimeTokenBudget?: number | null;
   maxConcurrentRequests?: number | null;
+  /** Slack above `maxConcurrentRequests`; null/absent means no allowance. */
+  maxConcurrentTolerance?: number | null;
   modelPrefix?: string;
   modelAccessMode?: ApiKeyModelAccessMode;
   modelList?: readonly string[];
@@ -88,6 +90,7 @@ export interface ApiKeyResponse {
   readonly modelList?: readonly string[];
   readonly clientRouterDenylist?: readonly string[];
   readonly maxConcurrentRequests?: number;
+  readonly maxConcurrentTolerance?: number | null;
   readonly notesTitle?: string;
   readonly notesSubtitle?: string;
   readonly notesBody?: string;
@@ -297,6 +300,11 @@ export function validateApiKeyRequest(request: CreateApiKeyRequest): readonly Ac
   finitePositive(request.monthlyTokenLimit, "monthlyTokenLimit");
   finitePositive(request.lifetimeTokenBudget, "lifetimeTokenBudget");
   finitePositive(request.maxConcurrentRequests, "maxConcurrentRequests");
+  if (
+    request.maxConcurrentTolerance != null &&
+    (!Number.isFinite(request.maxConcurrentTolerance) || request.maxConcurrentTolerance < 0)
+  )
+    throw new ConsoleDomainError("invalid_max_concurrent_tolerance", 400, "maxConcurrentTolerance must be zero or greater");
   parseSharePopupImage(request.sharePopupImage);
   if (request.sharePopupTitle != null && request.sharePopupTitle.length > 120) {
     throw new ConsoleDomainError("invalid_share_popup", 400, "Share popup title is too long");
@@ -379,6 +387,7 @@ export function sanitizeApiKeyResponse(record: ApiKeyRecord): ApiKeyResponse {
     ...(record.monthlyTokenLimit === undefined ? {} : { monthlyTokenLimit: record.monthlyTokenLimit }),
     ...(record.lifetimeTokenBudget === undefined ? {} : { lifetimeTokenBudget: record.lifetimeTokenBudget }),
     ...(record.maxConcurrentRequests === undefined ? {} : { maxConcurrentRequests: record.maxConcurrentRequests }),
+    ...(record.maxConcurrentTolerance === undefined ? {} : { maxConcurrentTolerance: record.maxConcurrentTolerance }),
     ...(record.modelPrefix === undefined ? {} : { modelPrefix: record.modelPrefix }),
     ...(record.modelAccessMode === undefined ? {} : { modelAccessMode: record.modelAccessMode }),
     ...(record.modelList === undefined ? {} : { modelList: record.modelList }),

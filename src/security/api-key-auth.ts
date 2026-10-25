@@ -188,6 +188,7 @@ export interface ApiKeyAuthorizationSnapshot {
   readonly lifetime_token_budget?: number | null | undefined;
   readonly lifetime_tokens_consumed?: number | null | undefined;
   readonly max_concurrent?: number | null | undefined;
+  readonly max_concurrent_tolerance?: number | null | undefined;
   readonly scopes?: readonly string[] | undefined;
 }
 
@@ -223,6 +224,7 @@ export function freezeSnapshot(s: ApiKeyAuthorizationSnapshot): ApiKeyAuthorizat
     lifetime_token_budget: s.lifetime_token_budget ?? null,
     lifetime_tokens_consumed: s.lifetime_tokens_consumed ?? null,
     max_concurrent: s.max_concurrent ?? null,
+    max_concurrent_tolerance: s.max_concurrent_tolerance ?? null,
     scopes: s.scopes ? Object.freeze([...s.scopes]) : undefined,
   };
   return Object.freeze(frozen) as ApiKeyAuthorizationSnapshot;
@@ -241,6 +243,7 @@ export function createAuthorizationSnapshot(input: {
   readonly lifetime_token_budget?: number | null;
   readonly lifetime_tokens_consumed?: number | null;
   readonly max_concurrent?: number | null;
+  readonly max_concurrent_tolerance?: number | null;
   readonly rpm_limit?: number | null;
   readonly scopes?: readonly string[];
 }): ApiKeyAuthorizationSnapshot {
@@ -476,6 +479,9 @@ export async function resolveApiKeyAuthorization(
     ...(policy.lifetimeTokenBudget != null ? { lifetime_token_budget: policy.lifetimeTokenBudget } : {}),
     lifetime_tokens_consumed: consumed,
     ...(policy.maxConcurrentRequests != null ? { max_concurrent: policy.maxConcurrentRequests } : {}),
+    ...(policy.maxConcurrentTolerance != null
+      ? { max_concurrent_tolerance: policy.maxConcurrentTolerance }
+      : {}),
     scopes,
   });
 

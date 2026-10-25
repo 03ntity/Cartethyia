@@ -28,8 +28,6 @@ import { getErrorMessage } from "../../data/api";
  * option, because "unset" is a real state rather than one of the numbers.
  */
 const TIMEOUT_CHOICES = [5, 15, 30, 60, 120, 300, 600] as const;
-/** Slack allowed above a key's concurrency limit. */
-const TOLERANCE_CHOICES = [1, 2, 3, 5, 8, 10, 20, 50] as const;
 /** How long requests stay in full before being folded into the day summary. */
 const WINDOW_CHOICES = [5, 15, 30, 60, 180, 720, 1440] as const;
 const ATTACHMENT_CHOICES = [1, 5, 10, 25, 50, 100] as const;
@@ -311,43 +309,6 @@ function OperationalPanel(): ReactNode {
        * silently clamps — "6000" in a number box reads as accepted until it is
        * quietly stored as 600.
        */}
-      {/*
-       * The concurrency allowance, with the three numbers an operator has to
-       * hold in their head spelled out together. "Limit" is what is chosen on
-       * the key and what a refusal names; "tolerance" is slack added on top so
-       * a run landing a few over is not refused at that number; the effective
-       * max is the sum. Showing the sum here is the point — reading the two
-       * numbers separately is how an operator thinks they have 5 slots when
-       * they have 8, or the reverse.
-       */}
-      <div className="settings-field">
-        <Select
-          label="Concurrency tolerance"
-          id="concurrency-tolerance"
-          value={settings.concurrencyTolerance?.toString() ?? ""}
-          placeholder="None"
-          onValueChange={(value) =>
-            save(
-              {
-                concurrencyTolerance:
-                  value === "" ? null : Number(value),
-              },
-              "Concurrency tolerance updated.",
-            )
-          }
-          options={boundedOptions(
-            TOLERANCE_CHOICES,
-            settings.concurrencyTolerance,
-            (value) => `+${value}`,
-          )}
-        />
-        <p className="mt-1 text-micro text-text-tertiary">
-          Added on top of each key&apos;s <strong>Max concurrent requests</strong>. With a limit of
-          5 and a tolerance of 3 the effective max is <strong>8</strong>: the first 8 run, only the
-          9th is refused. The refusal still names the limit, not the effective max. Leave this empty
-          for no allowance.
-        </p>
-      </div>
       <div className="grid grid-cols-3 gap-8 w-full min-w-0 max-medium:grid-cols-1">
         <div className="settings-field">
           <Select
