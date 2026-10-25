@@ -4,13 +4,39 @@
  * behavior.
  */
 import { log } from "../observability/logger";
+import type { MaintenanceLeaseStore } from "./maintenance-lease";
+import { leaseTtlMs } from "./maintenance-lease";
 
 export interface ScheduledTask {
   readonly name: string;
   readonly intervalMs: number;
   /** Delay before the first run after the registry starts. */
   readonly initialDelayMs?: number;
+  /**
+   * Whether this task's work is SHARED across the fleet, so only one process
+   * should run it per interval.
+   *
+   * Opt-in, because the opposite is also correct: a task that only reads this
+   * process's own state — publishing memory gauges, say — must run everywhere,
+   * and leasing it would mean only one process reported its numbers.
+   *
+   * Side-effecting sweeps (retention, payload cleanup, session expiry) set
+   * this: two processes over the same batches do not produce two correct
+   * halves, they double the row churn and contend for one core.
+   */
+  readonly shared?: boolean;
   run(): Promise<unknown> | void;
+}
+
+export interface ScheduledTaskRegistryOptions {
+  /**
+   * Cross-process coordinator. When present, a task that cannot acquire the
+   * fleet lease SKIPS its tick rather than waiting — the next interval is the
+   * retry, so a missed run cannot become a catch-up storm.
+   */
+  readonly lease?: MaintenanceLeaseStore | undefined;
+  /** Injected clock for deterministic tests. */
+  readonly now?: (() => number) | undefined;
 }
 
 /**
@@ -70,9 +96,44 @@ export class ScheduledTaskRegistry {
    * string split on the maintenance path.
    */
   private readonly disabled: ReadonlySet<string>;
+  /**
+   * Optional cross-process coordinator. Absent, only this process's own
+   * re-entrancy rule applies — which is correct for a single-process
+   * deployment and for tasks that are already idempotent.
+   */
+  private readonly lease: MaintenanceLeaseStore | undefined;
+  /** Injected clock, so a test can drive the maintenance cadence deterministically. */
+  private readonly now: () => number;
+  /** Ticks that could not acquire the fleet lease. Diagnostic, not a queue. */
+  private readonly skippedByLease = new Map<string, number>();
+  /** When each task last skipped on the lease, from the injected clock. */
+  private readonly lastSkipAt = new Map<string, number>();
+  /** Whether any maintenance task in this process is currently running. */
+  private busy: string | undefined;
 
-  constructor(disabledTaskNames: readonly string[] = []) {
+  constructor(
+    disabledTaskNames: readonly string[] = [],
+    options: ScheduledTaskRegistryOptions = {},
+  ) {
     this.disabled = new Set(disabledTaskNames);
+    this.lease = options.lease;
+    this.now = options.now ?? Date.now;
+  }
+
+  /**
+   * How many ticks a task has skipped because another process held the lease.
+   *
+   * A non-zero, steadily rising number means the fleet is duplicating work
+   * somewhere OR one holder is not releasing — both worth seeing, and neither
+   * visible from the task's own logs.
+   */
+  leaseSkips(name: string): number {
+    return this.skippedByLease.get(name) ?? 0;
+  }
+
+  /** When a task last skipped on the lease, or `undefined` if it never has. */
+  lastLeaseSkipAt(name: string): number | undefined {
+    return this.lastSkipAt.get(name);
   }
 
   register(task: ScheduledTask): void {
@@ -150,12 +211,50 @@ export class ScheduledTaskRegistry {
 
   private async runOnce(task: ScheduledTask): Promise<void> {
     if (this.running.has(task.name)) return;
+    // LOCAL rule: one maintenance task at a time per process, across ALL
+    // names. A different task's tick skips (it does not queue) while one is
+    // running — the two would contend for the same rows, the same file
+    // handles, and the same single core. Queuing the skipped tick would mean
+    // every task fires at once once the blocker finishes, which is the burst
+    // this rule exists to prevent.
+    if (this.busy !== undefined) return;
     this.running.add(task.name);
+    this.busy = task.name;
+    const lease =
+      this.lease !== undefined && task.shared === true
+        ? await this.lease.tryAcquire(task.name, leaseTtlMs(task.intervalMs))
+        : undefined;
+    if (lease !== undefined && !lease.held) {
+      this.running.delete(task.name);
+      this.busy = undefined;
+      this.skippedByLease.set(task.name, (this.skippedByLease.get(task.name) ?? 0) + 1);
+      this.lastSkipAt.set(task.name, this.now());
+      return;
+    }
     const done = (async () => {
+      // Renewal at a third of the TTL: enough headroom that one slow
+      // iteration cannot drop the lease mid-run, without hammering Redis.
+      const renewEveryMs = Math.max(1_000, Math.floor(leaseTtlMs(task.intervalMs) / 3));
+      let renewTimer: ReturnType<typeof setInterval> | undefined;
+      if (lease !== undefined) {
+        renewTimer = setInterval(() => {
+          void lease.renew();
+        }, renewEveryMs);
+        if (typeof renewTimer.unref === "function") renewTimer.unref();
+      }
       try {
         await task.run();
+        if (lease !== undefined) await lease.release();
       } catch (error) {
         log.error(`[scheduled-task:${task.name}] failed`, error as Error);
+        // Released on failure too: the error is this process's, not the
+        // fleet's, and holding the lease until it expires would block the
+        // next tick for no reason.
+        if (lease !== undefined) await lease.release().catch(() => undefined);
+      } finally {
+        // No-ops for an absent handle, and the renewal timer is always
+        // assigned before this runs.
+        clearInterval(renewTimer);
       }
     })();
     this.inFlight.add(done);
@@ -164,6 +263,7 @@ export class ScheduledTaskRegistry {
     } finally {
       this.inFlight.delete(done);
       this.running.delete(task.name);
+      this.busy = undefined;
     }
   }
 }

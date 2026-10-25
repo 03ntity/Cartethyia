@@ -4,6 +4,7 @@ import { poolMaxFromEnv } from "../persistence/db-pg";
 import type { CartethyiaDatabase } from "../persistence/db-handle";
 import { resolveRedisBackend, resolveRedisClient } from "../persistence/redis";
 import { resolveProcessTopology, type ProcessTopology } from "../config/runtime";
+import { createRedisMaintenanceLeaseStore } from "../workers/maintenance-lease";
 import { resolveDbMode } from "../persistence/db-mode";
 import type { RedisClient } from "../persistence/redis";
 import {
@@ -371,8 +372,14 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
   // One list covers every periodic task: a small deployment can cut the
   // heaviest sweeps (quota refresh, OAuth refresh, client-version polling)
   // without the codebase growing a flag per task.
+  // Leases coordinate the SHARED sweeps across processes. Absent Redis there is
+  // nothing to coordinate with, and the registry's local one-at-a-time rule is
+  // the correct (and only) guard.
   const scheduledTasks = new ScheduledTaskRegistry(
     readList("CARTETHYIA_DISABLED_TASKS", CONFIG_SPEC.CARTETHYIA_DISABLED_TASKS) ?? [],
+    {
+      ...(redis ? { lease: createRedisMaintenanceLeaseStore(redis) } : {}),
+    },
   );
   if (redis) {
     scheduledTasks.register({
@@ -384,6 +391,8 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
   scheduledTasks.register({
     name: "account-health-sweep",
     intervalMs: 30_000,
+    // Recovers cooldowns deployment-wide and invalidates the shared snapshot.
+    shared: true,
     run: async () => {
       const recovered = await sweepExpiredCooldowns(db);
       const poolRecovered = await sweepExpiredPoolCooldowns(db);
@@ -395,6 +404,9 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
   scheduledTasks.register({
     name: "telemetry-payload-cleanup",
     intervalMs: 15 * 60_000,
+    // Deletes payload frames for every tenant: two passes over the same
+    // batches is duplicated work, not speedup.
+    shared: true,
     run: () => payloadCapture.cleanupExpired(),
   });
   scheduledTasks.register({
@@ -404,11 +416,15 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
     // be expired. Half the session lifetime is the point where a pass can
     // actually find work, and still leaves a full grace period after it.
     intervalMs: 12 * 60 * 60_000,
+    shared: true,
     run: () => deleteExpiredSessions(db),
   });
   scheduledTasks.register({
     name: "telemetry-retention",
     intervalMs: 6 * 60 * 60_000,
+    // Retention deletes rows and files for the whole deployment; a second
+    // concurrent pass would churn the same batches.
+    shared: true,
     run: () =>
       telemetryStore.pruneTelemetry(
         new Date(Date.now() - resolveTelemetryRetentionDays() * 24 * 60 * 60_000),
