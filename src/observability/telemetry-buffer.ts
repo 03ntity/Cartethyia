@@ -205,6 +205,20 @@ export function adaptiveFlushIntervalMs(
   return Math.max(ADAPTIVE_FLUSH_MIN_MS, Math.round(baseMs * (1 - fill)));
 }
 
+/** The telemetry backlog's current shape — see {@link TelemetryBatchBuffer.snapshot}. */
+export interface TelemetryBacklogSnapshot {
+  /** Queued events waiting for the next drain. */
+  readonly items: number;
+  /** Estimated queued bytes. */
+  readonly bytes: number;
+  readonly itemCapacity: number;
+  readonly byteCapacity: number;
+  /** Whether a drain is currently in flight. */
+  readonly flushing: boolean;
+  /** Consecutive fully-failed drains; 0 when healthy. */
+  readonly drainFailureStreak: number;
+}
+
 export class TelemetryBatchBuffer {
   /**
    * One entry per queued event. `bytes` is a conservative enqueue-time
@@ -261,7 +275,28 @@ export class TelemetryBatchBuffer {
     if (typeof this.timer.unref === "function") this.timer.unref();
   }
 
-  /** Non-blocking; drops the event (and counts it) when the buffer is full by count or bytes. */
+  /**
+   * The backlog's current shape, for gauges and the health surface.
+   *
+   * The buffer already drops on its bounds, but a drop nobody can see is
+   * indistinguishable from "no traffic" — an operator watching the console
+   * during an outage would see flat telemetry and conclude nothing was
+   * happening, when in fact the queue was full and discarding.
+   */
+  snapshot(): TelemetryBacklogSnapshot {
+    return {
+      items: this.queue.length,
+      bytes: this.queuedBytes,
+      itemCapacity: this.maxItems,
+      byteCapacity: this.maxBytes,
+      flushing: this.flushing,
+      // The streak is the interesting one: a single failed drain is noise, a
+      // rising streak means the database is refusing writes and every event
+      // buffered past the cap is being dropped.
+      drainFailureStreak: this.drainFailureStreak,
+    };
+  }
+
   enqueue(event: TelemetryEventInput): void {
     const bytes = estimateTelemetryEventBytes(event);
     if (this.stopped || this.queue.length >= this.maxItems || this.queuedBytes + bytes > this.maxBytes) {

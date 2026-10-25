@@ -113,12 +113,20 @@ export async function ensureMigrated(): Promise<void> {
  * they cannot see from the config file: with `poolMax` per process and
  * `max_connections` on the server, how many processes fit.
  *
+ * `processCount` is the configured count: the budget is
+ * `processCount × poolMax`, not `poolMax`. Without it a four-process deploy
+ * that looked fine per-process exhausts `max_connections` in aggregate — and
+ * does so under load rather than at boot.
+ *
  * A pool that alone meets or exceeds the server ceiling is unambiguously
  * broken even for one process, so that fails the boot. Anything else is a
  * warning with the usable process count, because a single-process deployment
  * is legitimate and the operator — not this process — knows how many they run.
  */
-export async function assertPoolFitsServerCapacity(poolMax: number): Promise<void> {
+export async function assertPoolFitsServerCapacity(
+  poolMax: number,
+  processCount = 1,
+): Promise<void> {
   let serverMax: number;
   try {
     const result = await getPool().query<{ max_connections: string }>("SHOW max_connections");
@@ -131,26 +139,29 @@ export async function assertPoolFitsServerCapacity(poolMax: number): Promise<voi
   }
   if (!Number.isFinite(serverMax) || serverMax < 1) return;
 
-  if (poolMax >= serverMax) {
+  const needed = poolMax * Math.max(1, processCount);
+  if (needed >= serverMax) {
     // A plain Error, not a GatewayError: this fires during boot, before any
     // request exists to shape an envelope for, and persistence must not depend
     // on the protocol layer for a diagnostic the operator reads in the log.
     // The `code` property keeps the stable identifier a boot log can match on.
     throw Object.assign(
       new Error(
-        `DATABASE_POOL_MAX (${poolMax}) must be below the server's max_connections (${serverMax}); ` +
-          "a single process could not serve a full pool, and every other connection would be refused",
+        `DATABASE_POOL_MAX (${poolMax}) × ${Math.max(1, processCount)} process(es) = ${needed} connections, ` +
+          `which meets or exceeds the server's max_connections (${serverMax}); ` +
+          "the last process would be refused a full pool and every connection after that would fail",
       ),
-      { code: "max_connections_exceeded", poolMax, serverMax },
+      { code: "max_connections_exceeded", poolMax, serverMax, processCount, needed },
     );
   }
 
   const processes = Math.floor(serverMax / poolMax);
-  if (processes < 2) {
+  if (processes < processCount) {
     log.warn(
-      `[postgres] DATABASE_POOL_MAX=${poolMax} leaves room for only ${processes} gateway process ` +
-        `on a server with max_connections=${serverMax}; a second process would exhaust the budget`,
-      { pool_max: poolMax, max_connections: serverMax, processes },
+      `[postgres] DATABASE_POOL_MAX=${poolMax} leaves room for ${processes} gateway process(es) ` +
+        `on a server with max_connections=${serverMax}, but ${processCount} are configured; ` +
+        "the surplus process would exhaust the budget",
+      { pool_max: poolMax, max_connections: serverMax, processes, processCount },
     );
     return;
   }

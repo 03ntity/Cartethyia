@@ -4,7 +4,13 @@ import "./boot/elysia-typebox-bridge";
 import { createGatewayApp, createGatewayShell } from "./boot/app";
 import { bootstrap } from "./boot/lifecycle";
 import type { CartethyiaBoot } from "./boot/lifecycle";
-import { resolveDrainToken, resolveIdleTimeout, resolveMaxBodyBytes, resolvePort } from "./config/runtime";
+import {
+  resolveDrainToken,
+  resolveIdleTimeout,
+  resolveMaxBodyBytes,
+  resolvePort,
+  resolveProcessTopology,
+} from "./config/runtime";
 import { Manifest } from "elysia";
 import { log } from "./observability/logger";
 
@@ -116,10 +122,12 @@ if (boot) {
       // indefinitely. 60 s aligns with the DB pool idle timeout so all
       // long-idle resources reap together.
       idleTimeout: resolveIdleTimeout(),
-      // Enable Bun's SO_REUSEPORT load-balancing so multi-worker deploys
-      // (or a second omp process) can share the same port without a
-      // reverse proxy in front. Silent no-op on platforms that lack it.
-      reusePort: true,
+      // SO_REUSEPORT load-balancing, so several processes can share the port
+      // without a reverse proxy. Tied to the declared topology rather than
+      // left always-on: with one process declared, enabling it lets an
+      // unrelated process on the same port silently take half the traffic —
+      // which is worse than a bind error, because nothing reports it.
+      reusePort: resolveProcessTopology().multiProcess,
       // 8 MiB cap on request bodies keeps a rogue client from allocating
       // gigabytes of memory in the ingress path before validation rejects.
       maxRequestBodySize: resolveMaxBodyBytes(),

@@ -120,6 +120,15 @@ export const CONFIG_SPEC = {
   // must not be the same thing. Zero is not a valid ceiling, so a default of 0
   // would need a second sentinel to mean "derive".
   CARTETHYIA_PROCESS_CONCURRENCY_LIMIT: { kind: "optional-int", min: 1, max: 64 },
+  // How many gateway processes serve this deployment, and which one this is.
+  // Count > 1 requires Linux, CARTETHYIA_DB_MODE=full, and a REACHABLE Redis —
+  // checked at boot, because a half-configured multi-process deploy starts
+  // fine and then enforces every per-key limit N times over. Lite stays
+  // single-process: two processes on one SQLite file corrupt it.
+  CARTETHYIA_PROCESS_COUNT: { kind: "int", default: 1, min: 1, max: 16 },
+  // Which process this is (0 – count-1). Mandatory when count > 1: a process
+  // that does not know its index cannot own a shard of anything.
+  CARTETHYIA_PROCESS_INDEX: { kind: "int", default: 0, min: 0, max: 15 },
   // Optional secret for the operator drain endpoint (`POST /admin/drain`). When
   // set, a process can be stopped gracefully on platforms where a catchable
   // signal cannot be delivered to it (notably Windows, where `process.kill` of

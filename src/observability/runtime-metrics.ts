@@ -13,6 +13,7 @@ import { trackMemoryUsage } from "./performance-metrics";
 import { log } from "./logger";
 import { resolveMemoryLimitOverrideBytes } from "../config/timeouts";
 import { CONFIG_SPEC, readFlag } from "../config/spec";
+import type { TelemetryBacklogSnapshot } from "./telemetry-buffer";
 /**
  * The memory figures a shed decision needs.
  *
@@ -38,6 +39,11 @@ export interface RuntimeMetricSources {
    * identities, so its size is the leak signal to watch.
    */
   readonly ipAbuseKeys: () => number;
+  /**
+   * The telemetry backlog's current shape, or `undefined` when no buffer is
+   * wired (tests, and the console-only shell).
+   */
+  readonly telemetryBacklog?: () => TelemetryBacklogSnapshot | undefined;
   /** Tracked keys in the in-process quota cache tier (0 when Redis-only paths are idle). */
   readonly quotaCacheEntries: () => number;
 
@@ -187,6 +193,11 @@ export class RuntimeMetricsSampler {
     metrics.cartethyia_quota_cache_entries.set(this.sources.quotaCacheEntries());
     metrics.cartethyia_model_catalog_entries.set(this.sources.modelCatalogEntries());
     metrics.cartethyia_process_in_flight.set(this.inFlightSource());
+    const backlog = this.sources.telemetryBacklog?.();
+    if (backlog !== undefined) {
+      metrics.cartethyia_telemetry_backlog_items.set(backlog.items);
+      metrics.cartethyia_telemetry_backlog_bytes.set(backlog.bytes);
+    }
     if (this.concurrencyLimit !== undefined) {
       metrics.cartethyia_process_concurrency_limit.set(this.concurrencyLimit);
     }

@@ -3,6 +3,8 @@ import { assertPoolFitsServerCapacity, bootDatabase, ensureMigrated } from "../p
 import { poolMaxFromEnv } from "../persistence/db-pg";
 import type { CartethyiaDatabase } from "../persistence/db-handle";
 import { resolveRedisBackend, resolveRedisClient } from "../persistence/redis";
+import { resolveProcessTopology, type ProcessTopology } from "../config/runtime";
+import { resolveDbMode } from "../persistence/db-mode";
 import type { RedisClient } from "../persistence/redis";
 import {
   bundledModelCatalog,
@@ -143,9 +145,89 @@ const OAUTH_REFRESH_INTER_ITEM_DELAY_MS = 1_500;
 const CLIENT_VERSION_MONITOR_INTERVAL_MS = 30 * 60_000;
 const CLIENT_VERSION_INITIAL_DELAY_MS = 10_000;
 
+/** Bound on the boot-time Redis probe: a start must fail, not hang. */
+const REDIS_PROBE_TIMEOUT_MS = 2_000;
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  const { promise: timeout, reject } = Promise.withResolvers<never>();
+  const timer = setTimeout(() => reject(new Error("timeout")), ms);
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Bounded Redis reachability probe: fails rather than hangs. */
+async function redisIsReachable(): Promise<boolean> {
+  const client = resolveRedisClient();
+  if (!client) return false;
+  try {
+    const result = await withTimeout(client.ping(), REDIS_PROBE_TIMEOUT_MS);
+    return result === "PONG";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Refuses to start a multi-process deployment whose shared state is not
+ * actually shared.
+ *
+ * Every process shares one port via `SO_REUSEPORT`, so the kernel balances
+ * across them — and each process keeps its own in-memory admission counters,
+ * quota cache, and cooldown map. Those are only correct when they live in
+ * Redis. Starting anyway does not fail loudly; it enforces every per-key limit
+ * N times over, which then reads as "the limit did not work".
+ *
+ * Redis is checked by PING with a hard bound, not merely for being configured:
+ * a configured-but-unreachable Redis is the failure mode that matters, and an
+ * unbounded connect at boot would hang the start instead of failing it.
+ */
+async function assertMultiProcessPreconditions(
+  topology: ProcessTopology,
+  redisReachable: () => Promise<boolean>,
+): Promise<void> {
+  if (!topology.multiProcess) return;
+  if (process.platform !== "linux") {
+    throw Object.assign(
+      new Error(
+        `CARTETHYIA_PROCESS_COUNT=${topology.count} requires Linux (SO_REUSEPORT); ` +
+          `this process is on ${process.platform}`,
+      ),
+      { code: "multi_process_unsupported_platform" },
+    );
+  }
+  if (resolveDbMode() !== "full") {
+    throw Object.assign(
+      new Error(
+        `CARTETHYIA_PROCESS_COUNT=${topology.count} requires CARTETHYIA_DB_MODE=full (PostgreSQL); ` +
+          "two processes on one SQLite file corrupt it — there is no cross-process lock in the driver",
+      ),
+      { code: "multi_process_requires_postgres" },
+    );
+  }
+  const reachable = await redisReachable();
+  if (!reachable) {
+    throw Object.assign(
+      new Error(
+        `CARTETHYIA_PROCESS_COUNT=${topology.count} requires a REACHABLE Redis: admission counters, ` +
+          "quotas, and cooldowns are per-process without one, so every per-key limit would be " +
+          `enforced ${topology.count} times over`,
+      ),
+      { code: "multi_process_requires_redis" },
+    );
+  }
+}
+
 export async function buildProductionDeps(): Promise<ProductionDeps> {
   const startupStartedAt = performance.now();
   const startupMemoryBefore = process.memoryUsage();
+  // Resolved first and validated before any connection is opened: a
+  // half-configured multi-process deploy that starts anyway looks healthy
+  // until a per-key limit is enforced N times over.
+  const topology = resolveProcessTopology();
+  await assertMultiProcessPreconditions(topology, redisIsReachable);
   const handle = await measureStartupPhase("database-connect", bootDatabase);
   const db = handle.db;
   // One rule, no mode flag: REDIS_URL set → shared client, unset → memory.
@@ -155,7 +237,7 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
     await ensureMigrated();
     // Pool sizing is an external-server concern; the embedded backend has no
     // connection budget to fit into.
-    if (handle.kind === "pg") await assertPoolFitsServerCapacity(poolMaxFromEnv());
+    if (handle.kind === "pg") await assertPoolFitsServerCapacity(poolMaxFromEnv(), topology.count);
   });
   await measureStartupPhase("provider-seed", () => seedBundledProviders(db));
   // Boot-only: retire global rows for providers the bundle has dropped, so a
@@ -353,6 +435,9 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
     modelCatalogEntries: () => modelCatalogCacheSize(),
     // Late-bound via bindInFlight once the request state store exists.
     inFlight: () => 0,
+    // The buffer is built below; the closure keeps the sampler from holding a
+    // reference during construction.
+    telemetryBacklog: () => telemetryBuffer?.snapshot(),
   });
   // One sample NOW, not on the first tick. The headroom guard reads
   // `memorySnapshot()` on every gateway request and treats `undefined` as

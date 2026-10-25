@@ -66,6 +66,11 @@ const ALLOW_LIST: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     // One-shot sentinel the install script sets to mark a source run; not an
     // operator-tunable knob, so it is not sampled in `.env.example` either.
     CARTETHYIA_SOURCE_RUN: "install-script sentinel, not an operator knob",
+    // Read raw for PRESENCE, not value: with a process count above one, an
+    // absent index must fail rather than default to 0 — the spec's int reader
+    // cannot distinguish "absent" from "explicitly 0". The value itself is
+    // still read through the spec.
+    CARTETHYIA_PROCESS_INDEX: "presence check; absent must error, not default to 0",
   },
   "src/observability/payload-capture.ts": {
     // Telemetry subsystem knob; the retention value is also in `.env.example`
