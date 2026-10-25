@@ -8,9 +8,9 @@
 //     X-Device-Type, X-Os-Version  (all encodeURIComponent'd)
 //   - User-Agent: TraeClient/TTNet
 //
-// It does NOT send: x-ide-token (separate header), x-ide-version,
-// x-app-version, store-country-code, X-Request-Id. Those were inherited
-// from the donor hub and are dropped here.
+// The donor's data-plane implementation and the native Agent transport both
+// send x-ide-token alongside Authorization. Version headers remain separate:
+// they are not universally required by Agent and commercial requests.
 
 import { createHash } from "node:crypto";
 import {
@@ -64,7 +64,7 @@ export const TRAE_DEVICE_BRAND = "Default string";
 /** Inputs for {@link buildTraeHeaders}. */
 export interface TraeHeaderInput {
   readonly realm: TraeRealm;
-  /** Access token, sent as `Authorization: Cloud-IDE-JWT <token>`. */
+  /** Access token, sent as both `x-ide-token` and Cloud-IDE-JWT. */
   readonly token: string;
   /** Account id the device fingerprint is derived from. */
   readonly uid: string;
@@ -88,6 +88,7 @@ export function buildTraeHeaders(input: TraeHeaderInput): Record<string, string>
     "X-App-Id": TRAE_APP_ID,
     "x-plugin-channel": TRAE_PLUGIN_CHANNEL,
     "x-ide-version-code": input.versionCode ?? config.versionCode,
+    "x-ide-token": input.token,
     Authorization: `Cloud-IDE-JWT ${input.token}`,
     "Content-Type": "application/json",
     Accept: "application/json",

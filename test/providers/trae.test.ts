@@ -17,6 +17,48 @@ import {
   toTraeAgentBody,
 } from "../../src/providers/integrations/trae/trae-protocol";
 import type { CanonicalRequest } from "../../src/protocol/canonical-model";
+import { createTraeAdapter } from "../../src/providers/integrations/trae/trae";
+import type {
+  ProviderDispatchContext,
+  ProviderDispatchTarget,
+} from "../../src/providers/provider-contracts";
+
+const AGENT_TARGET: ProviderDispatchTarget = {
+  provider_id: "trae",
+  model_id: "deepseek-v4-pro-0813",
+  wire_family: "chat",
+  endpoint_path: TRAE_AGENT_CHAT_PATH,
+  capabilities: {},
+};
+
+function dispatchContext(frames: readonly Record<string, unknown>[]): ProviderDispatchContext {
+  const body = frames
+    .map((frame) => `event: ${frame["event"]}\ndata: ${JSON.stringify(frame["data"])}\n\n`)
+    .join("");
+  return {
+    outbound_fetch: (async () => new Response(body, { status: 200 })) as unknown as typeof fetch,
+    deadline: Date.now() + 60_000,
+    abort_signal: new AbortController().signal,
+    credential: {
+      credential_id: "c1",
+      provider_id: "trae",
+      account_id: "1",
+      credential_kind: "oauth",
+      secret: new TextEncoder().encode("token"),
+    },
+    user_agent: "test",
+  } as unknown as ProviderDispatchContext;
+}
+
+async function agentEvents(frames: readonly Record<string, unknown>[]) {
+  const events = [];
+  for await (const event of createTraeAdapter().dispatch(
+    request(),
+    AGENT_TARGET,
+    dispatchContext(frames),
+  )) events.push(event);
+  return events;
+}
 
 function request(overrides: Partial<CanonicalRequest> = {}): CanonicalRequest {
   return {
@@ -163,7 +205,7 @@ describe("buildTraeHeaders", () => {
   test("CN authenticates with Cloud-IDE-JWT", () => {
     const headers = buildTraeHeaders({ realm: "cn", token: "t", uid: "1" });
     expect(headers["Authorization"]).toBe("Cloud-IDE-JWT t");
-    expect(headers["x-ide-token"]).toBeUndefined();
+    expect(headers["x-ide-token"]).toBe("t");
   });
 
   test("intl uses the same Cloud-IDE-JWT scheme as CN", () => {
@@ -436,5 +478,47 @@ describe("trae stream framing", () => {
     for await (const frame of parseTraeSse(streamOf(frames))) parsed.push(frame);
     expect(parsed).toHaveLength(1);
     expect((parsed[0]?.data as { response: string }).response).toBe("OK");
+  });
+});
+
+describe("trae Agent tool streams", () => {
+  test("an SSE error without a message preserves the upstream code", async () => {
+    await expect(agentEvents([{ event: "error", data: { code: 4015, message: "" } }]))
+      .rejects.toThrow("Trae stream error (upstream code 4015)");
+  });
+
+  test("an opening tool frame keeps arguments delivered beside the id", async () => {
+    const events = await agentEvents([
+      { event: "output", data: { tool_calls: [{ id: "call-1", index: 0, function_call: { name: "read", arguments: '{"path":"a.ts"}' } }] } },
+    ]);
+    const deltas = events.filter((event) => event.type === "tool_call_delta");
+    expect(deltas).toHaveLength(2);
+    expect(deltas.map((event) => event.type === "tool_call_delta" ? event.arguments_delta : ""))
+      .toEqual(["", '{"path":"a.ts"}']);
+  });
+
+  test("nested chunk tool calls use the same translation as flat frames", async () => {
+    const events = await agentEvents([
+      { event: "output", data: { chunk: { tool_calls: [{ id: "call-1", index: 0, function_call: { name: "read", arguments: "{}" } }] } } },
+    ]);
+    expect(events.some((event) => event.type === "tool_call_delta")).toBe(true);
+  });
+
+  test("tool ids from one request never resolve fragments in the next request", async () => {
+    const adapter = createTraeAdapter();
+    const collect = async (frames: readonly Record<string, unknown>[]) => {
+      const events = [];
+      for await (const event of adapter.dispatch(request(), AGENT_TARGET, dispatchContext(frames))) {
+        events.push(event);
+      }
+      return events;
+    };
+    await collect([
+      { event: "output", data: { tool_calls: [{ id: "old-call", index: 0, function_call: { name: "read" } }] } },
+    ]);
+    const events = await collect([
+      { event: "output", data: { tool_calls: [{ index: 0, function_call: { arguments: "stale" } }] } },
+    ]);
+    expect(events.some((event) => event.type === "tool_call_delta")).toBe(false);
   });
 });

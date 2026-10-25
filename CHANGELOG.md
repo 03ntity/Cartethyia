@@ -12,6 +12,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Trae Agent streams keep complete, isolated tool calls.** An opening tool
+  frame carrying both an id and arguments now emits both instead of dropping
+  the first arguments; the adapter also accepts `chunk.tool_calls`, and its
+  tool-id index is scoped to one stream so a later request cannot inherit an
+  earlier request's call id. Trae's portable Agent requests again carry the
+  donor's `x-ide-token` beside `Authorization: Cloud-IDE-JWT`, and an SSE
+  error with an empty message now reports its upstream numeric code.
+
+  The portable `llm_utils_chat` path remains the supported surface. Native
+  Solo task attribution and Max mode are not implemented. A live
+  `deepseek-v4-pro-0813` check streamed `OK` with usage using a synthetic
+  derived device identity, but returned upstream `4015` with the tested
+  account's original numeric device id; this release does not claim that
+  identity restriction is resolved.
+
 - **Remote Support runs on every host.** The service used to shell out to a
   Windows-only `.cmd`/`.ps1` launcher pair, and if the npm tarball shipped
   without them (or on macOS/Linux at all) every Overview card reported

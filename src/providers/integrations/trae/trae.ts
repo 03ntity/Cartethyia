@@ -90,14 +90,6 @@ class TraeAdapter implements ProviderAdapter {
   readonly provider_id: ProviderId;
   private readonly realm: TraeRealm;
   private readonly fetchFn: typeof fetch;
-  /**
-   * Maps a frame's `index` to the call id seen for it.
-   *
-   * Argument fragments arrive without the id, so the association has to be
-   * remembered between frames rather than read from the fragment itself.
-   */
-  readonly #toolCallIds = new Map<string, string>();
-
   constructor(options: TraeAdapterOptions = {}) {
     this.provider_id = (options.providerId ?? TRAE_PROVIDER_ID) as ProviderId;
     this.realm = options.realm ?? "intl";
@@ -186,6 +178,9 @@ class TraeAdapter implements ProviderAdapter {
     yield { type: "response_start", sequence_number: seq++, model: requestModel } as CanonicalEvent;
     let stopReason: CanonicalStopReason = "stop";
     let usage: Record<string, unknown> | undefined;
+    // Tool ids are scoped to one stream. Argument-only frames from a later
+    // request must never inherit an earlier request's id at the same index.
+    const toolCallIds = new Map<string, string>();
     /**
      * Tool calls arrive fragmented across frames and the id is not repeated.
      *
@@ -206,8 +201,12 @@ class TraeAdapter implements ProviderAdapter {
         continue;
       }
       if (frame.event === "error") {
-        const data = frame.data as { message?: unknown };
-        const message = typeof data.message === "string" ? data.message : "Trae stream error";
+        const data = frame.data as { message?: unknown; code?: unknown };
+        const message = typeof data.message === "string" && data.message.length > 0
+          ? data.message
+          : typeof data.code === "number" || typeof data.code === "string"
+            ? `Trae stream error (upstream code ${data.code})`
+            : "Trae stream error";
         throw new GatewayError("platform_unavailable", 502, message, {}, "upstream");
       }
       if (typeof frame.data !== "object" || frame.data === null) continue;
@@ -239,7 +238,7 @@ class TraeAdapter implements ProviderAdapter {
             content: { kind: "reasoning", payload: null, summary: flatReasoning },
           } as CanonicalEvent;
         }
-        yield* this.#toolCallDeltas(record["tool_calls"], announced, () => seq++);
+        yield* this.#toolCallDeltas(record["tool_calls"], announced, toolCallIds, () => seq++);
         if (typeof record["finish_reason"] === "string") {
           stopReason = STOP_REASONS[record["finish_reason"] as string] ?? "stop";
         }
@@ -271,8 +270,9 @@ class TraeAdapter implements ProviderAdapter {
         } as CanonicalEvent;
       }
       if (typeof payload["finish_reason"] === "string") {
-        stopReason = STOP_REASONS[payload["finish_reason"]] ?? "stop";
+        stopReason = STOP_REASONS[payload["finish_reason"] as string] ?? "stop";
       }
+      yield* this.#toolCallDeltas(payload["tool_calls"], announced, toolCallIds, () => seq++);
       if (typeof payload["usage"] === "object" && payload["usage"] !== null) {
         usage = payload["usage"] as Record<string, unknown>;
       }
@@ -305,6 +305,7 @@ class TraeAdapter implements ProviderAdapter {
   async *#toolCallDeltas(
     raw: unknown,
     announced: Set<string>,
+    toolCallIds: Map<string, string>,
     nextSeq: () => number,
   ): AsyncIterable<CanonicalEvent> {
     if (!Array.isArray(raw)) return;
@@ -320,7 +321,7 @@ class TraeAdapter implements ProviderAdapter {
       const slot = `idx:${index}`;
 
       if (declaredId.length > 0) {
-        this.#toolCallIds.set(slot, declaredId);
+        toolCallIds.set(slot, declaredId);
         // The closing frame repeats a known id with no payload; emitting it
         // again would append a duplicate empty call.
         if (announced.has(declaredId)) continue;
@@ -332,11 +333,11 @@ class TraeAdapter implements ProviderAdapter {
           name: name ?? "",
           arguments_delta: "",
         } as CanonicalEvent;
-        continue;
+        if (args.length === 0) continue;
       }
 
       if (args.length === 0) continue;
-      const id = this.#toolCallIds.get(slot);
+      const id = toolCallIds.get(slot);
       if (id === undefined) continue;
       yield {
         type: "tool_call_delta",
@@ -394,7 +395,10 @@ export async function discoverTraeModels(input: {
   readonly providerId?: string;
   /** Account region, so the listing is asked of the host that serves it. */
   readonly region?: string;
-}): Promise<readonly { id: string; ctx: number | undefined }[]> {
+}): Promise<readonly {
+  id: string;
+  ctx: number | undefined;
+}[]> {
   const headers = buildTraeHeaders({
     realm: input.realm,
     token: input.token,
