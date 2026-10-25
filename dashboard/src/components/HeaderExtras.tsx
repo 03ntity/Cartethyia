@@ -135,7 +135,7 @@ function DonationModal({
         </DialogActions>
       }
     >
-      <div className="grid grid-cols-1 gap-5 sm:gap-6 lg:donate-qr-grid">
+      <div className="grid grid-cols-1 gap-5 sm:gap-6 donate-qr-grid">
         <div className="flex flex-col items-center gap-2">
           <img
             src={QRIS_IMAGE}

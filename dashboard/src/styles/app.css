@@ -1728,9 +1728,21 @@ html[data-app="landing"] .landing-story-visual {
  * One width, stated once. The grid template and the QR image's own max width
  * were two separate `220px` literals, which is how a layout decision ends up
  * needing two edits to change and a third to stay in sync.
+ *
+ * Two columns from `lg` up. This used to be applied as `lg:donate-qr-grid`,
+ * but Tailwind only generates variants for utilities it owns — a class defined
+ * here is not one, so the `lg:` prefix produced no rule at all and the dialog
+ * stayed a single stacked column at every width: QR above, prose below, no
+ * side-by-side layout ever rendered. The breakpoint lives here instead.
  */
 .donate-qr-grid {
-  grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 1024px) {
+  .donate-qr-grid {
+    grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+  }
 }
 .donate-qr-image {
   max-width: 220px;
