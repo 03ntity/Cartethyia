@@ -120,6 +120,9 @@ export const CONFIG_SPEC = {
   // must not be the same thing. Zero is not a valid ceiling, so a default of 0
   // would need a second sentinel to mean "derive".
   CARTETHYIA_PROCESS_CONCURRENCY_LIMIT: { kind: "optional-int", min: 1, max: 64 },
+  // Slack above each key's concurrency limit. Effective ceiling is
+  // limit + tolerance; only requests past it are refused.
+  CARTETHYIA_CONCURRENCY_TOLERANCE: { kind: "optional-int", min: 0, max: 1024 },
   // How many gateway processes serve this deployment, and which one this is.
   // Count > 1 requires Linux, CARTETHYIA_DB_MODE=full, and a REACHABLE Redis —
   // checked at boot, because a half-configured multi-process deploy starts

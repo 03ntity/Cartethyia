@@ -106,6 +106,22 @@ export function resolveProcessConcurrencyOverride(): number | undefined {
 }
 
 /**
+ * Slack added on top of every key's concurrency limit.
+ *
+ * Operator configuration, not something a key carries about itself: it is
+ * deliberate hidden allowance so a run that lands a few requests over the
+ * number an operator chose is not refused at that number. The effective
+ * ceiling is `limit + tolerance`, and only requests past it are refused.
+ */
+export function resolveConcurrencyTolerance(): number {
+  const value = readOptionalInt(
+    "CARTETHYIA_CONCURRENCY_TOLERANCE",
+    CONFIG_SPEC.CARTETHYIA_CONCURRENCY_TOLERANCE,
+  );
+  return value === undefined ? 0 : Math.max(0, value);
+}
+
+/**
  * The effective concurrency for this process.
  *
  * Takes the limit as an argument rather than resolving it here: the limit

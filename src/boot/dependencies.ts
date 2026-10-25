@@ -87,6 +87,7 @@ import {
 import { resolveSsrfPolicy, resolveTrustedProxyBoundary } from "../config/network";
 import type { TrustedProxyBoundary } from "../config/network";
 import { resolveTelemetryRetentionDays } from "../config/telemetry";
+import { resolveConcurrencyTolerance } from "../config/resources";
 import { CONFIG_SPEC, readInt, readList } from "../config/spec";
 import type { ProviderAdapter } from "../providers/provider-contracts";
 import type { ProviderRegistry } from "../providers/provider-registry";
@@ -350,6 +351,10 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
       const children = await store.sumChildrenConsumed(apiKeyId);
       return (row.lifetimeTokensConsumed ?? 0) + children;
     },
+    // Slack above every key's concurrency limit. Deployment-wide rather than
+    // per key: it is operator configuration, not something a key can carry
+    // about itself to loosen its own ceiling.
+    () => resolveConcurrencyTolerance(),
   );
   const ipStore = redis
     ? new RedisIpAbuseStore(redis)
