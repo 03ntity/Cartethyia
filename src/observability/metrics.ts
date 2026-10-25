@@ -279,6 +279,8 @@ export class PrometheusRegistry {
   readonly cartethyia_ip_abuse_keys: GaugeMetric;
   readonly cartethyia_quota_cache_entries: GaugeMetric;
   readonly cartethyia_model_catalog_entries: GaugeMetric;
+  readonly cartethyia_process_in_flight: GaugeMetric;
+  readonly cartethyia_process_concurrency_limit: GaugeMetric;
   readonly cartethyia_proxy_dial_proxy_resolved_total: CounterMetric;
   readonly proxy_provider_adapter_load_ms: HistogramMetric;
   readonly pool_cooldown_record_failed: CounterMetric;
@@ -349,6 +351,14 @@ export class PrometheusRegistry {
     this.cartethyia_memory_limit_bytes = this.gauge(
       "cartethyia_memory_limit_bytes",
       "Container/cgroup memory limit in bytes (0 when unknown)",
+    );
+    this.cartethyia_process_in_flight = this.gauge(
+      "cartethyia_process_in_flight",
+      "Gateway requests currently admitted into this process",
+    );
+    this.cartethyia_process_concurrency_limit = this.gauge(
+      "cartethyia_process_concurrency_limit",
+      "Effective in-flight ceiling for this process, derived from the memory limit",
     );
     this.cartethyia_routing_roundrobin_entries = this.gauge(
       "cartethyia_routing_roundrobin_entries",

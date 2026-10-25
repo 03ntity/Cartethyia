@@ -28,6 +28,7 @@ import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import type { RedisClient } from "../../persistence/redis";
 import type { TelemetryBatchBuffer } from "../../observability/telemetry-buffer";
 import type { ModelStrikeService } from "../../security/model-abuse";
+import type { RuntimeMemorySnapshot } from "../../observability/runtime-metrics";
 import {
   TelemetryPayloadCapture,
   payloadCaptureKeepsBodies,
@@ -58,6 +59,14 @@ export interface TransportPipelineContext {
    * decision is local, and Redis is only written for fleet visibility.
    */
   readonly redis?: RedisClient | undefined;
+  /**
+   * The sampled memory state the headroom guard sheds against.
+   *
+   * Supplied by the runtime sampler. When absent the guard cannot compare RSS
+   * against a limit and does not shed — so this must be wired in production,
+   * and the sampler must be initialized at boot even before its first tick.
+   */
+  readonly memorySnapshot?: () => RuntimeMemorySnapshot | undefined;
 }
 
 /**
@@ -84,6 +93,7 @@ export function createTransportPipeline(context: TransportPipelineContext): Tran
     createProcessConcurrencyMiddleware(),
     createHeadroomGuard({
       store: context.stateStore,
+      ...(context.memorySnapshot === undefined ? {} : { memorySnapshot: context.memorySnapshot }),
       ...(context.redis === undefined ? {} : { redis: context.redis }),
     }),
     createDependencyReadinessMiddleware({

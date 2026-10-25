@@ -110,6 +110,16 @@ export const CONFIG_SPEC = {
     min: 0,
     max: 600_000,
   },
+  // Optional ceiling on in-flight requests per process. Left unset, the limit
+  // is derived from the memory limit and the body ceiling (see
+  // config/resources.ts): 2 GiB/4 MiB → 64, 512 MiB/4 MiB → 16, 256 MiB/16 MiB
+  // → 2. Set it to admit more than memory alone would allow — which is the
+  // operator's call, and is reported rather than corrected — or less, to keep
+  // a slow upstream from being handed more concurrency than it can serve.
+  // Optional-int, not int-with-a-zero-default: "unset" and "explicitly zero"
+  // must not be the same thing. Zero is not a valid ceiling, so a default of 0
+  // would need a second sentinel to mean "derive".
+  CARTETHYIA_PROCESS_CONCURRENCY_LIMIT: { kind: "optional-int", min: 1, max: 64 },
   // Optional secret for the operator drain endpoint (`POST /admin/drain`). When
   // set, a process can be stopped gracefully on platforms where a catchable
   // signal cannot be delivered to it (notably Windows, where `process.kill` of

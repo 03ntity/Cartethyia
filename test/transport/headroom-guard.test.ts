@@ -18,14 +18,31 @@ import { ProxyRequestStateStore } from "../../src/transport/request/state";
 
 /**
  * Builds an app where the guard's predicate trips deterministically: a
- * `minFreeBytes` far larger than any real box's total memory makes
- * `rss + minFreeBytes > totalmem()` always true, independent of the machine.
+ * `minFreeBytes` far larger than the announced limit makes
+ * `rss + headroom > limit` always true, independent of the machine.
+ *
+ * The guard now compares against the RESOLVED LIMIT, not the host's total
+ * memory, so the fixture has to announce a limit — with none discoverable the
+ * guard cannot compare and deliberately does not shed.
  */
+const ANNOUNCED_LIMIT_BYTES = 512 * 1024 * 1024;
+const snapshot = () => ({
+  rssBytes: 64 * 1024 * 1024,
+  limitBytes: ANNOUNCED_LIMIT_BYTES,
+  sampledAtMs: Date.now(),
+});
+
 function trippedApp() {
   const stateStore = new ProxyRequestStateStore(undefined);
   return new Elysia()
     .use(createErrorNormalizationMiddleware({ stateStore }))
-    .use(createHeadroomGuard({ store: stateStore, minFreeBytes: Number.MAX_SAFE_INTEGER }))
+    .use(
+      createHeadroomGuard({
+        store: stateStore,
+        memorySnapshot: snapshot,
+        minFreeBytes: Number.MAX_SAFE_INTEGER,
+      }),
+    )
     .post("/v1/chat/completions", () => new Response("gateway", { status: 200 }))
     .get("/console", () => new Response("console", { status: 200 }))
     .get("/share/token", () => new Response("share", { status: 200 }))
@@ -37,7 +54,7 @@ function openApp() {
   const stateStore = new ProxyRequestStateStore(undefined);
   return new Elysia()
     .use(createErrorNormalizationMiddleware({ stateStore }))
-    .use(createHeadroomGuard({ store: stateStore, minFreeBytes: 0 }))
+    .use(createHeadroomGuard({ store: stateStore, memorySnapshot: snapshot, minFreeBytes: 0 }))
     .post("/v1/chat/completions", () => new Response("gateway", { status: 200 }))
     .get("/console", () => new Response("console", { status: 200 }));
 }

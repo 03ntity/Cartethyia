@@ -45,6 +45,7 @@ import {
 import { createTokenCountHandler } from "../transport/dispatch/token-count";
 
 import { createTransportPipeline } from "../transport/guards/pipeline";
+import { defaultProcessConcurrencyController } from "../transport/guards/concurrency-guard";
 import { createDrainHandler, isLoopbackPeer, tokenMatches } from "../transport/drain-endpoint";
 import { createConsoleAccountResetHandler } from "../console/auth/account-reset";
 import { resetConsoleAuthState } from "../console/auth/account-reset-store";
@@ -244,6 +245,10 @@ export function createGatewayApp(deps: GatewayAppDeps) {
     deps.mode === "production" ? deps.shutdownCoordinator : undefined,
   );
   deps.runtimeMetricsSampler?.bindInFlight(() => requestStateStore.inFlightCount());
+  // The concurrency ceiling is derived (memory limit ÷ body budget), so it is
+  // published as a gauge: an operator reading "shedding at 16 in flight" needs
+  // to see that 16 IS the limit on this box, not that the process is broken.
+  deps.runtimeMetricsSampler?.bindConcurrencyLimit(defaultProcessConcurrencyController.limit());
   // Shutdown ordering: abort in-flight proxy controllers first so the
   // bounded drain observes cancellation and finalizers run before
   // telemetry flush and pool close. The reason is threaded through so the
@@ -379,6 +384,11 @@ export function createGatewayApp(deps: GatewayAppDeps) {
       telemetry: deps.telemetryBuffer,
       ...(deps.modelStrikes ? { modelStrikes: deps.modelStrikes } : {}),
       ...(deps.consoleApi?.redis ? { redis: deps.consoleApi.redis } : {}),
+      // Bound at construction so the guard holds the sampler's live snapshot
+      // rather than a value captured at boot.
+      ...(deps.runtimeMetricsSampler
+        ? { memorySnapshot: () => deps.runtimeMetricsSampler?.memorySnapshot() }
+        : {}),
     });
     transportPipeline.mountRoot(app);
     const proxyDeps: ProviderProxyHandlerDeps = {

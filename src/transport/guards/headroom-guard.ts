@@ -17,15 +17,14 @@
  * metrics are exempt so an operator can always reach the console that explains
  * the shedding.
  */
-import { totalmem } from "node:os";
 import { Elysia } from "elysia";
 import { GatewayError } from "../../protocol/gateway-error";
 import type { RedisClient } from "../../persistence/redis";
+import { deriveMemoryHeadroomBytes } from "../../config/resources";
+import type { RuntimeMemorySnapshot } from "../../observability/runtime-metrics";
 import type { ProxyRequestStateStore } from "../request/state";
 import { isProxyRequest } from "./body-policy";
 
-/** Free bytes the process must keep below its RSS before it stops accepting. */
-const DEFAULT_MIN_FREE_BYTES = 64 * 1024 * 1024;
 /** How long the shared shed marker outlives the last shed, so peers can see it. */
 const SHED_MARKER_TTL_SECONDS = 5;
 /** Fleet-visible marker: set on the first shed so every instance reports the same state. */
@@ -34,7 +33,22 @@ const SHED_RETRY_MS = 1_000;
 
 export interface HeadroomGuardDeps {
   readonly store: ProxyRequestStateStore;
-  /** Free bytes to keep; defaults to 64 MiB. A smaller box wants a larger value. */
+  /**
+  * The last sampled memory state, published once per sample by
+  * `RuntimeMetricsSampler`.
+  *
+  * Taken from the sampler rather than measured here: this runs on EVERY
+  * request, and `process.memoryUsage()` on the request path is a cost paid
+  * per request to answer a question that changes over seconds. When absent
+  * (before the first sample) the guard falls back to measuring once — an
+  * unsampled process is still a process that can be OOM-killed.
+  */
+  readonly memorySnapshot?: () => RuntimeMemorySnapshot | undefined;
+  /**
+   * Free bytes to keep below the resolved limit. Defaults to
+   * `MEMORY_HEADROOM_FRACTION` of it, so a 512 MiB container keeps ~102 MiB
+   * free rather than the flat 64 MiB a 2 GiB one would keep.
+   */
   readonly minFreeBytes?: number;
   /**
    * Optional shared client. Used only to publish a shed marker for visibility;
@@ -45,11 +59,27 @@ export interface HeadroomGuardDeps {
 }
 
 export function createHeadroomGuard(deps: HeadroomGuardDeps): Elysia {
-  const minFreeBytes = deps.minFreeBytes ?? DEFAULT_MIN_FREE_BYTES;
+  const fixedHeadroom = deps.minFreeBytes;
   return new Elysia()
     .beforeHandle(({ request }) => {
       if (!isProxyRequest(request)) return;
-      if (process.memoryUsage().rss + minFreeBytes <= totalmem()) return;
+      // Shed when RSS plus the headroom would exceed this process's LIMIT —
+      // not the host's total memory. A container capped at 512 MiB on a 16 GiB
+      // host never approached the old `os.totalmem()` threshold, so the guard
+      // never fired and the process was OOM-killed instead of shedding.
+      //
+      // The snapshot is up to one sample interval old. That is deliberate:
+      // this is the hottest path in the process, and the condition it guards
+      // develops over seconds.
+      const snapshot = deps.memorySnapshot?.();
+      const limit = snapshot?.limitBytes;
+      if (limit === undefined) {
+        // No limit discoverable and no sample yet: nothing to shed against.
+        return;
+      }
+      const rss = snapshot?.rssBytes ?? process.memoryUsage().rss;
+      const headroom = fixedHeadroom ?? deriveMemoryHeadroomBytes(limit);
+      if (rss + headroom <= limit) return;
       if (deps.redis) {
         // Fire-and-forget: a failed marker write must not change this request's
         // outcome, and awaiting it would put Redis on the shed path.
@@ -61,7 +91,11 @@ export function createHeadroomGuard(deps: HeadroomGuardDeps): Elysia {
         "overloaded",
         503,
         "The gateway is at capacity; retry shortly.",
-        { retryAfterMs: SHED_RETRY_MS, minFreeBytes, activeRequests: deps.store.activeCount() },
+        {
+          retryAfterMs: SHED_RETRY_MS,
+          minFreeBytes: headroom,
+          activeRequests: deps.store.activeCount(),
+        },
       );
     })
     .as("plugin");

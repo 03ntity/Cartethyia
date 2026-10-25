@@ -354,6 +354,12 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
     // Late-bound via bindInFlight once the request state store exists.
     inFlight: () => 0,
   });
+  // One sample NOW, not on the first tick. The headroom guard reads
+  // `memorySnapshot()` on every gateway request and treats `undefined` as
+  // "unknown" — so without this the guard would spend its first interval
+  // (seconds, at the configured cadence) unable to shed at all, which is
+  // exactly the window a cold start is most likely to be short of memory.
+  runtimeMetricsSampler.sample();
   scheduledTasks.register({
     name: "runtime-metrics",
     intervalMs: readInt(
