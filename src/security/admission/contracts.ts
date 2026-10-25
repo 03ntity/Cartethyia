@@ -44,6 +44,16 @@ export interface AdmissionReserveRequest {
   readonly lifetimeBudget: number | null;
   readonly lifetimeConsumed: number;
   readonly concurrencyLimit: number | null;
+  /**
+   * Hidden allowance added on top of `concurrencyLimit`.
+   *
+   * The configured limit is what an operator tunes and what the error names;
+   * this is deliberate slack so a run that lands a few requests over does not
+   * get refused at the number it was told. Effective max is
+   * `concurrencyLimit + concurrencyTolerance`. Only requests *beyond* that are
+   * refused — never ones already admitted.
+   */
+  readonly concurrencyTolerance?: number | null | undefined;
   readonly tenantId: string;
   readonly tenantConcurrencyLimit: number | null;
   /**

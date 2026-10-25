@@ -20,6 +20,16 @@ interface InMemoryReservation {
   readonly monthlyKey: string;
   readonly tracksLifetime: boolean;
   readonly tracksConcurrency: boolean;
+  /**
+   * The key the concurrency counter was incremented under.
+   *
+   * Not `apiKeyId`: a share child reserves under its own id while the
+   * reservation is recorded against its parent, so charging and refunding
+   * through `apiKeyId` incremented one counter and decremented another. The
+   * child's count then never fell — after `limit` requests it was permanently
+   * full and refused everything, which is the "never invoked again" symptom.
+   */
+  readonly concurrencyKey: string;
   readonly tenantId: string;
   readonly tracksTenantConcurrency: boolean;
   state: "active" | "committed" | "released";
@@ -193,8 +203,19 @@ export class InMemoryAdmissionCounterStore implements AdmissionCounterStore {
         lifetime + request.estimatedTokens > request.lifetimeBudget
       )
         throw reasonToGatewayError("lifetime-token-budget", { limit: request.lifetimeBudget });
-      if (request.concurrencyLimit != null && concurrent >= request.concurrencyLimit)
-        throw reasonToGatewayError("concurrency-limit", { limit: request.concurrencyLimit });
+      // The tolerance is slack above the configured limit, so the ceiling is
+      // the sum. It widens admission only: requests already inside are never
+      // revisited, and the refusal still names the configured limit.
+      const concurrencyCeiling =
+        request.concurrencyLimit !== null
+          ? request.concurrencyLimit + Math.max(0, request.concurrencyTolerance ?? 0)
+          : null;
+      if (concurrencyCeiling !== null && concurrent >= concurrencyCeiling)
+        throw reasonToGatewayError("concurrency-limit", {
+          limit: request.concurrencyLimit,
+          tolerance: request.concurrencyTolerance ?? 0,
+          effectiveLimit: concurrencyCeiling,
+        });
       if (
         request.tenantConcurrencyLimit != null &&
         tenantConcurrent >= request.tenantConcurrencyLimit
@@ -230,6 +251,7 @@ export class InMemoryAdmissionCounterStore implements AdmissionCounterStore {
         monthlyKey,
         tracksLifetime: request.lifetimeBudget != null,
         tracksConcurrency: request.concurrencyLimit != null,
+        concurrencyKey: rpmConcId,
         tenantId: request.tenantId,
         tracksTenantConcurrency: request.tenantConcurrencyLimit != null,
         state: "active",
@@ -253,7 +275,7 @@ export class InMemoryAdmissionCounterStore implements AdmissionCounterStore {
       this.adjust(this.daily, reservation.dailyKey, delta, reservation.tracksDaily);
       this.adjust(this.monthly, reservation.monthlyKey, delta, reservation.tracksMonthly);
       this.adjust(this.lifetime, apiKeyId, delta, reservation.tracksLifetime);
-      if (reservation.tracksConcurrency) this.decrement(this.concurrent, apiKeyId);
+      if (reservation.tracksConcurrency) this.decrement(this.concurrent, reservation.concurrencyKey);
       if (reservation.tracksTenantConcurrency)
         this.decrement(this.tenantConcurrent, reservation.tenantId);
       reservation.state = "committed";
@@ -338,7 +360,7 @@ export class InMemoryAdmissionCounterStore implements AdmissionCounterStore {
     this.adjust(this.daily, reservation.dailyKey, -reservation.reserved, reservation.tracksDaily);
     this.adjust(this.monthly, reservation.monthlyKey, -reservation.reserved, reservation.tracksMonthly);
     this.adjust(this.lifetime, reservation.apiKeyId, -reservation.reserved, reservation.tracksLifetime);
-    if (reservation.tracksConcurrency) this.decrement(this.concurrent, reservation.apiKeyId);
+    if (reservation.tracksConcurrency) this.decrement(this.concurrent, reservation.concurrencyKey);
     if (reservation.tracksTenantConcurrency)
       this.decrement(this.tenantConcurrent, reservation.tenantId);
     reservation.state = "released";

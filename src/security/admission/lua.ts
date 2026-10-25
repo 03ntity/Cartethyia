@@ -73,7 +73,10 @@ if tonumber(ARGV[3]) and rpm >= tonumber(ARGV[3]) then return -1 end
 if tonumber(ARGV[4]) and daily + estimated > tonumber(ARGV[4]) then return -2 end
 if tonumber(ARGV[5]) and monthly + estimated > tonumber(ARGV[5]) then return -3 end
 if tonumber(ARGV[6]) and lifetime + estimated > tonumber(ARGV[6]) then return -4 end
-if tonumber(ARGV[7]) and concurrent >= tonumber(ARGV[7]) then return -5 end
+-- ARGV[15] is the tolerance: slack above the configured limit, so the ceiling
+-- is the sum. It widens admission only; already-admitted requests are never
+-- revisited.
+if tonumber(ARGV[7]) and concurrent >= tonumber(ARGV[7]) + (tonumber(ARGV[15]) or 0) then return -5 end
 if tonumber(ARGV[10]) and tenantConcurrent >= tonumber(ARGV[10]) then return -6 end
 redis.call('ZADD', KEYS[1], ARGV[1], ARGV[8])
 redis.call('EXPIRE', KEYS[1], ${RPM_WINDOW_TTL_SECONDS})
@@ -82,7 +85,7 @@ if tonumber(ARGV[5]) then redis.call('INCRBY', KEYS[3], estimated); redis.call('
 if tonumber(ARGV[6]) then redis.call('INCRBY', KEYS[5], estimated); redis.call('EXPIRE', KEYS[5], ${LIFETIME_COUNTER_TTL_SECONDS}) end
 if tonumber(ARGV[7]) then redis.call('INCR', KEYS[4]); redis.call('EXPIRE', KEYS[4], ${CONCURRENCY_TTL_SECONDS}) end
 if tonumber(ARGV[10]) then redis.call('INCR', KEYS[7]); redis.call('EXPIRE', KEYS[7], ${CONCURRENCY_TTL_SECONDS}) end
-redis.call('HSET', KEYS[6], 'state', 'active', 'reserved', estimated, 'daily', tonumber(ARGV[4]) and KEYS[2] or '', 'monthly', tonumber(ARGV[5]) and KEYS[3] or '', 'lifetime', tonumber(ARGV[6]) and KEYS[5] or '', 'concurrent', tonumber(ARGV[7]) and '1' or '0', 'tenant_concurrent', tonumber(ARGV[10]) and '1' or '0', 'tenant_id', ARGV[11], 'api_key_id', ARGV[12], 'expires_at', tonumber(ARGV[1]) + tonumber(ARGV[13]))
+redis.call('HSET', KEYS[6], 'state', 'active', 'reserved', estimated, 'daily', tonumber(ARGV[4]) and KEYS[2] or '', 'monthly', tonumber(ARGV[5]) and KEYS[3] or '', 'lifetime', tonumber(ARGV[6]) and KEYS[5] or '', 'concurrent', tonumber(ARGV[7]) and '1' or '0', 'concurrent_key', tonumber(ARGV[7]) and KEYS[4] or '', 'tenant_concurrent', tonumber(ARGV[10]) and '1' or '0', 'tenant_id', ARGV[11], 'api_key_id', ARGV[12], 'expires_at', tonumber(ARGV[1]) + tonumber(ARGV[13]))
 redis.call('EXPIRE', KEYS[6], tonumber(ARGV[14]))
 return 0
 `;
@@ -114,7 +117,13 @@ for _, field in ipairs({'daily', 'monthly', 'lifetime'}) do
     table.insert(updates, key)
   end
 end
-local concurrentKey = 'admission:concurrent:' .. ARGV[2]
+-- The key that was CHARGED, not one rebuilt from the caller's identity: a share
+-- child reserves under its own id while the lease is recorded against its
+-- parent, so rebuilding from ARGV incremented one counter and decremented
+-- another. The child's count never fell and the key went permanently over its
+-- limit. Fall back to ARGV only for leases written before this field existed.
+local concurrentKey = redis.call('HGET', KEYS[1], 'concurrent_key')
+if not concurrentKey or concurrentKey == '' then concurrentKey = 'admission:concurrent:' .. ARGV[2] end
 local hasConcurrency = redis.call('HGET', KEYS[1], 'concurrent') == '1'
 if hasConcurrency then
   local value = tonumber(redis.call('GET', concurrentKey))
@@ -158,7 +167,7 @@ if state ~= 'active' then return -99 end
 local reserved = tonumber(redis.call('HGET', KEYS[1], 'reserved'))
 if not reserved or reserved < 0 then return -99 end
 for _, field in ipairs({'daily', 'monthly', 'lifetime'}) do local key = redis.call('HGET', KEYS[1], field); if key and key ~= '' then local value = tonumber(redis.call('GET', key) or '0'); if not value or value < reserved then return -99 end; redis.call('DECRBY', key, reserved) end end
-if redis.call('HGET', KEYS[1], 'concurrent') == '1' then local key = 'admission:concurrent:' .. ARGV[1]; local value = tonumber(redis.call('GET', key) or '0'); if not value or value < 1 then return -99 end; redis.call('DECR', key) end
+if redis.call('HGET', KEYS[1], 'concurrent') == '1' then local key = redis.call('HGET', KEYS[1], 'concurrent_key'); if not key or key == '' then key = 'admission:concurrent:' .. ARGV[1] end; local value = tonumber(redis.call('GET', key) or '0'); if not value or value < 1 then return -99 end; redis.call('DECR', key) end
 if redis.call('HGET', KEYS[1], 'tenant_concurrent') == '1' then local tenantId = redis.call('HGET', KEYS[1], 'tenant_id'); if not tenantId or tenantId == '' then return -99 end; local key = 'admission:tenant_concurrent:' .. tenantId; local value = tonumber(redis.call('GET', key) or '0'); if not value or value < 1 then return -99 end; redis.call('DECR', key) end
 redis.call('HSET', KEYS[1], 'state', 'released')
 return 0

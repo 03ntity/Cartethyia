@@ -61,6 +61,7 @@ export class RedisAdmissionCounterStore implements AdmissionCounterStore {
         request.apiKeyId,
         String(LEASE_TTL_MS),
         String(LEASE_KEY_TTL_SECONDS),
+        String(Math.max(0, request.concurrencyTolerance ?? 0)),
       );
     assertResult(result, "reserve");
   }
