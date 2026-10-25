@@ -92,7 +92,13 @@ export const HERMES_MODELS: readonly ModelDefinition[] = [
   defineModel({ id: "stepfun/step-3.7-flash:free", ctx: 262144, out: 256000, vision: true, reasoning: true, free: true, freeTier: true }),
   defineModel({ id: "upstage/solar-mini4:free", ctx: 524288, out: 131072, reasoning: true, free: true, freeTier: true }),
   defineModel({ id: "reflection/beam-1.0-501b-a23b:free", ctx: 262144, out: 131072, reasoning: true, free: true, freeTier: true }),
-  defineModel({ id: "meituan/longcat-2.5-preview:free", ctx: 1048576, out: 131072, reasoning: true, free: true, freeTier: true }),
+  // Vision-corrected against the live catalog: `architecture.input_modalities`
+  // lists `image` for this row, so it was published without vision it has.
+  defineModel({ id: "meituan/longcat-2.5-preview:free", ctx: 1048576, out: 131072, vision: true, reasoning: true, free: true, freeTier: true }),
+  // Added after a live read: the catalog carries it, it is free, and a dispatch
+  // answers 200 — it was simply absent from this list, so a client asking for
+  // it resolved to nothing. 262144 out is the catalog's own cap.
+  defineModel({ id: "ornith/ornith-1.5-122b:free", ctx: 262144, out: 262144, vision: true, reasoning: true, free: true, freeTier: true }),
 ];
 
 

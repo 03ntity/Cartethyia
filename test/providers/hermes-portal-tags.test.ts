@@ -95,14 +95,33 @@ describe("hermes portal tags", () => {
     // `stepfun/step-5-preview:free` is gone too: absent from the live catalog
     // and 404 "This model's free period has ended" when dispatched, so it was
     // a card that could only ever fail.
+    //
+    // `ornith/ornith-1.5-122b:free` was missing entirely — live, free, and a
+    // dispatch answers 200, but with no row here a client asking for it
+    // resolved to nothing.
     const ids = HERMES_MODELS.map((m) => m.modelId).sort();
     expect(ids).toEqual([
       "meituan/longcat-2.5-preview:free",
+      "ornith/ornith-1.5-122b:free",
       "poolside/laguna-s-2.1:free",
       "poolside/laguna-xs-2.1:free",
       "reflection/beam-1.0-501b-a23b:free",
       "stepfun/step-3.7-flash:free",
       "upstage/solar-mini4:free",
     ]);
+  });
+
+  test("vision matches what the live catalog declares", () => {
+    // Read from `architecture.input_modalities` on a live read. This was wrong
+    // for `meituan/longcat-2.5-preview:free`, published without vision it has —
+    // which strips images from a request the model accepts.
+    const vision = new Set([
+      "meituan/longcat-2.5-preview:free",
+      "ornith/ornith-1.5-122b:free",
+      "stepfun/step-3.7-flash:free",
+    ]);
+    for (const model of HERMES_MODELS) {
+      expect(model.modalities.input.includes("image")).toBe(vision.has(model.modelId));
+    }
   });
 });
