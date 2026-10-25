@@ -1,6 +1,6 @@
 {
-  "capturedAt": "2026-10-25T15:28:56Z",
-  "source": "Live GET /v3/config using temporary credentials; credentials and account identity are not included.",
+  "capturedAt": "2026-10-25T15:35:10Z",
+  "source": "Live GET /v3/config using temporary credentials; credentials and account identity are not included. Source of record: this roster is the one a catalog sync persists.",
   "catalogs": [
     {
       "providerId": "cb",
@@ -309,204 +309,56 @@
           "supportsReasoning": true,
           "credits": "x0.00"
         }
-      ]
-    },
-    {
-      "providerId": "cb",
-      "host": "www.codebuddy.ai",
-      "endpoint": "GET /v2/enterprises/personal/models",
-      "identityUserAgent": "CLI/4.12.1.39217423 CodeBuddy/4.12.1.39217423",
-      "httpStatus": 200,
-      "envelopeCode": 0,
-      "cliModelIds": [
-        "default-model",
-        "fast-model",
-        "balanced-model",
-        "primary-model",
-        "hy4-preview",
-        "hy3",
-        "gpt-5.6-sol",
-        "gpt-5.6-terra",
-        "gpt-5.6-luna",
-        "gpt-5.5",
-        "gpt-5.4",
-        "gpt-5.3-codex",
-        "gemini-3.5-flash",
-        "glm-5.3",
-        "glm-5.2",
-        "kimi-k3",
-        "kimi-k2.6"
       ],
-      "models": [
+      "excludedModels": [
         {
-          "id": "default-model",
-          "name": "Auto",
-          "maxInputTokens": 176000,
-          "maxOutputTokens": 24000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": null,
-          "credits": "x0.79 credits"
+          "id": "hy-image-3.5",
+          "name": "HY-Image-3.5",
+          "reason": "text-to-image tag — media model, no chat surface",
+          "tags": [
+            "text-to-image",
+            "image-to-image"
+          ]
         },
         {
-          "id": "fast-model",
-          "name": "Fast",
-          "maxInputTokens": 200000,
-          "maxOutputTokens": 32000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.34 credits"
-        },
-        {
-          "id": "balanced-model",
-          "name": "Balanced",
-          "maxInputTokens": 256000,
-          "maxOutputTokens": 32000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.59 credits"
-        },
-        {
-          "id": "primary-model",
-          "name": "Primary",
-          "maxInputTokens": 272000,
-          "maxOutputTokens": 72000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x3.31 credits"
-        },
-        {
-          "id": "hy4-preview",
-          "name": "Hy4 preview",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 64000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.00"
-        },
-        {
-          "id": "hy3",
-          "name": "Hy3",
-          "maxInputTokens": 192000,
-          "maxOutputTokens": 64000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.00"
-        },
-        {
-          "id": "gpt-5.6-sol",
-          "name": "GPT-5.6-Sol",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 128000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x3.47"
-        },
-        {
-          "id": "gpt-5.6-terra",
-          "name": "GPT-5.6-Terra",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 128000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x1.39"
-        },
-        {
-          "id": "gpt-5.6-luna",
-          "name": "GPT-5.6-Luna",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 128000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.14"
-        },
-        {
-          "id": "gpt-5.5",
-          "name": "GPT-5.5",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 128000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x3.31"
-        },
-        {
-          "id": "gpt-5.4",
-          "name": "GPT-5.4",
-          "maxInputTokens": 272000,
-          "maxOutputTokens": 72000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x1.65"
-        },
-        {
-          "id": "gpt-5.3-codex",
-          "name": "GPT-5.3-Codex",
-          "maxInputTokens": 272000,
-          "maxOutputTokens": 72000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x1.25"
-        },
-        {
-          "id": "gemini-3.5-flash",
-          "name": "Gemini-3.5-Flash",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 65536,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.99"
-        },
-        {
-          "id": "glm-5.3",
-          "name": "GLM-5.3",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 48000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.79"
-        },
-        {
-          "id": "glm-5.2",
-          "name": "GLM-5.2",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 48000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.79"
-        },
-        {
-          "id": "kimi-k3",
-          "name": "Kimi-K3",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 32000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x1.62"
-        },
-        {
-          "id": "kimi-k2.6",
-          "name": "Kimi-K2.6",
-          "maxInputTokens": 256000,
-          "maxOutputTokens": 32000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.52"
+          "id": "kling-video-v3",
+          "name": "Kling-Video-V3",
+          "reason": "video-generation tags — media model, no chat surface",
+          "tags": [
+            "text-to-video",
+            "image-to-video"
+          ],
+          "videoGeneration": {
+            "allowMixedReferenceMaterials": false,
+            "aspectRatios": [
+              "16:9",
+              "9:16",
+              "1:1"
+            ],
+            "audioMode": "switchable",
+            "defaultAspectRatio": "16:9",
+            "defaultEnableAudio": true,
+            "defaultResolution": "720P",
+            "defaultSeconds": 5,
+            "framesExclusiveWithReferenceMaterials": false,
+            "lastFrameRequiresFirstFrame": true,
+            "maxPromptLength": 2500,
+            "maxReferenceAudios": 0,
+            "maxReferenceImages": 0,
+            "maxReferenceMaterials": 0,
+            "maxReferenceVideos": 0,
+            "maxSeconds": 15,
+            "minSeconds": 3,
+            "referenceAudioRequiresVisualMaterial": false,
+            "resolutions": [
+              "720P",
+              "1080P",
+              "4K"
+            ],
+            "supportedSeconds": [],
+            "supportsFirstFrame": true,
+            "supportsFirstLastFrame": true
+          }
         }
       ]
     },
@@ -817,204 +669,56 @@
           "supportsReasoning": true,
           "credits": "x0.00"
         }
-      ]
-    },
-    {
-      "providerId": "workbuddy",
-      "host": "www.workbuddy.ai",
-      "endpoint": "GET /v2/enterprises/personal/models",
-      "identityUserAgent": "CLI/4.12.1.39217423 CodeBuddy/4.12.1.39217423",
-      "httpStatus": 200,
-      "envelopeCode": 0,
-      "cliModelIds": [
-        "default-model",
-        "fast-model",
-        "balanced-model",
-        "primary-model",
-        "hy4-preview",
-        "hy3",
-        "gpt-5.6-sol",
-        "gpt-5.6-terra",
-        "gpt-5.6-luna",
-        "gpt-5.5",
-        "gpt-5.4",
-        "gpt-5.3-codex",
-        "gemini-3.5-flash",
-        "glm-5.3",
-        "glm-5.2",
-        "kimi-k3",
-        "kimi-k2.6"
       ],
-      "models": [
+      "excludedModels": [
         {
-          "id": "default-model",
-          "name": "Auto",
-          "maxInputTokens": 176000,
-          "maxOutputTokens": 24000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": null,
-          "credits": "x0.79 credits"
+          "id": "hy-image-3.5",
+          "name": "HY-Image-3.5",
+          "reason": "text-to-image tag — media model, no chat surface",
+          "tags": [
+            "text-to-image",
+            "image-to-image"
+          ]
         },
         {
-          "id": "fast-model",
-          "name": "Fast",
-          "maxInputTokens": 200000,
-          "maxOutputTokens": 32000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.34 credits"
-        },
-        {
-          "id": "balanced-model",
-          "name": "Balanced",
-          "maxInputTokens": 256000,
-          "maxOutputTokens": 32000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.59 credits"
-        },
-        {
-          "id": "primary-model",
-          "name": "Primary",
-          "maxInputTokens": 272000,
-          "maxOutputTokens": 72000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x3.31 credits"
-        },
-        {
-          "id": "hy4-preview",
-          "name": "Hy4 preview",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 64000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.00"
-        },
-        {
-          "id": "hy3",
-          "name": "Hy3",
-          "maxInputTokens": 192000,
-          "maxOutputTokens": 64000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.00"
-        },
-        {
-          "id": "gpt-5.6-sol",
-          "name": "GPT-5.6-Sol",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 128000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x3.47"
-        },
-        {
-          "id": "gpt-5.6-terra",
-          "name": "GPT-5.6-Terra",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 128000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x1.39"
-        },
-        {
-          "id": "gpt-5.6-luna",
-          "name": "GPT-5.6-Luna",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 128000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.14"
-        },
-        {
-          "id": "gpt-5.5",
-          "name": "GPT-5.5",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 128000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x3.31"
-        },
-        {
-          "id": "gpt-5.4",
-          "name": "GPT-5.4",
-          "maxInputTokens": 272000,
-          "maxOutputTokens": 72000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x1.65"
-        },
-        {
-          "id": "gpt-5.3-codex",
-          "name": "GPT-5.3-Codex",
-          "maxInputTokens": 272000,
-          "maxOutputTokens": 72000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x1.25"
-        },
-        {
-          "id": "gemini-3.5-flash",
-          "name": "Gemini-3.5-Flash",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 65536,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.99"
-        },
-        {
-          "id": "glm-5.3",
-          "name": "GLM-5.3",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 48000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.79"
-        },
-        {
-          "id": "glm-5.2",
-          "name": "GLM-5.2",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 48000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.79"
-        },
-        {
-          "id": "kimi-k3",
-          "name": "Kimi-K3",
-          "maxInputTokens": 1000000,
-          "maxOutputTokens": 32000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x1.62"
-        },
-        {
-          "id": "kimi-k2.6",
-          "name": "Kimi-K2.6",
-          "maxInputTokens": 256000,
-          "maxOutputTokens": 32000,
-          "supportsImages": true,
-          "supportsToolCall": true,
-          "supportsReasoning": true,
-          "credits": "x0.52"
+          "id": "kling-video-v3",
+          "name": "Kling-Video-V3",
+          "reason": "video-generation tags — media model, no chat surface",
+          "tags": [
+            "text-to-video",
+            "image-to-video"
+          ],
+          "videoGeneration": {
+            "allowMixedReferenceMaterials": false,
+            "aspectRatios": [
+              "16:9",
+              "9:16",
+              "1:1"
+            ],
+            "audioMode": "switchable",
+            "defaultAspectRatio": "16:9",
+            "defaultEnableAudio": true,
+            "defaultResolution": "720P",
+            "defaultSeconds": 5,
+            "framesExclusiveWithReferenceMaterials": false,
+            "lastFrameRequiresFirstFrame": true,
+            "maxPromptLength": 2500,
+            "maxReferenceAudios": 0,
+            "maxReferenceImages": 0,
+            "maxReferenceMaterials": 0,
+            "maxReferenceVideos": 0,
+            "maxSeconds": 15,
+            "minSeconds": 3,
+            "referenceAudioRequiresVisualMaterial": false,
+            "resolutions": [
+              "720P",
+              "1080P",
+              "4K"
+            ],
+            "supportedSeconds": [],
+            "supportsFirstFrame": true,
+            "supportsFirstLastFrame": true
+          }
         }
       ]
     }

@@ -1,0 +1,420 @@
+{
+  "capturedAt": "2026-10-25T15:35:10Z",
+  "source": "Live GET /v2/enterprises/personal/models using temporary credentials; credentials and account identity are not included. Runtime fallback roster: stale and narrower — see the v3-config file for the current roster.",
+  "catalogs": [
+    {
+      "providerId": "cb",
+      "host": "www.codebuddy.ai",
+      "endpoint": "GET /v2/enterprises/personal/models",
+      "identityUserAgent": "CLI/4.12.1.39217423 CodeBuddy/4.12.1.39217423",
+      "httpStatus": 200,
+      "envelopeCode": 0,
+      "cliModelIds": [
+        "default-model",
+        "fast-model",
+        "balanced-model",
+        "primary-model",
+        "hy4-preview",
+        "hy3",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.3-codex",
+        "gemini-3.5-flash",
+        "glm-5.3",
+        "glm-5.2",
+        "kimi-k3",
+        "kimi-k2.6"
+      ],
+      "models": [
+        {
+          "id": "default-model",
+          "name": "Auto",
+          "maxInputTokens": 176000,
+          "maxOutputTokens": 24000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": null,
+          "credits": "x0.79 credits"
+        },
+        {
+          "id": "fast-model",
+          "name": "Fast",
+          "maxInputTokens": 200000,
+          "maxOutputTokens": 32000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.34 credits"
+        },
+        {
+          "id": "balanced-model",
+          "name": "Balanced",
+          "maxInputTokens": 256000,
+          "maxOutputTokens": 32000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.59 credits"
+        },
+        {
+          "id": "primary-model",
+          "name": "Primary",
+          "maxInputTokens": 272000,
+          "maxOutputTokens": 72000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x3.31 credits"
+        },
+        {
+          "id": "hy4-preview",
+          "name": "Hy4 preview",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 64000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.00"
+        },
+        {
+          "id": "hy3",
+          "name": "Hy3",
+          "maxInputTokens": 192000,
+          "maxOutputTokens": 64000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.00"
+        },
+        {
+          "id": "gpt-5.6-sol",
+          "name": "GPT-5.6-Sol",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 128000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x3.47"
+        },
+        {
+          "id": "gpt-5.6-terra",
+          "name": "GPT-5.6-Terra",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 128000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x1.39"
+        },
+        {
+          "id": "gpt-5.6-luna",
+          "name": "GPT-5.6-Luna",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 128000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.14"
+        },
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 128000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x3.31"
+        },
+        {
+          "id": "gpt-5.4",
+          "name": "GPT-5.4",
+          "maxInputTokens": 272000,
+          "maxOutputTokens": 72000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x1.65"
+        },
+        {
+          "id": "gpt-5.3-codex",
+          "name": "GPT-5.3-Codex",
+          "maxInputTokens": 272000,
+          "maxOutputTokens": 72000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x1.25"
+        },
+        {
+          "id": "gemini-3.5-flash",
+          "name": "Gemini-3.5-Flash",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 65536,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.99"
+        },
+        {
+          "id": "glm-5.3",
+          "name": "GLM-5.3",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 48000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.79"
+        },
+        {
+          "id": "glm-5.2",
+          "name": "GLM-5.2",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 48000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.79"
+        },
+        {
+          "id": "kimi-k3",
+          "name": "Kimi-K3",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 32000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x1.62"
+        },
+        {
+          "id": "kimi-k2.6",
+          "name": "Kimi-K2.6",
+          "maxInputTokens": 256000,
+          "maxOutputTokens": 32000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.52"
+        }
+      ],
+      "excludedModels": [
+        {
+          "id": "deep-model",
+          "name": "Deep",
+          "reason": "not in the CLI roster",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "providerId": "workbuddy",
+      "host": "www.workbuddy.ai",
+      "endpoint": "GET /v2/enterprises/personal/models",
+      "identityUserAgent": "CLI/4.12.1.39217423 CodeBuddy/4.12.1.39217423",
+      "httpStatus": 200,
+      "envelopeCode": 0,
+      "cliModelIds": [
+        "default-model",
+        "fast-model",
+        "balanced-model",
+        "primary-model",
+        "hy4-preview",
+        "hy3",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.3-codex",
+        "gemini-3.5-flash",
+        "glm-5.3",
+        "glm-5.2",
+        "kimi-k3",
+        "kimi-k2.6"
+      ],
+      "models": [
+        {
+          "id": "default-model",
+          "name": "Auto",
+          "maxInputTokens": 176000,
+          "maxOutputTokens": 24000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": null,
+          "credits": "x0.79 credits"
+        },
+        {
+          "id": "fast-model",
+          "name": "Fast",
+          "maxInputTokens": 200000,
+          "maxOutputTokens": 32000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.34 credits"
+        },
+        {
+          "id": "balanced-model",
+          "name": "Balanced",
+          "maxInputTokens": 256000,
+          "maxOutputTokens": 32000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.59 credits"
+        },
+        {
+          "id": "primary-model",
+          "name": "Primary",
+          "maxInputTokens": 272000,
+          "maxOutputTokens": 72000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x3.31 credits"
+        },
+        {
+          "id": "hy4-preview",
+          "name": "Hy4 preview",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 64000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.00"
+        },
+        {
+          "id": "hy3",
+          "name": "Hy3",
+          "maxInputTokens": 192000,
+          "maxOutputTokens": 64000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.00"
+        },
+        {
+          "id": "gpt-5.6-sol",
+          "name": "GPT-5.6-Sol",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 128000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x3.47"
+        },
+        {
+          "id": "gpt-5.6-terra",
+          "name": "GPT-5.6-Terra",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 128000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x1.39"
+        },
+        {
+          "id": "gpt-5.6-luna",
+          "name": "GPT-5.6-Luna",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 128000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.14"
+        },
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 128000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x3.31"
+        },
+        {
+          "id": "gpt-5.4",
+          "name": "GPT-5.4",
+          "maxInputTokens": 272000,
+          "maxOutputTokens": 72000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x1.65"
+        },
+        {
+          "id": "gpt-5.3-codex",
+          "name": "GPT-5.3-Codex",
+          "maxInputTokens": 272000,
+          "maxOutputTokens": 72000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x1.25"
+        },
+        {
+          "id": "gemini-3.5-flash",
+          "name": "Gemini-3.5-Flash",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 65536,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.99"
+        },
+        {
+          "id": "glm-5.3",
+          "name": "GLM-5.3",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 48000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.79"
+        },
+        {
+          "id": "glm-5.2",
+          "name": "GLM-5.2",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 48000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.79"
+        },
+        {
+          "id": "kimi-k3",
+          "name": "Kimi-K3",
+          "maxInputTokens": 1000000,
+          "maxOutputTokens": 32000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x1.62"
+        },
+        {
+          "id": "kimi-k2.6",
+          "name": "Kimi-K2.6",
+          "maxInputTokens": 256000,
+          "maxOutputTokens": 32000,
+          "supportsImages": true,
+          "supportsToolCall": true,
+          "supportsReasoning": true,
+          "credits": "x0.52"
+        }
+      ],
+      "excludedModels": [
+        {
+          "id": "deep-model",
+          "name": "Deep",
+          "reason": "not in the CLI roster",
+          "tags": []
+        }
+      ]
+    }
+  ]
+}

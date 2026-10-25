@@ -37,13 +37,15 @@ coverage/
 # Local runtime scratch: captured telemetry payload frames. Written constantly
 # by the running gateway and pruned by retention, so tracking them churns the
 # repo with megabytes of transient request bodies.
-data/
-# Checked-in provider model catalogs live under data/ but are NOT runtime
-# scratch: they are hand-reviewed captures the catalog sync is verified
-# against. Un-ignore this one directory only — `!data/` here would also un-ignore
-# the transient payload frames the rule exists to keep out.
+# `data/*`, NOT `data/`: excluding the directory itself makes git stop
+# descending into it, and a negation for something inside a directory git never
+# enters is silently ignored — the checked-in catalogs below were skipped by
+# `git add -A` for exactly that reason. Matching the children keeps the
+# directory traversable so the re-include can take effect.
+data/*
+# Checked-in provider model catalogs. Hand-reviewed live captures the catalog
+# sync is verified against — not runtime scratch, so they are tracked.
 !data/provider-catalogs/
-!data/provider-catalogs/**
 # Keep the dashboard's checked-in browser data layer distinct from runtime payloads.
 !dashboard/src/data/
 !dashboard/src/data/**

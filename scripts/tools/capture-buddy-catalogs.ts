@@ -56,6 +56,7 @@ interface RawModel {
   readonly supportsReasoning?: unknown;
   readonly credits?: unknown;
   readonly tags?: unknown;
+  readonly videoGeneration?: unknown;
 }
 
 interface CatalogModel {
@@ -69,6 +70,15 @@ interface CatalogModel {
   credits: string;
 }
 
+interface ExcludedModel {
+  id: string;
+  name: string;
+  reason: string;
+  tags: readonly string[];
+  /** Present only for media models, where upstream publishes capabilities here. */
+  videoGeneration?: unknown;
+}
+
 interface Catalog {
   providerId: string;
   host: string;
@@ -78,6 +88,14 @@ interface Catalog {
   envelopeCode: number | null;
   cliModelIds: readonly string[];
   models: readonly CatalogModel[];
+  /**
+   * Rows upstream publishes that this capture does NOT route, with why.
+   *
+   * Recorded rather than dropped: the gateway cannot serve them today, but
+   * "cannot serve" and "does not exist" are different facts, and a catalog that
+   * silently omits them makes a media model look like it was never offered.
+   */
+  excludedModels: readonly ExcludedModel[];
 }
 
 const IDENTITY_USER_AGENT =
@@ -163,6 +181,7 @@ async function captureSite(
     envelopeCode: null,
     cliModelIds: [],
     models: [],
+    excludedModels: [],
   };
   if (!response.ok) return empty;
 
@@ -193,34 +212,53 @@ async function captureSite(
   }
 
   const models: CatalogModel[] = [];
+  const excluded: ExcludedModel[] = [];
   const seen = new Set<string>();
   for (const entry of rawModels) {
     const model = asRecord(entry) as RawModel | undefined;
     const id = model?.id;
     if (typeof id !== "string" || id.length === 0 || seen.has(id)) continue;
-    if (model?.disabled === true) continue;
+    const name = typeof model?.name === "string" && model.name.length > 0 ? model.name : id;
+    const tagList: readonly string[] = Array.isArray(model?.tags)
+      ? model.tags.filter((t): t is string => typeof t === "string")
+      : [];
+    const exclude = (reason: string): void => {
+      excluded.push({ id, name, reason, tags: tagList, ...(model?.videoGeneration === undefined ? {} : { videoGeneration: model.videoGeneration }) });
+    };
+    if (model?.disabled === true) {
+      exclude("disabled upstream");
+      continue;
+    }
     const lowerId = id.toLowerCase();
     if (
       lowerId.startsWith("nes-") ||
       lowerId.startsWith("completion-") ||
       lowerId.startsWith("codewise-")
     ) {
+      exclude("non-chat family prefix (nes-/completion-/codewise-)");
       continue;
     }
     const output = asNumber(model?.maxOutputTokens);
-    if (output !== null && output <= 256) continue;
-    const tags = model?.tags;
-    if (
-      Array.isArray(tags) &&
-      tags.some((tag) => typeof tag === "string" && tag.toLowerCase() === "text-to-image")
-    ) {
+    if (output !== null && output <= 256) {
+      exclude(`maxOutputTokens ${output} <= 256 (completion model)`);
       continue;
     }
-    if (cliRoster !== undefined && !cliRoster.has(id)) continue;
+    if (tagList.some((tag) => tag.toLowerCase() === "text-to-image")) {
+      exclude("text-to-image tag — media model, no chat surface");
+      continue;
+    }
+    if (tagList.some((tag) => /-to-video$/.test(tag.toLowerCase()))) {
+      exclude("video-generation tags — media model, no chat surface");
+      continue;
+    }
+    if (cliRoster !== undefined && !cliRoster.has(id)) {
+      exclude("not in the CLI roster");
+      continue;
+    }
     seen.add(id);
     models.push({
       id,
-      name: typeof model?.name === "string" && model.name.length > 0 ? model.name : id,
+      name,
       maxInputTokens: asNumber(model?.maxInputTokens),
       maxOutputTokens: output,
       supportsImages: model?.supportsImages === true,
@@ -235,6 +273,7 @@ async function captureSite(
     envelopeCode: 0,
     cliModelIds: cliRoster === undefined ? [] : [...cliRoster],
     models,
+    excludedModels: excluded,
   };
 }
 
@@ -293,12 +332,31 @@ if (failed.length > 0) {
 }
 
 const capturedAt = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-const payload = {
-  capturedAt,
-  source:
-    "Live GET /v3/config using temporary credentials; credentials and account identity are not included.",
-  catalogs,
+const day = capturedAt.slice(0, 10);
+
+/**
+ * One file per endpoint, each holding every host.
+ *
+ * Split by endpoint rather than by provider because the endpoint is the axis
+ * that matters: `/v3/config` is the source of record and `/v2/...` is the stale
+ * runtime fallback. Keeping them in separate files means a consumer cannot
+ * accidentally load the fallback roster as if it were current, and the drift
+ * between them stays a file-level comparison instead of an array index.
+ */
+const FILE_PER_ENDPOINT: Record<string, string> = {
+  "GET /v3/config": `buddy-v3-config-model-catalogs-${day}.json`,
+  "GET /v2/enterprises/personal/models": `buddy-v2-personal-model-catalogs-${day}.json`,
 };
+
+function sourceNote(endpointLabel: string): string {
+  return (
+    `Live ${endpointLabel} using temporary credentials; credentials and account ` +
+    `identity are not included.` +
+    (endpointLabel === ENDPOINTS[0]!.label
+      ? " Source of record: this roster is the one a catalog sync persists."
+      : " Runtime fallback roster: stale and narrower — see the v3-config file for the current roster.")
+  );
+}
 
 if (typeof values.check === "string") {
   const stored = (await Bun.file(values.check).json().catch(() => null)) as
@@ -328,9 +386,35 @@ if (typeof values.check === "string") {
   process.exit(drift === 0 ? 0 : 1);
 }
 
-const outPath =
-  typeof values.out === "string"
-    ? values.out
-    : `data/provider-catalogs/buddy-live-model-catalogs-${capturedAt.slice(0, 10)}.json`;
-await Bun.write(outPath, `${JSON.stringify(payload, null, 2)}\n`);
-console.log(`[capture] wrote ${outPath} (${catalogs.length} catalogs)`);
+// `--out` writes one combined file (all endpoints, all hosts). Without it the
+// default is one file per endpoint, which is the layout actually checked in.
+if (typeof values.out === "string") {
+  await Bun.write(
+    values.out,
+    `${JSON.stringify(
+      { capturedAt, source: sourceNote(ENDPOINTS[0]!.label), catalogs },
+      null,
+      2,
+    )}\n`,
+  );
+  console.log(`[capture] wrote ${values.out} (${catalogs.length} catalogs)`);
+} else {
+  for (const endpoint of ENDPOINTS) {
+    const group = catalogs.filter((c) => c.endpoint === endpoint.label);
+    const name = FILE_PER_ENDPOINT[endpoint.label];
+    if (name === undefined) continue;
+    const outPath = `data/provider-catalogs/${name}`;
+    await Bun.write(
+      outPath,
+      `${JSON.stringify(
+        { capturedAt, source: sourceNote(endpoint.label), catalogs: group },
+        null,
+        2,
+      )}\n`,
+    );
+    console.log(
+      `[capture] wrote ${outPath} ` +
+        `(${group.map((c) => `${c.providerId}:${c.models.length}`).join(" ")})`,
+    );
+  }
+}
