@@ -151,37 +151,13 @@ export const CONFIG_SPEC = {
   /**
    * How long a day's telemetry is kept, in days.
    *
-   * The retention unit is the whole day: a day's event file and its index are
-   * deleted together, and the current day is never touched. Past this age an
-   * individual request no longer exists anywhere, so its detail is gone —
-   * totals, breakdowns and spend are unaffected, because the index keeps
-   * running sums rather than the rows.
+   * Whole raw event files past this age are removed. No summary or compacted
+   * form replaces the individual requests.
    *
    * This is the knob that decides how long the request list, per-request
    * filters, and the detail drawer stay complete.
    */
   CARTETHYIA_TELEMETRY_RETENTION_DAYS: { kind: "int", default: 30, min: 3, max: 365 },
-  /**
-   * Age at which a request's detail is described as no longer stored.
-   *
-   * Retention itself is `CARTETHYIA_TELEMETRY_RETENTION_DAYS`; this only words
-   * the operator-facing message shown when a request that old is asked for.
-   */
-  CARTETHYIA_TELEMETRY_COMPACT_AFTER_DAYS: { kind: "int", default: 7, min: 1, max: 365 },
-  /**
-   * How often each day's index is brought up to date, in minutes.
-   *
-   * Bringing an index up to date means folding the bytes appended since the
-   * last pass — not re-reading the day. Reads fold before they answer too, so
-   * raising this does not make the numbers stale; it only leaves the on-disk
-   * index further behind, and the next read pays for the remainder.
-   */
-  CARTETHYIA_TELEMETRY_COMPACT_INTERVAL_MINUTES: {
-    kind: "int",
-    default: 60,
-    min: 5,
-    max: 1440,
-  },
   CARTETHYIA_TELEMETRY_PAYLOAD_MAX_BYTES: {
     kind: "int",
     default: 16 * 1024 * 1024,

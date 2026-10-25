@@ -284,6 +284,54 @@ dbDescribe("TelemetryBatchBuffer — flush lifecycle", () => {
       await scope.cleanup();
     }
   });
+
+  test("stop during retry accounts for the in-flight batch instead of losing it silently", async () => {
+    const scope = await tenantScope("telemetry-stop-retry");
+    const retrying = Promise.withResolvers<void>();
+    const stopped = Promise.withResolvers<void>();
+    let attempts = 0;
+    const buffer = new TelemetryBatchBuffer(db(), {
+      flushIntervalMs: 3_600_000,
+
+      onRetry: async () => {
+        retrying.resolve();
+        await stopped.promise;
+      },
+      store: {
+        insertEvents: async () => {
+          attempts += 1;
+          if (attempts === 1) {
+            throw new Error("simulated store outage");
+          }
+        },
+      },
+    });
+    buffers.push(buffer);
+    try {
+      buffer.enqueue(makeEvent(scope.tenantId));
+      buffer.enqueue(makeEvent(scope.tenantId));
+      const before = metricValue("cartethyia_telemetry_dropped_total");
+      const flushing = buffer.flush();
+      await retrying.promise;
+      const stopping = buffer.stop();
+      stopped.resolve();
+      await stopping;
+      await flushing;
+      expect(attempts).toBe(1);
+      expect(metricValue("cartethyia_telemetry_dropped_total") - before).toBe(2);
+      expect(await rowsFor(scope.tenantId)).toHaveLength(0);
+    } finally {
+      await scope.cleanup();
+    }
+  });
+
+  test("enqueue after stop is rejected and counted", async () => {
+    const buffer = startBuffer();
+    await buffer.stop();
+    const before = metricValue("cartethyia_telemetry_dropped_total");
+    buffer.enqueue(makeEvent(crypto.randomUUID()));
+    expect(metricValue("cartethyia_telemetry_dropped_total") - before).toBe(1);
+  });
 });
 
 dbDescribe("telemetry row mapping, read back from Postgres", () => {

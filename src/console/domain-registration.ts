@@ -43,7 +43,7 @@ import { createBackupRoutes } from "./backup/routes";
 import { BackupService } from "./backup/service";
 import type { ConsoleCredentialService } from "./auth/credentials";
 import { resolveTelemetryRetentionDays } from "../config/telemetry";
-import { MAX_PAYLOAD_RETENTION_MS, payloadRetentionMs } from "../observability/payload-capture";
+import { payloadRetentionMs } from "../observability/payload-capture";
 import { TELEMETRY_EVENT_DIR } from "../observability/event-log";
 
 import { InMemoryOAuthFlowStore, OAuthFlowStore } from "../providers/authentication/oauth-flow-store";
@@ -294,7 +294,6 @@ export function registerConsoleDomains(
       telemetryDir: TELEMETRY_EVENT_DIR,
       retentionDays: resolveTelemetryRetentionDays(),
       payloadRetentionMs: payloadRetentionMs(),
-      payloadRetentionMaxMs: MAX_PAYLOAD_RETENTION_MS,
       accessResolver: ctx.accessResolver,
       auditSink: ctx.auditRecorder,
       flusher: ctx.flushBuffers,

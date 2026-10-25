@@ -71,8 +71,6 @@ import { preferencesReaderFor } from "../persistence/tenant-preferences";
 import { sweepExpiredCooldowns } from "../providers/operations/account-health-service";
 import { DrizzleTelemetryStore } from "../persistence/stores/telemetry-store";
 import { TelemetryPayloadCapture } from "../observability/payload-capture";
-import { foldDayIndex, listEventDays } from "../observability/event-day-index";
-import { resolveTelemetryCompactIntervalMs } from "../config/telemetry";
 import { sweepExpiredPoolCooldowns } from "../network/pool-health-machine";
 import { TelemetryBatchBuffer } from "../observability/telemetry-buffer";
 import { RuntimeMetricsSampler } from "../observability/runtime-metrics";
@@ -307,25 +305,6 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
     name: "telemetry-payload-cleanup",
     intervalMs: 15 * 60_000,
     run: () => payloadCapture.cleanupExpired(),
-  });
-  scheduledTasks.register({
-    name: "telemetry-index-fold",
-    intervalMs: resolveTelemetryCompactIntervalMs(),
-    // Brings each day's index up to date with the bytes appended since the last
-    // pass, so a usage read is a small JSON read rather than a parse of the
-    // whole period. Folding is incremental and idempotent: a crash only leaves
-    // the watermark behind, and the next pass re-reads the tail.
-    run: async () => {
-      const days = await listEventDays();
-      let folded = 0;
-      for (const day of days) {
-        const result = await foldDayIndex(day).catch(() => ({ folded: 0 }));
-        folded += result.folded;
-      }
-      if (folded > 0) {
-        log.info(`[telemetry] indexed ${folded} event(s) across ${days.length} day(s)`);
-      }
-    },
   });
   scheduledTasks.register({
     name: "console-session-sweep",

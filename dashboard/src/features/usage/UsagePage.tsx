@@ -1036,9 +1036,7 @@ function RequestDetailDrawer({
           <div className="animate-pulse h-48 rounded-control bg-surface-2" />
         </Stack>
       ) : detailQuery.isError || !detail ? (
-        // The server says *why* a detail is unavailable, and "compacted into
-        // daily summaries" is the answer an operator needs — a generic failure
-        // message reads like lost data and sends them hunting for a bug.
+        // A missing raw event is absent; there is no compacted-detail state.
         <ErrorState
           compact
           message={getErrorMessage(detailQuery.error, "Failed to load request detail.")}

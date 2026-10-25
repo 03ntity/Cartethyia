@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readdir, rm } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
 import { affectedRows, currentTimestamp, laterOf } from "../dialect";
@@ -11,7 +11,7 @@ import {
 } from "../schema";
 import { isGatewayError } from "../../observability/telemetry-status";
 import { TELEMETRY_EVENT_DIR } from "../../observability/event-log";
-import { dayEventFileName, utcDay } from "../../observability/event-day-index";
+import { RawTelemetryEventWriter } from "../../observability/raw-event-writer";
 
 interface UsageTotalDelta {
   readonly tenantId: string;
@@ -71,53 +71,79 @@ function aggregateUsage(rows: readonly (typeof telemetryEvents.$inferInsert)[]) 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Deletes whole days past the retention cutoff: the event file and its index
- * together.
- *
- * The day is the retention unit now, so both go at once. Removing one without
- * the other is the failure this avoids — an index with no events reports totals
- * for requests that no longer exist, and events with no index are invisible to
- * every usage read.
- *
- * The cutoff is a whole day, so today's file — still being appended to — is
- * never a candidate. Comparing filenames hour by hour would match a day file's
- * `.events` suffix against an hour stamp and could drop the open file.
+ * Deletes hourly event files whose whole hour is older than the retention
+ * cutoff. The current hour's file is never touched: it is still being appended.
  */
 async function pruneEventFiles(before: Date): Promise<void> {
   const files = await readdir(TELEMETRY_EVENT_DIR).catch(() => [] as string[]);
+  const cutoff = before.toISOString().slice(0, 13).replaceAll(":", "-");
+  for (const file of files) {
+    if (!file.endsWith(".jsonl") || file.endsWith(".events.jsonl")) continue;
+    const hour = file.slice(0, 13);
+    if (hour < cutoff) await rm(join(TELEMETRY_EVENT_DIR, file), { force: true });
+  }
+  // Read-only legacy day logs are pruned only after their whole UTC day has
+  // aged out; index files are never consulted for usage anymore.
   const cutoffDay = before.toISOString().slice(0, 10);
   for (const file of files) {
-    const day = file.slice(0, 10);
-    if (day.length !== 10 || day >= cutoffDay) continue;
-    if (!file.endsWith(".events.jsonl") && !file.endsWith(".index.json")) continue;
+    if (!file.endsWith(".events.jsonl") || file.slice(0, 10) >= cutoffDay) continue;
     await rm(join(TELEMETRY_EVENT_DIR, file), { force: true });
   }
 }
 
 /**
- * Appends one JSON line per event to the day's event file.
- *
- * One file per UTC day, appended to and never rewritten while the day is open.
- * A file per `windowMinutes` window — 96 a day at the default — would have to be
- * found, opened and parsed one by one on every usage query, and which of those
- * files was still being written could only be inferred from the name, which is
- * what lets the open one be deleted mid-write.
- *
- * A single growing file has no such ambiguity, and the day index tracks how much
- * of it has been counted by byte offset.
+ * Appends one JSON line per event. One file per hour, so retention is a file
+ * delete and no request is replaced by a compacted summary.
  */
-async function appendEvents(rows: readonly (typeof telemetryEvents.$inferInsert)[]): Promise<void> {
-  await mkdir(TELEMETRY_EVENT_DIR, { recursive: true });
-  const file = join(TELEMETRY_EVENT_DIR, dayEventFileName(utcDay(new Date())));
-  const newline = String.fromCharCode(10);
-  const body = rows.map((row) => JSON.stringify(row)).join(newline) + newline;
-  await appendFile(file, body, "utf8");
-}
-
 export class DrizzleTelemetryStore {
-  constructor(private readonly db: CartethyiaDatabase) {}
+  private readonly eventWriter: RawTelemetryEventWriter;
 
-  /** Inserts events and their durable identity aggregates atomically. */
+  constructor(
+    private readonly db: CartethyiaDatabase,
+    eventWriter = new RawTelemetryEventWriter(TELEMETRY_EVENT_DIR),
+  ) {
+    this.eventWriter = eventWriter;
+  }
+
+  private async applyUsageDeltas(deltas: readonly UsageTotalDelta[], direction: 1 | -1): Promise<void> {
+    if (deltas.length === 0) return;
+    const ordered = [...deltas].sort((left, right) =>
+      left.tenantId.localeCompare(right.tenantId)
+      || left.identityType.localeCompare(right.identityType)
+      || left.entityId.localeCompare(right.entityId));
+    await this.db.transaction(async (tx) => {
+      const now = new Date();
+      await tx
+        .insert(telemetryUsageTotals)
+        .values(ordered.map((delta) => ({
+          ...delta,
+          requests: direction * delta.requests,
+          errors: direction * delta.errors,
+          inputTokens: direction * delta.inputTokens,
+          outputTokens: direction * delta.outputTokens,
+          lastUsedAt: now,
+        })))
+        .onConflictDoUpdate({
+          target: [
+            telemetryUsageTotals.tenantId,
+            telemetryUsageTotals.identityType,
+            telemetryUsageTotals.entityId,
+          ],
+          set: {
+            requests: sql`${telemetryUsageTotals.requests} + excluded.requests`,
+            errors: sql`${telemetryUsageTotals.errors} + excluded.errors`,
+            inputTokens: sql`${telemetryUsageTotals.inputTokens} + excluded.input_tokens`,
+            outputTokens: sql`${telemetryUsageTotals.outputTokens} + excluded.output_tokens`,
+            // Do not alter lastUsedAt on a compensating upsert. A portable
+            // CASE keeps the original timestamp on either SQL backend.
+            lastUsedAt: sql`CASE WHEN excluded.requests < 0 THEN ${telemetryUsageTotals.lastUsedAt} ELSE ${laterOf(sql`${telemetryUsageTotals.lastUsedAt}`, sql`excluded.last_used_at`, this.db)} END`,
+            updatedAt: currentTimestamp(),
+          },
+        });
+    });
+  }
+
+  /** Writes raw events and maintains their durable identity aggregates. */
   async insertEvents(rows: Array<typeof telemetryEvents.$inferInsert>): Promise<void> {
     if (rows.length === 0) return;
     // The file accepts anything, so a malformed row would be written and then
@@ -133,32 +159,24 @@ export class DrizzleTelemetryStore {
     // database keeps only the durable aggregate below, so a request never
     // adds a row to the largest table. Readers of recent requests read the
     // file; readers of long-term totals read the aggregate.
-    await this.db.transaction(async (tx) => {
-      if (deltas.length === 0) return;
-      const now = new Date();
-      await tx
-        .insert(telemetryUsageTotals)
-        .values(deltas.map((delta) => ({ ...delta, lastUsedAt: now })))
-        .onConflictDoUpdate({
-          target: [
-            telemetryUsageTotals.tenantId,
-            telemetryUsageTotals.identityType,
-            telemetryUsageTotals.entityId,
-          ],
-          set: {
-            requests: sql`${telemetryUsageTotals.requests} + excluded.requests`,
-            errors: sql`${telemetryUsageTotals.errors} + excluded.errors`,
-            inputTokens: sql`${telemetryUsageTotals.inputTokens} + excluded.input_tokens`,
-            outputTokens: sql`${telemetryUsageTotals.outputTokens} + excluded.output_tokens`,
-            lastUsedAt: laterOf(sql`${telemetryUsageTotals.lastUsedAt}`, sql`excluded.last_used_at`),
-            updatedAt: currentTimestamp(),
-          },
-        });
-    });
-    // After the aggregate commits, so a rejected batch is retried once, not
-    // appended once per attempt. The file is the record of requests whose
-    // totals were actually counted.
-    await appendEvents(rows);
+    await this.applyUsageDeltas(deltas, 1);
+    // The aggregate commits before the file append so an invalid row is not
+    // rewritten on every database retry. A failed append is compensated below;
+    // only a failure of that compensation itself needs external reconciliation.
+    try {
+      await this.eventWriter.append(rows);
+    } catch (error) {
+      // Do not let the retry charge this batch twice. Compensation is itself
+      // a transaction, so a partial database outage cannot unwind only some
+      // identities in this batch. Surface both failures if that also fails.
+      await this.applyUsageDeltas(deltas, -1).catch((compensationError: unknown) => {
+        throw new AggregateError(
+          [error, compensationError],
+          "telemetry raw append failed and aggregate compensation also failed",
+        );
+      });
+      throw error;
+    }
   }
 
   /** Inserts one redacted payload and returns its generated identity. */
@@ -225,6 +243,7 @@ export class DrizzleTelemetryStore {
    * the payload sweeper's `cleanupExpired`.
    */
   async pruneTelemetry(before: Date): Promise<void> {
+    await this.eventWriter.idle();
     await pruneEventFiles(before);
     const MAX_BATCHES_PER_SWEEP = 40;
     for (let batch = 0; batch < MAX_BATCHES_PER_SWEEP; batch += 1) {

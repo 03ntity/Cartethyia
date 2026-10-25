@@ -6,7 +6,6 @@ import { preferencesReaderFor } from "../persistence/tenant-preferences";
 import type {
   TelemetryPayloadDepth,
   TelemetryPayloadMode,
-  TelemetryPayloadRetentionMinutes,
 } from "../console/settings/contracts";
 export type CaptureScope = "tenant" | "debug_session" | "operator_flag";
 
@@ -23,37 +22,15 @@ export function payloadRetentionMs(): number {
   return Math.floor(raw);
 }
 
-/**
- * The longest payload retention a tenant may ask for: seven days.
- *
- * Two things depend on this being a hard ceiling rather than a suggestion.
- *
- * The prune pass deletes a frame file it cannot parse once the file's last
- * write is older than the retention window — that bound is the only thing that
- * makes a damaged file reclaimable at all. A tenant allowed to keep frames for
- * a year while the prune assumed an hour would have live frames deleted out
- * from under them.
- *
- * The disk-usage panel counts a frame as reclaimable once its file is older
- * than the same window. Without a ceiling it would offer a reclaim button for
- * frames that are still live, and the operator would press it and see
- * "nothing to reclaim".
- */
+/** Upper bound for a deployment-level retention override, not a tenant setting. */
 export const MAX_PAYLOAD_RETENTION_MS = 7 * 24 * 60 * 60_000;
-
-/** Milliseconds one tenant's chosen retention resolves to. */
-export function retentionMsFor(minutes: number | null | undefined): number {
-  if (minutes === null || minutes === undefined) return payloadRetentionMs();
-  if (!Number.isFinite(minutes)) return payloadRetentionMs();
-  return Math.min(Math.max(1_000, Math.floor(minutes * 60_000)), MAX_PAYLOAD_RETENTION_MS);
-}
 
 /**
  * Settings-gated payload capture. Request-event metadata is always retained;
  * tenants opt into drawer capture through Settings → Privacy: `metadata`
  * keeps only the Proxy→Provider request line, `full` keeps redacted bodies
- * at the tenant's chosen depth, and both live for the tenant's chosen
- * retention. Fail-closed on error.
+ * at the tenant's chosen depth. Their lifetime is the tenant's Request detail
+ * window, or the deployment default when unset. Fail-closed on error.
  */
 export async function resolvePayloadCapture(
   db: CartethyiaDatabase,
@@ -72,7 +49,11 @@ export async function resolvePayloadCapture(
     const prefs = await preferencesReaderFor(db).readPreferences(tenantId);
     const mode = prefs?.telemetryPayloads;
     const depth = prefs?.telemetryPayloadDepth;
-    const retention = prefs?.telemetryPayloadRetentionMinutes;
+    const minutes = prefs?.telemetryWindowMinutes;
+    const retentionMs =
+      typeof minutes === "number" && Number.isFinite(minutes) && minutes > 0
+        ? Math.min(MAX_PAYLOAD_RETENTION_MS, Math.floor(minutes * 60_000))
+        : payloadRetentionMs();
     return {
       ok: true,
       mode: mode === "full" || mode === "metadata" || mode === "none" ? mode : "none",
@@ -86,7 +67,7 @@ export async function resolvePayloadCapture(
               : depth === "full"
                 ? "maximum"
                 : "minimum",
-      retentionMs: retentionMsFor(retention as TelemetryPayloadRetentionMinutes | undefined),
+      retentionMs,
     };
   } catch {
     // A preference read that fails must not invent capture. Off keeps nothing.
@@ -150,8 +131,7 @@ export interface PayloadCaptureInput {
    */
   maxBytes?: number;
   /**
-   * How long this frame lives, in ms. Defaults to the tenant's chosen
-   * retention, then the deployment default. Bounded by
+   * Retention for this capture; normally the deployment default. Bounded by
    * {@link MAX_PAYLOAD_RETENTION_MS} either way.
    */
   retentionMs?: number;

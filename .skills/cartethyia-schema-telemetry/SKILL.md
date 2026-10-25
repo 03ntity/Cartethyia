@@ -20,10 +20,10 @@ import**:
 ```ts
 const sandbox = await mkdtemp(join(tmpdir(), "carte-telemetry-test-"));
 process.env.CARTETHYIA_DATA_DIR = sandbox;
-const telemetry = await import("../../src/observability/event-day-index");
+const telemetry = await import("../../src/observability/event-log");
 ```
 
-Use `test/observability/telemetry-window.test.ts` as the reference. Keep every
+Use `test/observability/raw-event-retention.test.ts` as the reference. Keep every
 telemetry test and cleanup inside its own sandbox.
 
 ## Schema changes
@@ -82,34 +82,23 @@ ledger; report them separately.
 
 ## Persisted telemetry fields
 
-Per-request events are appended to one file per UTC day,
-`<YYYY-MM-DD>.events.jsonl`, under the data dir's `telemetry-events/`
-(`src/observability/event-log.ts`). The day's file is append-only and is never
-rewritten while the day is open.
+Per-request events are appended to one raw JSONL file per UTC hour under the
+data dir's `telemetry-events/` (`src/observability/event-log.ts`). Usage,
+breakdown, chart, request detail, and per-key spend read these events. No
+compaction worker, summary index, or watermark replaces the individual rows.
+Legacy `<YYYY-MM-DD>.events.jsonl` files remain readable until retention;
+`.compacted.jsonl` and `.index.json` are never read as requests.
 
-Beside it sits `<YYYY-MM-DD>.index.json`, written by
-`src/observability/event-day-index.ts`. It carries running totals per
-tenant/key, the per-name breakdown sums, per-hour slots for the traffic chart,
-and a byte watermark of how much of the event file has been folded in. Usage,
-breakdown and chart reads go to the index — **not** to the event files — so a
-usage query does not parse the period's requests. Only the request list and the
-detail drawer read the events, and they read backwards from the tail.
-
-Folding is incremental and idempotent: bytes below the watermark are counted,
-bytes above are not, and an unterminated line is left for the next pass rather
-than counted as an event. The watermark is the whole point — deciding which file
-was still open by comparing file *names* is what let the previous scheme fold
-and unlink a file the writer was still appending to.
-
-Retention deletes whole days: the event file and its index together. Never one
-without the other.
+Retention deletes whole expired raw files and never replaces them with a
+summary. The query path still applies the retention floor and can read the
+newest unfiltered page backwards from a file's tail.
 
 The database keeps aggregates in `telemetry_usage_totals` only; do not add a
 reader back onto `telemetry_events`. Payload capture stays a separate
 append-only file under `data/telemetry-payloads/`.
 
 A new usage field must pass through canonical usage, normalization, the file
-writer, **the day index bucket**, console contract/store, dashboard validator,
+writer, event query/aggregation, console contract/store, dashboard validator,
 and Usage UI. Reject invalid upstream values; do not silently clamp them.
 An aggregate that must survive retention needs the canonical schema and a
 forward migration in both backend directories. Update restore mapping when old

@@ -13,10 +13,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { Value } from "typebox/value";
-import {
-  runtimeUpdateBody,
-  TELEMETRY_PAYLOAD_RETENTION_MINUTES,
-} from "../../src/console/settings/contracts";
+import { runtimeUpdateBody } from "../../src/console/settings/contracts";
 import type { UpdateRuntimeSettingsRequest } from "../../src/console/settings/contracts";
 
 const SCHEMA_KEYS = Object.keys(runtimeUpdateBody.properties ?? {});
@@ -31,7 +28,6 @@ const REQUEST_KEYS: readonly (keyof UpdateRuntimeSettingsRequest)[] = [
   "responsesReasoningSummary",
   "telemetryPayloads",
   "telemetryPayloadDepth",
-  "telemetryPayloadRetentionMinutes",
   "privacyMode",
   "rtkPruneEnabled",
   "rtkPruneLevel",
@@ -78,7 +74,6 @@ describe("runtimeUpdateBody", () => {
       "upstreamTimeoutSeconds",
       "telemetryWindowMinutes",
       "imageClampMaxBytes",
-      "telemetryPayloadRetentionMinutes",
     ];
     for (const key of nullable) {
       expect(Value.Check(runtimeUpdateBody, { [key]: null })).toBe(true);
@@ -88,14 +83,7 @@ describe("runtimeUpdateBody", () => {
     }
   });
 
-  test("the payload retention accepts only the offered durations, plus null", () => {
-    // The offered list is the whole point of the control: a value off it is
-    // rejected rather than clamped, so an operator cannot ask for thirty days
-    // and silently get seven.
-    const schema = (
-      runtimeUpdateBody.properties as Record<string, { anyOf?: readonly unknown[] }>
-    )["telemetryPayloadRetentionMinutes"];
-    expect(schema).toBeDefined();
-    expect(TELEMETRY_PAYLOAD_RETENTION_MINUTES).toEqual([15, 30, 60, 360, 720, 1440, 10080]);
+  test("the separate payload retention override is no longer accepted", () => {
+    expect(SCHEMA_KEYS).not.toContain("telemetryPayloadRetentionMinutes");
   });
 });

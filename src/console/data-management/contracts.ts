@@ -19,7 +19,7 @@
 /** One measured category of on-disk data. */
 export interface DiskUsageBucket {
   /** Stable id, so the dashboard can key rows without matching on copy. */
-  readonly id: "telemetry_events" | "telemetry_index" | "payload_frames";
+  readonly id: "telemetry_events" | "payload_frames";
   readonly label: string;
   readonly bytes: number;
   readonly files: number;
@@ -37,13 +37,6 @@ export interface DiskUsageResponse {
   readonly retentionDays: number;
   /** Payload frames live this long by default before they are reclaimable. */
   readonly payloadRetentionMs: number;
-  /**
-   * The longest retention a tenant may have chosen. A frame is only counted as
-   * reclaimable once it is older than *this*, because a tenant who raised the
-   * window has frames the default would call dead while their rows still
-   * address them.
-   */
-  readonly payloadRetentionMaxMs: number;
   /**
    * Stored health & error rows, for the purge row's label. Absent when the
    * composition does not wire the health-event store (a reduced console),

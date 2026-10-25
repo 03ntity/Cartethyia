@@ -21,8 +21,6 @@ export interface RuntimeSettingsResponse {
   readonly telemetryPayloads: TelemetryPayloadMode;
   /** Capture depth for `full` mode; `minimum` when unset. */
   readonly telemetryPayloadDepth: TelemetryPayloadDepth;
-  /** How long a captured frame is kept, in minutes; `null` means deployment default. */
-  readonly telemetryPayloadRetentionMinutes: number | null;
   readonly privacyMode: PrivacyMode;
   /** Compacts bulky tool-result text before dispatch (RTK prune). Default false. */
   readonly rtkPruneEnabled: boolean;
@@ -41,7 +39,7 @@ export interface RuntimeSettingsResponse {
   readonly forceDisableCooldown: boolean;
   /** Per-tenant upstream request timeout in seconds; null means deployment default. */
   readonly upstreamTimeoutSeconds: number | null;
-  /** Per-tenant telemetry compaction age in days; null means deployment default. */
+  /** Captured payload detail lifetime in minutes; null means deployment default. */
   readonly telemetryWindowMinutes: number | null;
   /** Per-tenant inline attachment ceiling in bytes; null means deployment default. */
   readonly imageClampMaxBytes: number | null;
@@ -92,20 +90,6 @@ export type TelemetryPayloadMode = (typeof TELEMETRY_PAYLOAD_MODES)[number];
 export const TELEMETRY_PAYLOAD_DEPTHS = ["minimum", "moderate", "maximum"] as const;
 /** Capture depth for `full` mode accepted by the runtime-settings PATCH. */
 export type TelemetryPayloadDepth = (typeof TELEMETRY_PAYLOAD_DEPTHS)[number];
-/**
- * How long a captured payload frame is kept, in whole minutes, or `null` for
- * the deployment default.
- *
- * Only the offered values are accepted, and a value off the list is *rejected*
- * rather than clamped: clamping would answer a request for thirty days with
- * seven and report success, and an operator who asked for the longer window
- * would believe they got it.
- */
-export const TELEMETRY_PAYLOAD_RETENTION_MINUTES = [15, 30, 60, 360, 720, 1440, 10080] as const;
-/** Payload retention in minutes accepted by the runtime-settings PATCH. */
-export type TelemetryPayloadRetentionMinutes =
-  | (typeof TELEMETRY_PAYLOAD_RETENTION_MINUTES)[number]
-  | null;
 export const PRIVACY_MODES = ["masked", "full"] as const;
 /** Provider/model label privacy accepted by the runtime-settings PATCH. */
 export type PrivacyMode = (typeof PRIVACY_MODES)[number];
@@ -148,19 +132,6 @@ export function createRuntimeSettingsOperations(deps: RuntimeSettingsConfig) {
         }
         if (patch.telemetryPayloadDepth !== undefined && !TELEMETRY_PAYLOAD_DEPTHS.includes(patch.telemetryPayloadDepth)) {
           throw new ConsoleDomainError("invalid_request", 400, "Invalid telemetryPayloadDepth");
-        }
-        if (patch.telemetryPayloadRetentionMinutes !== undefined) {
-          const minutes = patch.telemetryPayloadRetentionMinutes;
-          if (
-            minutes !== null &&
-            !(TELEMETRY_PAYLOAD_RETENTION_MINUTES as readonly number[]).includes(minutes)
-          ) {
-            throw new ConsoleDomainError(
-              "invalid_request",
-              400,
-              "Invalid telemetryPayloadRetentionMinutes",
-            );
-          }
         }
         if (patch.privacyMode !== undefined && !PRIVACY_MODES.includes(patch.privacyMode)) {
           throw new ConsoleDomainError("invalid_request", 400, "Invalid privacyMode");
@@ -206,12 +177,6 @@ export const runtimeUpdateBody = t.Object({
   responsesReasoningSummary: t.Optional(literalUnion(RESPONSES_REASONING_SUMMARIES)),
   telemetryPayloads: t.Optional(literalUnion(TELEMETRY_PAYLOAD_MODES)),
   telemetryPayloadDepth: t.Optional(literalUnion(TELEMETRY_PAYLOAD_DEPTHS)),
-  telemetryPayloadRetentionMinutes: t.Optional(
-    t.Union([
-      t.Null(),
-      t.Union(TELEMETRY_PAYLOAD_RETENTION_MINUTES.map((minutes) => t.Literal(minutes))),
-    ]),
-  ),
   privacyMode: t.Optional(literalUnion(PRIVACY_MODES)),
   tenantConcurrencyLimit: t.Optional(t.Union([t.Null(), t.Number()])),
   thinkingNormalizationEnabled: t.Optional(t.Boolean()),

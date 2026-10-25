@@ -1040,16 +1040,7 @@ export interface ConsoleSettingsPreferences {
    * - `maximum` — 16 MiB combined cap, expect CPU/memory spikes while active
    */
   telemetryPayloadDepth?: "minimum" | "moderate" | "maximum";
-  /**
-   * How long a captured payload frame is kept, in whole minutes.
-   *
-   * `null` or absent means the deployment default
-   * (`CARTETHYIA_TELEMETRY_PAYLOAD_RETENTION_MS`, 15 minutes). Raising it is a
-   * real trade: a frame is a gzipped copy of up to four request bodies, so
-   * keeping them for a week is keeping a week of bodies on disk. The upper
-   * bound is seven days, enforced by the capture path rather than trusted here.
-   */
-  telemetryPayloadRetentionMinutes?: number | null;
+
   privacyMode?: "masked" | "full";
   /**
    * Ignores an account-wide cooldown when building route candidates.
@@ -1074,13 +1065,9 @@ export interface ConsoleSettingsPreferences {
    * deployment default.
    */
   upstreamTimeoutSeconds?: number | null;
-  /**
-   * Per-tenant telemetry compaction age in days, overriding
-   * `CARTETHYIA_TELEMETRY_COMPACT_AFTER_DAYS`. `null` or absent means use the
-   * deployment default. Lower keeps less history but bounds the usage-list
-   * scan; see the compaction notes in `event-compaction.ts`.
-   */
+  /** Captured payload detail lifetime in minutes; null means deployment default. */
   telemetryWindowMinutes?: number | null;
+
   /**
    * Per-tenant ceiling for one inline attachment, in bytes, overriding the
    * deployment default of 10 MB.

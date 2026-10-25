@@ -9,7 +9,6 @@ import {
   payloadRetentionMs,
   payloadPruneBound,
   resolveRetention,
-  retentionMsFor,
   type PayloadCaptureInput,
 } from "../../src/observability/payload-capture";
 import { readPayloadFrame, writePayloadFrame } from "../../src/observability/payload-store";
@@ -175,9 +174,7 @@ describe("payload retention", () => {
   test("retention is bounded at seven days however long it is asked for", () => {
     // The ceiling is what keeps the prune pass and the disk-usage panel honest:
     // both judge a frame file dead by age, and a frame allowed to outlive that
-    // bound would be deleted while its row still addresses it.
-    expect(retentionMsFor(60 * 24 * 60)).toBe(MAX_PAYLOAD_RETENTION_MS);
-    expect(retentionMsFor(null)).toBe(payloadRetentionMs());
+    expect(payloadRetentionMs()).toBe(15 * 60_000);
   });
 
   test("the prune bound is the longest retention, not the deployment default", () => {

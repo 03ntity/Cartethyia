@@ -1,6 +1,7 @@
 import { readdir, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { payloadDirectory, prunePayloadFrames } from "../../observability/payload-store";
+import { payloadPruneBound } from "../../observability/payload-capture";
 import type {
   DiskUsageBucket,
   DiskUsageResponse,
@@ -34,13 +35,6 @@ export interface DataManagementConfig {
   readonly telemetryDir: string;
   readonly retentionDays: number;
   readonly payloadRetentionMs: number;
-  /**
-   * The longest payload retention a tenant may have chosen, and therefore the
-   * only cutoff a frame file can be judged dead against without reading it.
-   * Defaults to `payloadRetentionMs` for callers that predate per-tenant
-   * retention, which is then the true ceiling in that deployment.
-   */
-  readonly payloadRetentionMaxMs?: number;
   /**
    * The health & error log store, backing the console's only row-level purge.
    * Absent (a reduced console composition) means the purge is not offered
@@ -78,37 +72,27 @@ async function scan(
   return { bytes, files };
 }
 
-const isIndex = (name: string): boolean => name.endsWith(".index.json");
-const isHourly = (name: string): boolean => name.endsWith(".events.jsonl");
+const isEventLog = (name: string): boolean =>
+  name.endsWith(".jsonl") && !name.endsWith(".compacted.jsonl");
 const isFrame = (name: string): boolean =>
   name.endsWith(".jsonl");
 
 /** The UTC day a telemetry file name starts with, compared to a cutoff. */
-function dayBefore(name: string, cutoff: number): boolean {
+function eventBefore(name: string, cutoff: number): boolean {
+  if (!name.endsWith(".events.jsonl")) {
+    return name.slice(0, 13) < new Date(cutoff).toISOString().slice(0, 13).replaceAll(":", "-");
+  }
   const at = Date.parse(`${name.slice(0, 10)}T00:00:00Z`);
   return Number.isFinite(at) && at < cutoff;
 }
 
 export function createDataManagementOperations(config: DataManagementConfig) {
   const payloadDir = (): string => payloadDirectory();
-  /**
-   * The only cutoff a frame file can be judged dead against without parsing it.
-   *
-   * A file's mtime says when it was last written, not what its frames' tenants
-   * chose — so a file written an hour ago can hold a frame with a week to live.
-   * The ceiling is therefore the bound, and the default retention is only used
-   * when no ceiling was configured.
-   */
-  const payloadMax = (): number => config.payloadRetentionMaxMs ?? config.payloadRetentionMs;
-
   async function usage(): Promise<DiskUsageResponse> {
-    const retentionCutoff = Date.now() - config.retentionDays * 24 * 60 * 60_000;
-    const payloadCutoff = Date.now() - payloadMax();
+    const payloadCutoff = Date.now() - config.payloadRetentionMs;
 
-    const [hourly, compacted, staleCompacted, frames, staleFrames, healthEventCount] = await Promise.all([
-      scan(config.telemetryDir, isHourly),
-      scan(config.telemetryDir, isIndex),
-      scan(config.telemetryDir, (name) => isIndex(name) && dayBefore(name, retentionCutoff)),
+    const [events, frames, staleFrames, healthEventCount] = await Promise.all([
+      scan(config.telemetryDir, isEventLog),
       scan(payloadDir(), isFrame),
       scan(payloadDir(), isFrame, payloadCutoff),
       config.healthEvents?.count(),
@@ -118,20 +102,11 @@ export function createDataManagementOperations(config: DataManagementConfig) {
       {
         id: "telemetry_events",
         label: "Request event files",
-        bytes: hourly.bytes,
-        files: hourly.files,
+        bytes: events.bytes,
+        files: events.files,
         note: "Feeds the request list and detail drawer.",
         reclaimableBytes: null,
         reclaimableFiles: null,
-      },
-      {
-        id: "telemetry_index",
-        label: "Day indexes",
-        bytes: compacted.bytes,
-        files: compacted.files,
-        note: "Feeds usage totals, breakdowns and the chart.",
-        reclaimableBytes: staleCompacted.bytes,
-        reclaimableFiles: staleCompacted.files,
       },
       {
         id: "payload_frames",
@@ -151,7 +126,6 @@ export function createDataManagementOperations(config: DataManagementConfig) {
       totalBytes: buckets.reduce((sum, bucket) => sum + bucket.bytes, 0),
       retentionDays: config.retentionDays,
       payloadRetentionMs: config.payloadRetentionMs,
-      payloadRetentionMaxMs: payloadMax(),
       ...(healthEventCount === undefined ? {} : { healthEventCount }),
     };
   }
@@ -168,10 +142,7 @@ export function createDataManagementOperations(config: DataManagementConfig) {
       // written after that bound might still hold a live frame in the part
       // that failed to parse, so it is left for a later pass.
       const now = new Date();
-      const deletedFiles = await prunePayloadFrames(
-        now,
-        new Date(now.getTime() - payloadMax()),
-      );
+      const deletedFiles = await prunePayloadFrames(now, payloadPruneBound(now));
       const after = await scan(payloadDir(), isFrame);
       return {
         action,
@@ -180,12 +151,9 @@ export function createDataManagementOperations(config: DataManagementConfig) {
       };
     }
     if (action === "telemetry_retention") {
-      // Only day indexes past retention, and only together with their events.
-      // Deleting one without the other is the failure this avoids: an index
-      // with no events reports totals for requests that are gone.
       const cutoff = Date.now() - config.retentionDays * 24 * 60 * 60_000;
       return unlinkWhere(action, config.telemetryDir, (name) =>
-        (isIndex(name) || isHourly(name)) && dayBefore(name, cutoff),
+        isEventLog(name) && eventBefore(name, cutoff),
       );
     }
     throw new ReclaimNotAllowedError(`Unknown reclaim action: ${action}`);

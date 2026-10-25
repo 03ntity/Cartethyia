@@ -58,7 +58,7 @@ const SETTINGS = {
   privacyMode: "masked",
   forceDisableCooldown: false,
   upstreamTimeoutSeconds: null,
-  telemetryCompactAfterDays: null,
+  telemetryWindowMinutes: null,
   imageClampMaxBytes: null,
 };
 

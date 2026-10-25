@@ -147,36 +147,30 @@ counters: one update per key per flush.
 ## Observability
 
 `src/observability/event-log.ts` appends one JSON object per request to a
-single file per UTC day, `data/telemetry-events/<YYYY-MM-DD>.events.jsonl`.
-`src/observability/event-day-index.ts` maintains `<YYYY-MM-DD>.index.json`
-beside it: running totals, per-name breakdown sums, per-hour slots, and a byte
-watermark of how much of the event file has been folded in.
+raw hourly file in the configured data dir's `telemetry-events/`. Legacy daily
+raw files remain readable until retention; there is no compaction or day-index
+module.
 
 Readers split by what they need:
 
-- **Usage, breakdown, traffic chart, per-key spend** — read the index
-  (`queryIndexedBuckets`, `periodBuckets`). They do not parse the events, so
-  their cost does not grow with traffic.
-- **Request list and detail drawer** — read the event file, backwards from the
-  tail in blocks (`readEventFileTail`), via `queryTelemetryEvents`. Health and
-  share stats also read events.
+- **Usage, breakdown, traffic chart, per-key spend** — aggregate raw events via
+  `queryTelemetryEvents` and the short-lived period memo.
+- **Request list and detail drawer** — read raw events via
+  `queryTelemetryEvents`; an unfiltered newest page can use
+  `readEventFileTail`. Health and share stats also read events.
 
 Lifetime totals stay in `telemetry_usage_totals`.
 `isGatewayError(status, httpStatus)` is the only error predicate — 4xx, 499,
 503, 529 are recorded but not gateway errors.
 
-Folding is incremental and idempotent from the watermark; an unterminated line
-is not an event. Retention deletes whole days — event file and index together.
-Do not reinfer which file is open from its name; that is what let the previous
-fold-and-delete scheme unlink a file the writer was still appending to.
+Retention deletes whole expired raw files. No summary replaces their requests.
 
 `telemetry-buffer.ts` batches inserts; the file appends after the aggregate
 transaction commits, a rejected batch is not rewritten per retry, and a
 non-UUID `tenantId` drops the batch. `payload-capture.ts` writes gzipped JSON
 frame files, indexed by `telemetry_payloads` rows naming their encoding
 (`jsonl-file` gzipped, `jsonb-file` pre-compression). Telemetry retention
-prunes by whole day and never touches the current day; a day's event file and
-its index are removed together.
+prunes expired raw event files without touching the current hour.
 
 ## Console API
 

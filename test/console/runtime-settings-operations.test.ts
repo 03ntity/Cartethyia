@@ -1,5 +1,5 @@
 /**
- * The operational settings: cooldown override, upstream timeout, compaction age.
+ * The operational settings: cooldown override, upstream timeout, detail window.
  *
  * These are the knobs that used to be deployment-only env vars. Two properties
  * matter more than the values themselves:
@@ -17,6 +17,7 @@ import { getDb } from "../../src/persistence/boot";
 import { consoleSettings } from "../../src/persistence/schema";
 import { DrizzleRuntimeSettingsStore } from "../../src/console/settings/store";
 import { createRuntimeSettingsOperations } from "../../src/console/settings/contracts";
+import { resolvePayloadCapture } from "../../src/observability/payload-capture";
 import { dbDescribe, requireDatabase } from "../helpers/database";
 import { createWorld, type GatewayWorld } from "../helpers/fixtures";
 
@@ -85,9 +86,12 @@ dbDescribe("operational runtime settings", () => {
     expect((await store.get(world.tenantId)).telemetryWindowMinutes).toBeNull();
   });
 
-  test("a compaction age override round-trips", async () => {
+  test("a request detail window override round-trips", async () => {
     await writeBag({ telemetryWindowMinutes: 14 });
     expect((await store.get(world.tenantId)).telemetryWindowMinutes).toBe(14);
+    const capture = await resolvePayloadCapture(getDb(), world.tenantId);
+    expect(capture.ok).toBe(true);
+    if (capture.ok) expect(capture.retentionMs).toBe(14 * 60_000);
   });
 
   test("an attachment ceiling round-trips", async () => {

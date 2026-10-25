@@ -87,8 +87,9 @@ export function caseInsensitiveLike(column: SQL, pattern: SQL): SQL {
 }
 
 /** The later of two timestamps. */
-export function laterOf(left: SQL, right: SQL): SQL {
-  return sqliteDialect() ? sql`max(${left}, ${right})` : sql`greatest(${left}, ${right})`;
+export function laterOf(left: SQL, right: SQL, database?: unknown): SQL {
+  const isSqlite = database === undefined ? sqliteDialect() : hasSqliteDialect(database);
+  return isSqlite ? sql`max(${left}, ${right})` : sql`greatest(${left}, ${right})`;
 }
 
 /** The current timestamp, in the spelling the backend's default uses. */

@@ -40,8 +40,7 @@ const SPEC_ONLY_KEYS: Readonly<Record<string, true>> = {
   CARTETHYIA_RUNTIME_METRICS_INTERVAL_MS: true,
   // Advanced knobs documented in `documentation/reference/configuration.md`.
   CARTETHYIA_DISABLED_TASKS: true,
-  CARTETHYIA_TELEMETRY_COMPACT_AFTER_DAYS: true,
-  CARTETHYIA_TELEMETRY_COMPACT_INTERVAL_MINUTES: true,
+
   CARTETHYIA_OAUTH_CALLBACK_PORT: true,
   // Provider-specific overrides. Readers live in `src/config/providers.ts`;
   // every operator who needs one goes through the reference doc, and sampling

@@ -1,4 +1,4 @@
-import { Activity, CalendarDays, FileClock, FileJson, HardDrive, HardDriveDownload, Trash2, Zap, type LucideIcon } from "lucide-react";
+import { Activity, FileClock, FileJson, HardDrive, HardDriveDownload, Trash2, Zap, type LucideIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Button } from "../../components/ui/button";
 import { ErrorState, LoadingState } from "../../components/ui/state";
@@ -211,20 +211,18 @@ export function DataManagementPanel(): ReactNode {
 }
 
 /**
- * Which reclaim each bucket offers. Event files have none: they are kept for
- * the retention window and cleaned up together with their index via
- * `telemetry_retention`. The index row offers that action directly.
+ * Which reclaim each bucket offers. Raw events can be reclaimed only after
+ * their retention window; there is no summary/index action anymore.
  */
 function reclaimActionFor(bucket: DiskUsageBucket): ReclaimAction | null {
   if (bucket.id === "payload_frames") return "payload_frames";
-  if (bucket.id === "telemetry_index") return "telemetry_retention";
+  if (bucket.id === "telemetry_events") return "telemetry_retention";
   return null;
 }
 
 /** One glyph per section, so the five parts of the panel read as a family. */
 function bucketIconFor(bucket: DiskUsageBucket): LucideIcon {
   if (bucket.id === "payload_frames") return FileJson;
-  if (bucket.id === "telemetry_index") return CalendarDays;
   return FileClock;
 }
 
@@ -251,9 +249,10 @@ function BucketCard({
   readonly onConfirm: () => void;
 }): ReactNode {
   const action = reclaimActionFor(bucket);
+  const knownReclaimable = bucket.reclaimableBytes !== null;
   const reclaimable = bucket.reclaimableBytes ?? 0;
   const files = bucket.reclaimableFiles ?? 0;
-  const nothingToReclaim = action !== null && reclaimable === 0;
+  const nothingToReclaim = knownReclaimable && reclaimable === 0;
   const Icon = bucketIconFor(bucket);
 
   return (
@@ -288,8 +287,9 @@ function BucketCard({
         ) : confirming ? (
           <span className="flex flex-col gap-3">
             <span className="text-caption text-text-secondary">
-              Delete {formatNumber(files)} file{files === 1 ? "" : "s"},{" "}
-              {formatBytes(reclaimable)}?
+              {knownReclaimable
+                ? `Delete ${formatNumber(files)} file${files === 1 ? "" : "s"}, ${formatBytes(reclaimable)}?`
+                : "Delete raw event files past the retention window?"}
             </span>
             <span className="flex items-center gap-3">
               <Button variant="secondary" size="sm" onClick={onCancel} disabled={busy}>
@@ -309,7 +309,11 @@ function BucketCard({
         ) : (
           <span className="flex items-center justify-between gap-3 flex-wrap">
             <span className="text-caption text-text-tertiary">
-              {nothingToReclaim ? "Clean" : `${formatBytes(reclaimable)} free`}
+              {!knownReclaimable
+                ? "Expired events only"
+                : nothingToReclaim
+                  ? "Clean"
+                  : `${formatBytes(reclaimable)} free`}
             </span>
             <Button
               variant="secondary"

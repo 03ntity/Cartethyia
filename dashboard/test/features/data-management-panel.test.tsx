@@ -51,15 +51,6 @@ const USAGE = {
       reclaimableFiles: null,
     },
     {
-      id: "telemetry_index",
-      label: "Day indexes",
-      bytes: 1024 * 1024,
-      files: 30,
-      note: "Feeds usage totals, breakdowns and the chart.",
-      reclaimableBytes: 512 * 1024,
-      reclaimableFiles: 5,
-    },
-    {
       id: "payload_frames",
       label: "Payload frames",
       bytes: 4096,
@@ -89,26 +80,22 @@ describe("DataManagementPanel", () => {
       // 2 MiB and 1 MiB are the two large buckets; formatting comes from the
       // shared helper, so assert on the rendered figure rather than raw bytes.
       expect(text).toContain("Request event files");
-      expect(text).toContain("Day indexes");
       expect(text).toContain("Payload frames");
       // `formatBytes` scales to KB/MB with one decimal, not MiB.
       expect(text).toContain("2.0 MB");
-      expect(text).toContain("1.0 MB");
     } finally {
       unmount();
       restore();
     }
   });
 
-  test("hourly files get no reclaim button", async () => {
-    // The safety boundary. An hourly file is the only copy of its requests
-    // until compaction folds it up, so the panel must not offer to delete it.
+  test("event files offer retention reclaim without a fabricated byte count", async () => {
     const { container, unmount, restore } = await mountPanel();
     try {
       const row = container.querySelector('[data-bucket="telemetry_events"]');
       expect(row).not.toBeNull();
-      expect(row?.querySelectorAll("button")).toHaveLength(0);
-      expect(row?.textContent).toContain("no other copy");
+      expect(row?.textContent).toContain("Expired events only");
+      expect(row?.querySelectorAll("button")).toHaveLength(1);
     } finally {
       unmount();
       restore();
@@ -132,8 +119,8 @@ describe("DataManagementPanel", () => {
   test("a bucket with something reclaimable offers it", async () => {
     const { container, unmount, restore } = await mountPanel();
     try {
-      const row = container.querySelector('[data-bucket="telemetry_index"]');
-      expect(row?.textContent).toContain("512.0 KB");
+      const row = container.querySelector('[data-bucket="telemetry_events"]');
+      expect(row?.textContent).toContain("Expired events only");
       const button = Array.from(row?.querySelectorAll("button") ?? []).find(
         (b) => (b.textContent ?? "").includes("Reclaim"),
       ) as HTMLButtonElement | undefined;
@@ -164,7 +151,7 @@ describe("DataManagementPanel", () => {
     const { container, unmount, restore } = await mountPanel();
     try {
       const cards = container.querySelectorAll("[data-bucket]");
-      expect(cards).toHaveLength(3);
+      expect(cards).toHaveLength(2);
       const parents = new Set(Array.from(cards).map((c) => c.parentElement));
       expect(parents.size).toBe(1);
       const grid = cards[0]?.parentElement;
