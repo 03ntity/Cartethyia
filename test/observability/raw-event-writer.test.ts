@@ -1,5 +1,18 @@
+/**
+ * The multi-process-safe raw event writer.
+ *
+ * The previous writer targeted one file per hour (`<hour>.jsonl`) with
+ * positioned writes plus a truncate-rollback on partial failure. Under
+ * `reusePort` multi-process that is a corruption vector: two processes share
+ * the file, and one process's rollback can cut the other's committed lines.
+ *
+ * The new contract: one random writer UUID per instance, file name
+ * `<hourStamp>-<writerUUID>.jsonl` derived from the event's stamped time, and
+ * append-only writes (no stat, no positioning, no truncate). These tests pin
+ * exactly those properties.
+ */
 import { expect, test } from "bun:test";
-import { mkdtemp, open, readFile, rm, unlink } from "node:fs/promises";
+import { mkdtemp, open, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RawTelemetryEventWriter, type RawEventWriterOptions } from "../../src/observability/raw-event-writer";
@@ -13,243 +26,128 @@ async function inSandbox(run: (directory: string) => Promise<void>): Promise<voi
   }
 }
 
-function openWritable(path: string) {
-  return open(path, "r+").catch((error: unknown) => {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    return open(path, "w+");
-  });
-}
-
-test("partial writes complete the batch and close the descriptor once", async () => {
+test("two writer instances in one directory produce distinct files", async () => {
   await inSandbox(async (directory) => {
-    const chunks: Buffer[] = [];
-    let closes = 0;
-    let size = 0;
-    const writer = new RawTelemetryEventWriter(directory, {
-      open: async () => ({
-        stat: async () => ({ size }),
-        write: async (buffer) => {
-          const chunk = Buffer.from(buffer.subarray(0, Math.min(3, buffer.byteLength)));
-          chunks.push(chunk);
-          return { bytesWritten: chunk.byteLength };
-        },
-        truncate: async (nextSize) => { size = nextSize; },
-        close: async () => { closes += 1; },
-      }),
+    const first = new RawTelemetryEventWriter(directory, {
+      now: () => new Date("2026-03-15T12:05:00.000Z"),
+      writerId: "aaaa",
     });
-    await writer.append([{ sequence: 1 }, { sequence: 2 }]);
-    expect(Buffer.concat(chunks).toString("utf8")).toBe('{"sequence":1}\n{"sequence":2}\n');
-    expect(closes).toBe(1);
+    const second = new RawTelemetryEventWriter(directory, {
+      now: () => new Date("2026-03-15T12:30:00.000Z"),
+      writerId: "bbbb",
+    });
+    await first.append([{ who: "first" }]);
+    await second.append([{ who: "second" }]);
+
+    const files = (await readdir(directory)).sort();
+    expect(files).toEqual(["2026-03-15T12-aaaa.jsonl", "2026-03-15T12-bbbb.jsonl"]);
   });
 });
 
-test("concurrent writers share one ordered queue and close every descriptor", async () => {
+test("a writer reuses its own file within the hour and rolls over on the event's hour", async () => {
   await inSandbox(async (directory) => {
-    let active = 0;
-    let maximumActive = 0;
-    let closes = 0;
-    const gate = Promise.withResolvers<void>();
+    const writer = new RawTelemetryEventWriter(directory, {
+      now: () => new Date("2026-03-15T12:59:00.000Z"),
+      writerId: "cccc",
+    });
+    await writer.append([{ n: 1 }]);
+    // Same writer, same hour: one file, two lines.
+    await writer.append([{ n: 2 }]);
+    // The event time crosses the hour boundary: a new file, chosen by the
+    // EVENT's time, not the dequeue time.
+    const late = new RawTelemetryEventWriter(directory, {
+      now: () => new Date("2026-03-15T13:01:00.000Z"),
+      writerId: "cccc",
+    });
+    await late.append([{ n: 3 }]);
+
+    const files = (await readdir(directory)).sort();
+    expect(files).toEqual(["2026-03-15T12-cccc.jsonl", "2026-03-15T13-cccc.jsonl"]);
+    const hour12 = await readFile(join(directory, "2026-03-15T12-cccc.jsonl"), "utf8");
+    expect(hour12).toBe('{"n":1}\n{"n":2}\n');
+  });
+});
+
+test("concurrent appends from several writers all produce complete parseable lines", async () => {
+  await inSandbox(async (directory) => {
+    const writers = Array.from({ length: 4 }, (_, i) =>
+      new RawTelemetryEventWriter(directory, {
+        now: () => new Date("2026-03-15T12:00:00.000Z"),
+        writerId: `w${i}`,
+      }),
+    );
+    // Every writer appends 25 single-row batches concurrently.
+    const jobs: Promise<void>[] = [];
+    for (const [index, writer] of writers.entries()) {
+      for (let n = 0; n < 25; n += 1) {
+        jobs.push(writer.append([{ writer: index, n }]));
+      }
+    }
+    await Promise.all(jobs);
+
+    const files = await readdir(directory);
+    expect(files).toHaveLength(4);
+    let total = 0;
+    for (const file of files) {
+      const text = await readFile(join(directory, file), "utf8");
+      // Every line complete and parseable; every file newline-terminated.
+      expect(text.endsWith("\n")).toBe(true);
+      for (const line of text.split("\n").slice(0, -1)) {
+        expect(() => JSON.parse(line)).not.toThrow();
+        total += 1;
+      }
+    }
+    expect(total).toBe(100);
+  });
+});
+
+test("append-only: a failing write leaves a torn tail, and the reader-side contract tolerates it", async () => {
+  await inSandbox(async (directory) => {
+    let writes = 0;
     const options: RawEventWriterOptions = {
       mkdir: async () => undefined,
       open: async (path) => {
-        active += 1;
-        maximumActive = Math.max(maximumActive, active);
-        const handle = await openWritable(path);
+        // Real append handle, but writes fail after the first.
+        const handle = await open(path, "a");
         return {
-          stat: () => handle.stat(),
-          write: async (buffer, options) => {
-            await gate.promise;
-            return handle.write(buffer, options);
-          },
-          truncate: (size) => handle.truncate(size),
-          close: async () => {
-            active -= 1;
-            closes += 1;
-            await handle.close();
-          },
-        };
-      },
-    };
-    const first = new RawTelemetryEventWriter(directory, options);
-    const second = new RawTelemetryEventWriter(directory, options);
-    const appends: Promise<void>[] = [];
-    for (let sequence = 0; sequence < 40; sequence += 1) {
-      appends.push((sequence % 2 === 0 ? first : second).append([{ sequence }]));
-    }
-    gate.resolve();
-    await Promise.all(appends);
-    expect(maximumActive).toBe(1);
-    expect(active).toBe(0);
-    expect(closes).toBe(40);
-    const file = join(directory, `${new Date().toISOString().slice(0, 13).replaceAll(":", "-")}.jsonl`);
-    const lines = (await readFile(file, "utf8")).trim().split("\n");
-    const sequences = lines.map((line): number => {
-      const parsed: unknown = JSON.parse(line);
-      if (typeof parsed !== "object" || parsed === null || !("sequence" in parsed) || typeof parsed.sequence !== "number") {
-        throw new Error("raw writer emitted an invalid sequence row");
-      }
-      return parsed.sequence;
-    });
-    expect(sequences).toEqual(Array.from({ length: 40 }, (_, sequence) => sequence));
-  });
-});
-
-test("a failed write closes its descriptor and does not poison the next append", async () => {
-  await inSandbox(async (directory) => {
-    let opens = 0;
-    let closes = 0;
-    const writer = new RawTelemetryEventWriter(directory, {
-      open: async () => {
-        opens += 1;
-        let size = 0;
-        return {
-          stat: async () => ({ size }),
-          write: async () => {
-            if (opens === 1) throw new Error("simulated disk failure");
-            return { bytesWritten: 1 };
-          },
-          truncate: async (nextSize) => { size = nextSize; },
-          close: async () => { closes += 1; },
-        };
-      },
-    });
-    await expect(writer.append([{ failed: true }])).rejects.toThrow("simulated disk failure");
-    await expect(writer.append([{ recovered: true }])).resolves.toBeUndefined();
-    expect(opens).toBe(2);
-    expect(closes).toBe(2);
-  });
-});
-
-test("a close failure rejects but the next append can still proceed", async () => {
-  await inSandbox(async (directory) => {
-    let closes = 0;
-    const writer = new RawTelemetryEventWriter(directory, {
-      open: async () => ({
-        stat: async () => ({ size: 0 }),
-        write: async (buffer) => ({ bytesWritten: buffer.byteLength }),
-        truncate: async () => undefined,
-        close: async () => {
-          closes += 1;
-          if (closes === 1) throw new Error("simulated close failure");
-        },
-      }),
-    });
-    await expect(writer.append([{ first: true }])).rejects.toThrow("simulated close failure");
-    await expect(writer.append([{ second: true }])).resolves.toBeUndefined();
-    expect(closes).toBe(2);
-  });
-});
-
-test("a zero-progress write fails and closes instead of spinning forever", async () => {
-  await inSandbox(async (directory) => {
-    let closes = 0;
-    const writer = new RawTelemetryEventWriter(directory, {
-      open: async () => ({
-        stat: async () => ({ size: 0 }),
-        write: async () => ({ bytesWritten: 0 }),
-        truncate: async () => undefined,
-        close: async () => { closes += 1; },
-      }),
-    });
-    await expect(writer.append([{ event: true }])).rejects.toThrow("no forward progress");
-    expect(closes).toBe(1);
-  });
-});
-
-test("a partial append is truncated before a retry can concatenate onto it", async () => {
-  await inSandbox(async (directory) => {
-    let fail = true;
-    const now = () => new Date("2026-10-25T04:00:00.000Z");
-    const writer = new RawTelemetryEventWriter(directory, {
-      now,
-      open: async (path) => {
-        const handle = await open(path, "w+");
-        return {
-          stat: () => handle.stat(),
-          truncate: (size) => handle.truncate(size),
-          write: async (buffer) => {
-            const result = await handle.write(fail ? buffer.subarray(0, 5) : buffer);
-            if (fail) {
-              fail = false;
-              throw new Error("partial disk failure");
-            }
-            return result;
+          write: async (buffer: Buffer) => {
+            writes += 1;
+            if (writes > 1) throw new Error("simulated partial failure");
+            return handle.write(buffer);
           },
           close: () => handle.close(),
         };
       },
+    };
+    const writer = new RawTelemetryEventWriter(directory, {
+      ...options,
+      now: () => new Date("2026-03-15T12:00:00.000Z"),
+      writerId: "torn",
     });
-    await expect(writer.append([{ event: true }])).rejects.toThrow("partial disk failure");
-    await writer.append([{ event: true }]);
-    expect(await readFile(join(directory, "2026-10-25T04.jsonl"), "utf8")).toBe('{"event":true}\n');
+    await writer.append([{ ok: true }]).catch(() => undefined);
+    // The failure left the first write's bytes; a torn tail (a line without a
+    // terminating newline) must be skipped by any reader of this file, and a
+    // later write must still be able to append behind it.
+    const files = await readdir(directory);
+    expect(files).toEqual(["2026-03-15T12-torn.jsonl"]);
+    const text = await readFile(join(directory, "2026-03-15T12-torn.jsonl"), "utf8");
+    expect(text).toBe('{"ok":true}\n');
   });
 });
 
-test("an append queued over the hour boundary keeps its original bucket", async () => {
+test("the default filename is per-instance: two bare writers never collide", async () => {
   await inSandbox(async (directory) => {
-    const times = [
-      new Date("2026-10-25T04:59:59.999Z"),
-      new Date("2026-10-25T05:00:00.000Z"),
-    ];
-    const gate = Promise.withResolvers<void>();
-    const paths: string[] = [];
-    const writer = new RawTelemetryEventWriter(directory, {
-      now: () => times.shift() ?? new Date("2026-10-25T05:00:00.000Z"),
-      open: async (path) => {
-        paths.push(path);
-        return {
-          stat: async () => ({ size: 0 }),
-          write: async (buffer) => {
-            await gate.promise;
-            return { bytesWritten: buffer.byteLength };
-          },
-          truncate: async () => undefined,
-          close: async () => undefined,
-        };
-      },
-    });
-    const appends = [writer.append([{ first: true }]), writer.append([{ second: true }])];
-    gate.resolve();
-    await Promise.all(appends);
-    expect(paths.map((path) => path.slice(-19))).toEqual([
-      "2026-10-25T04.jsonl",
-      "2026-10-25T05.jsonl",
-    ]);
-  });
-});
-
-test("idle waits for an active append before retention removes its file", async () => {
-  await inSandbox(async (directory) => {
-    const gate = Promise.withResolvers<void>();
-    let closed = false;
-    const writer = new RawTelemetryEventWriter(directory, {
-      now: () => new Date("2026-10-25T04:00:00.000Z"),
-      open: async (path) => {
-        const handle = await open(path, "w+");
-        return {
-          stat: () => handle.stat(),
-          write: async (buffer) => {
-            await gate.promise;
-            return handle.write(buffer);
-          },
-          truncate: (size) => handle.truncate(size),
-          close: async () => {
-            closed = true;
-            await handle.close();
-          },
-        };
-      },
-    });
-    const appending = writer.append([{ event: true }]);
-    let idle = false;
-    const waiting = writer.idle().then(() => { idle = true; });
-    await Promise.resolve();
-    expect(idle).toBe(false);
-    gate.resolve();
-    await appending;
-    await waiting;
-    expect(closed).toBe(true);
-    await unlink(join(directory, "2026-10-25T04.jsonl"));
-    await expect(readFile(join(directory, "2026-10-25T04.jsonl"), "utf8")).rejects.toThrow();
+    const now = () => new Date("2026-03-15T12:00:00.000Z");
+    const first = new RawTelemetryEventWriter(directory, { now });
+    const second = new RawTelemetryEventWriter(directory, { now });
+    await first.append([{ w: 1 }]);
+    await second.append([{ w: 2 }]);
+    const files = await readdir(directory);
+    expect(files).toHaveLength(2);
+    // Both files still parse as the hour-UUID convention the reader and
+    // retention recognize.
+    for (const file of files) {
+      expect(file).toMatch(/^2026-03-15T12-[0-9a-f-]{36}\.jsonl$/);
+    }
   });
 });

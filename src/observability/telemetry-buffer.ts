@@ -6,6 +6,7 @@ import { DEFAULT_BOUNDS } from "../config/network";
 import { type SourceSurface, type UsageRecord } from "../protocol/canonical-model";
 import { log } from "./logger";
 import { scrubSecrets } from "./redaction";
+import { clientNameFromUserAgent } from "./client-name";
 
 
 /**
@@ -104,6 +105,12 @@ function telemetryEventRow(event: TelemetryEventInput) {
   // `cachedInputTokens` stays — `health` aggregates it into the Overview
   // cache-hit rate.
   return {
+    // Stable identity: the request's own id. Retries reuse the materialized
+    // row (the buffer retries the same rows across its five attempts), and
+    // the (tenant_id, request_id) unique boundary makes a re-drain or a
+    // cross-process race converge to one row via ON CONFLICT DO NOTHING
+    // instead of double-charging.
+    id: event.requestId,
     tenantId: event.tenantId,
     requestId: event.requestId,
     // Stamped here, not by the reader. A row without it has no real time, and a
@@ -116,6 +123,8 @@ function telemetryEventRow(event: TelemetryEventInput) {
     endpoint: event.endpoint ?? null,
     apiKeyId: event.apiKeyId ?? null,
     userAgent: event.userAgent ?? null,
+    // Canonical client grouping, stamped once so SQL breakdowns group by it.
+    clientName: clientNameFromUserAgent(event.userAgent),
     clientIp: event.clientIp ?? null,
     providerId: event.providerId ?? null,
     accountId: event.accountId ?? null,

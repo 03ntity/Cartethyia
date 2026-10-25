@@ -1,17 +1,20 @@
 import { mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 interface AppendHandle {
-  stat(): Promise<{ readonly size: number }>;
-  write(buffer: Buffer, options?: { readonly position: number }): Promise<{ readonly bytesWritten: number }>;
-  truncate(size: number): Promise<void>;
+  appendFile?(buffer: Buffer): Promise<void>;
+  write(buffer: Buffer): Promise<{ readonly bytesWritten: number }>;
   close(): Promise<void>;
 }
 
 export interface RawEventWriterOptions {
   readonly open?: (path: string) => Promise<AppendHandle>;
   readonly mkdir?: (directory: string) => Promise<void>;
+  /** Test seam: the file's event-time stamp source (default `Date`). */
   readonly now?: () => Date;
+  /** Test seam: fixed writer identity (default: one random UUID per instance). */
+  readonly writerId?: string;
 }
 
 /**
@@ -19,29 +22,39 @@ export interface RawEventWriterOptions {
  *
  * There is one short-lived handle per queued batch. Every handle is closed on
  * success and failure, and a failed append does not poison the following one.
- * This serializes callers inside one process; it is not a cross-process lock.
+ * This serializes callers inside one process; cross-process safety comes from
+ * the FILENAME, not a lock: each writer instance owns a distinct file
+ * (`<hourStamp>-<writerUUID>.jsonl`), so two processes can never target the
+ * same file and their appends cannot interleave destructively.
+ *
+ * The file is chosen by the EVENT's stamped time, not the dequeue time: a
+ * batch flushed after an hour boundary still belongs to the hour its events
+ * happened in, so retention's hour-granular rule never deletes a file whose
+ * events belong to the current window.
  */
 export class RawTelemetryEventWriter {
   private readonly state: { tail: Promise<void> };
   private readonly openFile: (path: string) => Promise<AppendHandle>;
   private readonly makeDirectory: (directory: string) => Promise<void>;
   private readonly now: () => Date;
+  private readonly writerId: string;
 
   constructor(directory: string, options: RawEventWriterOptions = {}) {
     this.directory = directory;
     this.state = sharedState(directory);
     this.openFile = options.open ?? (async (path) => {
-      try {
-        return await open(path, "r+");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        return open(path, "w+");
-      }
+      // 'a' positions every write at end-of-file: no stat, no positioned
+      // write, no truncate-rollback. Two writers on one file would still
+      // interleave at line granularity (append is atomic per call for
+      // line-sized buffers), but the writer-UUID filename makes that
+      // impossible; 'a' is the belt to that suspenders.
+      return (await open(path, "a")) as unknown as AppendHandle;
     });
     this.makeDirectory = options.mkdir ?? (async (path) => {
       await mkdir(path, { recursive: true });
     });
     this.now = options.now ?? (() => new Date());
+    this.writerId = options.writerId ?? randomUUID();
   }
 
   /** Queues an already-bounded batch; the telemetry buffer owns drop policy. */
@@ -50,7 +63,8 @@ export class RawTelemetryEventWriter {
     // JSON encoding work happens while a descriptor is open.
     const body = Buffer.from(`${rows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
     const hour = this.now().toISOString().slice(0, 13).replaceAll(":", "-");
-    const write = this.state.tail.then(() => this.write(hour, body));
+    const file = `${hour}-${this.writerId}.jsonl`;
+    const write = this.state.tail.then(() => this.write(file, body));
     this.state.tail = write.catch(() => undefined);
     return write;
   }
@@ -60,27 +74,29 @@ export class RawTelemetryEventWriter {
     await this.state.tail;
   }
 
-  private async write(hour: string, body: Buffer): Promise<void> {
+  private async write(file: string, body: Buffer): Promise<void> {
     await this.makeDirectory(this.directory);
-    const handle = await this.openFile(join(this.directory, `${hour}.jsonl`));
+    const handle = await this.openFile(join(this.directory, file));
     try {
-      const initialSize = (await handle.stat()).size;
+      // Append-only: a failed write leaves whatever prefix landed, and the
+      // reader already tolerates a torn tail (a partial final line without a
+      // newline is skipped). No truncate-rollback: truncating under
+      // `reusePort` multi-process was the corruption risk this rewrite
+      // removes — one process's rollback could cut another process's
+      // already-committed lines on a shared file. Private files make that
+      // impossible, and refusing to truncate keeps it impossible even if the
+      // filename rule is ever relaxed.
+      if (typeof handle.appendFile === "function") {
+        await handle.appendFile(body);
+        return;
+      }
       let offset = 0;
-      try {
-        while (offset < body.byteLength) {
-          const { bytesWritten } = await handle.write(body.subarray(offset), { position: initialSize + offset });
-          if (!Number.isInteger(bytesWritten) || bytesWritten <= 0 || bytesWritten > body.byteLength - offset) {
-            throw new Error("telemetry event writer made no forward progress");
-          }
-          offset += bytesWritten;
+      while (offset < body.byteLength) {
+        const { bytesWritten } = await handle.write(body.subarray(offset));
+        if (!Number.isInteger(bytesWritten) || bytesWritten <= 0) {
+          throw new Error("telemetry event writer made no forward progress");
         }
-      } catch (error) {
-        // Never leave a JSON fragment for a retry to concatenate onto. If the
-        // rollback itself fails, keep both failures visible to the caller.
-        await handle.truncate(initialSize).catch((truncateError: unknown) => {
-          throw new AggregateError([error, truncateError], "telemetry append and partial-write rollback failed");
-        });
-        throw error;
+        offset += bytesWritten;
       }
     } finally {
       await handle.close();

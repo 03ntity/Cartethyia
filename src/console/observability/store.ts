@@ -8,6 +8,13 @@ import {
   type TelemetryEventRecord,
 } from "../../observability/event-log";
 import { isGatewayError } from "../../observability/telemetry-status";
+import { clientNameFromUserAgent } from "../../observability/client-name";
+
+// Re-exported from the canonical module: ingestion (`telemetryEventRow`) and
+// the backfill stamp the same value the console read side groups by, so the
+// derivation cannot drift between writer and reader. Existing console
+// imports of `clientNameFromUserAgent` keep working.
+export { clientNameFromUserAgent };
 import { cachedReadWithEtag, type CachedResult } from "../shared/read-through-cache";
 import { decodeDatedCursor, encodeCursor } from "../shared/cursor";
 import { CARTETHYIA_VERSION } from "../../version";
@@ -82,23 +89,6 @@ function periodStartDate(period: string): Date | undefined {
   return new Date(Date.now() - amount * unitMs);
 }
 
-
-/**
- * Client identity straight from the stored `User-Agent`: the first RFC 9110
- * product token carries both the client and its version (`bun/1.2.3`,
- * `codex-cli/0.1.0`), so no prefix catalog can drift from what the client
- * actually sent. Browser agents start with the historical `Mozilla/5.0`
- * token, which names no real client, so they report as `Browser`.
- */
-export function clientNameFromUserAgent(userAgent: string | null | undefined): string {
-  const raw = userAgent?.trim();
-  if (!raw) return "unknown";
-  if (/^mozilla\//i.test(raw)) return "Browser";
-  const product = raw.split(/\s+/, 1)[0] ?? "";
-  const slash = product.indexOf("/");
-  const token = slash <= 0 ? product : product.slice(0, slash + 1).concat(product.slice(slash + 1).split(/[;,)]/, 1)[0] ?? "");
-  return token || "unknown";
-}
 /** Time-series bucket width for the usage chart, chosen from the window length. */
 function chartBucketSeconds(period: string): number {
   const since = periodStartDate(period);
