@@ -1,0 +1,330 @@
+/**
+ * Runs ONE F2 matrix cell end to end: upstream stub → N gateway workers → seed
+ * → load → per-worker attribution → report JSON.
+ *
+ * Split out of `perf-matrix.ts` so one cell can be re-run on its own without
+ * the whole matrix, and so a cell that fails does not take the driver with it.
+ *
+ * Two-worker cells start two gateway processes with explicit
+ * CARTETHYIA_PROCESS_COUNT/INDEX, which is what makes `reusePort` share the
+ * port. A worker that fails to come up fails the cell rather than quietly
+ * measuring one process and calling it two.
+ *
+ * Usage: bun run scripts/tools/perf-cell.ts --name w2-redis-dash-full --workers 2
+ *        [--redis] [--dashboard] [--full] [--requests 4000] [--concurrency 40]
+ *        [--settle 60] [--warmup 200] [--json out.json]
+ */
+import { parseArgs } from "node:util";
+import { writeFileSync } from "node:fs";
+
+const { values } = parseArgs({
+  options: {
+    name: { type: "string", default: "cell" },
+    workers: { type: "string", default: "1" },
+    redis: { type: "boolean", default: false },
+    dashboard: { type: "boolean", default: false },
+    full: { type: "boolean", default: false },
+    requests: { type: "string", default: "4000" },
+    concurrency: { type: "string", default: "40" },
+    settle: { type: "string", default: "60" },
+    warmup: { type: "string", default: "200" },
+    "dashboard-rps": { type: "string", default: "2" },
+    "request-bytes": { type: "string", default: "0" },
+    "response-bytes": { type: "string", default: "0" },
+    port: { type: "string", default: "9901" },
+    "upstream-port": { type: "string", default: "9911" },
+    json: { type: "string" },
+  },
+});
+
+const name = String(values.name);
+const workers = Number(values.workers);
+const port = Number(values.port);
+const upstreamPort = Number(values["upstream-port"]);
+const settle = Number(values.settle);
+
+const REPO = new URL("../..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+
+/** Shared env for every child: one upstream, one database, no watcher. */
+function childEnv(extra: Record<string, string>): Record<string, string> {
+  return {
+    ...process.env,
+    PERF_PORT: String(port),
+    PERF_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
+    ...(values.redis === true && process.env.CARTETHYIA_PERF_REDIS_URL
+      ? { REDIS_URL: process.env.CARTETHYIA_PERF_REDIS_URL }
+      : {}),
+    ...extra,
+  };
+}
+
+function spawn(args: readonly string[], env: Record<string, string>) {
+  return Bun.spawn([...args], { cwd: REPO, env, stdout: "pipe", stderr: "pipe" });
+}
+
+/**
+ * Polls until the upstream answers, or fails after `timeoutMs`.
+ *
+ * Probed with POST: the stub upstream serves POST only, so a GET returns 404
+ * and a GET-based readiness check would report "never ready" against a server
+ * that is listening fine.
+ */
+async function waitUpstreamReady(url: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: "readiness-probe" }),
+        signal: AbortSignal.timeout(2_000),
+      });
+      // Any HTTP response means the listener is up; a 404 from an unknown path
+      // is still proof of life.
+      if (response.status > 0) return true;
+    } catch {
+      /* not up yet */
+    }
+    await Bun.sleep(500);
+  }
+  return false;
+}
+
+/** Polls the gateway's health route until it answers 200. */
+async function waitGatewayReady(url: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });
+      if (response.ok) return true;
+    } catch {
+      /* not up yet */
+    }
+    await Bun.sleep(500);
+  }
+  return false;
+}
+
+const children: { proc: ReturnType<typeof spawn>; label: string }[] = [];
+
+function shutdownAll(): void {
+  for (const child of children) {
+    try {
+      child.proc.kill("SIGTERM");
+    } catch {
+      /* already gone */
+    }
+  }
+}
+process.on("SIGINT", () => {
+  shutdownAll();
+  process.exit(130);
+});
+
+try {
+  console.log(`[cell:${name}] starting upstream on :${upstreamPort}`);
+  const upstream = spawn(["bun", "run", "scripts/tools/perf-upstream.ts", "--port", String(upstreamPort)], childEnv({}));
+  children.push({ proc: upstream, label: "upstream" });
+  if (!(await waitUpstreamReady(`http://127.0.0.1:${upstreamPort}/v1/chat/completions`, 20_000))) {
+    throw new Error("upstream did not become ready");
+  }
+
+  // Seed before the gateway boots for multi-worker: both processes read the
+  // same seeded rows, so seeding once is correct and seeding per worker would
+  // create a second tenant per worker.
+  console.log(`[cell:${name}] seeding`);
+  const seedOut = await new Response(
+    spawn(["bun", "run", "scripts/tools/perf-seed.ts"], childEnv({})).stdout,
+  ).text();
+  const seeded = JSON.parse(seedOut.trim().split("\n").at(-1) ?? "{}") as {
+    token?: string;
+    modelId?: string;
+    qualifiedModel?: string;
+  };
+  if (!seeded.token || !seeded.qualifiedModel) {
+    throw new Error(`seed did not return token+model: ${seedOut.slice(-400)}`);
+  }
+
+  const workerPids: number[] = [];
+  for (let index = 0; index < workers; index += 1) {
+    const env = childEnv({
+      ...(workers > 1
+        ? { CARTETHYIA_PROCESS_COUNT: String(workers), CARTETHYIA_PROCESS_INDEX: String(index) }
+        : {}),
+    });
+    console.log(`[cell:${name}] starting worker ${index}/${workers}`);
+    const worker = spawn(["bun", "run", "scripts/tools/perf-start.ts", "--port", String(port)], env);
+    children.push({ proc: worker, label: `worker-${index}` });
+    if (worker.pid !== undefined) workerPids.push(worker.pid);
+  }
+
+  if (!(await waitGatewayReady(`http://127.0.0.1:${port}/health`, 60_000))) {
+    throw new Error(`gateway worker(s) did not become ready on :${port}`);
+  }
+  console.log(`[cell:${name}] gateway ready (pids ${workerPids.join(",")})`);
+
+  // Attribute memory to the GATEWAY process, not to the launcher. On Windows
+  // `bun run scripts/tools/perf-start.ts` is itself a process, so the spawned
+  // PID is the launcher's; the gateway is its child. Reading `pid` from the
+  // gateway's own health payload is the only attribution that is actually about
+  // the process serving traffic.
+  const gatewayPids = await resolveGatewayPids(port, workers);
+  // On Windows the spawned PID is the `bun run perf-start.ts` launcher, not the
+  // gateway: the launcher's RSS is a constant ~30 MB that says nothing about the
+  // process under test. Resolve the launcher's child, which is the gateway.
+  const childPids = process.platform === "win32" ? await childrenOf(workerPids) : [];
+  const attributedPids =
+    gatewayPids.length > 0 ? gatewayPids : childPids.length > 0 ? childPids : workerPids;
+  const workersFile = `/tmp/carte-perf-workers-${name}.txt`;
+  const rssSnapshot = await rssOf(attributedPids);
+  writeFileSync(
+    workersFile,
+    attributedPids.map((pid) => `${pid}\t${rssSnapshot.get(pid) ?? 0}`).join("\n"),
+  );
+  console.log(
+    `[cell:${name}] attribution pids=${attributedPids.join(",")} ` +
+      `(from ${gatewayPids.length > 0 ? "health" : "spawn fallback"})`,
+  );
+
+  const reportPath = values.json ? String(values.json) : `/tmp/carte-perf-${name}.json`;
+  const loadArgs = [
+    "bun",
+    "run",
+    "scripts/tools/perf-load.ts",
+    "--base",
+    `http://127.0.0.1:${port}`,
+    "--token",
+    seeded.token,
+    "--model",
+    seeded.qualifiedModel,
+    "--concurrency",
+    String(values.concurrency),
+    "--requests",
+    String(values.requests),
+    "--settle",
+    String(settle),
+    "--warmup",
+    String(values.warmup),
+    "--workers-file",
+    workersFile,
+    "--json",
+    reportPath,
+  ];
+  if (values.dashboard === true) {
+    loadArgs.push("--dashboard", "--dashboard-rps", String(values["dashboard-rps"]));
+  }
+  if (values.full === true) {
+    loadArgs.push("--request-bytes", String(values["request-bytes"]), "--response-bytes", String(values["response-bytes"]));
+  }
+
+  console.log(`[cell:${name}] driving load`);
+  const load = spawn(loadArgs, childEnv({}));
+  const [loadOut, loadErr, loadCode] = await Promise.all([
+    new Response(load.stdout).text(),
+    new Response(load.stderr).text(),
+    load.exited,
+  ]);
+  console.log(loadOut.trim());
+  if (loadCode !== 0) {
+    console.error(loadErr.slice(-1200));
+    throw new Error(`perf-load exited ${loadCode}`);
+  }
+  console.log(`[cell:${name}] report -> ${reportPath}`);
+} catch (error) {
+  console.error(`[cell:${name}] FAILED: ${(error as Error).message}`);
+  shutdownAll();
+  process.exit(1);
+} finally {
+  shutdownAll();
+}
+
+/**
+ * The PIDs the gateway reports for itself.
+ *
+ * One probe answers once per process, so a two-worker cell needs as many
+ * probes as there are workers to see both — with `reusePort`, each answer comes
+ * from whichever process the kernel picked. Collected until distinct PIDs stop
+ * appearing or the budget runs out.
+ */
+async function resolveGatewayPids(port: number, expected: number): Promise<number[]> {
+  const found = new Set<number>();
+  const deadline = Date.now() + 8_000;
+  // The console health route goes through the console access resolver, which a
+  // bearer token does not satisfy — so this returns 401 rather than a pid, and
+  // the caller falls back to the spawned PIDs. Kept because the route is the
+  // only place the gateway names its own process, and it may become reachable
+  // if the console is ever served without a session.
+  while (Date.now() < deadline && found.size < expected) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/console/api/observability/system/health`, {
+        signal: AbortSignal.timeout(2_000),
+      });
+      if (!response.ok) break;
+      const body = (await response.json()) as { pid?: number };
+      if (typeof body.pid === "number") found.add(body.pid);
+    } catch {
+      break;
+    }
+    await Bun.sleep(200);
+  }
+  return [...found];
+}
+
+/**
+ * Child PIDs of the given processes (Windows).
+ *
+ * `wmic process where (ParentProcessId=...)` is the portable-enough way to
+ * resolve them. Falls back to an empty list when the tool is unavailable, in
+ * which case the caller keeps the launcher PIDs and the report says so.
+ */
+async function childrenOf(pids: readonly number[]): Promise<number[]> {
+  if (pids.length === 0) return [];
+  const out: number[] = [];
+  for (const pid of pids) {
+    try {
+      const proc = Bun.spawn(
+        ["wmic", "process", "where", `ParentProcessId=${pid}`, "get", "ProcessId"],
+        { stdout: "pipe", stderr: "ignore" },
+      );
+      const text = await new Response(proc.stdout).text();
+      await proc.exited;
+      for (const line of text.split("\n")) {
+        const value = Number(line.trim());
+        if (Number.isInteger(value) && value > 0) out.push(value);
+      }
+    } catch {
+      /* wmic unavailable */
+    }
+  }
+  return [...new Set(out)];
+}
+
+/** Reads RSS per PID. Windows has no /proc, so tasklist is used there. */
+async function rssOf(pids: readonly number[]): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  if (pids.length === 0) return out;
+  if (process.platform === "win32") {
+    const proc = Bun.spawn(["tasklist", "/FO", "CSV", "/NH"], { stdout: "pipe" });
+    const text = await new Response(proc.stdout).text();
+    await proc.exited;
+    for (const line of text.split("\n")) {
+      const match = /"([^"]+)","(\d+)","[^"]*","[^"]*","([\d,.]+) K"/.exec(line);
+      if (match === null) continue;
+      const pid = Number(match[2]);
+      if (!pids.includes(pid)) continue;
+      const kb = Number(match[3]!.replace(/[,.]/g, ""));
+      if (Number.isFinite(kb)) out.set(pid, kb * 1024);
+    }
+    return out;
+  }
+  for (const pid of pids) {
+    try {
+      const status = await Bun.file(`/proc/${pid}/status`).text();
+      const match = /^VmRSS:\s+(\d+) kB$/m.exec(status);
+      if (match) out.set(pid, Number(match[1]) * 1024);
+    } catch {
+      /* gone */
+    }
+  }
+  return out;
+}
