@@ -160,7 +160,11 @@ describe("Buddy upstream protocol alignment", () => {
     };
     codeBuddyCnPrePayload(payload, request, candidate);
     expect(payload["reasoning_effort"]).toBe("xhigh");
-    expect(payload["max_tokens"]).toBe(192_000);
+    // The floor is half the model's catalog output limit. deepseek-v4-pro's CN
+    // output was recorded as 384,000 (making the floor 192,000); /v3/config
+    // publishes 128,000, so the correct floor is 64,000. A clamp is only as
+    // right as the limit it reads, which is what this pins.
+    expect(payload["max_tokens"]).toBe(64_000);
   });
 
   test("`auto` stays `auto` on the international roster", () => {

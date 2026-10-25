@@ -102,6 +102,52 @@ export const BUDDY_IMAGE_MODEL_ID_SET: ReadonlySet<string> = new Set(
 );
 
 /**
+ * The CN realm's image-generation ids.
+ *
+ * Separate from {@link BUDDY_IMAGE_MODEL_IDS} because the realms do not share
+ * a roster: `hunyuan-image-alpha` is published by the CN `/v3/config` only, and
+ * the intl image ids are not served there. Sharing one list would either leak
+ * CN-only ids onto the international catalogs or force a realm check into
+ * every consumer.
+ *
+ * `hunyuan-image-alpha-edit` carries `image-to-image` and is deliberately NOT
+ * here: it is not in the CLI roster, so it is not a routable generation model.
+ */
+const BUDDY_CN_IMAGE_MODEL_IDS: readonly { id: string; ctx: number; out: number }[] = [
+  { id: "hunyuan-image-alpha", ctx: 1_000_000, out: 64_000 },
+];
+
+/** The CN analogue of {@link BUDDY_IMAGE_MODEL_ID_SET}. */
+export const BUDDY_CN_IMAGE_MODEL_ID_SET: ReadonlySet<string> = new Set(
+  BUDDY_CN_IMAGE_MODEL_IDS.map((entry) => entry.id),
+);
+
+/**
+ * Builds the CN image-generation rows for one buddy CN provider.
+ *
+ * Same shape as {@link makeBuddyImageModels}, scoped to the CN roster.
+ */
+export function makeBuddyCnImageModels(
+  providerId: string,
+  endpoint: string,
+): readonly ModelDefinition[] {
+  return BUDDY_CN_IMAGE_MODEL_IDS.map((entry) =>
+    defineModel({
+      id: entry.id,
+      providerId,
+      serviceKind: "imageGeneration",
+      wireFamily: "chat",
+      endpoint,
+      ctx: entry.ctx,
+      out: entry.out,
+      vision: true,
+      output: ["image"],
+      toolCall: false,
+    }),
+  );
+}
+
+/**
  * Ids the buddy facade refuses on a free plan.
  *
  * The international CodeBuddy and WorkBuddy catalogs share this roster and

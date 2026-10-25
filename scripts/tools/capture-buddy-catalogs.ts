@@ -105,7 +105,14 @@ const IDENTITY_USER_AGENT =
 const SITES: readonly { providerId: string; host: string }[] = [
   { providerId: "cb", host: "www.codebuddy.ai" },
   { providerId: "workbuddy", host: "www.workbuddy.ai" },
+  // CN realm. A separate credential export: the CN sites are a different
+  // account realm and reject an intl token. Passed via --creds-cn.
+  { providerId: "cbcn", host: "copilot.tencent.com" },
+  { providerId: "workbuddycn", host: "www.workbuddy.cn" },
 ];
+
+/** Which credential each site needs: CN sites take the CN token. */
+const CN_PROVIDER_IDS: ReadonlySet<string> = new Set(["cbcn", "workbuddycn"]);
 
 /**
  * Every path that answers, captured — not just the one we trust.
@@ -120,6 +127,10 @@ const SITES: readonly { providerId: string; host: string }[] = [
 const ENDPOINTS: readonly { path: string; label: string }[] = [
   { path: "/v3/config", label: "GET /v3/config" },
   { path: "/v2/enterprises/personal/models", label: "GET /v2/enterprises/personal/models" },
+  // CN-only directory path. On the intl hosts it answers 500, which is why it
+  // is not in the intl set above; on the CN hosts it answers 200 alongside
+  // /v2/enterprises/personal/models.
+  { path: "/console/enterprises/personal/models", label: "GET /console/enterprises/personal/models" },
 ];
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -280,33 +291,55 @@ async function captureSite(
 const { values } = parseArgs({
   options: {
     creds: { type: "string" },
+    "creds-cn": { type: "string" },
     out: { type: "string" },
     check: { type: "string" },
   },
 });
+
+/** Reads the first account's access token out of an exported accounts file. */
+async function tokenFrom(path: string): Promise<string | undefined> {
+  const file = (await Bun.file(path).json().catch(() => null)) as
+    | { accounts?: readonly { accessToken?: unknown }[] }
+    | null;
+  const token = file?.accounts?.[0]?.accessToken;
+  return typeof token === "string" && token.length > 0 ? token : undefined;
+}
 
 const credsPath = values.creds;
 if (typeof credsPath !== "string") {
   console.error("--creds <path to exported accounts json> is required");
   process.exit(2);
 }
-
-const credsFile = await Bun.file(credsPath).json().catch(() => null) as
-  | { accounts?: readonly { accessToken?: unknown }[] }
-  | null;
-const token = credsFile?.accounts?.[0]?.accessToken;
-if (typeof token !== "string" || token.length === 0) {
+const token = await tokenFrom(credsPath);
+if (token === undefined) {
   console.error(`no accessToken found in ${credsPath}`);
+  process.exit(2);
+}
+
+// The CN sites are a different account realm and reject an intl token, so they
+// need their own export. Without it they are skipped rather than captured as a
+// wall of 401s.
+const cnCredsPath = values["creds-cn"];
+const cnToken =
+  typeof cnCredsPath === "string" ? await tokenFrom(cnCredsPath) : undefined;
+if (typeof cnCredsPath === "string" && cnToken === undefined) {
+  console.error(`no accessToken found in ${cnCredsPath}`);
   process.exit(2);
 }
 
 const catalogs: Catalog[] = [];
 for (const site of SITES) {
+  const siteToken = CN_PROVIDER_IDS.has(site.providerId) ? cnToken : token;
+  if (siteToken === undefined) {
+    console.log(`[capture] ${site.host}: skipped — no CN credential (pass --creds-cn)`);
+    continue;
+  }
   for (const endpoint of ENDPOINTS) {
     const captured = await captureSite(
       site.providerId,
       site.host,
-      token,
+      siteToken,
       endpoint.path,
       endpoint.label,
     );
@@ -318,10 +351,13 @@ for (const site of SITES) {
   }
 }
 
-// Only the source-of-record endpoint is required to answer. A secondary
-// endpoint coming back empty is a finding, not a reason to abort — the whole
-// point of capturing it is that it may be empty or stale.
-const failed = catalogs.filter((c) => c.endpoint === ENDPOINTS[0]!.label && c.models.length === 0);
+// Only the source-of-record endpoint (/v3/config) is required to answer, and
+// only for sites we actually had a credential for. A secondary endpoint coming
+// back empty is a finding, not a reason to abort — capturing that it is empty
+// or stale is the point.
+const failed = catalogs.filter(
+  (c) => c.endpoint === ENDPOINTS[0]!.label && c.httpStatus === 200 && c.models.length === 0,
+);
 if (failed.length > 0) {
   console.error(
     `[capture] ${failed.map((c) => c.host).join(", ")} returned no models on ` +
@@ -346,6 +382,7 @@ const day = capturedAt.slice(0, 10);
 const FILE_PER_ENDPOINT: Record<string, string> = {
   "GET /v3/config": `buddy-v3-config-model-catalogs-${day}.json`,
   "GET /v2/enterprises/personal/models": `buddy-v2-personal-model-catalogs-${day}.json`,
+  "GET /console/enterprises/personal/models": `buddy-console-personal-model-catalogs-${day}.json`,
 };
 
 function sourceNote(endpointLabel: string): string {

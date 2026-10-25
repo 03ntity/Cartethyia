@@ -136,11 +136,16 @@ describe("gpt-6-luna on the buddy roster", () => {
     expect(luna(CODEBUDDY_CN_MODELS)).toBeUndefined();
   });
 
-  test("CodeBuddy CN publishes the newly fetched CLI models and drops the removed model", () => {
+  test("CodeBuddy CN publishes the live CLI roster and drops the legacy fallback rows", () => {
+    // `uto` was here only because the reference's CN fallback table carried it;
+    // the CN /v3/config roster does not publish it. The legacy block is gone, so
+    // the CN catalog is exactly what upstream serves — 19 chat rows plus the
+    // image generation row.
     const rows = [
-      ["uto", 256_000, 32_000],
       ["space-bunny", 1_000_000, 128_000],
       ["step-5-preview", 1_000_000, 64_000],
+      ["kimi-k3-1", 1_000_000, 32_000],
+      ["minimax-m2.7", 200_000, 48_000],
     ] as const;
     for (const [modelId, contextLimit, outputLimit] of rows) {
       const row = CODEBUDDY_CN_MODELS.find((model) => model.modelId === modelId);
@@ -148,7 +153,13 @@ describe("gpt-6-luna on the buddy roster", () => {
       expect(row?.contextLimit).toBe(contextLimit);
       expect(row?.outputLimit).toBe(outputLimit);
     }
-    expect(CODEBUDDY_CN_MODELS.some((model) => model.modelId === "hy4-preview-x")).toBe(false);
+    for (const removed of ["uto", "hy4-preview-x", "hunyuan-chat", "glm-4.6", "default"]) {
+      expect(CODEBUDDY_CN_MODELS.some((model) => model.modelId === removed)).toBe(false);
+    }
+    // The one row that is published but not a chat model: kept as generation.
+    expect(
+      CODEBUDDY_CN_MODELS.find((model) => model.modelId === "hunyuan-image-alpha")?.serviceKind,
+    ).toBe("imageGeneration");
   });
 
   test("WorkBuddy CN uses exactly the CodeBuddy CN catalog with its own endpoint", () => {
@@ -178,12 +189,19 @@ describe("measured context windows", () => {
     }
   });
 
-  test("kimi-k2.8-preview is published at the measured 1,048,576 context", () => {
-    for (const rows of [CODEBUDDY_MODELS, WORKBUDDY_MODELS, CODEBUDDY_CN_MODELS]) {
+  test("kimi-k2.8-preview is published at each realm's measured context", () => {
+    // The two realms genuinely differ and always did: intl publishes
+    // 1,048,576/65,536 while CN publishes 1,000,000/64,000. Asserting one pair
+    // across all three catalogs only passed because CN's row was a copy of the
+    // intl numbers, so it encoded the bug rather than the fact.
+    for (const rows of [CODEBUDDY_MODELS, WORKBUDDY_MODELS]) {
       const row = rows.find((model) => model.modelId === "kimi-k2.8-preview");
       expect(row?.contextLimit).toBe(1_048_576);
       expect(row?.outputLimit).toBe(65_536);
     }
+    const cn = CODEBUDDY_CN_MODELS.find((model) => model.modelId === "kimi-k2.8-preview");
+    expect(cn?.contextLimit).toBe(1_000_000);
+    expect(cn?.outputLimit).toBe(64_000);
   });
 
   test("hy3-preview is published with the measured efforts", () => {
