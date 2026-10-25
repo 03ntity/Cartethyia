@@ -29,17 +29,31 @@
   position: relative;
   z-index: 10;
   width: 100%;
-  max-width: 1560px;
+  /* No ceiling on the frame. Browser zoom out makes the CSS-pixel viewport
+     WIDER — 50% zoom turns a 1920px screen into 3840 CSS px — and a capped
+     frame simply stops growing there and parks the extra width as empty
+     margin on both sides. That is what read as "the page does not adjust".
+     Zooming out should show more, not more empty space, so the frame follows
+     the viewport all the way down. */
   min-height: 100vh;
   min-height: 100dvh;
   margin: 0 auto;
   padding: 16px;
   display: grid;
-  /* The sidebar column collapses the moment the shell itself is too narrow to
-     hold it, not at a fixed viewport width. A window can be wide while this
-     column is not (a docked panel, a split view), and a viewport query kept
-     reserving 272px there, pushing the page off the right edge. */
-  grid-template-columns: 272px minmax(0, 1fr);
+  /* Two rules about the sidebar column, both about tracking the frame rather
+     than a number baked in up front.
+
+     It scales with the frame instead of staying pinned to 272px: a fixed track
+     meant the content absorbed every extra pixel and the rail looked bolted
+     on, so widening the window changed nothing about the layout. `minmax`
+     keeps 272px as the floor, so a narrow frame still reserves the room the
+     nav needs before the drawer breakpoint takes over.
+
+     And it collapses the moment the *shell* is too narrow to hold it, not at a
+     fixed viewport width. A window can be wide while this column is not (a
+     docked panel, a split view), and a viewport query kept reserving the track
+     there, pushing the page off the right edge. */
+  grid-template-columns: minmax(272px, 20%) minmax(0, 1fr);
   gap: 16px;
   box-sizing: border-box;
 }
