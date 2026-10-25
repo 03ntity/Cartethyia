@@ -6,6 +6,7 @@ import { Elysia, t } from "elysia";
 import { randomBytes, randomUUID } from "node:crypto";
 import { decryptCredentialToString, encryptCredential } from "../../security/crypto";
 import { invalidateApiKeyCache } from "../../security/api-key-auth";
+import { invalidatePublicModels } from "../providers/catalog/public-model-store";
 import { generateShareSlug, hashShareToken } from "../../persistence/stores/share-store";
 import type { AccessDecision } from "../../security/access-control";
 import { ConsoleDomainError, errorResponse, requireTenantScope } from "../shared/errors";
@@ -293,6 +294,17 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
       // budget edit looks like a no-op for up to AUTH_CACHE_TTL_MS per child.
       invalidateApiKeyCache(keyId);
       for (const child of children) invalidateApiKeyCache(child.id);
+      // The allow/deny list and prefix decide which models `/v1/models`
+      // returns, which is a different cache from the auth snapshot: the
+      // listing is cached per (tenant, key, mode, list, prefix), so editing
+      // one must drop it or the endpoint keeps advertising the old set.
+      if (
+        patchRequest.modelAccessMode !== undefined ||
+        patchRequest.modelList !== undefined ||
+        patchRequest.modelPrefix !== undefined
+      ) {
+        invalidatePublicModels(authorized.tenantId);
+      }
 
       // Denylist / allowlist / scopes are auth-snapshot fields: cache
       // invalidation above is enough. Only quota/concurrency edits need an

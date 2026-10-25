@@ -17,6 +17,7 @@
 import { Elysia, t } from "elysia";
 import type { ConsoleAccessResolver } from "../auth/access";
 import { invalidateApiKeyCache } from "../../security/api-key-auth";
+import { invalidatePublicModels } from "../providers/catalog/public-model-store";
 import { ConsoleDomainError, errorResponse, requireAnyScope } from "../shared/errors";
 import { NO_COMPRESS_HEADER } from "../response-compression";
 import { MAX_BACKUP_BYTES } from "./contracts";
@@ -198,6 +199,11 @@ export function createBackupRoutes(config: BackupRoutesConfig): Elysia {
         // now has, so a resurrected key cannot start with a fresh budget.
         if (result.restored.api_keys !== undefined) {
           invalidateApiKeyCache();
+          // A restore rewrites the catalog and every key's allowlist, so a
+          // cached model listing is stale. Called directly as well as through
+          // the routing notice above, because with no Redis there is no notice
+          // — and this process's own cache would survive the restore.
+          invalidatePublicModels();
           const keys = await config.apiKeyStore?.list(access.tenantId);
           if (keys && config.admissionService) {
             const admission = config.admissionService;
@@ -226,6 +232,7 @@ export function createBackupRoutes(config: BackupRoutesConfig): Elysia {
           detail: { scopes: [...new Set(body.scopes)], deleted: result.deleted },
         });
         invalidateApiKeyCache();
+        invalidatePublicModels();
         await Promise.allSettled([
           config.snapshotInvalidator?.invalidate(),
           ...(config.admissionService

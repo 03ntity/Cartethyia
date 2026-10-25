@@ -33,12 +33,16 @@ const INVALIDATION_CHANNEL = "cartethyia:cache:invalidate";
  * collide, and so a `FLUSHDB`-free deploy can drop one namespace without
  * touching another.
  */
-export type SharedCacheNamespace = "auth" | "preferences" | "credential" | "routing";
+export type SharedCacheNamespace = "auth" | "preferences" | "credential" | "routing" | "public-models";
 
 const NAMESPACE_PREFIX: Readonly<Record<SharedCacheNamespace, string>> = {
   auth: "cartethyia:cache:auth:",
   preferences: "cartethyia:cache:prefs:",
   credential: "cartethyia:cache:cred:",
+  // Never read or written as a value either — the model listing is cached
+  // in-process and rebuilt from the catalog. Only the invalidation notice
+  // uses this namespace.
+  "public-models": "cartethyia:cache:pubmodels:",
   // Never read or written as a value — the routing snapshot is 11 SELECTs of
   // derived data and is far too large to round-trip through Redis. This prefix
   // exists only so the namespace is a closed union.
