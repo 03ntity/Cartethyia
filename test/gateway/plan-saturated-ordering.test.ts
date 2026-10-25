@@ -43,7 +43,7 @@ function snapshot(candidates: readonly RouteCandidate[]): RouteSnapshot {
 
 /** Fills `count` slots on one candidate, as live requests would. */
 async function occupy(
-  controller: InMemoryAdmissionController,
+  controller: Pick<InMemoryAdmissionController, "admit">,
   target: RouteCandidate,
   count: number,
 ): Promise<void> {
@@ -105,6 +105,94 @@ describe("RoutingEngine.plan saturated ordering", () => {
     await occupy(controller, b, CEILING);
 
     const plan = await engine.plan(QUALIFIED, snapshot([a, b]));
+    expect(plan.candidates).toHaveLength(2);
+  });
+});
+
+/**
+ * The ordering read is scoped and fail-safe — added when
+ * `snapshotAccountInflight()` became `readAccountInflight(candidates)`.
+ *
+ * Two properties the ordering depends on:
+ *
+ * 1. Only the bounded matched candidates are queried. An unlimited candidate
+ *    cannot be saturated, so reading its bucket would be a wasted Redis round
+ *    trip per plan — and under the old fleet-wide read it was worse: every
+ *    plan with any bounded candidate scanned the entire keyspace.
+ * 2. A failing counter read must degrade to today's unordered behavior, never
+ *    to a failed plan. The admission attempt itself is the gate; ordering is
+ *    an optimization on top of it.
+ */
+import type { AdmissionController, AdmissionDecision, Reservation } from "../../src/transport/routing/route-model";
+
+/** Wraps a controller, recording every candidate handed to the scoped read. */
+class SpyingController implements AdmissionController {
+  readonly queried: RouteCandidate[] = [];
+  private readonly inner: InMemoryAdmissionController;
+  private failNextRead = false;
+
+  constructor(inner?: InMemoryAdmissionController) {
+    this.inner = inner ?? new InMemoryAdmissionController();
+  }
+
+  /** Arms the next scoped read to reject, simulating a Redis outage. */
+  failNextScopedRead(): void {
+    this.failNextRead = true;
+  }
+
+  async readAccountInflight(
+    candidates: readonly RouteCandidate[],
+  ): Promise<ReadonlyMap<string, number>> {
+    this.queried.push(...candidates);
+    if (this.failNextRead) {
+      this.failNextRead = false;
+      throw new Error("simulated counter read failure");
+    }
+    return this.inner.readAccountInflight(candidates);
+  }
+
+  admit(candidate: RouteCandidate): Promise<AdmissionDecision> {
+    return this.inner.admit(candidate);
+  }
+  async release(reservation: Reservation): Promise<void> {
+    await this.inner.release(reservation);
+  }
+}
+
+describe("RoutingEngine.plan scoped ordering reads", () => {
+  test("only bounded matched candidates are queried", async () => {
+    const spy = new SpyingController();
+    const engine = new RoutingEngine(spy);
+    const unlimited = candidate("unlimited", { max_inflight: undefined });
+    const bounded = candidate("bounded");
+
+    const plan = await engine.plan(QUALIFIED, snapshot([unlimited, bounded]));
+    expect(plan.candidates).toHaveLength(2);
+    expect(spy.queried.every((c) => c.provider_account_id === "bounded")).toBe(true);
+    expect(spy.queried.length).toBeGreaterThan(0);
+  });
+
+  test("a plan with no bounded candidates issues no scoped read", async () => {
+    const spy = new SpyingController();
+    const engine = new RoutingEngine(spy);
+    const a = candidate("a", { max_inflight: undefined });
+    const b = candidate("b", { max_inflight: undefined });
+
+    await engine.plan(QUALIFIED, snapshot([a, b]));
+    expect(spy.queried).toHaveLength(0);
+  });
+
+  test("a failed ordering read still produces a plan", async () => {
+    const spy = new SpyingController();
+    const engine = new RoutingEngine(spy);
+    const full = candidate("full");
+    const roomy = candidate("roomy");
+    await occupy(spy, full, CEILING);
+
+    spy.failNextScopedRead();
+    // No throw: routing degrades to the unordered candidate list rather than
+    // failing the request over an ordering optimization.
+    const plan = await engine.plan(QUALIFIED, snapshot([full, roomy]));
     expect(plan.candidates).toHaveLength(2);
   });
 });

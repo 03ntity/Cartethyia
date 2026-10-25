@@ -69,8 +69,20 @@ function capacityRejected(): AdmissionDecision {
 
 export class InMemoryAdmissionController implements AdmissionController {
   private inflight = new Map<string, number>();
-  snapshotAccountInflight(): ReadonlyMap<string, number> {
-    return new Map(this.inflight);
+  readAccountInflight(
+    candidates: readonly RouteCandidate[],
+  ): ReadonlyMap<string, number> {
+    // Dedupe buckets: one candidate list often repeats a bucket (combo members
+    // fan out to several candidates on one account), and the caller only needs
+    // one count per bucket to make its ordering decision.
+    const snapshot = new Map<string, number>();
+    for (const candidate of candidates) {
+      const key = admissionKey(candidate);
+      if (snapshot.has(key)) continue;
+      const value = this.inflight.get(key) ?? 0;
+      if (value > 0) snapshot.set(key, value);
+    }
+    return snapshot;
   }
   async admit(candidate: RouteCandidate): Promise<AdmissionDecision> {
     // Bucket per ACCOUNT, not per provider:model. A provider with N accounts
@@ -166,17 +178,47 @@ export class RedisAdmissionController implements AdmissionController {
     await redisEvalNumber(this.redis, RELEASE_SCRIPT, 1, this.key(reservation.candidate));
   }
 
-  async snapshotAccountInflight(): Promise<ReadonlyMap<string, number>> {
-    const keys = await this.redis.keys("admission:inflight:*");
-    if (keys.length === 0) return new Map();
-    const values = await this.redis.mget(...keys);
+  async readAccountInflight(
+    candidates: readonly RouteCandidate[],
+  ): Promise<ReadonlyMap<string, number>> {
+    // Candidate-scoped exact reads replace the fleet-wide `KEYS` + unbounded
+    // `MGET` this method used to run on every `plan()` that had any bounded
+    // candidate. `KEYS` is O(keyspace) and blocks the single-threaded Redis
+    // server; on a shared box the scan was measured as the dominant planning
+    // cost. The keys here are exactly the buckets the caller is about to order
+    // candidates by, read in bounded sequential chunks.
+    //
+    // `KEYS` and `SCAN` stay banned on this path by construction: neither can
+    // answer "what are the values of these N known keys" in fewer than
+    // O(keyspace) server work, and a fleet-wide inflight snapshot has no
+    // request-path consumer left. (If one ever appears, it belongs in a
+    // maintenance task using `SCAN` with `COUNT`, never here.)
+    const buckets = [...new Set(candidates.map(admissionKey))];
+    if (buckets.length === 0) return new Map();
+    const keys = buckets.map((bucket) => `admission:inflight:${bucket}`);
+    const values: number[] = [];
+    // Bounded sequential chunks: one huge MGET would move the unbounded
+    // payload problem from the KEYS call to the MGET call. 256 keys keeps a
+    // single command payload small while the round trips stay proportional to
+    // the (deduped, candidate-bounded) request size.
+    for (let offset = 0; offset < keys.length; offset += MGET_CHUNK_SIZE) {
+      const chunk = keys.slice(offset, offset + MGET_CHUNK_SIZE);
+      const raw = (await this.redis.mget(...chunk)) as (string | null)[];
+      for (const value of raw) values.push(Number(value ?? 0));
+    }
     const snapshot = new Map<string, number>();
-    for (const [index, key] of keys.entries()) {
-      const value = Number(values[index] ?? 0);
+    for (const [index, bucket] of buckets.entries()) {
+      const value = values[index] ?? 0;
       if (Number.isFinite(value) && value > 0) {
-        snapshot.set(key.slice("admission:inflight:".length), value);
+        snapshot.set(bucket, value);
       }
+      // The Redis controller's counter keys are TTL self-healing, so a bucket
+      // absent from the reply reads as zero and is omitted — the projection
+      // both controllers share: positive-finite counts only, unprefixed names.
     }
     return snapshot;
   }
 }
+
+/** Sequential MGET chunk bound for {@link RedisAdmissionController.readAccountInflight}. */
+const MGET_CHUNK_SIZE = 256;

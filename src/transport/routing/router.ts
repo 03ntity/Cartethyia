@@ -26,22 +26,15 @@ import { planAllowsCandidate } from "./plan-gate";
 import { InMemoryAdmissionController, admissionKey } from "./admission";
 import { ReservationManager } from "./reservations";
 import { getOrCreateRoundRobin, RoundRobinState } from "./round-robin";
+import {
+  lookupRouteCandidates,
+  parseModelReference,
+  routeCandidateIndex,
+} from "./candidate-index";
 import { totalRemainingCredit, totalRemainingPercent, type ProviderQuotaWindow } from "../../providers/quota/quota-contracts";
 import { getCachedQuotaEntry, quotaLens } from "../../console/quota/cache";
 import type { RedisClient } from "../../persistence/redis";
 import { sharedClaudeSlowLanes } from "../../providers/integrations/claude/claude-slow-lane";
-
-function parseModel(model: string): { providerId: string | null; bare: string } {
-  const slash = model.indexOf("/");
-  if (slash === -1) return { providerId: null, bare: model };
-  return { providerId: model.slice(0, slash), bare: model.slice(slash + 1) };
-}
-
-function candidateMatches(candidate: RouteCandidate, model: string): boolean {
-  const parsed = parseModel(model);
-  if (parsed.providerId === null) return candidate.model_id === parsed.bare;
-  return candidate.model_id === parsed.bare && candidate.provider_id === parsed.providerId;
-}
 
 /**
  * True when the account's remaining allowance is at or below its provider's
@@ -375,11 +368,20 @@ export class RoutingEngine {
     return { combo: this._roundRobinByCombo.size, provider: this._roundRobinByProvider.size };
   }
 
-  /** Live admission counters by `provider:model[:account]` bucket. */
-  async accountInflightSnapshot(): Promise<ReadonlyMap<string, number>> {
-    // Both controllers hand back a fresh map, so no defensive copy here —
-    // this feeds an admin read, not a mutation site.
-    return (await this.admission.snapshotAccountInflight?.()) ?? new Map();
+  /**
+   * Live admission counters for the buckets the given candidates draw from.
+   *
+   * Takes candidates rather than returning a fleet-wide snapshot: the scoped
+   * read is what keeps `plan()` off Redis `KEYS` (the fleet-wide read had no
+   * other implementation) and bounds the console's per-provider read to the
+   * accounts it will actually report on. Both controllers hand back a fresh
+   * map, so no defensive copy here — this feeds an admin read, not a mutation
+   * site.
+   */
+  async accountInflightSnapshot(
+    candidates: readonly RouteCandidate[],
+  ): Promise<ReadonlyMap<string, number>> {
+    return this.admission.readAccountInflight(candidates);
   }
 
   /**
@@ -402,7 +404,12 @@ export class RoutingEngine {
       (candidate) => typeof candidate.max_inflight === "number" && candidate.max_inflight > 0,
     );
     if (bounded.length === 0) return new Set();
-    const snapshot = await this.accountInflightSnapshot().catch(() => new Map<string, number>());
+    // Only the bounded candidates can be saturated, so only their buckets are
+    // read. A failed ordering read must never fail routing — the admission
+    // attempt itself is the real gate; this read only optimizes attempt order.
+    const snapshot = await this.accountInflightSnapshot(bounded).catch(
+      () => new Map<string, number>(),
+    );
     if (snapshot.size === 0) return new Set();
     const saturated = new Set<RouteCandidate>();
     for (const candidate of bounded) {
@@ -792,16 +799,23 @@ export class RoutingEngine {
       ? combo.members.flatMap((name) => expandMember(name, new Set([resolved.model])))
       : [resolved.model];
     const modelIds = [...new Set(rawModelIds)];
-    let matching = snapshot.candidates.filter(
-      (candidate) =>
-        modelIds.some((id) => candidateMatches(candidate, id)) &&
-        (candidate.tenant_id == null || candidate.tenant_id === tid),
-    );
+    // One index build per snapshot (cached on the immutable snapshot), one
+    // lookup per unique resolved model. The previous shape rescanned every
+    // candidate per model — O(C×K) string parses per plan — which was the
+    // quadratic cost the catalog rebuild had already paid once and the request
+    // path was paying again on every plan.
+    const index = routeCandidateIndex(snapshot);
+    const parsedModels = modelIds.map((id) => ({ id, parsed: parseModelReference(id) }));
+    let matching = parsedModels.flatMap((entry) => lookupRouteCandidates(index, entry.parsed, tid));
+    // Preserve the resolver's flatten-then-dedupe contract: one candidate can
+    // serve two member groups only via a combo listing the same model twice,
+    // and the plan must not dial it twice.
+    matching = [...new Set(matching)];
     let unmatchedMembers: readonly string[] = [];
     if (combo) {
-      const perId = modelIds.map((id) => ({
-        id,
-        group: matching.filter((c) => candidateMatches(c, id)),
+      const perId = parsedModels.map((entry) => ({
+        id: entry.id,
+        group: lookupRouteCandidates(index, entry.parsed, tid),
       }));
       unmatchedMembers = perId.filter((entry) => entry.group.length === 0).map((entry) => entry.id);
       const groups = perId.map((entry) => entry.group).filter((g) => g.length > 0);

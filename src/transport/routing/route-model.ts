@@ -247,8 +247,19 @@ export interface AdmissionDecision {
 export interface AdmissionController {
   admit(candidate: RouteCandidate): Promise<AdmissionDecision>;
   release(reservation: Reservation): Promise<void>;
-  /** Observable current counters by admission bucket (`provider:model[:account]`). */
-  snapshotAccountInflight?(): Promise<ReadonlyMap<string, number>> | ReadonlyMap<string, number>;
+  /**
+   * Current inflight counts for exactly the buckets the given candidates draw
+   * from, keyed by the unprefixed admission bucket (`provider:model[:account]`).
+   *
+   * Required, not optional: the previous fleet-wide
+   * `snapshotAccountInflight()` was the only reason `plan()` could issue a
+   * Redis `KEYS` on the request path. Scoped reads make the ordering cost
+   * proportional to the candidates being ordered, and an empty input must be
+   * answerable with zero backend commands.
+   */
+  readAccountInflight(
+    candidates: readonly RouteCandidate[],
+  ): Promise<ReadonlyMap<string, number>> | ReadonlyMap<string, number>;
 }
 
 /**

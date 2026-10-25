@@ -191,7 +191,6 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
     tenantId: string | null,
   ): Promise<readonly { accountId: string; inflight: number }[]> => {
     if (providerId === "" || tenantId === null) return [];
-    const snapshot = await routingEngine.accountInflightSnapshot();
     const accounts = await new DrizzleProviderCatalogStore(db, {
       telemetryBuffer,
       bundledModelCatalog: bundledCatalog,
@@ -200,10 +199,20 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
       snapshotInvalidator: snapshotService,
     }).listAccounts(tenantId, providerId);
     const owned = new Set(accounts.map((account) => account.id));
+    // Scoped read: only the provider's own candidates for this tenant are
+    // queried, so the console read costs one exact MGET over the accounts it
+    // is about to report on — not a fleet-wide `KEYS` scan whose cost is the
+    // size of every bucket every process ever wrote.
+    const routeSnapshot = await snapshotService.getSnapshot();
+    const ownedCandidates = routeSnapshot.candidates.filter(
+      (candidate) =>
+        candidate.provider_id === providerId &&
+        candidate.provider_account_id !== undefined &&
+        owned.has(candidate.provider_account_id),
+    );
+    const snapshot = await routingEngine.accountInflightSnapshot(ownedCandidates);
     const totals = new Map<string, number>();
     for (const [bucket, count] of snapshot) {
-      const prefix = `${providerId}:`;
-      if (!bucket.startsWith(prefix)) continue;
       const accountId = bucket.slice(bucket.lastIndexOf(":") + 1);
       if (!owned.has(accountId)) continue;
       totals.set(accountId, (totals.get(accountId) ?? 0) + count);
