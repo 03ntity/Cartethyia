@@ -25,6 +25,24 @@ const env: Record<string, string> = {
   IP_RATE_MAX_PER_WINDOW: process.env.PERF_IP_RATE ?? "100000",
   // Max is 100 by spec; enough that a load run never trips the strike ban.
   CARTETHYIA_MODEL_STRIKE_THRESHOLD: "100",
+  // Admission concurrency is DERIVED from the memory limit (config/resources
+  // .ts): on a host with no discoverable cgroup limit it resolves to the 512 MiB
+  // fallback, which derives 16 concurrent requests at a 4 MiB body — so a
+  // --concurrency 40 run measures the concurrency guard instead of the gateway.
+  // Set the limit and the ceiling explicitly for measurement: the throughput
+  // budgets in the plan are about the gateway's own work, not about admission.
+  CARTETHYIA_MEMORY_LIMIT_BYTES: process.env.PERF_MEMORY_LIMIT_BYTES ?? "17179869184",
+  // Capped at 64 by the config spec, which is also the ceiling the derivation
+  // clamps to. Explicit rather than left to the derivation, because on a host
+  // with no discoverable cgroup limit the 512 MiB fallback derives 16 — and a
+  // --concurrency 40 run would then measure the concurrency guard instead of
+  // the gateway's own work. The override is intentional and logged as such.
+  CARTETHYIA_PROCESS_CONCURRENCY_LIMIT: process.env.PERF_CONCURRENCY_LIMIT ?? "64",
+  // A realistic multi-turn context does not fit the 4 MiB default: one user
+  // carrying 40-80 MB of context/attachments is rejected at ingress before any
+  // memory accounting happens, so a body-size run measures nothing at all.
+  // Raised for measurement only — see PERF_MAX_BODY_BYTES.
+  CARTETHYIA_SERVER_MAX_BODY_BYTES: process.env.PERF_MAX_BODY_BYTES ?? "67108864",
 };
 const entry = new URL("../../src/main.ts", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const proc = Bun.spawn(["bun", "run", entry], {

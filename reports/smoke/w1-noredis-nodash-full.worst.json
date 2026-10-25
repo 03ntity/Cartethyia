@@ -1,0 +1,77 @@
+{
+  "base": "http://127.0.0.1:9901",
+  "concurrency": 40,
+  "requests": 400,
+  "withDashboard": false,
+  "dashboardRps": 2,
+  "requestBytes": 743600,
+  "responseBytes": 55000,
+  "warmup": 100,
+  "elapsedMs": 4922,
+  "throughputRps": 81,
+  "idleBefore": {
+    "rssMb": 126.9,
+    "heapMb": 15.7,
+    "inFlight": 0
+  },
+  "duringPeak": {
+    "rssMb": 126.9,
+    "heapMb": 15.7,
+    "inFlight": 0
+  },
+  "settled": {
+    "rssMb": 126.9,
+    "heapMb": 15.7,
+    "inFlight": 0
+  },
+  "settledRssAboveIdleMb": 0,
+  "finalInFlight": 0,
+  "hot": {
+    "surface": "chat",
+    "sent": 400,
+    "ok": 400,
+    "statusCounts": {
+      "200": 400
+    },
+    "latency": {
+      "count": 400,
+      "meanMs": 487.54,
+      "p50Ms": 404.24,
+      "p95Ms": 1005.84,
+      "p99Ms": 1523.74,
+      "maxMs": 1863.61,
+      "errors": 0
+    }
+  },
+  "workers": [
+    {
+      "pid": 36300,
+      "rssBytes": 125956096,
+      "pidMatches": false
+    }
+  ],
+  "workersSumRssMb": 120.1,
+  "harness": {
+    "rssMb": 45.5,
+    "heapMb": 1.3,
+    "inFlight": 0
+  },
+  "cell": {
+    "name": "w1-noredis-nodash-full",
+    "workers": 1,
+    "redis": false,
+    "dashboard": false,
+    "full": true
+  },
+  "profile": {
+    "label": "windows-dev-host",
+    "cores": 12,
+    "logicalProcessors": 16,
+    "memoryMb": 16088,
+    "os": "Windows (WSL2 Debian available)",
+    "note": "NOT the 1-core/2GiB VPS target. 12 physical cores and ~16 GB RAM. This machine cannot validate the F2 memory budgets (summed worker peak RSS <= 1536 MiB, settled RSS above idle) in any meaningful way: a 2 GiB box is the constraint those budgets exist to catch, and on 16 GB the process never approaches them. Latency and correctness results are still informative; MEMORY numbers measured here are not evidence about the target.",
+    "budgetsScaled": false,
+    "postgres": "Laragon PostgreSQL 18.4 on 127.0.0.1:5432",
+    "redis": "Laragon Redis 5.0.14.1 on 127.0.0.1:6379 (plan names 7.4.2 for CI)"
+  }
+}

@@ -76,6 +76,22 @@ try {
     ],
   );
 
+  // Admission ceilings raised for measurement. The defaults (network-pool
+  // `max_inflight` 10, per-proxy limit 10) are exactly the concurrency this
+  // harness drives, so without this every run measures the LIMITER rather than
+  // the gateway — a run at concurrency 40 returns ~75% 503s that look like a
+  // capacity defect and are not. Same reasoning as IP_RATE_MAX_PER_WINDOW in
+  // perf-start.ts: a load-test knob, not a production default.
+  await client.query(
+    `insert into provider_routing_settings
+       (provider_id, tenant_id, max_inflight, max_inflight_per_proxy)
+     values ($1, $2, $3, $4)
+     on conflict (provider_id, tenant_id)
+       do update set max_inflight = excluded.max_inflight,
+                     max_inflight_per_proxy = excluded.max_inflight_per_proxy`,
+    [providerId, tenantId, 100_000, 100_000],
+  );
+
   const token = `rk_perf_${randomUUID().replace(/-/g, "")}`;
   await client.query(
     `insert into api_keys

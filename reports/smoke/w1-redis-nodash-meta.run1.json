@@ -1,0 +1,59 @@
+{
+  "base": "http://127.0.0.1:9901",
+  "concurrency": 40,
+  "requests": 400,
+  "withDashboard": false,
+  "dashboardRps": 2,
+  "requestBytes": 0,
+  "responseBytes": 0,
+  "warmup": 100,
+  "elapsedMs": 2346,
+  "throughputRps": 171,
+  "idleBefore": {
+    "rssMb": 131.5,
+    "heapMb": 19.9,
+    "inFlight": 0
+  },
+  "duringPeak": {
+    "rssMb": 131.5,
+    "heapMb": 19.9,
+    "inFlight": 0
+  },
+  "settled": {
+    "rssMb": 131.5,
+    "heapMb": 19.9,
+    "inFlight": 0
+  },
+  "settledRssAboveIdleMb": 0,
+  "finalInFlight": 0,
+  "hot": {
+    "surface": "chat",
+    "sent": 400,
+    "ok": 400,
+    "statusCounts": {
+      "200": 400
+    },
+    "latency": {
+      "count": 400,
+      "meanMs": 231.09,
+      "p50Ms": 200.32,
+      "p95Ms": 452.6,
+      "p99Ms": 632.73,
+      "maxMs": 857.17,
+      "errors": 0
+    }
+  },
+  "workers": [
+    {
+      "pid": 45944,
+      "rssBytes": 127524864,
+      "pidMatches": false
+    }
+  ],
+  "workersSumRssMb": 121.6,
+  "harness": {
+    "rssMb": 43.7,
+    "heapMb": 0.6,
+    "inFlight": 0
+  }
+}

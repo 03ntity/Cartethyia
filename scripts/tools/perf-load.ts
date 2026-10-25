@@ -256,7 +256,17 @@ const sizedContent =
   requestBytes > 0 ? "x".repeat(requestBytes) : "Say hello to Cartethyia.";
 const sizedMaxTokens = responseBytes > 0 ? Math.max(1, Math.round(responseBytes / 4)) : 64;
 
-const chatInit = () => ({
+/**
+ * The whole request init, built ONCE.
+ *
+ * Every field is constant for a run — model, token, headers, body — so
+ * serializing per request was pure waste. At a 50 MB body that is a 50 MB
+ * stringify PER REQUEST, which makes the harness the bottleneck and allocates
+ * gigabytes in the load generator, not in the gateway being measured. This is
+ * both the single biggest speed win and the difference between a body-size run
+ * being feasible and not.
+ */
+const chatInitValue = {
   method: "POST",
   headers: {
     "content-type": "application/json",
@@ -268,7 +278,9 @@ const chatInit = () => ({
     stream: false,
     messages: [{ role: "user", content: sizedContent }],
   }),
-});
+};
+
+const chatInit = () => chatInitValue;
 
 console.log(
   `[load] base=${base} concurrency=${concurrency} requests=${total} dashboard=${withDashboard} ` +

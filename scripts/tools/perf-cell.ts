@@ -49,6 +49,14 @@ const REPO = new URL("../..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/
 function childEnv(extra: Record<string, string>): Record<string, string> {
   return {
     ...process.env,
+    // perf-start.ts reads DATABASE_URL, while perf-seed.ts reads
+    // CARTETHYIA_PERF_DATABASE_URL. Both must point at the SAME database, or
+    // the gateway boots against the built-in default while the seed writes
+    // somewhere else — and every request then fails with "provider adapter not
+    // registered" because the seeded provider is not in the gateway's database.
+    ...(process.env.CARTETHYIA_PERF_DATABASE_URL
+      ? { DATABASE_URL: process.env.CARTETHYIA_PERF_DATABASE_URL }
+      : {}),
     PERF_PORT: String(port),
     PERF_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
     ...(values.redis === true && process.env.CARTETHYIA_PERF_REDIS_URL
@@ -121,7 +129,33 @@ process.on("SIGINT", () => {
   process.exit(130);
 });
 
+/**
+ * Fails if a port is already in use.
+ *
+ * Without this a stale gateway from an earlier run keeps serving the port, the
+ * new worker silently fails to bind, and the load is measured against the OLD
+ * process pointed at a DIFFERENT database — which reports "provider adapter not
+ * registered" for every request and looks like a gateway bug.
+ */
+async function assertPortFree(port: number, label: string): Promise<void> {
+  try {
+    const probe = Bun.listen({
+      hostname: "127.0.0.1",
+      port,
+      socket: { open() {}, close() {}, data() {} },
+    } as never);
+    probe.stop(true);
+    return;
+  } catch {
+    throw new Error(
+      `port ${port} (${label}) is already in use — stop the stale process before running this cell`,
+    );
+  }
+}
+
 try {
+  await assertPortFree(upstreamPort, "upstream");
+  await assertPortFree(port, "gateway");
   console.log(`[cell:${name}] starting upstream on :${upstreamPort}`);
   const upstream = spawn(["bun", "run", "scripts/tools/perf-upstream.ts", "--port", String(upstreamPort)], childEnv({}));
   children.push({ proc: upstream, label: "upstream" });
@@ -159,9 +193,36 @@ try {
   }
 
   if (!(await waitGatewayReady(`http://127.0.0.1:${port}/health`, 60_000))) {
-    throw new Error(`gateway worker(s) did not become ready on :${port}`);
+    // Multi-process has hard preconditions (Linux + full mode + REACHABLE
+    // Redis) that deliberately fail the boot. Say so, because "did not become
+    // ready" reads like a harness bug when it is the topology guard working.
+    const hint =
+      workers > 1
+        ? ` — multi-process requires Linux, CARTETHYIA_DB_MODE=full, and a REACHABLE Redis ` +
+          `(platform=${process.platform}, redis=${values.redis === true ? "requested" : "not requested"})`
+        : "";
+    throw new Error(`gateway worker(s) did not become ready on :${port}${hint}`);
   }
   console.log(`[cell:${name}] gateway ready (pids ${workerPids.join(",")})`);
+
+  // Wait until the seeded provider actually SERVES, not merely until the
+  // listener answers. The gateway registers non-bundled provider adapters from
+  // a snapshot built at boot, so /health returning 200 does not mean a request
+  // for the just-seeded provider will route — it 503s with "provider adapter
+  // not registered" until the registry catches up. Probing with a real request
+  // turns that race into a bounded wait instead of ~93% 503s in the results.
+  const seedOut2 = JSON.parse(seedOut.trim().split("\n").at(-1) ?? "{}") as {
+    token?: string;
+    qualifiedModel?: string;
+  };
+  const probeReady = await waitProviderServes(port, seedOut2.token!, seedOut2.qualifiedModel!, 30_000);
+  if (!probeReady) {
+    throw new Error(
+      `seeded provider never served on :${port} — the gateway is up but routing is not ` +
+        `(check that seed and gateway use the same database)`,
+    );
+  }
+  console.log(`[cell:${name}] seeded provider serves`);
 
   // Attribute memory to the GATEWAY process, not to the launcher. On Windows
   // `bun run scripts/tools/perf-start.ts` is itself a process, so the spawned
@@ -297,6 +358,43 @@ async function childrenOf(pids: readonly number[]): Promise<number[]> {
     }
   }
   return [...new Set(out)];
+}
+
+/**
+ * Polls a real chat request until it returns 2xx.
+ *
+ * `/health` only proves the listener is up. The question a load cell needs
+ * answered is whether the seeded provider ROUTES, which is a different thing:
+ * the adapter registry is built from a snapshot, so there is a window where
+ * health is green and every proxy request 503s.
+ */
+async function waitProviderServes(
+  port: number,
+  token: string,
+  model: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          model,
+          max_tokens: 16,
+          stream: false,
+          messages: [{ role: "user", content: "readiness" }],
+        }),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (response.ok) return true;
+    } catch {
+      /* not ready */
+    }
+    await Bun.sleep(300);
+  }
+  return false;
 }
 
 /** Reads RSS per PID. Windows has no /proc, so tasklist is used there. */

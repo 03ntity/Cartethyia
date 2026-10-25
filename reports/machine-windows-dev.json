@@ -1,0 +1,11 @@
+{
+  "label": "windows-dev-host",
+  "cores": 12,
+  "logicalProcessors": 16,
+  "memoryMb": 16088,
+  "os": "Windows (WSL2 Debian available)",
+  "note": "NOT the 1-core/2GiB VPS target. 12 physical cores and ~16 GB RAM. This machine cannot validate the F2 memory budgets (summed worker peak RSS <= 1536 MiB, settled RSS above idle) in any meaningful way: a 2 GiB box is the constraint those budgets exist to catch, and on 16 GB the process never approaches them. Latency and correctness results are still informative; MEMORY numbers measured here are not evidence about the target.",
+  "budgetsScaled": false,
+  "postgres": "Laragon PostgreSQL 18.4 on 127.0.0.1:5432",
+  "redis": "Laragon Redis 5.0.14.1 on 127.0.0.1:6379 (plan names 7.4.2 for CI)"
+}

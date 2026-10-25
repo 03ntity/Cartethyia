@@ -32,6 +32,13 @@ const { values } = parseArgs({
     /** Machine description recorded into every report. Never relaxes a budget. */
     profile: { type: "string" },
     "out-dir": { type: "string", default: "reports" },
+    /**
+     * Skip multi-worker cells with a recorded reason instead of running them
+     * into a precondition the topology guard enforces by design (Linux + full
+     * mode + reachable Redis). Skipping silently would be a lie; this makes the
+     * omission part of the report.
+     */
+    "skip-multi-worker": { type: "boolean", default: false },
     port: { type: "string", default: "9901" },
     "upstream-port": { type: "string", default: "9911" },
   },
@@ -83,8 +90,10 @@ interface Cell {
   readonly full: boolean;
 }
 
+const skipMulti = values["skip-multi-worker"] === true;
 const CELLS: Cell[] = [];
 for (const workers of [1, 2] as const) {
+  if (skipMulti && workers > 1) continue;
   for (const redis of [false, true]) {
     for (const dashboard of [false, true]) {
       for (const full of [false, true]) {
@@ -129,6 +138,13 @@ console.log(
   `[matrix] cells=${selected.length} runs=${R.runs} requests=${R.requests} concurrency=${R.concurrency} ` +
     `settle=${R.settle} out=${R.outDir}`,
 );
+if (skipMulti) {
+  console.log(
+    "[matrix] NOTE: multi-worker cells SKIPPED. Multi-process requires Linux, " +
+      "CARTETHYIA_DB_MODE=full, and a reachable Redis; this host does not satisfy them, " +
+      "so those cells are omitted rather than reported as failures.",
+  );
+}
 if (profile.memoryMb !== undefined) {
   console.log(
     `[matrix] profile: ${profile.label ?? "unnamed"} — ${profile.cores ?? "?"} core(s), ` +
