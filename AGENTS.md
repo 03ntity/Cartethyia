@@ -1,4 +1,4 @@
-# Cartethyia — Agent Guide
+Cartethyia — Agent Guide
 
 Use this guide to orient yourself, then follow the skill that owns the task.
 Skills may impose stricter domain requirements. Do not turn this guide into a
@@ -44,6 +44,51 @@ remains unproven.
 
 `CARTETHYIA_DB_MODE` is required. Never silently choose a database mode: Lite
 and Full use different databases and migration sets.
+
+### Finding Postgres and Redis — check what already exists first
+
+Before provisioning anything (WSL, Docker, a VM, a download), **check whether
+the machine already provides the service.** On a Windows dev box it usually
+does: Laragon, XAMPP, Chocolatey/Scoop installs, a native `postgres`, or a
+service already listening. Provisioning on top of a running service produces
+port collisions and two databases, and wastes a lot of time.
+
+Order:
+
+1. **Probe the ports.** On Windows: `powershell -Command "Get-NetTCPConnection
+   -State Listen -LocalPort 5432,6379 ..."` (pipe the PID through
+   `Get-Process` to see *what* owns it). Elsewhere: `ss -ltnp | grep -E
+   '5432|6379'` or `lsof -i :5432,:6379`.
+2. **If something is already listening, that is the service.** Identify the
+   binary behind the PID — `C:\laragon\bin\...` means Laragon, and Laragon is
+   the answer, not a reason to install more.
+3. **Confirm it speaks the protocol**, and get its version, using the same
+   driver the tests use — not just a TCP connect:
+
+   ```sh
+   bun -e "const {Redis}=await import('ioredis'); const r=new Redis('redis://127.0.0.1:6379/5',{lazyConnect:true}); await r.connect(); console.log((await r.info('server')).match(/redis_version:.*/)[0]); r.disconnect();"
+   bun -e "const {Pool}=await import('pg'); const p=new Pool({connectionString:process.env.CARTETHYIA_TEST_DATABASE_URL}); console.log((await p.query('select version()')).rows[0]); await p.end();"
+   ```
+
+4. **Only if nothing is listening**, set one up:
+   - **Windows:** prefer a native install or Laragon. WSL2 works but has two
+     caveats: it has no systemd (use `service <name> start`, not `systemctl`),
+     and its services do not survive `wsl --shutdown`.
+   - **Linux/macOS:** install natively (`apt-get install redis-server
+     postgresql`, `brew install redis postgresql`) and start with the platform
+     service manager. Docker is fine too if it is already present.
+   - **Never** guess that a service is missing from the absence of a Docker
+     container. Docker being unavailable says nothing about whether Redis is
+     running.
+
+Then create the role/database the suite expects if they are absent — see
+`CARTETHYIA_TEST_DATABASE_URL` in `.env` for the exact names — and verify the
+connection string end to end before running a suite.
+
+**Do not conclude a suite is being skipped without checking.** A Redis-gated
+suite that reports `17 pass` is *running*, not skipped. Count the skip notices
+(`grep -c "\[test-redis\] skipped"`) rather than assuming from the absence of
+Redis elsewhere.
 
 Use shell and path syntax appropriate for the active environment. Prefer local
 services for development; Docker is an option, not a universal prerequisite.
