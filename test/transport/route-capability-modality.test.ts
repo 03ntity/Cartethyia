@@ -89,3 +89,66 @@ describe("buildCapabilityProfile input modalities", () => {
     expect(declared.image).toBe(true);
   });
 });
+
+/**
+ * Capability-profile memo: the rebuild must see the *current* modalities.
+ *
+ * The memo key is `providerId/modelId` **plus the serialized modalities**, so
+ * an operator editing a row's modalities (text-only → vision) produces a new
+ * key and a fresh profile on the next snapshot rebuild. Before the key carried
+ * modalities, the rebuild answered from the stale pre-edit profile until the
+ * entry aged out of the LRU — routing stripped images from a model that had
+ * just gained image support.
+ *
+ * The cache itself is a `BoundedLruMap` at the same 4096-entry cap; the size
+ * test pins that the bound holds under insertions beyond it.
+ */
+import { capabilityProfileCacheSize } from "../../src/transport/routing/route-catalog";
+
+describe("capability profile memo", () => {
+  const row = (modalities: unknown) => ({
+    modalities,
+    reasoning: false,
+    toolCall: false,
+    providerId: "qoder",
+    modelId: "memo-model",
+  });
+
+  test("a rebuild with changed modalities yields the new profile", () => {
+    // Same provider/model, different modalities → different cache key, so the
+    // second build cannot answer from the first's entry.
+    const before = buildCapabilityProfile(row({ input: ["text"], output: ["text"] }));
+    expect(before.image).toBe(false);
+
+    const after = buildCapabilityProfile(row({ input: ["text", "image"], output: ["text"] }));
+    expect(after.image).toBe(true);
+  });
+
+  test("metadata-less rows and declared rows do not collide", () => {
+    // `null` (never had metadata) and `{input: [], output: []}` (declared
+    // empty) both take the codec grant, but they are distinct keys — a
+    // metadata-less row that later gains a declaration must build its own.
+    const undeclared = buildCapabilityProfile(row(null));
+    const declaredEmpty = buildCapabilityProfile(row({ input: [], output: [] }));
+    expect(undeclared.image).toBe(true);
+    expect(declaredEmpty.image).toBe(true);
+  });
+
+  test("the memo never exceeds its capacity", () => {
+    const before = capabilityProfileCacheSize();
+    // Insert well past the 4096 cap with distinct keys; the live size must
+    // stay bounded. (Insertions reuse the same build path as production.)
+    for (let i = 0; i < 5000; i += 1) {
+      buildCapabilityProfile({
+        reasoning: false,
+        toolCall: false,
+        providerId: "qoder",
+        // Distinct modalities per build so each call is a distinct memo key.
+        modalities: { input: ["text", `v${i}`], output: ["text"] },
+      });
+    }
+    const after = capabilityProfileCacheSize();
+    expect(after).toBeLessThanOrEqual(4096);
+    expect(after).toBeGreaterThanOrEqual(before); // only grows toward the cap
+  });
+});

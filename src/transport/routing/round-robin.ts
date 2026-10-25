@@ -1,5 +1,6 @@
 // Round-robin rotation state and its bounded per-key LRU.
 import type { RouteCandidate } from "./route-model";
+import { BoundedLruMap } from "./bounded-lru";
 
 export class RoundRobinState {
   private idx = 0;
@@ -22,29 +23,16 @@ export class RoundRobinState {
  * combinations would retain one entry forever. 1000 is far above the working
  * set of any real catalog, so eviction only ever targets genuinely cold keys.
  */
-const MAX_ROUND_ROBIN_ENTRIES = 1000;
+export const MAX_ROUND_ROBIN_ENTRIES = 1000;
 
 /**
- * Bounded LRU accessor for round-robin state: an existing key is refreshed to
- * the tail (most-recently-used), and inserting past the cap evicts the head
- * (least-recently-used). Keeps the hot routing working set while guaranteeing
- * the map cannot grow without bound.
+ * Creates the bounded LRU map the router keeps round-robin state in.
+ *
+ * The bound is the same 1000-entry cap the hand-rolled version enforced;
+ * `BoundedLruMap` is now the single implementation of that behavior, so the
+ * eviction rule (get refreshes recency, overflow evicts the LRU head) cannot
+ * drift between this cache and the capability-profile cache.
  */
-export function getOrCreateRoundRobin(
-  map: Map<string, RoundRobinState>,
-  key: string,
-): RoundRobinState {
-  const existing = map.get(key);
-  if (existing) {
-    map.delete(key);
-    map.set(key, existing);
-    return existing;
-  }
-  if (map.size >= MAX_ROUND_ROBIN_ENTRIES) {
-    const oldest = map.keys().next().value;
-    if (oldest !== undefined) map.delete(oldest);
-  }
-  const created = new RoundRobinState();
-  map.set(key, created);
-  return created;
+export function createRoundRobinMap(): BoundedLruMap<string, RoundRobinState> {
+  return new BoundedLruMap<string, RoundRobinState>(MAX_ROUND_ROBIN_ENTRIES);
 }

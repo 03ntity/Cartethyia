@@ -30,6 +30,7 @@ import { DEFAULT_PROXY_SKIP_PROVIDER_IDS } from "../../providers/provider-metada
 import { buildClaudeCliUserAgent } from "../../providers/operations/custom-cli-headers";
 import { isBundledProviderId } from "../../providers/provider-contracts";
 import type { ServiceKind, WireFamily } from "../../protocol/canonical-model";
+import { BoundedLruMap } from "./bounded-lru";
 import { providerHasAdapterUserAgent, providerUsesBespokeWire } from "../../providers/provider-metadata";
 
 const CLAUDE_MODEL_FAMILIES = new Set(["opus", "sonnet", "haiku", "fable", "mythos"]);
@@ -156,17 +157,28 @@ export function buildCapabilityProfile(row: {
 }
 
 /**
- * The capability profile for one model row, memoized across rebuilds.
- *
- * Bounded LRU keyed by `providerId/modelId`: the value is a pure function of
- * the row's metadata, so two rebuilds that see the same row get the same object
- * instead of two identical ones. The bound keeps a long-lived process from
- * pinning one profile per row it has ever seen — a model deleted from the
- * catalog must not leave its profile behind forever.
+ * Upper bound on the capability-profile memo. Same value as the hand-rolled
+ * bound it replaces: far above any real catalog, so eviction only ever targets
+ * rows deleted from the catalog.
  */
 const CAPABILITY_PROFILE_CACHE_MAX_ENTRIES = 4096;
-const capabilityProfileCache = new Map<string, Record<string, boolean>>();
+const capabilityProfileCache = new BoundedLruMap<string, Record<string, boolean>>(
+  CAPABILITY_PROFILE_CACHE_MAX_ENTRIES,
+);
 
+/**
+ * The capability profile for one model row, memoized across rebuilds.
+ *
+ * The value is a pure function of the row's metadata, so two rebuilds that see
+ * the same row get the same object instead of two identical ones. The cache is
+ * a {@link BoundedLruMap} keyed by `providerId/modelId` **plus the row's
+ * modalities**: the key must change when the operator edits a row's modalities
+ * (text-only → vision), otherwise the rebuild would hand routing the stale
+ * pre-edit profile until the entry aged out of the LRU. A row that has never
+ * carried modality metadata keys with `null`, which only collides with another
+ * metadata-less row for the same provider/model — the same profile by
+ * construction.
+ */
 function capabilityProfileFor(row: {
   modalities: unknown;
   reasoning: boolean;
@@ -174,14 +186,10 @@ function capabilityProfileFor(row: {
   providerId: string;
   modelId: string;
 }): Record<string, boolean> {
-  const key = `${row.providerId}/${row.modelId}`;
+  const key = `${row.providerId}/${row.modelId}/${JSON.stringify(row.modalities ?? null)}`;
   const cached = capabilityProfileCache.get(key);
   if (cached !== undefined) return cached;
   const profile = buildCapabilityProfile(row);
-  if (capabilityProfileCache.size >= CAPABILITY_PROFILE_CACHE_MAX_ENTRIES) {
-    const oldest = capabilityProfileCache.keys().next().value;
-    if (oldest !== undefined) capabilityProfileCache.delete(oldest);
-  }
   capabilityProfileCache.set(key, profile);
   return profile;
 }

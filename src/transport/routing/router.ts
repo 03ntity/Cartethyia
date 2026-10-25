@@ -25,7 +25,7 @@ import {
 import { planAllowsCandidate } from "./plan-gate";
 import { InMemoryAdmissionController, admissionKey } from "./admission";
 import { ReservationManager } from "./reservations";
-import { getOrCreateRoundRobin, RoundRobinState } from "./round-robin";
+import { createRoundRobinMap, RoundRobinState } from "./round-robin";
 import {
   lookupRouteCandidates,
   parseModelReference,
@@ -345,8 +345,8 @@ export class EligibilityEvaluator {
 }
 
 export class RoutingEngine {
-  private readonly _roundRobinByCombo = new Map<string, RoundRobinState>();
-  private readonly _roundRobinByProvider = new Map<string, RoundRobinState>();
+  private readonly _roundRobinByCombo = createRoundRobinMap();
+  private readonly _roundRobinByProvider = createRoundRobinMap();
   private readonly eligibility = new EligibilityEvaluator();
   private readonly reservations = new ReservationManager();
 
@@ -356,11 +356,19 @@ export class RoutingEngine {
   ) {}
 
   private getRoundRobin(key: string): RoundRobinState {
-    return getOrCreateRoundRobin(this._roundRobinByCombo, key);
+    const existing = this._roundRobinByCombo.get(key);
+    if (existing) return existing;
+    const created = new RoundRobinState();
+    this._roundRobinByCombo.set(key, created);
+    return created;
   }
 
   private getProviderRoundRobin(key: string): RoundRobinState {
-    return getOrCreateRoundRobin(this._roundRobinByProvider, key);
+    const existing = this._roundRobinByProvider.get(key);
+    if (existing) return existing;
+    const created = new RoundRobinState();
+    this._roundRobinByProvider.set(key, created);
+    return created;
   }
 
   /** Observable bounded-collection sizes for the runtime metrics sampler. */
