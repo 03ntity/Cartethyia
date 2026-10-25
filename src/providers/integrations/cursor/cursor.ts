@@ -60,6 +60,7 @@ import { fetchCursorRunOrigin } from "./cursor-catalog";
 import { defaultParameterValues, fetchCursorModels } from "./cursor-catalog";
 import type { CursorModelInfo } from "./cursor-catalog";
 import { decodeValueToJson, decodeStructEntriesToJson } from "./protocol/struct";
+import { cursorVariantForExecArgs } from "./protocol/tool-canonical";
 
 /**
  * Client-heartbeat cadence for every Cursor Run.
@@ -1093,6 +1094,32 @@ class CursorAdapter implements ProviderAdapter {
       await handle.write(buildAllowlistPrecheckResult(execId, precheckKind, execIdString));
       return { kind: "handled" };
     }
+    // Native first. A Cursor host-exec frame (`read_args`, `shell_args`,
+    // `pi_read_args`, …) is relayed to the client as an ordinary tool call
+    // instead of being refused. This is the half the earlier direct-forward
+    // attempt got wrong: it built typed result frames by hand per variant and
+    // they were not matched by the server. The canonical layer owns that
+    // mapping now, keyed by the originating variant, so a result can only ever
+    // come back in the arm it arrived on.
+    const nativeCall = cursorVariantForExecArgs(execServer);
+    // Only a tool the request actually declared may be relayed. A host frame
+    // for something the client never advertised is an undeclared tool like any
+    // other and keeps the refusal — forwarding it would hand the client a call
+    // it has no handler for and nowhere to send the result.
+    const declaredNative = nativeCall !== undefined &&
+      session.descriptors.some((d) => d.toolName === nativeCall.variant.name);
+    if (nativeCall !== undefined && declaredNative) {
+      return {
+        kind: "tool_call",
+        execId,
+        execIdString,
+        toolName: nativeCall.variant.name,
+        arguments: JSON.stringify(nativeCall.args),
+      };
+    }
+    // MCP is the fallback, not the first stop: client-declared tools have no
+    // native slot in `agent.proto`, so they are the ones that must travel this
+    // channel. An arm neither path claims falls through to the refusal below.
     const mcpArgs = recordOf(execServer["mcp_args"]);
     if (mcpArgs !== undefined) {
       const call = readExecutableMcpCall(mcpArgs, session.descriptors);
@@ -1110,17 +1137,7 @@ class CursorAdapter implements ProviderAdapter {
         arguments: call.arguments,
       };
     }
-    // Host exec frames (shell_args, write_args, read_args, and every other
-    // Cursor-native variant) are not executed here. Cursor's own executor on
-    // the local CLI handles them; the MCP channel is the correct path for tool
-    // calls routed through this gateway.
-    //
-    // A direct-forward path (`readHostExecCall`) was implemented experimentally
-    // but produced protocol errors in practice: the typed result frames it sent
-    // back (shell_result, write_result, read_result) were not matched correctly
-    // by the server under all code paths, causing the Run to stall or the model
-    // to receive malformed tool output. The path has been removed; use MCP.
-    const refusal = "Cursor host tools are not executed by this gateway";
+    const refusal = "this tool is not one the request declared";
     await handle.write(buildExecThrow(execId, refusal, execIdString));
     await handle.write(buildExecStreamClose(execId, execIdString));
     return { kind: "handled" };

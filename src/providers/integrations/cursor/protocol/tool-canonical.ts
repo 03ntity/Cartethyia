@@ -147,10 +147,13 @@ export function cursorToolArm(
  * Decodes one `ToolCall` into a canonical call, or `undefined` when the arm is
  * not a Cursor-native tool.
  *
- * Arguments are taken from the variant's `args` sub-message and flattened to a
- * plain record. Nothing is renamed or reshaped here: the canonical `arguments`
- * is opaque by contract so each adapter owns its own repair policy, and doing
- * translation in the decoder would put two policies in one place.
+ * Arguments come off the variant's `args` sub-message and are normalised to
+ * canonical OpenAI-style tool arguments: snake_case keys, all the way down.
+ * Cursor's own arms disagree with each other and with the OpenAI spelling, and
+ * this is the gateway's translation boundary — the point where a Cursor call
+ * becomes a tool call every other protocol can read. Leaving the keys as the
+ * wire sent them would make the same tool mean different things depending on
+ * which arm happened to carry it.
  */
 export function decodeCursorNativeToolCall(
   callId: string,
@@ -165,8 +168,68 @@ export function decodeCursorNativeToolCall(
     variant,
     name: variant.name,
     callId,
-    arguments: args && typeof args === "object" ? { ...(args as Record<string, unknown>) } : {},
+    arguments: canonicalToolArguments(args),
   };
+}
+
+/**
+ * Recursive snake_case normalisation of a tool-argument value.
+ *
+ * OpenAI-style tool arguments are snake_case throughout, nested values
+ * included, so the conversion has to walk the whole tree rather than the top
+ * level — a Cursor `EditToolArgs` can carry nested objects whose keys would
+ * otherwise stay camelCase and be invisible to a client reading the canonical
+ * spelling. Array elements are walked for the same reason; a scalar is
+ * returned untouched because there is no key to convert.
+ */
+export function canonicalToolArguments(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+      snakeCaseKey(key),
+      canonicalToolValue(child),
+    ]),
+  );
+}
+
+function canonicalToolValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalToolValue);
+  if (value !== null && typeof value === "object") return canonicalToolArguments(value);
+  return value;
+}
+
+/** `someKeyName` → `some_key_name`; already-snake keys come back unchanged. */
+function snakeCaseKey(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[\s-]+/g, "_")
+    .toLowerCase();
+}
+
+/**
+ * The variant whose args a host-exec frame is carrying.
+ *
+ * Exec frames name their payload after the args message — `read_args`,
+ * `shell_args`, `pi_read_args` — not after the `ToolCall` arm, so the lookup
+ * runs off `argsType`. Anything not ending in `_args` is not a tool payload
+ * (`id`, `exec_id`, `request_context_args`, …) and is reported as `undefined`.
+ */
+export function cursorVariantForExecArgs(
+  execServer: Record<string, unknown>,
+): { readonly variant: CursorToolVariant; readonly args: Record<string, unknown> } | undefined {
+  for (const [key, value] of Object.entries(execServer)) {
+    if (value === null || value === undefined || !key.endsWith("_args")) continue;
+    const wanted = key.slice(0, -"_args".length);
+    const variant = [...CURSOR_TOOL_VARIANTS.values()].find((entry) =>
+      entry.argsType.toLowerCase().startsWith(wanted.toLowerCase()),
+    );
+    if (variant === undefined) continue;
+    return {
+      variant,
+      args: canonicalToolArguments(value),
+    };
+  }
+  return undefined;
 }
 
 /**

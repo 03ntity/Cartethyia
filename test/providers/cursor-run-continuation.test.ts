@@ -252,6 +252,15 @@ const BASH_TOOL = {
   },
 } as const;
 
+// The canonical Cursor-native name. A native `shell` frame only relays when
+// something declared a tool of exactly that name — variants stay separate, so
+// `shell` here is not `_bash` above and not `pi_bash`.
+const SHELL_TOOL = {
+  name: "shell",
+  description: "Run a shell command.",
+  jsonSchema: { type: "object", properties: {} },
+} as const;
+
 /** The client's own file-write surface. */
 const WRITE_TOOL = {
   name: "_write",
@@ -265,7 +274,9 @@ const WRITE_TOOL = {
 } as const;
 
 /** One request declaring exactly the given tools. */
-function requestWithTools(tools: readonly (typeof LOOKUP_TOOL | typeof BASH_TOOL | typeof WRITE_TOOL)[]): CanonicalRequest {
+function requestWithTools(
+  tools: readonly (typeof LOOKUP_TOOL | typeof BASH_TOOL | typeof WRITE_TOOL | typeof SHELL_TOOL)[],
+): CanonicalRequest {
   return {
     model: "cursor-model",
     messages: [{ role: "user", content: [{ kind: "text", text: "what is the weather?" }] }],
@@ -771,6 +782,22 @@ describe("Cursor host tool forwarding", () => {
     expect(opened.events.some((event) => event.type === "tool_call_delta")).toBe(false);
     expect(cursorRunSessions.size).toBe(0);
     const thrown = stream.messages().find((message) => message["exec_client_control_message"] !== undefined);
-    expect(JSON.stringify(thrown)).toContain("Cursor host tools are not executed by this gateway");
+    // The refusal stands; the stated reason moved. Host tools are no longer
+    // refused for being host tools — they are relayed when the request declared
+    // them. This one is refused because nothing declared it.
+    expect(JSON.stringify(thrown)).toContain("this tool is not one the request declared");
+  });
+
+  test("a shell exec whose client declared a shell tool is relayed", async () => {
+    // The behaviour the old refusal could not express: the same frame, with the
+    // tool declared, becomes an ordinary tool call for the client to answer.
+    const adapter = createCursorAdapter();
+    const stream = new FakeStream([shellExecFrame(5, "echo hi")]);
+    stream.endBody();
+    // The descriptor set comes from the request's own tools, so declaring
+    // `shell` is all it takes for the native arm to be recognised as declared.
+    const opened = await collect(adapter, requestWithTools([SHELL_TOOL]), harnessWith([], scopeOf(), undefined, stream));
+    expect(opened.error).toBeUndefined();
+    expect(opened.events.some((event) => event.type === "tool_call_delta")).toBe(true);
   });
 });
