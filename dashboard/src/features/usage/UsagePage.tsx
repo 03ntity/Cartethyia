@@ -1103,7 +1103,10 @@ function RequestDetailDrawer({
                 <div
                   role="menu"
                   aria-label="Ban duration"
-                  className="absolute bottom-full left-0 z-50 mb-1 min-w-36 flex flex-col gap-0.5 border border-inner-border rounded-control bg-popover-bg shadow-popout p-1.5"
+                  // Opens downward. `bottom-full` placed it above the button,
+                  // which reads as a menu belonging to whatever sits above the
+                  // split control rather than to the caret that opened it.
+                  className="absolute top-full left-0 z-50 mt-1 min-w-36 flex flex-col gap-0.5 border border-inner-border rounded-control bg-popover-bg shadow-popout p-1.5"
                 >
                   {BAN_DURATION_CHOICES.map((choice) => (
                     <button

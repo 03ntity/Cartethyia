@@ -115,7 +115,6 @@ async function runAccountCheckin(
 }
 
 /** Bound on accounts one manual daily-growth batch may cover. */
-const DAILY_GROWTH_MAX_IDS = 100;
 /** Concurrent accounts inside one manual daily-growth batch. */
 const DAILY_GROWTH_CONCURRENCY = 3;
 
@@ -253,8 +252,17 @@ function checkinStateMessage(result: DailyCheckinResult): string {
   }
 }
 
+/**
+ * How many accounts are refreshed at once.
+ *
+ * This is the bound, not a cap on how many may be requested. A tenant with
+ * several hundred accounts used to be refused outright at 100 — "accountIds
+ * exceeds the limit of 100" — so refreshing the whole fleet meant hand-batching
+ * in the UI. Concurrency is what actually protects the upstream and the
+ * gateway, and it does so regardless of how many ids arrive, so the request is
+ * accepted at any size and drained through this many workers.
+ */
 const QUOTA_REFRESH_CONCURRENCY = 5;
-const QUOTA_REFRESH_MAX_IDS = 100;
 
 /**
  * Registers the tenant-scoped account/quota routes onto `app`. Every route here
@@ -547,13 +555,6 @@ export function registerAccountQuotaTenantRoutes(
           set.status = 400;
           return { error: "accountIds must be a non-empty array", code: "invalid_request" };
         }
-        if (ids.length > QUOTA_REFRESH_MAX_IDS) {
-          set.status = 400;
-          return {
-            error: `accountIds exceeds the limit of ${QUOTA_REFRESH_MAX_IDS}`,
-            code: "invalid_request",
-          };
-        }
         const accounts = await db
           .select({
             accountId: providerAccounts.id,
@@ -668,16 +669,11 @@ export function registerAccountQuotaTenantRoutes(
           active: t.Boolean(),
         }),
       },
-      async ({ request, body, set }) => {
+      async ({ request, body }) => {
         const access = requireTenantScope(accessResolver(request), "dashboard:write");
+        // No size cap: a tenant-wide enable/disable is a legitimate single
+        // request, and the UPDATE is one statement over `inArray` either way.
         if (body.ids.length === 0) return { ok: true, updated: 0 };
-        if (body.ids.length > QUOTA_REFRESH_MAX_IDS) {
-          set.status = 400;
-          return {
-            error: `ids exceeds the limit of ${QUOTA_REFRESH_MAX_IDS}`,
-            code: "invalid_request",
-          };
-        }
         const status = body.active ? ("active" as const) : ("disabled" as const);
         const updated = await db
           .update(providerAccounts)
@@ -780,13 +776,9 @@ export function registerAccountQuotaTenantRoutes(
             code: "not_found",
           };
         }
-        if (accounts.length > DAILY_GROWTH_MAX_IDS) {
-          set.status = 400;
-          return {
-            error: `accountIds exceeds the limit of ${DAILY_GROWTH_MAX_IDS}`,
-            code: "invalid_request",
-          };
-        }
+        // No size cap, for the same reason as the quota refresh: the work is
+        // already drained through a bounded worker pool, so refusing the request
+        // protected nothing and just forced the operator to batch by hand.
         // One egress rotator for the whole request, exactly as the sweep builds
         // it, so consecutive accounts leave from consecutive pools.
         const rotator =

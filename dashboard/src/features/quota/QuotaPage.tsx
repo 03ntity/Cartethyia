@@ -710,10 +710,25 @@ export default function QuotaPage(): ReactNode {
   const accounts = useMemo(() => data?.accounts ?? [], [data?.accounts]);
   const refreshingCount = data?.refreshing ?? 0;
   const refreshAll = useRefreshAllQuotas();
+  /**
+   * Checked-of-total while a whole-fleet refresh runs.
+   *
+   * Shows only the count, not pass/fail: per-account verdicts arrive as toasts
+   * and land in the health log, so a running tally would duplicate them and
+   * read as a verdict while the run is still in flight. Same reasoning as
+   * "Test all" on the provider detail page.
+   */
+  const [refreshProgress, setRefreshProgress] = useState<{ done: number; total: number } | null>(
+    null,
+  );
   const updateActive = useUpdateAccountActive();
   const setActiveBatch = useSetAccountsActiveBatch();
   const deleteAccountMutation = useDeleteQuotaAccount();
   const [deleteTarget, setDeleteTarget] = useState<QuotaEntry | null>(null);
+  // Cleared when a run finishes, so a stale count never sits on the button.
+  useEffect(() => {
+    if (!refreshAll.isPending) setRefreshProgress(null);
+  }, [refreshAll.isPending]);
   const [healthTarget, setHealthTarget] = useState<QuotaEntry | null>(null);
   const [resetTarget, setResetTarget] = useState<QuotaEntry | null>(null);
 
@@ -863,7 +878,10 @@ export default function QuotaPage(): ReactNode {
             icon={<RefreshCw size={13} className={refreshAll.isPending ? "animate-spin" : undefined} />}
             onClick={() =>
               refreshAll.mutate(
-                accounts.map((account) => account.id),
+                {
+                  accountIds: accounts.map((account) => account.id),
+                  onProgress: (done, total) => setRefreshProgress({ done, total }),
+                },
                 {
                   onSuccess: (result) => {
                     toast.success(
@@ -878,7 +896,9 @@ export default function QuotaPage(): ReactNode {
               )
             }
           >
-            Refresh
+            {refreshProgress && refreshProgress.total > 0
+              ? `Refresh ${refreshProgress.done}/${refreshProgress.total}`
+              : "Refresh"}
           </Button>
         </span>
       </div>

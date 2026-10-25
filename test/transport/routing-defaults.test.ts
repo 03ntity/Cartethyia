@@ -50,12 +50,18 @@ describe("proxy skip default", () => {
 });
 
 describe("providers that dial direct by default", () => {
-  // Each of these is credential-keyed, so a rotating egress address buys
-  // nothing and only adds a hop that can be refused or rate-limited per pool.
-  // Pinned individually rather than as a set comparison: a set assertion
-  // passes when a provider is dropped from the list by accident, which is the
-  // failure this is here to catch.
-  const DIRECT_EGRESS = ["antigravity", "trae", "kilo", "hermes", "github", "kiro"];
+  // Pinned individually rather than as a set comparison: a set assertion passes
+  // when a provider is dropped from the list by accident, which is the failure
+  // this is here to catch.
+  // `trae` is deliberately absent: it is proxied by default now. Trae applies
+  // account-level ban/detection heuristics to the request origin, and a direct
+  // egress makes every account in the pool leave from one identifiable address,
+  // so the whole pool is what gets flagged rather than a single account. It
+  // was in this list before, which is the behaviour that changed.
+  //
+  // `cursor` is here for the opposite reason: its upstream is reached over its
+  // own HTTP/2 path that a proxy in front of it breaks.
+  const DIRECT_EGRESS = ["antigravity", "cursor", "kilo", "hermes", "github", "kiro"];
 
   for (const id of DIRECT_EGRESS) {
     test(`${id} skips the proxy by default`, () => {
@@ -70,6 +76,13 @@ describe("providers that dial direct by default", () => {
       expect(defaultSkipProxy(id)).toBe(true);
     }
     expect(defaultSkipProxy("groq")).toBe(false);
+  });
+
+  test("trae is proxied by default but can still be made direct", () => {
+    // The point of the change is the default, not a lock: an operator with a
+    // reason to dial direct can still write `skipProxy: true`.
+    expect(DEFAULT_PROXY_SKIP_PROVIDER_IDS.has("trae")).toBe(false);
+    expect(defaultSkipProxy("trae")).toBe(false);
   });
 });
 

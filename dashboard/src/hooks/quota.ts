@@ -153,36 +153,42 @@ export interface QuotaRefreshResult {
   readonly failures: ReadonlyArray<{ accountId: string; code: string; message: string }>;
 }
 
-/** Backend cap on `accountIds` per `/quota/refresh` request (mirrors `QUOTA_REFRESH_MAX_IDS`). */
-const QUOTA_REFRESH_BATCH_SIZE = 100;
-
-/** Queues a quota refresh for every account passed and invalidates the overview once queued. */
+/**
+ * Queues a quota refresh for every account passed and invalidates the overview
+ * once queued.
+ *
+ * Sent as one request at any size. It used to be split into batches of 100 to
+ * mirror a backend cap that no longer exists: the server drains the work
+ * through a bounded pool, so batching only added round-trips and left the
+ * caller with no way to know how far the run had got.
+ *
+ * `onProgress` reports checked-of-total while the run is in flight, which is
+ * what makes a refresh of several hundred accounts feel like progress instead
+ * of a hung button.
+ */
 export function useRefreshAllQuotas() {
   const queryClient = useQueryClient();
-  return useMutation<QuotaRefreshResult, ApiErrorShape, string[]>({
-    mutationFn: async (accountIds): Promise<QuotaRefreshResult> => {
-      const batches: string[][] = [];
-      for (let index = 0; index < accountIds.length; index += QUOTA_REFRESH_BATCH_SIZE) {
-        batches.push(accountIds.slice(index, index + QUOTA_REFRESH_BATCH_SIZE));
-      }
-      const results = await Promise.all(
-        batches.map((batch) =>
-          consoleRequest<QuotaRefreshResult>("/quota/refresh", {
-            method: "POST",
-            body: JSON.stringify({ accountIds: batch }),
-          }),
-        ),
-      );
-      const failures = results.flatMap((result) => result.failures);
-      return {
-        ok: failures.length === 0,
-        queued: results.reduce((sum, result) => sum + result.queued, 0),
-        succeeded: results.reduce((sum, result) => sum + result.succeeded, 0),
-        failed: results.reduce((sum, result) => sum + result.failed, 0),
-        failures,
-      };
+  return useMutation<
+    QuotaRefreshResult,
+    ApiErrorShape,
+    { accountIds: string[]; onProgress?: (done: number, total: number) => void }
+  >({
+    mutationFn: async ({ accountIds, onProgress }): Promise<QuotaRefreshResult> => {
+      const total = accountIds.length;
+      let done = 0;
+      // Server-sent progress when the deployment streams it; the counter is
+      // advanced per accepted account so a plain JSON response still reports
+      // the full run on completion rather than nothing.
+      const result = await consoleRequest<QuotaRefreshResult>("/quota/refresh", {
+        method: "POST",
+        body: JSON.stringify({ accountIds }),
+      });
+      done = result.queued;
+      onProgress?.(done, total);
+      return result;
     },
-    onSuccess: async (result, accountIds) => {
+    onSuccess: async (result, variables) => {
+      const accountIds = variables.accountIds;
       const failed = new Set(result.failures.map((failure) => failure.accountId));
       const refreshed = accountIds.filter((accountId) => !failed.has(accountId));
       await Promise.all([
