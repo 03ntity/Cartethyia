@@ -1,5 +1,6 @@
 import pino from 'pino';
 import { pushConsoleLog, type ConsoleLogLevel } from './log-ring';
+import { LOG_RING_MAX_CODE_UNITS, sanitizeLogValue, truncateLogString } from './log-sanitize';
 
 /**
  * Structured logger using Pino for production-ready logging.
@@ -58,19 +59,13 @@ const logger = pino({
  * without a cycle guard, so a circular log arg would overflow the stack
  * before redaction even runs. Errors collapse to name+message - stacks are
  * too long for a tail line and the message already carries the cause.
+ *
+ * Bounded in every dimension, not just depth: see the constants above. The
+ * node budget is carried by a mutable counter object rather than a return
+ * value, because a recursive walk that returned remaining budget would have to
+ * thread it through every branch and a missed one would silently unbound a
+ * subtree.
  */
-function decycle(value: unknown, seen: WeakSet<object> = new WeakSet(), depth = 0): unknown {
-  if (value === null || typeof value !== "object") return value;
-  if (seen.has(value)) return "[circular]";
-  if (depth > 5) return "[truncated]";
-  if (value instanceof Error) return { name: value.name, message: value.message };
-  seen.add(value);
-  if (Array.isArray(value)) return value.map((item) => decycle(item, seen, depth + 1));
-  const out: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) out[key] = decycle(entry, seen, depth + 1);
-  return out;
-}
-
 /**
  * Flatten a log call into one ring line. Args keep their real values: a log
  * line whose credential was rewritten into `***REDACTED***` is
@@ -79,7 +74,7 @@ function decycle(value: unknown, seen: WeakSet<object> = new WeakSet(), depth = 
  */
 function safeLogValue(value: unknown): unknown {
   try {
-    return decycle(value);
+    return sanitizeLogValue(value);
   } catch {
     return "[unserializable args]";
   }
@@ -98,6 +93,10 @@ function formatRingMessage(msg: string, args: readonly unknown[]): string {
   } catch {
     rendered = "[unserializable args]";
   }
+  // Bounded on the way out too: the copy above caps each field, but a few
+  // hundred capped fields still render to a line long enough that the ring —
+  // a fixed 500-entry buffer — holds a meaningful fraction of one log call.
+  rendered = truncateLogString(rendered, LOG_RING_MAX_CODE_UNITS);
   return rendered.length > 0 ? `${msg} ${rendered}` : msg;
 }
 
@@ -160,6 +159,11 @@ function safeErrorForPino(error: Error): Error {
 }
 
 function logError(msg: string, error: Error | undefined, args: readonly unknown[]): void {
+  // Same fast-path as `logArgs`, and for the same reason: `safeErrorForPino`
+  // copies every own enumerable field of the error, and an error from a failed
+  // upstream call carries the response body. That copy is the largest one in
+  // this module and it used to run unconditionally.
+  if (!logger.isLevelEnabled("error")) return;
   const safe = safeLogArgs(args);
   const ringError = error === undefined ? undefined : safeErrorForRing(error);
   const pinoError = error === undefined ? undefined : safeErrorForPino(error);
