@@ -8,6 +8,9 @@
  *   only run when `CARTETHYIA_TEST_DATABASE_URL` points to a disposable
  *   database; when present, the runner routes `DATABASE_URL` there and selects
  *   Full mode so tests cannot accidentally write to the runtime database.
+ * - Config, HOME, platform-specific config paths, and telemetry are redirected
+ *   to one temporary sandbox per invocation and removed on exit. Tests cannot
+ *   inherit the operator's writable state merely by forgetting an override.
  * - **`--timeout` is a hang detector, not a budget.** 15 s is far longer than
  *   any legitimate test in this suite; it exists so a deadlocked test fails
  *   with a name instead of stalling CI. A test that needs to wait is written
@@ -18,7 +21,8 @@
  *   parallel run catches.
  *
  * `--scope` picks a tree: `backend` (`test/`), `dashboard` (`dashboard/test/`),
- * or `all`. `--watch` re-runs on change. Anything else is forwarded to
+ * `scripts` (`test/cli/`), or `all`. Integration is a separate opt-in scope.
+ * `--watch` re-runs on change. Anything else is forwarded to
  * `bun test`, so `bun run test -- --test-name-pattern admission` works.
  *
  * The scope is passed as an explicit PATH rather than as the working directory,
@@ -27,15 +31,21 @@
  * was silently running the dashboard suites a second time. The paths below are
  * the single definition of what each scope covers.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const PROJECT_ROOT = join(import.meta.dir, "..", "..");
 const DASHBOARD_ROOT = join(PROJECT_ROOT, "dashboard");
 const BACKEND_TESTS = join(PROJECT_ROOT, "test");
+const INTEGRATION_TESTS = join(BACKEND_TESTS, "integration");
 const DASHBOARD_TESTS = join(DASHBOARD_ROOT, "test");
 const SCRIPTS_TESTS = join(PROJECT_ROOT, "test", "cli");
+const DEFAULT_BACKEND_TESTS = readdirSync(BACKEND_TESTS)
+  .filter((name) => name !== "cli" && name !== "integration")
+  .map((name) => join(BACKEND_TESTS, name));
+DEFAULT_BACKEND_TESTS.push(join(INTEGRATION_TESTS, "docker-contract.test.ts"), SCRIPTS_TESTS);
+const sandboxRoot = mkdtempSync(join(tmpdir(), "cartethyia-test-run-"));
 
 const rawArgs = process.argv.slice(2);
 
@@ -58,9 +68,9 @@ function loadEnvFile(path: string): Record<string, string> {
 
 const scopeIndex = rawArgs.indexOf("--scope");
 const scope = scopeIndex >= 0 ? rawArgs[scopeIndex + 1] : "all";
-if (scope !== "all" && scope !== "backend" && scope !== "dashboard" && scope !== "scripts") {
-  console.error(`[test] unknown --scope "${scope}"; expected backend, dashboard, scripts, or all`);
-  process.exit(1);
+if (!["all", "backend", "dashboard", "scripts", "integration"].includes(scope ?? "")) {
+  console.error(`[test] unknown --scope "${scope}"; expected backend, dashboard, scripts, integration, or all`);
+  throw new Error(`Unknown test scope: ${scope}`);
 }
 
 const passthrough = rawArgs.filter((_arg, index) => {
@@ -104,22 +114,41 @@ function mergedExtraCaCerts(): Record<string, string> {
   const existing = sharedEnv.NODE_EXTRA_CA_CERTS?.trim();
   const parts = [readFileSync(fixture, "utf8")];
   if (existing && existsSync(existing)) parts.push(readFileSync(existing, "utf8"));
-  const bundle = join(tmpdir(), `cartethyia-extra-ca-${process.pid}.pem`);
+  const bundle = join(sandboxRoot, "extra-ca.pem");
   writeFileSync(bundle, parts.join("\n"));
   return { NODE_EXTRA_CA_CERTS: bundle };
 }
 
 const testDatabaseUrl = sharedEnv.CARTETHYIA_TEST_DATABASE_URL?.trim();
 if (testDatabaseUrl) {
+  const runtimeDatabaseUrl = process.env.DATABASE_URL?.trim();
+  if (runtimeDatabaseUrl && testDatabaseUrl === runtimeDatabaseUrl) {
+    console.error("[test] CARTETHYIA_TEST_DATABASE_URL must differ from the runtime DATABASE_URL");
+    process.exit(1);
+  }
   sharedEnv.CARTETHYIA_DB_MODE = "full";
   sharedEnv.DATABASE_URL = testDatabaseUrl;
-} else if (scope === "all" || scope === "backend") {
+} else if (scope === "all" || scope === "backend" || scope === "integration") {
   console.error(
     "[test] set CARTETHYIA_TEST_DATABASE_URL in the local .env or shell before running backend tests; " +
       "the development DATABASE_URL is never used as a test fallback",
   );
   process.exit(1);
 }
+
+// Tests exercise code that writes user-owned configuration and telemetry. Set
+// every filesystem root before spawning Bun so even a forgotten per-file
+// sandbox cannot overwrite or clean the operator's real data.
+Object.assign(sharedEnv, {
+  APPDATA: join(sandboxRoot, "config", "roaming"),
+  LOCALAPPDATA: join(sandboxRoot, "config", "local"),
+  XDG_CONFIG_HOME: join(sandboxRoot, "config", "xdg"),
+  CARTETHYIA_CONFIG_DIR: join(sandboxRoot, "config"),
+  CARTETHYIA_DATA_DIR: join(sandboxRoot, "data"),
+  CARTETHYIA_TELEMETRY_PAYLOAD_DIR: join(sandboxRoot, "data", "telemetry-payloads"),
+  HOME: join(sandboxRoot, "home"),
+  USERPROFILE: join(sandboxRoot, "home"),
+});
 
 /**
  * One `bun test` invocation.
@@ -154,13 +183,22 @@ function runTests(cwd: string, label: string, paths: readonly string[]): Promise
 }
 
 let exitCode = 0;
-if (scope === "all" || scope === "backend") {
-  exitCode = await runTests(PROJECT_ROOT, "backend", [BACKEND_TESTS]);
+try {
+  if (scope === "all" || scope === "backend") {
+    exitCode = await runTests(PROJECT_ROOT, "backend", DEFAULT_BACKEND_TESTS);
+  }
+  if (exitCode === 0 && (scope === "all" || scope === "dashboard")) {
+    exitCode = await runTests(DASHBOARD_ROOT, "dashboard", [DASHBOARD_TESTS]);
+  }
+  // Backend already includes test/cli; the standalone scripts scope exists so
+  // CLI work can be run without the rest of the backend suite.
+  if (exitCode === 0 && scope === "scripts") {
+    exitCode = await runTests(PROJECT_ROOT, "scripts", [SCRIPTS_TESTS]);
+  }
+  if (exitCode === 0 && scope === "integration") {
+    exitCode = await runTests(PROJECT_ROOT, "integration", [INTEGRATION_TESTS]);
+  }
+} finally {
+  rmSync(sandboxRoot, { recursive: true, force: true });
 }
-if (exitCode === 0 && (scope === "all" || scope === "dashboard")) {
-  exitCode = await runTests(DASHBOARD_ROOT, "dashboard", [DASHBOARD_TESTS]);
-}
-if (exitCode === 0 && (scope === "all" || scope === "scripts")) {
-  exitCode = await runTests(PROJECT_ROOT, "scripts", [SCRIPTS_TESTS]);
-}
-process.exit(exitCode);
+process.exitCode = exitCode;

@@ -22,17 +22,33 @@
  * Everything runs against the real table through the real query, so a change to
  * the SQL is caught here rather than by a wrong number on a page.
  */
-import { appendFile, mkdir, rm } from "node:fs/promises";
-import { describe, expect, test } from "bun:test";
+import { appendFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
-import { createShareStatsPort, clientTypeFromUserAgent } from "../../src/console/share/share-stats";
-import { TELEMETRY_EVENT_DIR } from "../../src/observability/event-log";
 import { getDb } from "../../src/persistence/boot";
 import { telemetryEvents } from "../../src/persistence/schema";
 import { createRunId, dbDescribe, getTestPool, requireDatabase } from "../helpers/database";
 import { createTenant } from "../helpers/fixtures";
 
+// Sandbox: set CARTETHYIA_DATA_DIR before importing share-stats or event-log.
+// share-stats imports queryTelemetryEvents from event-log, which resolves
+// TELEMETRY_EVENT_DIR as a module-level constant at first import time.
+const sandbox = await mkdtemp(join(tmpdir(), "carte-share-stats-"));
+const previousDataDir = process.env.CARTETHYIA_DATA_DIR;
+process.env.CARTETHYIA_DATA_DIR = sandbox;
+
+const { createShareStatsPort, clientTypeFromUserAgent } = await import("../../src/console/share/share-stats");
+const { TELEMETRY_EVENT_DIR } = await import("../../src/observability/event-log");
+
 requireDatabase();
+
+afterAll(async () => {
+  if (previousDataDir === undefined) delete process.env.CARTETHYIA_DATA_DIR;
+  else process.env.CARTETHYIA_DATA_DIR = previousDataDir;
+  await rm(sandbox, { recursive: true, force: true });
+});
 
 const HOUR_MS = 3_600_000;
 

@@ -27,13 +27,14 @@
  * `DESC` — are reported.
  *
  * Requires a reachable PostgreSQL server with rights to create a database.
- * Set `CARTETHYIA_DRIFT_DATABASE_URL` to that connection; it defaults to
- * `DATABASE_URL`, then to the local test database.
+ * Set `CARTETHYIA_DRIFT_DATABASE_URL` to a disposable instance. The
+ * development DATABASE_URL is never used as an administrative fallback.
  *
  * Never runs `drizzle-kit generate` against `migrations/`: that would rewrite
  * every committed baseline.
  */
 import { Client } from "pg";
+import { randomUUID } from "node:crypto";
 import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -42,10 +43,15 @@ import * as schemaModule from "../../src/persistence/schema";
 const PROJECT_ROOT = resolve(import.meta.dir, "..", "..");
 const MIGRATIONS_DIR = join(PROJECT_ROOT, "migrations", "full-postgres");
 
-const ADMIN_URL =
-  process.env["CARTETHYIA_DRIFT_DATABASE_URL"] ??
-  process.env["DATABASE_URL"] ??
-  "postgres://cartethyia_test:cartethyia_test@127.0.0.1:5432/cartethyia_test";
+const driftDatabaseUrl = process.env["CARTETHYIA_DRIFT_DATABASE_URL"]?.trim();
+if (!driftDatabaseUrl) {
+  console.error(
+    "[check-migrations] set CARTETHYIA_DRIFT_DATABASE_URL to a disposable PostgreSQL instance; " +
+      "the development DATABASE_URL is never used for CREATE/DROP DATABASE",
+  );
+  throw new Error("CARTETHYIA_DRIFT_DATABASE_URL is required");
+}
+const ADMIN_URL: string = driftDatabaseUrl;
 
 const SCRATCH_PREFIX = "cartethyia_drift_";
 
@@ -60,7 +66,6 @@ async function createDatabase(name: string): Promise<void> {
   const admin = new Client({ connectionString: ADMIN_URL });
   await admin.connect();
   try {
-    await admin.query(`DROP DATABASE IF EXISTS ${name}`);
     await admin.query(`CREATE DATABASE ${name}`);
   } finally {
     await admin.end();
@@ -170,14 +175,18 @@ async function main(): Promise<number> {
   const statements = await generateMigration(empty as never, current as never);
   const generatedDdl = statements.filter((s) => s.trim().length > 0).join(";\n");
 
-  const migrationDb = `${SCRATCH_PREFIX}migration`;
-  const schemaDb = `${SCRATCH_PREFIX}schema`;
+  const runId = randomUUID().replace(/-/g, "");
+  const migrationDb = `${SCRATCH_PREFIX}${runId}_migration`;
+  const schemaDb = `${SCRATCH_PREFIX}${runId}_schema`;
+  const created: string[] = [];
 
   let expected: readonly string[] = [];
   let actual: readonly string[] = [];
   try {
     await createDatabase(migrationDb);
+    created.push(migrationDb);
     await createDatabase(schemaDb);
+    created.push(schemaDb);
 
     const apply = async (name: string, sql: readonly string[]): Promise<void> => {
       const client = clientFor(name);
@@ -196,8 +205,7 @@ async function main(): Promise<number> {
     expected = await catalogOf(schemaDb);
     actual = await catalogOf(migrationDb);
   } finally {
-    await dropDatabase(migrationDb);
-    await dropDatabase(schemaDb);
+    for (const name of created.reverse()) await dropDatabase(name);
   }
 
   const expectedSet = new Set(expected);

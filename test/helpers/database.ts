@@ -50,7 +50,7 @@ if (!testRedisUrl) {
  * this module first. Without it a suite that passed the gate still wrote its
  * fixtures into whatever `DATABASE_URL` pointed at.
  */
-if (testDatabaseUrl && !process.env.CARTETHYIA_TEST_DATABASE_ISOLATED) {
+if (testDatabaseUrl) {
   process.env.CARTETHYIA_TEST_DATABASE_ISOLATED = "1";
   process.env.DATABASE_URL = testDatabaseUrl;
 }

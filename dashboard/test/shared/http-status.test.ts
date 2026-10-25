@@ -31,7 +31,7 @@ import {
  * codes, so this list is the contract rather than a sample of it.
  */
 const GATEWAY_STATUSES = [
-  200, 400, 401, 403, 404, 409, 413, 415, 422, 429, 499, 500, 501, 502, 503, 504,
+  200, 400, 401, 402, 403, 404, 407, 408, 409, 413, 415, 422, 429, 499, 500, 501, 502, 503, 504, 529,
 ] as const;
 
 /**
@@ -49,8 +49,11 @@ describe("httpStatusLabel", () => {
       200: "200 OK",
       400: "400 Bad Request",
       401: "401 Unauthorized",
+      402: "402 Payment Required",
       403: "403 Forbidden",
       404: "404 Not Found",
+      407: "407 Proxy Authentication Required",
+      408: "408 Request Timeout",
       409: "409 Conflict",
       413: "413 Payload Too Large",
       415: "415 Unsupported Media Type",
@@ -62,6 +65,7 @@ describe("httpStatusLabel", () => {
       502: "502 Bad Gateway",
       503: "503 Service Unavailable",
       504: "504 Gateway Timeout",
+      529: "529 Capacity Exhausted",
     };
     for (const status of GATEWAY_STATUSES) {
       expect({ status, label: httpStatusLabel(status) }).toEqual({
@@ -109,8 +113,11 @@ describe("httpStatusShortLabel", () => {
       200: "200 OK",
       400: "400 BAD",
       401: "401 AUTH",
+      402: "402 QUOTA",
       403: "403 DENY",
       404: "404 MISS",
+      407: "407 PROXY",
+      408: "408 TIME",
       409: "409 CONFL",
       413: "413 LARGE",
       415: "415 TYPE",
@@ -122,6 +129,7 @@ describe("httpStatusShortLabel", () => {
       502: "502 GATE",
       503: "503 DOWN",
       504: "504 TIME",
+      529: "529 CAP",
     };
     for (const status of GATEWAY_STATUSES) {
       expect({ status, short: httpStatusShortLabel(status) }).toEqual({

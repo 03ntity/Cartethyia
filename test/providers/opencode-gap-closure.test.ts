@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import {
   isFreeTierZenModel,
   OPENCODE_FREE_SPEC,
@@ -35,6 +35,11 @@ describe("free-tier Accept advertises what a real client sends", () => {
 describe("the free-tier blocklist is correctable without a deploy", () => {
   const original = process.env.CARTETHYIA_OPENCODE_UNAVAILABLE_FREE;
 
+  afterAll(() => {
+    if (original === undefined) delete process.env.CARTETHYIA_OPENCODE_UNAVAILABLE_FREE;
+    else process.env.CARTETHYIA_OPENCODE_UNAVAILABLE_FREE = original;
+  });
+
   test("unset, the bundled measured list stands", () => {
     delete process.env.CARTETHYIA_OPENCODE_UNAVAILABLE_FREE;
     expect(isFreeTierZenModel("deepseek-v4-flash-free")).toBe(false);
@@ -69,11 +74,6 @@ describe("the free-tier blocklist is correctable without a deploy", () => {
     expect(isFreeTierZenModel("claude-opus-5")).toBe(false);
   });
 
-  test("cleanup restores the original environment", () => {
-    if (original === undefined) delete process.env.CARTETHYIA_OPENCODE_UNAVAILABLE_FREE;
-    else process.env.CARTETHYIA_OPENCODE_UNAVAILABLE_FREE = original;
-    expect(true).toBe(true);
-  });
 });
 
 describe("the Go plan reports a real subscription quota", () => {

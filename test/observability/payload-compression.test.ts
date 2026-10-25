@@ -1,11 +1,12 @@
 /**
  * Payload frames are gzipped on write and named `jsonl-file`.
  */
-import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { afterAll, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { sandboxEnv } from "../helpers/sandbox";
 import { gunzipSync } from "node:zlib";
 import {
   applySqliteMigrations,
@@ -21,9 +22,18 @@ import {
 
 function payloadDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "cartethyia-payload-"));
-  process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR = dir;
+  restorePayloadDir();
+  restorePayloadDir = sandboxEnv("CARTETHYIA_TELEMETRY_PAYLOAD_DIR", dir);
+  payloadDirs.push(dir);
   return dir;
 }
+
+let restorePayloadDir: () => void = () => undefined;
+const payloadDirs: string[] = [];
+afterAll(() => {
+  restorePayloadDir();
+  for (const dir of payloadDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 /**
  * The compressed bytes of one frame, out of its stored line.
@@ -94,4 +104,7 @@ test("the baseline accepts jsonl-file payload frame rows", async () => {
   const count = sqlite.prepare("SELECT count(*) AS c FROM telemetry_payloads").get() as { c: number };
   expect(count.c).toBe(1);
   sqlite.close();
+  // Bun's SQLite close can release its Windows handle just after returning.
+  // The database is temporary; removal must not hide the migration assertion.
+  try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort temp cleanup */ }
 });

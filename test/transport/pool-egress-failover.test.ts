@@ -22,21 +22,8 @@ import { expect, test } from "bun:test";
 import { GatewayError } from "../../src/protocol/gateway-error";
 import { runAttemptLoop } from "../../src/transport/dispatch/attempt-loop";
 import { NetworkPoolSelector } from "../../src/network/pool/selector";
-import type { ProxyRequestState } from "../../src/transport/request/state";
 import type { RouteCandidate } from "../../src/transport/routing/route-model";
-
-function stateFor(): ProxyRequestState {
-  return {
-    requestId: "req-pool-failover",
-    ingressBody: { model: "big-pickle", messages: [] },
-    abortController: new AbortController(),
-    outcome: undefined,
-    deadlineMs: Date.now() + 60_000,
-    completed: false,
-    startProviderFlight: () => undefined,
-    stopProviderFlight: () => undefined,
-  } as unknown as ProxyRequestState;
-}
+import { attemptCandidate, attemptLeaseSource, attemptState, prepareAttempt } from "../helpers/attempt-loop";
 
 /**
  * One opencode candidate carrying both pools — the shape `route-catalog`
@@ -44,17 +31,13 @@ function stateFor(): ProxyRequestState {
  */
 function opencodeCandidate(): RouteCandidate {
   return {
-    candidate_id: "opencode:global",
-    provider_id: "opencode",
+    ...attemptCandidate("opencode", "global"),
     model_id: "big-pickle",
     endpoint: "/zen/v1/chat/completions",
-    capability_profile: null,
-    wire_family: "chat",
-    requires_account: false,
     network_pool_ids: ["pool-a", "pool-b"],
     network_pool_limits: { "pool-a": 10, "pool-b": 10 },
     network_pool_weights: { "pool-a": 100, "pool-b": 100 },
-  } as unknown as RouteCandidate;
+  };
 }
 
 /** The refusal the upstream sends for a flagged address: 403 FreeTierError. */
@@ -66,27 +49,6 @@ function freeTierRefusal(): GatewayError {
     { providerCode: "FreeTierError", rateLimitScope: "provider", raw: "FreeTierError" },
     "upstream",
   );
-}
-
-function leaseSource() {
-  return {
-    estimatedInputTokens: 10,
-    estimatedOutputTokens: 0,
-    admissionService: {
-      admit: async () => ({
-        commit: async () => undefined,
-        release: async () => undefined,
-        commitUsage: async () => undefined,
-      }),
-      release: async () => undefined,
-    },
-    routingEngine: {
-      acquire: async () => ({ lease_id: "lease-1" }),
-      reserve: async () => ({ lease_id: "lease-1" }),
-      release: async () => undefined,
-    },
-    plan: { requested_model: "big-pickle" },
-  };
 }
 
 /**
@@ -105,14 +67,15 @@ async function runOnce(options: {
   const seen: string[] = [];
   let error: unknown;
   try {
+    const candidates = [opencodeCandidate()];
     await runAttemptLoop<string, unknown>({
-      state: stateFor(),
-      deps: { db: {}, poolSelector: options.pools },
-      leaseSource: leaseSource(),
-      candidates: [opencodeCandidate()],
+      state: attemptState("req-pool-failover", Date.now() + 60_000),
+      deps: { db: {} as never, poolSelector: options.pools },
+      leaseSource: attemptLeaseSource(candidates, "big-pickle"),
+      candidates,
       tenantId: "tenant-1",
       strictPoolSelection: true,
-      prepare: async () => ({ credential: {}, adapter: {} }),
+      prepare: prepareAttempt,
       attempt: async (context: { readonly leases: { readonly networkPoolId?: string } }) => {
         const poolId = context.leases.networkPoolId ?? "none";
         seen.push(poolId);
@@ -121,7 +84,7 @@ async function runOnce(options: {
         return outcome;
       },
       exhaustedError: new GatewayError("accounts_unavailable", 503, "exhausted"),
-    } as never).catch((cause: unknown) => {
+    }).catch((cause: unknown) => {
       error = cause;
     });
     return { seen, error };
@@ -195,26 +158,30 @@ test("a 403 from a provider that is not IP-scoped never retires a pool", async (
   // egress's. The guard is in the provider metadata, not in the caller.
   const candidate = { ...opencodeCandidate(), provider_id: "claude" } as RouteCandidate;
   const previousAttempts = process.env["CARTETHYIA_ROUTE_MAX_ATTEMPTS"];
+  const previousBase = process.env["CARTETHYIA_FALLBACK_RETRY_BASE_MS"];
   process.env["CARTETHYIA_ROUTE_MAX_ATTEMPTS"] = "4";
   process.env["CARTETHYIA_FALLBACK_RETRY_BASE_MS"] = "0";
   try {
+    let thrown: unknown;
     await runAttemptLoop<string, unknown>({
-      state: stateFor(),
-      deps: { db: {}, poolSelector: pools },
-      leaseSource: leaseSource(),
+      state: attemptState("req-pool-failover"),
+      deps: { db: {} as never, poolSelector: pools },
+      leaseSource: attemptLeaseSource([candidate], "big-pickle"),
       candidates: [candidate],
       tenantId: "tenant-1",
       strictPoolSelection: true,
-      prepare: async () => ({ credential: {}, adapter: {} }),
+      prepare: prepareAttempt,
       attempt: async () => {
         throw policyRejection;
       },
       exhaustedError: new GatewayError("accounts_unavailable", 503, "exhausted"),
-    } as never).catch(() => undefined);
+    }).catch((error: unknown) => { thrown = error; });
+    expect(thrown).toBe(policyRejection);
   } finally {
     if (previousAttempts === undefined) delete process.env["CARTETHYIA_ROUTE_MAX_ATTEMPTS"];
     else process.env["CARTETHYIA_ROUTE_MAX_ATTEMPTS"] = previousAttempts;
-    delete process.env["CARTETHYIA_FALLBACK_RETRY_BASE_MS"];
+    if (previousBase === undefined) delete process.env["CARTETHYIA_FALLBACK_RETRY_BASE_MS"];
+    else process.env["CARTETHYIA_FALLBACK_RETRY_BASE_MS"] = previousBase;
   }
   // No pool may have been retired by a non-IP-scoped 403.
   expect(await pools.isProviderCooldown("pool-a", "claude")).toMatchObject({ inCooldown: false });

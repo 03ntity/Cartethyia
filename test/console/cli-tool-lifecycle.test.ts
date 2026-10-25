@@ -34,6 +34,7 @@ import { createFileInjector, INJECTORS } from "../../src/console/cli-tools/injec
 import { codexSpec } from "../../src/console/cli-tools/injectors/codex";
 import { readTextFile, textGet, textHas, writeTextFile } from "../../src/console/cli-tools/fs-ops";
 import { TOOL_IDS, TOOL_REGISTRY } from "../../src/console/cli-tools/contracts";
+import { sandboxConfigHome } from "../helpers/sandbox";
 
 /** A config the user has been maintaining by hand, with content to preserve. */
 const USER_CONFIG = `# my codex config
@@ -119,22 +120,15 @@ describe("the injector registry", () => {
 
 describe("the codex injector against a temp HOME", () => {
   let home: string;
-  let originalHome: string | undefined;
-  let originalProfile: string | undefined;
+  let restoreHome: () => void;
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "cartethyia-codex-"));
-    originalHome = process.env.HOME;
-    originalProfile = process.env.USERPROFILE;
-    process.env.HOME = home;
-    process.env.USERPROFILE = home;
+    restoreHome = sandboxConfigHome(home);
   });
 
   afterEach(() => {
-    if (originalHome === undefined) delete process.env.HOME;
-    else process.env.HOME = originalHome;
-    if (originalProfile === undefined) delete process.env.USERPROFILE;
-    else process.env.USERPROFILE = originalProfile;
+    restoreHome();
     rmSync(home, { recursive: true, force: true });
   });
 
@@ -305,22 +299,15 @@ describe("the codex injector against a temp HOME", () => {
 
 describe("the generic driver's status branches", () => {
   let home: string;
-  let originalHome: string | undefined;
-  let originalProfile: string | undefined;
+  let restoreHome: () => void;
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "cartethyia-driver-"));
-    originalHome = process.env.HOME;
-    originalProfile = process.env.USERPROFILE;
-    process.env.HOME = home;
-    process.env.USERPROFILE = home;
+    restoreHome = sandboxConfigHome(home);
   });
 
   afterEach(() => {
-    if (originalHome === undefined) delete process.env.HOME;
-    else process.env.HOME = originalHome;
-    if (originalProfile === undefined) delete process.env.USERPROFILE;
-    else process.env.USERPROFILE = originalProfile;
+    restoreHome();
     rmSync(home, { recursive: true, force: true });
   });
 
@@ -531,8 +518,7 @@ describe("the generic driver's status branches", () => {
  */
 describe("every file injector round-trips apply → status → reset", () => {
   let home: string;
-  let originalHome: string | undefined;
-  let originalProfile: string | undefined;
+  let restoreHome: () => void;
 
   /** Tools whose `apply` deliberately does not configure anything. */
   const NOT_CONFIGURED_BY_DESIGN: ReadonlySet<string> = new Set([
@@ -542,17 +528,11 @@ describe("every file injector round-trips apply → status → reset", () => {
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "cartethyia-all-tools-"));
-    originalHome = process.env.HOME;
-    originalProfile = process.env.USERPROFILE;
-    process.env.HOME = home;
-    process.env.USERPROFILE = home;
+    restoreHome = sandboxConfigHome(home);
   });
 
   afterEach(() => {
-    if (originalHome === undefined) delete process.env.HOME;
-    else process.env.HOME = originalHome;
-    if (originalProfile === undefined) delete process.env.USERPROFILE;
-    else process.env.USERPROFILE = originalProfile;
+    restoreHome();
     rmSync(home, { recursive: true, force: true });
   });
 

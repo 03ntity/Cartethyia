@@ -5,12 +5,13 @@
  * (jsonl-file). The only valid storage type is jsonl-file; the old binary
  * header shape (jsonb-file) has been fully retired.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const DIR = await mkdtemp(join(tmpdir(), "carte-payload-format-"));
+const previousPayloadDir = process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR;
 process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR = DIR;
 
 const store = await import("../../src/observability/payload-store");
@@ -21,10 +22,13 @@ beforeEach(async () => {
   }
 });
 
-afterEach(async () => {
+afterAll(async () => {
   for (const name of await readdir(DIR).catch(() => [])) {
     await rm(join(DIR, name), { force: true });
   }
+  await rm(DIR, { recursive: true, force: true });
+  if (previousPayloadDir === undefined) delete process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR;
+  else process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR = previousPayloadDir;
 });
 
 describe("new frames", () => {

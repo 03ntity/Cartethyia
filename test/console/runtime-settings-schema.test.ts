@@ -12,6 +12,7 @@
  * because a second list is the thing that drifts.
  */
 import { describe, expect, test } from "bun:test";
+import { Value } from "typebox/value";
 import {
   runtimeUpdateBody,
   TELEMETRY_PAYLOAD_RETENTION_MINUTES,
@@ -80,8 +81,10 @@ describe("runtimeUpdateBody", () => {
       "telemetryPayloadRetentionMinutes",
     ];
     for (const key of nullable) {
-      const schema = (runtimeUpdateBody.properties as Record<string, { anyOf?: unknown[] }>)[key];
-      expect(schema).toBeDefined();
+      expect(Value.Check(runtimeUpdateBody, { [key]: null })).toBe(true);
+      const value = key === "imageClampMaxBytes" ? 64 * 1024 : 60;
+      expect(Value.Check(runtimeUpdateBody, { [key]: value })).toBe(true);
+      expect(Value.Check(runtimeUpdateBody, { [key]: "60" })).toBe(false);
     }
   });
 

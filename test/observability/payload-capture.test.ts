@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeTelemetryPayloadMode } from "../../src/console/settings/store";
@@ -13,6 +13,7 @@ import {
   type PayloadCaptureInput,
 } from "../../src/observability/payload-capture";
 import { readPayloadFrame, writePayloadFrame } from "../../src/observability/payload-store";
+import { sandboxEnv } from "../helpers/sandbox";
 
 describe("payload capture", () => {
   test("an unset capture mode is off, not metadata", () => {
@@ -99,7 +100,9 @@ describe("payload capture", () => {
   });
 
   test("a frame written from the prebuilt text reads back the same bodies", async () => {
-    process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR = mkdtempSync(join(tmpdir(), "cartethyia-payload-"));
+    const dir = mkdtempSync(join(tmpdir(), "cartethyia-payload-"));
+    const restore = sandboxEnv("CARTETHYIA_TELEMETRY_PAYLOAD_DIR", dir);
+    try {
     const record = buildPayloadRecord(
       {
         tenantId: "tenant-1",
@@ -127,6 +130,10 @@ describe("payload capture", () => {
     expect(back.request_id).toBe("request-1");
     expect(back.request_body).toEqual({ prompt: "keep me" });
     expect(back.response_body).toEqual({ text: "and me" });
+    } finally {
+      restore();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

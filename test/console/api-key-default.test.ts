@@ -44,6 +44,20 @@ function owner(tenantId: string) {
 }
 
 dbDescribe("default gateway API key", () => {
+  test("the shared fixture persists modelPrefix", async () => {
+    await withRollback(async (client) => {
+      const tenant = await createTenant(client, RUN_ID);
+      const key = await createApiKey(client, {
+        tenantId: tenant.tenantId,
+        modelPrefix: "anthropic/",
+      });
+      const db = drizzle(client as never, { schema: fullSchema });
+      const store = new DrizzleApiKeyStore(db as never);
+      expect((await store.list(tenant.tenantId)).find((item) => item.id === key.id)?.modelPrefix)
+        .toBe("anthropic/");
+    });
+  });
+
   test("is flagged in the list response", async () => {
     await withRollback(async (client) => {
       const tenant = await createTenant(client, RUN_ID);

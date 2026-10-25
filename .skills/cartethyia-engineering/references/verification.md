@@ -13,9 +13,9 @@ bun run test                     # or scoped: test:backend, dashboard:test, test
 bun run check:migrations         # when src/persistence/schema.ts or migrations/ changes
 ```
 
-`check:migrations` needs a PostgreSQL server it can create databases on; set
-`CARTETHYIA_DRIFT_DATABASE_URL` (it falls back to `DATABASE_URL`, then the local
-test database). It builds two throwaway databases — one from the committed SQL,
+`check:migrations` needs a disposable PostgreSQL server it can create databases
+on; set `CARTETHYIA_DRIFT_DATABASE_URL` explicitly. It never falls back to the
+development database. It builds two throwaway databases — one from the committed SQL,
 one from the DDL Drizzle derives from `schema.ts` — and diffs their catalogs, so
 it catches a schema edit that no migration covers. Index and constraint *names*
 are normalized away; only structural differences are reported.

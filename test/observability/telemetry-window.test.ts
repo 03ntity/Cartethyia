@@ -10,7 +10,7 @@
  * which file is open from its name, which is what let the old scheme delete a
  * file mid-write and lose its requests.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, appendFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +19,7 @@ import { join } from "node:path";
 // has to be set before anything pulls it in. Without this the tests write into
 // — and then wipe — the real telemetry directory of whatever machine runs them.
 const sandbox = await mkdtemp(join(tmpdir(), "carte-telemetry-test-"));
+const previousDataDir = process.env.CARTETHYIA_DATA_DIR;
 process.env.CARTETHYIA_DATA_DIR = sandbox;
 
 const {
@@ -42,9 +43,11 @@ async function reset(): Promise<void> {
 }
 
 beforeEach(reset);
-afterEach(async () => {
+afterAll(async () => {
   await reset();
   await rm(sandbox, { recursive: true, force: true }).catch(() => undefined);
+  if (previousDataDir === undefined) delete process.env.CARTETHYIA_DATA_DIR;
+  else process.env.CARTETHYIA_DATA_DIR = previousDataDir;
 });
 
 let sequence = 0;

@@ -14,19 +14,30 @@
  * written, because a credential nobody can open is worse than an absent one —
  * it looks configured.
  */
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, test } from "bun:test";
 import { randomBytes, randomUUID } from "node:crypto";
 import { gzipSync } from "node:zlib";
+import { sql } from "drizzle-orm";
 import { getDb } from "../../src/persistence/boot";
 import { decryptCredentialToString, setCredentialEncryptionKeyForTesting, snapshotCredentialEncryptionKeyForTesting } from "../../src/security/crypto";
 import { BackupService } from "../../src/console/backup/service";
 import { applyRestore, compressBackup, exportBackup } from "../../src/console/backup/store";
 import { restoreOrder, validateRestorePayload } from "../../src/console/backup/validate";
-import { tablesForSection } from "../../src/console/backup/contracts";
+import { tablesForSection, type BackupPayload } from "../../src/console/backup/contracts";
 import { createRunId, dbDescribe, getTestPool } from "../helpers/database";
-import { createWorld } from "../helpers/fixtures";
+import { createWorld, type GatewayWorld } from "../helpers/fixtures";
 
 const SECRET = "sk-portability-secret";
+const worlds: GatewayWorld[] = [];
+const targetTenantIds: string[] = [];
+
+afterEach(async () => {
+  const db = getDb();
+  for (const tenantId of targetTenantIds.splice(0)) {
+    await db.execute(sql`delete from tenants where id = ${tenantId}`);
+  }
+  for (const world of worlds.splice(0)) await world.cleanup();
+});
 
 /** A second install's key: 32 random bytes, deliberately not this one. */
 const otherKey = randomBytes(32);
@@ -40,14 +51,29 @@ const otherKey = randomBytes(32);
  * the receiving install is a different database holding none of these ids — so
  * the test removes the collision rather than asserting around it.
  */
-async function dropSourceRows(tenantId: string): Promise<void> {
+async function dropSourceRows(tenantId: string, providerId?: string): Promise<void> {
   const pool = await getTestPool();
   const client = await pool.connect();
   try {
+    if (providerId) await client.query("delete from models where provider_id = $1", [providerId]);
     await client.query("delete from api_keys where tenant_id = $1", [tenantId]);
     await client.query("delete from provider_accounts where tenant_id = $1", [tenantId]);
   } finally {
     client.release();
+  }
+}
+
+async function backupWorld(): Promise<GatewayWorld> {
+  const world = await createWorld();
+  await world.addAccount({ tenantId: world.tenantId, credential: SECRET, credentialKind: "api_key" });
+  return world;
+}
+
+/** Authored rows from other parallel worlds are not this restore's fixture. */
+function ownedProviderModels(payload: BackupPayload, providerId: string): void {
+  const models = payload.sections.config?.["models"];
+  if (models) {
+    payload.sections.config!["models"] = models.filter((row) => row["provider_id"] === providerId);
   }
 }
 
@@ -82,14 +108,12 @@ dbDescribe("backup credential portability", () => {
 
   test("a restore re-seals provider credentials under the importing install's key", async () => {
     const db = getDb();
-    const world = await createWorld();
-    // Tenant-scoped: an export reads only the rows the exporting tenant owns,
-    // and `createWorld`'s own account is a shared (null-tenant) catalog row.
-    await world.addAccount({ tenantId: world.tenantId, credential: SECRET, credentialKind: "api_key" });
-
+    const world = await backupWorld();
+    worlds.push(world);
     // Install A exports.
     const { payload } = await exportBackup(db, tablesForSection("config"), world.tenantId);
-    await dropSourceRows(world.tenantId);
+    ownedProviderModels(payload, world.providerId);
+    await dropSourceRows(world.tenantId, world.providerId);
     const accounts = (payload as unknown as { sections: { config: { provider_accounts: Array<Record<string, unknown>> } } })
       .sections.config.provider_accounts;
     const exported = accounts.find((row) => row.tenant_id === world.tenantId);
@@ -102,6 +126,7 @@ dbDescribe("backup credential portability", () => {
     // Install B, with a different key, restores into a tenant of its own.
     setCredentialEncryptionKeyForTesting(otherKey);
     const importingTenant = randomUUID();
+    targetTenantIds.push(importingTenant);
     const service = new BackupService({ db, verifyPassword: async () => true });
     const result = await service.restore("pw", payload, importingTenant);
     expect(result.warnings).toEqual([]);
@@ -116,6 +141,7 @@ dbDescribe("backup credential portability", () => {
   test("ciphertext from another install is refused, not written", async () => {
     const db = getDb();
     const world = await createWorld();
+    worlds.push(world);
     const payload = {
       app: "cartethyia",
       version: 1,
@@ -151,6 +177,7 @@ dbDescribe("backup credential portability", () => {
       },
     };
     const importingTenant = randomUUID();
+    targetTenantIds.push(importingTenant);
     const service = new BackupService({ db, verifyPassword: async () => true });
     const result = await service.restore("pw", payload, importingTenant);
 
@@ -179,10 +206,11 @@ dbDescribe("backup credential portability", () => {
 
   test("a restore accepts the compressed file the export downloads", async () => {
     const db = getDb();
-    const world = await createWorld();
-    await world.addAccount({ tenantId: world.tenantId, credential: SECRET, credentialKind: "api_key" });
+    const world = await backupWorld();
+    worlds.push(world);
     const { payload } = await exportBackup(db, tablesForSection("config"), world.tenantId);
-    await dropSourceRows(world.tenantId);
+    ownedProviderModels(payload, world.providerId);
+    await dropSourceRows(world.tenantId, world.providerId);
 
     // What the dashboard puts on disk: gzip bytes, base64-encoded to travel in
     // a JSON body.
@@ -193,10 +221,11 @@ dbDescribe("backup credential portability", () => {
 
   test("a restore accepts the same bytes as a file, without the base64 step", async () => {
     const db = getDb();
-    const world = await createWorld();
-    await world.addAccount({ tenantId: world.tenantId, credential: SECRET, credentialKind: "api_key" });
+    const world = await backupWorld();
+    worlds.push(world);
     const { payload } = await exportBackup(db, tablesForSection("config"), world.tenantId);
-    await dropSourceRows(world.tenantId);
+    ownedProviderModels(payload, world.providerId);
+    await dropSourceRows(world.tenantId, world.providerId);
 
     const gzBytes = gzipSync(Buffer.from(JSON.stringify(payload), "utf8"));
     const fromBytes = await restoreInto(new Uint8Array(gzBytes));
@@ -209,15 +238,17 @@ dbDescribe("backup credential portability", () => {
     // must still ensure the receiving tenant exists before inserting child
     // rows, or `api_keys.tenant_id` violates its FK on a fresh install.
     const db = getDb();
-    const world = await createWorld();
-    await world.addAccount({ tenantId: world.tenantId, credential: SECRET, credentialKind: "api_key" });
+    const world = await backupWorld();
+    worlds.push(world);
     const { payload } = await exportBackup(db, tablesForSection("config"), world.tenantId);
-    await dropSourceRows(world.tenantId);
+    ownedProviderModels(payload, world.providerId);
+    await dropSourceRows(world.tenantId, world.providerId);
     expect(
       (payload as unknown as { sections: { config: Record<string, unknown> } }).sections.config["tenants"],
     ).toBeUndefined();
 
     const importingTenant = randomUUID();
+    targetTenantIds.push(importingTenant);
     const service = new BackupService({ db, verifyPassword: async () => true });
     const result = await service.restore("pw", payload, importingTenant);
     expect(result.warnings).toEqual([]);
@@ -236,7 +267,8 @@ dbDescribe("backup credential portability", () => {
 
   test("a failed bulk restore keeps the bulk error when per-row diagnostics also fail", async () => {
     const db = getDb();
-    const world = await createWorld();
+    const world = await backupWorld();
+    worlds.push(world);
     const { payload: exported } = await exportBackup(db, tablesForSection("config"), world.tenantId);
     const config = (exported as unknown as { sections: { config: Record<string, unknown> } }).sections.config;
     // The export shares this test database with the importing tenants. Drop
@@ -252,12 +284,14 @@ dbDescribe("backup credential portability", () => {
     };
 
     const firstTenant = randomUUID();
+    targetTenantIds.push(firstTenant);
     const first = validateRestorePayload(payload, firstTenant);
     expect(first.ok).toBe(true);
     if (!first.ok) return;
     await applyRestore(db, first.value, restoreOrder(), firstTenant);
 
     const secondTenant = randomUUID();
+    targetTenantIds.push(secondTenant);
     const second = validateRestorePayload(payload, secondTenant);
     expect(second.ok).toBe(true);
     if (!second.ok) return;
@@ -275,7 +309,9 @@ dbDescribe("backup credential portability", () => {
   test("a payload's secrets are named for what they are, and still restore", async () => {
     const db = getDb();
     const world = await createWorld();
+    worlds.push(world);
     const importingTenant = randomUUID();
+    targetTenantIds.push(importingTenant);
     // The shape every export writes: the sealed columns named for the secret
     // they hold. The compressed download an operator already has is this same
     // shape, which is why it still restores rather than being dropped as a
@@ -319,6 +355,7 @@ dbDescribe("backup credential portability", () => {
   test("an export names no column by its ciphertext name", async () => {
     const db = getDb();
     const world = await createWorld();
+    worlds.push(world);
     await world.addAccount({ tenantId: world.tenantId, credential: SECRET, credentialKind: "api_key" });
     const { payload } = await exportBackup(db, tablesForSection("config"), world.tenantId);
     const config = (payload as unknown as { sections: { config: Record<string, Record<string, unknown>[]> } })
@@ -341,6 +378,7 @@ dbDescribe("backup credential portability", () => {
   test("an export never carries sign-in accounts", async () => {
     const db = getDb();
     const world = await createWorld();
+    worlds.push(world);
     const { payload } = await exportBackup(db, tablesForSection("config"), world.tenantId);
     const config = (payload as { sections: { config: Record<string, unknown> } }).sections.config;
     expect(config.console_users).toBeUndefined();

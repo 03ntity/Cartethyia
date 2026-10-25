@@ -49,8 +49,11 @@ async function menuResult(input: string, noColor = false, status?: string): Prom
   }
 }
 
+const previousNoColor = process.env.NO_COLOR;
+
 afterEach(() => {
-  delete process.env.NO_COLOR;
+  if (previousNoColor === undefined) delete process.env.NO_COLOR;
+  else process.env.NO_COLOR = previousNoColor;
 });
 
 test("the wordmark stays hidden without colour and the menu remains usable", async () => {

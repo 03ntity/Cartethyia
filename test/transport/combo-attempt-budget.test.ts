@@ -15,34 +15,8 @@
 import { expect, test } from "bun:test";
 import { GatewayError } from "../../src/protocol/gateway-error";
 import { runAttemptLoop } from "../../src/transport/dispatch/attempt-loop";
-import type { ProxyRequestState } from "../../src/transport/request/state";
 import type { RouteCandidate } from "../../src/transport/routing/route-model";
-
-function stateFor(): ProxyRequestState {
-  return {
-    requestId: "req-combo-budget",
-    ingressBody: { model: "deepseek", messages: [] },
-    abortController: new AbortController(),
-    outcome: undefined,
-    startProviderFlight: () => undefined,
-  } as unknown as ProxyRequestState;
-}
-
-/** One candidate for `provider`/`model`, so accounts of a member are siblings. */
-function candidate(providerId: string, accountId: string): RouteCandidate {
-  return {
-    candidate_id: `${providerId}:${accountId}`,
-    provider_id: providerId,
-    model_id: "deepseek-v3",
-    endpoint: `/v1/${providerId}`,
-    capability_profile: null,
-    wire_family: "chat",
-    provider_account_id: accountId,
-    provider_account_label: accountId,
-    network_pool_ids: null,
-    model_prefix: null,
-  } as unknown as RouteCandidate;
-}
+import { attemptCandidate as candidate, attemptLeaseSource, attemptState, prepareAttempt } from "../helpers/attempt-loop";
 
 /** A 429 the first member always answers with; retryable, so failover walks on. */
 function throttled(): GatewayError {
@@ -56,27 +30,6 @@ function throttled(): GatewayError {
 }
 
 /** Stub leases: every candidate is admitted, and every reservation succeeds. */
-function leaseSourceStub() {
-  return {
-    estimatedInputTokens: 10,
-    estimatedOutputTokens: 0,
-    admissionService: {
-      admit: async () => ({
-        commit: async () => undefined,
-        release: async () => undefined,
-        commitUsage: async () => undefined,
-      }),
-      release: async () => undefined,
-    },
-    routingEngine: {
-      acquire: async () => ({ lease_id: "lease-1" }),
-      reserve: async () => ({ lease_id: "lease-1" }),
-      release: async () => undefined,
-    },
-    plan: { requested_model: "deepseek" },
-  };
-}
-
 /**
  * Runs the loop with `cbCount` failing accounts on the first member and one
  * healthy account on the second, and returns the providers actually attempted.
@@ -93,13 +46,13 @@ async function attemptedProviders(cbCount: number): Promise<readonly string[]> {
 
     const seen: string[] = [];
     await runAttemptLoop<string, unknown>({
-      state: stateFor(),
-      deps: { db: {} },
-      leaseSource: leaseSourceStub(),
+      state: attemptState("req-combo-budget"),
+      deps: { db: {} as never },
+      leaseSource: attemptLeaseSource(candidates),
       candidates,
       tenantId: "tenant-1",
       strictPoolSelection: false,
-      prepare: async () => ({ credential: {}, adapter: {} }),
+      prepare: prepareAttempt,
       attempt: async (context: { readonly candidate: RouteCandidate }) => {
         const current = context.candidate;
         seen.push(current.provider_id);
@@ -107,7 +60,7 @@ async function attemptedProviders(cbCount: number): Promise<readonly string[]> {
         return "ok";
       },
       exhaustedError: new GatewayError("accounts_unavailable", 503, "exhausted"),
-    } as never).catch(() => undefined);
+    });
     return seen;
   } finally {
     if (previousAttempts === undefined) delete process.env["CARTETHYIA_ROUTE_MAX_ATTEMPTS"];
@@ -137,13 +90,13 @@ async function attemptedProvidersInterleaved(cbCount: number): Promise<readonly 
 
     const seen: string[] = [];
     await runAttemptLoop<string, unknown>({
-      state: stateFor(),
-      deps: { db: {} },
-      leaseSource: leaseSourceStub(),
+      state: attemptState("req-combo-budget"),
+      deps: { db: {} as never },
+      leaseSource: attemptLeaseSource(candidates),
       candidates,
       tenantId: "tenant-1",
       strictPoolSelection: false,
-      prepare: async () => ({ credential: {}, adapter: {} }),
+      prepare: prepareAttempt,
       attempt: async (context: { readonly candidate: RouteCandidate }) => {
         const current = context.candidate;
         seen.push(current.provider_id);
@@ -151,7 +104,7 @@ async function attemptedProvidersInterleaved(cbCount: number): Promise<readonly 
         return "ok";
       },
       exhaustedError: new GatewayError("accounts_unavailable", 503, "exhausted"),
-    } as never).catch(() => undefined);
+    });
     return seen;
   } finally {
     if (previousAttempts === undefined) delete process.env["CARTETHYIA_ROUTE_MAX_ATTEMPTS"];

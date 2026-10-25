@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { createStaticHandler } from "../../src/console/dashboard-assets";
 
 let buildDir: string;
+let outsideFile: string;
 let handler: ReturnType<typeof createStaticHandler>;
 
 /** Body of a result as text, or `""` when the result has no body. */
@@ -59,12 +60,14 @@ beforeAll(async () => {
   await mkdir(join(buildDir, "nested"), { recursive: true });
   await writeFile(join(buildDir, "nested", "deep.txt"), "deep");
   // A sibling of the build dir, to prove traversal cannot reach it.
-  await writeFile(join(buildDir, "..", `outside-${Date.now()}.txt`), "secret");
+  outsideFile = join(buildDir, "..", `outside-${Date.now()}.txt`);
+  await writeFile(outsideFile, "secret");
   handler = createStaticHandler({ buildDir });
 });
 
 afterAll(async () => {
   await rm(buildDir, { recursive: true, force: true }).catch(() => undefined);
+  await rm(outsideFile, { force: true }).catch(() => undefined);
 });
 
 describe("static assets — precompressed siblings", () => {

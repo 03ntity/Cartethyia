@@ -12,12 +12,22 @@
  * the cache is a Map-backed fake with the same `{ get, set }` shape as
  * `read-through-cache.test.ts`.
  */
-import { appendFile, mkdir, rm } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
-import { createShareStatsPort, SHARE_STATS_CACHE_TTL_SECONDS } from "../../src/console/share/share-stats";
-import { TELEMETRY_EVENT_DIR } from "../../src/observability/event-log";
 
-const FIXTURE_FILE = `${TELEMETRY_EVENT_DIR}/share-stats-cache-test.jsonl`;
+// Sandbox: resolve the data directory into a throwaway tmpdir *before* any
+// module that calls `resolveDataDir()` at import time (event-log exports
+// TELEMETRY_EVENT_DIR as a module-level constant derived from it).
+const sandbox = await mkdtemp(join(tmpdir(), "carte-share-stats-cache-"));
+const previousDataDir = process.env.CARTETHYIA_DATA_DIR;
+process.env.CARTETHYIA_DATA_DIR = sandbox;
+
+const { createShareStatsPort, SHARE_STATS_CACHE_TTL_SECONDS } = await import("../../src/console/share/share-stats");
+const { TELEMETRY_EVENT_DIR } = await import("../../src/observability/event-log");
+
+const FIXTURE_FILE = join(TELEMETRY_EVENT_DIR, "share-stats-cache-test.jsonl");
 
 interface Recorded {
   readonly reads: string[];
@@ -75,7 +85,9 @@ async function writeEvent(
 const RECIPIENTS = { total: 2, active: 1 } as const;
 
 afterAll(async () => {
-  await rm(FIXTURE_FILE, { force: true });
+  if (previousDataDir === undefined) delete process.env.CARTETHYIA_DATA_DIR;
+  else process.env.CARTETHYIA_DATA_DIR = previousDataDir;
+  await rm(sandbox, { recursive: true, force: true });
 });
 
 /**

@@ -27,8 +27,10 @@ describe("resolveDevAdminCredentials", () => {
     try {
       run();
     } finally {
-      process.env.CARTETHYIA_DEV_ADMIN_USER = previous.user;
-      process.env.CARTETHYIA_DEV_ADMIN_PASSWORD = previous.password;
+      if (previous.user === undefined) delete process.env.CARTETHYIA_DEV_ADMIN_USER;
+      else process.env.CARTETHYIA_DEV_ADMIN_USER = previous.user;
+      if (previous.password === undefined) delete process.env.CARTETHYIA_DEV_ADMIN_PASSWORD;
+      else process.env.CARTETHYIA_DEV_ADMIN_PASSWORD = previous.password;
     }
   };
 

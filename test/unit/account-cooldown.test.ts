@@ -469,6 +469,7 @@ describe("recordAccountFailure — an auth rejection writes a cooldown, not a di
   test("CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS=0 writes no deadline — terminal again", async () => {
     // The documented escape hatch. It has to change the write, or the comment
     // promising the old behavior is a lie.
+    const previousRecovery = process.env.CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS;
     process.env.CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS = "0";
     resetCooldownCacheForTests();
     try {
@@ -487,7 +488,8 @@ describe("recordAccountFailure — an auth rejection writes a cooldown, not a di
       expect(onlyUpdate(captured).status).toBe("disabled");
       expect(onlyUpdate(captured).cooldownUntil).toBeNull();
     } finally {
-      delete process.env.CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS;
+      if (previousRecovery === undefined) delete process.env.CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS;
+      else process.env.CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS = previousRecovery;
       resetCooldownCacheForTests();
     }
   });

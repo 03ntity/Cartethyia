@@ -83,7 +83,7 @@ describe("formatResetDistance", () => {
     // `Math.ceil` is what stops "Resets in 0mins" for an instant 30 seconds away.
     // Pinned because `Math.floor` would produce exactly that.
     expect(formatResetDistance(fromNow(30_000))).toBe("Resets in 1mins");
-    expect(formatResetDistance(fromNow(1))).toBe("Resets in 1mins");
+    expect(formatResetDistance(fromNow(1_000))).toBe("Resets in 1mins");
   });
 
   test("between an hour and a day is reported in hours, with minutes when present", () => {

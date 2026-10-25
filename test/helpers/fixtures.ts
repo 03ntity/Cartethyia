@@ -207,8 +207,7 @@ export interface ApiKeyFixture {
  *
  * The row stores only `hashSecret(token)`, exactly as the console does, so
  * authentication runs the real hash-and-lookup path. The token is generated
- * with the `rk_` prefix the console uses, so a suite that asserts on token
- * shape is asserting the deployed format.
+ * with a test-only prefix so it is recognizable in local test logs.
  */
 export async function createApiKey(
   client: PoolClient,
@@ -219,9 +218,9 @@ export async function createApiKey(
     `insert into api_keys
        (tenant_id, key_hash, key_mode, parent_key_id, issued_client_ip, label, scopes,
         requests_per_minute, daily_token_limit, monthly_token_limit, lifetime_token_budget,
-        max_concurrent_requests, model_access_mode, model_list, client_router_denylist,
+        max_concurrent_requests, model_prefix, model_access_mode, model_list, client_router_denylist,
         revoked_at, is_default)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
      returning id`,
     [
       options.tenantId,
@@ -236,6 +235,7 @@ export async function createApiKey(
       options.monthlyTokenLimit ?? null,
       options.lifetimeTokenBudget ?? null,
       options.maxConcurrentRequests ?? null,
+      options.modelPrefix ?? null,
       options.modelAccessMode ?? "whitelist",
       options.modelList === undefined ? null : JSON.stringify(options.modelList),
       options.clientRouterDenylist === undefined
@@ -330,8 +330,8 @@ export interface CreateWorldOptions {
  * only needs a value momentarily — because a gateway request runs on a
  * *different* pooled connection and would not see uncommitted rows. `cleanup`
  * deletes the tenant, and the schema's `on delete cascade` removes everything
- * that hangs off it, so teardown is one statement rather than a hand-ordered
- * list that drifts as tables are added.
+ * that hangs off it. Providers created without a tenant need their own tracked
+ * cleanup; deleting the tenant alone leaves those rows and their accounts behind.
  */
 export async function createWorld(options: CreateWorldOptions = {}): Promise<GatewayWorld> {
   const pool = await getTestPool();
@@ -359,6 +359,7 @@ export async function createWorld(options: CreateWorldOptions = {}): Promise<Gat
     });
     await client.query("COMMIT");
     const modelIds: string[] = [modelId, ...(options.extraModels ?? [])];
+    const providerIds = [providerId];
     /** Counter so `addProvider` ids stay distinct without a caller-supplied name. */
     let extraProviders = 0;
     return {
@@ -409,6 +410,7 @@ export async function createWorld(options: CreateWorldOptions = {}): Promise<Gat
             suffix: `p${extraProviders}`,
             ...(providerOptions.providerOptions ?? {}),
           });
+          providerIds.push(extraProviderId);
           extraProviders += 1;
           const extraModelId = providerOptions.modelId ?? modelId;
           await createModel(
@@ -437,7 +439,18 @@ export async function createWorld(options: CreateWorldOptions = {}): Promise<Gat
         // the rows behind. `getTestPool` returns the live pool or makes a new
         // one, so teardown always has a connection.
         const teardown = await getTestPool();
-        await teardown.query("delete from tenants where id = $1", [tenant.tenantId]);
+        const teardownClient = await teardown.connect();
+        try {
+          await teardownClient.query("BEGIN");
+          await teardownClient.query("delete from tenants where id = $1", [tenant.tenantId]);
+          await teardownClient.query("delete from providers where id = any($1::text[])", [providerIds]);
+          await teardownClient.query("COMMIT");
+        } catch (error) {
+          await teardownClient.query("ROLLBACK").catch(() => undefined);
+          throw error;
+        } finally {
+          teardownClient.release();
+        }
         invalidateApiKeyCache(key.id);
       },
     };

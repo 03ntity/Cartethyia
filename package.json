@@ -59,6 +59,7 @@
     "dev:visual-baseline": "bun run scripts/test/visual-baseline.ts",
     "build:binary": "bun run scripts/build/compile.ts",
     "test:backend": "bun run scripts/test/run.ts --scope backend",
+    "test:integration": "bun run scripts/test/run.ts --scope integration",
     "test-db:down": "docker compose -f docker-compose.test.yml down",
     "dashboard:dev": "bun run --cwd dashboard dev",
     "test-db:check": "bun run scripts/test/check-db.ts",

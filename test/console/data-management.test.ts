@@ -12,13 +12,14 @@
  * test overrides it through the same env var production uses rather than
  * pretending the two can be pointed apart.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, writeFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const TELEMETRY_DIR = await mkdtemp(join(tmpdir(), "carte-dm-events-"));
 const PAYLOAD_DIR = await mkdtemp(join(tmpdir(), "carte-dm-payload-"));
+const previousPayloadDir = process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR;
 process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR = PAYLOAD_DIR;
 
 const { createDataManagementOperations } = await import(
@@ -56,7 +57,13 @@ beforeEach(async () => {
   await clear();
 });
 
-afterEach(clear);
+afterAll(async () => {
+  await clear();
+  await rm(TELEMETRY_DIR, { recursive: true, force: true });
+  await rm(PAYLOAD_DIR, { recursive: true, force: true });
+  if (previousPayloadDir === undefined) delete process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR;
+  else process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR = previousPayloadDir;
+});
 
 describe("disk usage", () => {
   test("counts each category separately, not as one total", async () => {

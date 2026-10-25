@@ -17,32 +17,15 @@
 import { expect, test } from "bun:test";
 import { GatewayError } from "../../src/protocol/gateway-error";
 import { runAttemptLoop } from "../../src/transport/dispatch/attempt-loop";
-import type { ProxyRequestState } from "../../src/transport/request/state";
 import type { RouteCandidate } from "../../src/transport/routing/route-model";
-
-/** The minimum state `completeAttempt` reads on this path. */
-function stateFor(requestId: string): ProxyRequestState {
-  return {
-    requestId,
-    ingressBody: { model: "stub/model", messages: [] },
-    abortController: new AbortController(),
-    outcome: undefined,
-  } as unknown as ProxyRequestState;
-}
+import { attemptCandidate, attemptState } from "../helpers/attempt-loop";
 
 function candidate(id: string): RouteCandidate {
   return {
-    candidate_id: id,
-    provider_id: "stub",
+    ...attemptCandidate("stub", id),
     model_id: "stub-model",
     endpoint: "/v1/chat/completions",
-    capability_profile: null,
-    wire_family: "chat",
-    provider_account_id: null,
-    provider_account_label: null,
-    network_pool_ids: null,
-    model_prefix: null,
-  } as unknown as RouteCandidate;
+  };
 }
 
 /**
@@ -61,17 +44,17 @@ test("an exhausted, always-retryable attempt budget still records a terminal com
   process.env["CARTETHYIA_ROUTE_MAX_ATTEMPTS"] = "2";
   process.env["CARTETHYIA_FALLBACK_RETRY_BASE_MS"] = "0";
   try {
-    const state = stateFor("req-exhausted");
+    const state = attemptState("req-exhausted");
     let attempts = 0;
 
     const error = await runAttemptLoop<never, unknown>({
       state,
-      deps: { db: {} },
+      deps: { db: {} as never },
       leaseSource: {
         estimatedInputTokens: 10,
         estimatedOutputTokens: 0,
         routingEngine: { release: async () => undefined },
-      },
+      } as never,
       candidates: Array.from({ length: 12 }, (_unused, index) => candidate(`c${index}`)),
       tenantId: "tenant-1",
       strictPoolSelection: false,
@@ -83,7 +66,7 @@ test("an exhausted, always-retryable attempt budget still records a terminal com
       attempt: async () => {
         throw new Error("attempt must never run when prepare fails");
       },
-    } as never).catch((thrown: unknown) => thrown);
+    }).catch((thrown: unknown) => thrown);
 
     expect(error instanceof Error).toBe(true);
     expect(attempts).toBe(2);

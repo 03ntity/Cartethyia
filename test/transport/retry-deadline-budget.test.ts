@@ -17,61 +17,12 @@
 import { expect, test } from "bun:test";
 import { GatewayError } from "../../src/protocol/gateway-error";
 import { runAttemptLoop } from "../../src/transport/dispatch/attempt-loop";
-import type { ProxyRequestState } from "../../src/transport/request/state";
 import type { RouteCandidate } from "../../src/transport/routing/route-model";
-
-/** State whose deadline is `deadlineMs` from now; the guard reads `deadlineMs`. */
-function stateWithDeadline(deadlineMs: number): ProxyRequestState {
-  return {
-    requestId: "req-deadline-budget",
-    ingressBody: { model: "deepseek-v4.1-flash", messages: [] },
-    abortController: new AbortController(),
-    outcome: undefined,
-    startProviderFlight: () => undefined,
-    deadlineMs: Date.now() + deadlineMs,
-    startedAtMs: Date.now(),
-  } as unknown as ProxyRequestState;
-}
-
-function candidate(providerId: string, accountId: string): RouteCandidate {
-  return {
-    candidate_id: `${providerId}:${accountId}`,
-    provider_id: providerId,
-    model_id: "deepseek-v4.1-flash",
-    endpoint: `/v1/${providerId}`,
-    capability_profile: null,
-    wire_family: "chat",
-    provider_account_id: accountId,
-    provider_account_label: accountId,
-    network_pool_ids: null,
-    model_prefix: null,
-  } as unknown as RouteCandidate;
-}
+import { attemptCandidate as candidate, attemptLeaseSource, attemptState, prepareAttempt } from "../helpers/attempt-loop";
 
 /** Retryable, so failover would otherwise walk to the next candidate. */
 function timeout(): GatewayError {
   return new GatewayError("deadline_exceeded", 504, "request deadline exceeded", {}, "upstream");
-}
-
-function leaseSourceStub() {
-  return {
-    estimatedInputTokens: 10,
-    estimatedOutputTokens: 0,
-    admissionService: {
-      admit: async () => ({
-        commit: async () => undefined,
-        release: async () => undefined,
-        commitUsage: async () => undefined,
-      }),
-      release: async () => undefined,
-    },
-    routingEngine: {
-      acquire: async () => ({ lease_id: "lease-1" }),
-      reserve: async () => ({ lease_id: "lease-1" }),
-      release: async () => undefined,
-    },
-    plan: { requested_model: "deepseek-v4.1-flash" },
-  };
 }
 
 /**
@@ -87,20 +38,21 @@ async function runUntilExhausted(deadlineMs: number): Promise<{
   try {
     const seen: string[] = [];
     let thrown: unknown;
+    const candidates = [candidate("wb", "wb-1"), candidate("wb", "wb-2"), candidate("wb", "wb-3")];
     await runAttemptLoop<string, unknown>({
-      state: stateWithDeadline(deadlineMs),
-      deps: { db: {} },
-      leaseSource: leaseSourceStub(),
-      candidates: [candidate("wb", "wb-1"), candidate("wb", "wb-2"), candidate("wb", "wb-3")],
+      state: attemptState("req-deadline-budget", Date.now() + deadlineMs),
+      deps: { db: {} as never },
+      leaseSource: attemptLeaseSource(candidates, "deepseek-v4.1-flash"),
+      candidates,
       tenantId: "tenant-1",
       strictPoolSelection: false,
-      prepare: async () => ({ credential: {}, adapter: {} }),
+      prepare: prepareAttempt,
       attempt: async (context: { readonly candidate: RouteCandidate }) => {
         seen.push(context.candidate.provider_account_id ?? "");
         throw timeout();
       },
       exhaustedError: new GatewayError("accounts_unavailable", 503, "exhausted"),
-    } as never).catch((error: unknown) => {
+    }).catch((error: unknown) => {
       thrown = error;
     });
     return { attempted: seen, thrown };

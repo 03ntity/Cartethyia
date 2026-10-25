@@ -29,6 +29,7 @@ dbDescribe("remote request detail via API key", () => {
       expect(response.status).toBe(200);
     } finally {
       await gateway.close();
+      await world.cleanup();
     }
   });
 
@@ -44,6 +45,7 @@ dbDescribe("remote request detail via API key", () => {
       expect(response.status).toBe(403);
     } finally {
       await gateway.close();
+      await world.cleanup();
     }
   });
 
@@ -56,6 +58,7 @@ dbDescribe("remote request detail via API key", () => {
       expect(response.status).toBe(401);
     } finally {
       await gateway.close();
+      await world.cleanup();
     }
   });
 
@@ -72,6 +75,7 @@ dbDescribe("remote request detail via API key", () => {
       expect(response.status).toBe(200);
     } finally {
       await gateway.close();
+      await world.cleanup();
     }
   });
 });

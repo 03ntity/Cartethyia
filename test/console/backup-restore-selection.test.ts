@@ -14,17 +14,28 @@
  *   whole file, which is what the API did before selection existed, so an
  *   older client cannot silently get a partial restore.
  */
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { getDb } from "../../src/persistence/boot";
 import { BackupService } from "../../src/console/backup/service";
 import { exportBackup } from "../../src/console/backup/store";
-import { tablesForSection } from "../../src/console/backup/contracts";
+import { tablesForSection, type BackupPayload } from "../../src/console/backup/contracts";
 import { dbDescribe, requireDatabase } from "../helpers/database";
-import { createWorld } from "../helpers/fixtures";
+import { createWorld, type GatewayWorld } from "../helpers/fixtures";
 
 requireDatabase();
+
+const worlds: GatewayWorld[] = [];
+const targetTenantIds: string[] = [];
+
+afterEach(async () => {
+  const db = getDb();
+  for (const tenantId of targetTenantIds.splice(0)) {
+    await db.execute(sql`delete from tenants where id = ${tenantId}`);
+  }
+  for (const world of worlds.splice(0)) await world.cleanup();
+});
 
 /**
  * Creates the tenant a partial restore writes into.
@@ -52,20 +63,33 @@ async function ensureTenant(tenantId: string): Promise<void> {
  * database. A real migration never hits this — the receiving install is a
  * different database holding none of these ids.
  */
-async function dropSourceRows(tenantId: string): Promise<void> {
+async function dropSourceRows(tenantId: string, providerId: string): Promise<void> {
   const db = getDb();
+  await db.execute(sql`delete from models where provider_id = ${providerId}`);
   await db.execute(sql`delete from api_keys where tenant_id = ${tenantId}`);
   await db.execute(sql`delete from provider_accounts where tenant_id = ${tenantId}`);
+}
+
+async function backupWorld(): Promise<GatewayWorld> {
+  return createWorld();
+}
+
+/** Authored rows from other parallel worlds are not this restore's fixture. */
+function ownedProviderModels(payload: BackupPayload, providerId: string): void {
+  const models = payload.sections.config?.["models"];
+  if (models) {
+    payload.sections.config!["models"] = models.filter((row) => row["provider_id"] === providerId);
+  }
 }
 
 dbDescribe("restore selection", () => {
   test("only the selected tables are written", async () => {
     const db = getDb();
-    const world = await createWorld();
-    await world.addAccount({ tenantId: world.tenantId, credential: "sk-a", credentialKind: "api_key" });
-
+    const world = await backupWorld();
+    worlds.push(world);
     const { payload } = await exportBackup(db, tablesForSection("config"), world.tenantId);
-    await dropSourceRows(world.tenantId);
+    ownedProviderModels(payload, world.providerId);
+    await dropSourceRows(world.tenantId, world.providerId);
     const shape = payload as unknown as {
       readonly sections: { readonly config: Record<string, readonly unknown[]> };
     };
@@ -74,6 +98,7 @@ dbDescribe("restore selection", () => {
 
     const service = new BackupService({ db, verifyPassword: async () => true });
     const tenantId = randomUUID();
+    targetTenantIds.push(tenantId);
     await ensureTenant(tenantId);
     // Exactly one table, and one the file actually carries.
     const only = present[0]!;
@@ -92,13 +117,14 @@ dbDescribe("restore selection", () => {
     // The default, and the pre-existing behavior: an API client that knows
     // nothing about selection must still get a complete restore.
     const db = getDb();
-    const world = await createWorld();
-    await world.addAccount({ tenantId: world.tenantId, credential: "sk-b", credentialKind: "api_key" });
-
+    const world = await backupWorld();
+    worlds.push(world);
     const { payload } = await exportBackup(db, tablesForSection("config"), world.tenantId);
-    await dropSourceRows(world.tenantId);
+    ownedProviderModels(payload, world.providerId);
+    await dropSourceRows(world.tenantId, world.providerId);
     const service = new BackupService({ db, verifyPassword: async () => true });
     const tenantId = randomUUID();
+    targetTenantIds.push(tenantId);
     await ensureTenant(tenantId);
     const result = await service.restore("pw", payload, tenantId);
 
@@ -116,11 +142,11 @@ dbDescribe("restore selection", () => {
     // validated as names only. Refusing to restore anything over one stale
     // name would be worse than ignoring it.
     const db = getDb();
-    const world = await createWorld();
-    await world.addAccount({ tenantId: world.tenantId, credential: "sk-c", credentialKind: "api_key" });
-
+    const world = await backupWorld();
+    worlds.push(world);
     const { payload } = await exportBackup(db, tablesForSection("config"), world.tenantId);
-    await dropSourceRows(world.tenantId);
+    ownedProviderModels(payload, world.providerId);
+    await dropSourceRows(world.tenantId, world.providerId);
     const service = new BackupService({ db, verifyPassword: async () => true });
     // A table the file actually carries rows for, so "restored" is a real
     // count and not the zero an empty table would legitimately report.
@@ -129,6 +155,7 @@ dbDescribe("restore selection", () => {
     const real = Object.entries(config).find(([, rows]) => rows.length > 0)?.[0]!;
 
     const tenantId = randomUUID();
+    targetTenantIds.push(tenantId);
     await ensureTenant(tenantId);
     const result = await service.restore("pw", payload, tenantId, {
       tables: [real, "table_that_does_not_exist"],
@@ -141,13 +168,14 @@ dbDescribe("restore selection", () => {
     // `[]` is what "Select none" would send if it got through; the guard is
     // that it must not be read as "restore nothing" and silently no-op.
     const db = getDb();
-    const world = await createWorld();
-    await world.addAccount({ tenantId: world.tenantId, credential: "sk-d", credentialKind: "api_key" });
-
+    const world = await backupWorld();
+    worlds.push(world);
     const { payload } = await exportBackup(db, tablesForSection("config"), world.tenantId);
-    await dropSourceRows(world.tenantId);
+    ownedProviderModels(payload, world.providerId);
+    await dropSourceRows(world.tenantId, world.providerId);
     const service = new BackupService({ db, verifyPassword: async () => true });
     const tenantId = randomUUID();
+    targetTenantIds.push(tenantId);
     await ensureTenant(tenantId);
     const result = await service.restore("pw", payload, tenantId, { tables: [] });
     expect(Object.keys(result.restored).length).toBeGreaterThan(0);

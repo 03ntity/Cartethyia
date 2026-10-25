@@ -5,6 +5,9 @@ import { resolve } from "node:path";
 const sockets = new Set<Socket>();
 let blocker5173: Server | null = null;
 let blocker1931: Server | null = null;
+const previousPorts = Object.fromEntries(
+  ["DASHBOARD_PORT", "VITE_PORT", "VITE_BACKEND_URL", "PORT"].map((key) => [key, process.env[key]]),
+);
 
 afterEach(async () => {
   for (const s of sockets) s.destroy();
@@ -17,10 +20,10 @@ afterEach(async () => {
     await new Promise<void>((r) => blocker1931!.close(() => r()));
     blocker1931 = null;
   }
-  delete process.env.DASHBOARD_PORT;
-  delete process.env.VITE_PORT;
-  delete process.env.VITE_BACKEND_URL;
-  delete process.env.PORT;
+  for (const [key, value] of Object.entries(previousPorts)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
 });
 
 function occupy(port: number): Promise<Server> {

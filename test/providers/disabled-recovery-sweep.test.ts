@@ -37,12 +37,14 @@ let sqlite: SqliteDatabase | undefined;
 let db: CartethyiaDatabase | undefined;
 let providerId: string | undefined;
 let previousMode: string | undefined;
+let previousRecovery: string | undefined;
 
 beforeEach(async () => {
   // The sweep's per-model pruning picks its SQL from `resolveDbMode()`, so a
   // file-backed fixture needs the mode to name the backend it is actually
   // writing to. This suite pins its own mode so it does not depend on local env.
   previousMode = process.env.CARTETHYIA_DB_MODE;
+  previousRecovery = process.env.CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS;
   process.env.CARTETHYIA_DB_MODE = "lite";
   dir = mkdtempSync(join(tmpdir(), "cartethyia-disabled-recovery-"));
   sqlite = createSqliteDatabase(join(dir, "cartethyia.sqlite"));
@@ -72,6 +74,9 @@ afterEach(() => {
   providerId = undefined;
   if (previousMode === undefined) delete process.env.CARTETHYIA_DB_MODE;
   else process.env.CARTETHYIA_DB_MODE = previousMode;
+  if (previousRecovery === undefined) delete process.env.CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS;
+  else process.env.CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS = previousRecovery;
+  resetCooldownCacheForTests();
 });
 
 /** One account row in a given health state, carrying `cooldownUntil`. */
