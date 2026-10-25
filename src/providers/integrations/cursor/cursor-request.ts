@@ -17,6 +17,17 @@
 import type { CanonicalMessage, CanonicalRequest, ContentPart, ToolDefinition } from "../../../protocol/canonical-model";
 import { encodeMessage } from "./protocol/messages";
 import { encodeJsonAsValue } from "./protocol/struct";
+// Inbound half of the tool surface. `toolDescriptorsFor` below is the outbound
+// half — what this request advertises. Together they are the only two places a
+// Cursor tool is named, so both live here rather than one in a protocol module
+// a caller has to discover separately.
+export {
+  CURSOR_TOOL_VARIANTS,
+  CursorToolCallProvenance,
+  cursorNativeToolDeclaration,
+  cursorToolArm,
+  decodeCursorNativeToolCall,
+} from "./protocol/tool-canonical";
 
 /**
  * MCP namespace Cartethyia advertises client tools under.
