@@ -142,11 +142,20 @@ export class RedisAdmissionCounterStore implements AdmissionCounterStore {
    * Drops every counter for one key (revocation). Active in-flight leases
    * settle through the release script first so their concurrency slots do
    * not leak; remaining lease rows expire via TTL. Best-effort by contract.
+   *
+   * Bounded per invocation: a keyspace that has grown for months cannot turn
+   * one revocation into an unbounded walk — lease-scan pages, leases released,
+   * and counter-scan pages each stop cleanly at their budget, and the rest
+   * ages out via TTL (the fallback this contract already relies on). A later
+   * revocation or the lease sweeper picks up what a budgeted pass left.
    */
   async purge(apiKeyId: string): Promise<void> {
     try {
+      let leaseScanPages = 0;
+      let leasesReleased = 0;
       let cursor = "0";
       do {
+        if (leaseScanPages >= MAX_PURGE_LEASE_SCAN_PAGES) break;
         const [nextCursor, keys] = await this.redis.scan(
           cursor,
           "MATCH",
@@ -155,6 +164,7 @@ export class RedisAdmissionCounterStore implements AdmissionCounterStore {
           100,
         );
         cursor = String(nextCursor);
+        leaseScanPages += 1;
         const leaseKeys = keys as string[];
         if (leaseKeys.length === 0) continue;
         // One pipeline for the whole scan page instead of an HGET per lease:
@@ -172,15 +182,22 @@ export class RedisAdmissionCounterStore implements AdmissionCounterStore {
           return Array.isArray(entry) && entry[1] === apiKeyId;
         });
         for (const leaseKey of owned) {
+          if (leasesReleased >= MAX_PURGE_LEASES_RELEASED) break;
           await redisEvalNumber(this.redis, RELEASE_SCRIPT, 1, leaseKey, apiKeyId).catch(
             () => -1,
           );
+          leasesReleased += 1;
         }
+        // Releasing is the point of the lease phase; once its budget is spent
+        // there is nothing more this pass can usefully do with further pages.
+        if (leasesReleased >= MAX_PURGE_LEASES_RELEASED) break;
       } while (cursor !== "0");
+      let counterScanPages = 0;
       let counterCursor = "0";
       const patterns = [`admission:*:${apiKeyId}`, `admission:*:${apiKeyId}:*`];
       for (const pattern of patterns) {
         do {
+          if (counterScanPages >= MAX_PURGE_COUNTER_SCAN_PAGES) break;
           const [nextCursor, keys] = await this.redis.scan(
             counterCursor,
             "MATCH",
@@ -189,14 +206,26 @@ export class RedisAdmissionCounterStore implements AdmissionCounterStore {
             100,
           );
           counterCursor = String(nextCursor);
+          counterScanPages += 1;
           if ((keys as string[]).length > 0) await this.redis.del(...(keys as string[]));
         } while (counterCursor !== "0");
+        if (counterScanPages >= MAX_PURGE_COUNTER_SCAN_PAGES) break;
       }
     } catch {
       // Best-effort: revocation already succeeded; stale counters expire via TTL.
     }
   }
 }
+
+/**
+ * Per-invocation purge budgets. Chosen so one full-budgeted pass still costs
+ * well under a second of Redis time (hundreds of small commands), while a
+ * normal revocation — tens of leases, a handful of counters — never notices
+ * them. Mirrors the lease sweeper's own bounded-pass philosophy.
+ */
+export const MAX_PURGE_LEASE_SCAN_PAGES = 40;
+export const MAX_PURGE_LEASES_RELEASED = 100;
+export const MAX_PURGE_COUNTER_SCAN_PAGES = 40;
 
 /**
  * Releases a lease identified only by its Redis key (used by the sweeper).
