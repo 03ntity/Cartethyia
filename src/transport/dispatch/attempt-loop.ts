@@ -170,9 +170,14 @@ export async function runAttemptLoop<TResult, TAdapter>(
   // sink reaches the payload store. When the terminal attempt fails before it
   // fires an outbound request (lease/acquire/prepare threw, or failover
   // exhausted), its sink is empty and the drawer reads "—" for a request that
-  // DID reach an upstream on an earlier attempt. Keep the fired exchanges so
-  // the terminal completion can fall back to the last one that has a request.
-  const firedCaptures: ProviderExchangeCapture[] = [];
+  // DID reach an upstream on an earlier attempt. Only the LAST fired exchange
+  // is ever consulted — every consumer below falls back to the most recent
+  // capture that has a request — so this holds one reference, not the whole
+  // history: a request walking N attempts used to pin N provider exchanges
+  // (each holding its bounded provider tee) alive until the loop returned.
+  // Earlier attempts' captures are released as each new attempt fires; the
+  // payload store's own bounded writer is what bounds anything persisted.
+  let lastFiredCapture: ProviderExchangeCapture | undefined;
   const maxAttempts = resolveRouteMaxAttempts();
   // One combo member must not be able to spend the whole budget.
   //
@@ -222,9 +227,10 @@ export async function runAttemptLoop<TResult, TAdapter>(
       if (remainingMs < MIN_RETRY_BUDGET_MS) {
         if (lastError !== undefined && !state.completed) {
           const terminal = classifyTerminalOutcome(lastError, state.abortController.signal);
-          const lastFired = [...firedCaptures]
-            .reverse()
-            .find((capture) => capture.request !== null);
+          const lastFired =
+            lastFiredCapture?.request !== null && lastFiredCapture !== undefined
+              ? lastFiredCapture
+              : undefined;
           await completeAttempt(state, {
             status: terminal.status,
             providerId: candidate.provider_id,
@@ -358,7 +364,9 @@ export async function runAttemptLoop<TResult, TAdapter>(
         cancelled ||
         !isRetryableFailure(error) ||
         (index === candidates.length - 1 && !poolScopedFailure);
-      if (providerCapture.request !== null) firedCaptures.push(providerCapture);
+      // Track only the most recent fired exchange; the array this replaced
+      // accumulated every attempt's capture until the loop returned.
+      if (providerCapture.request !== null) lastFiredCapture = providerCapture;
       // The payload store only keeps the terminal attempt's exchange. When the
       // terminal attempt never fired (failover walked past the attempt that
       // did, or prepare/lease threw first), fall back to the last fired
@@ -367,8 +375,7 @@ export async function runAttemptLoop<TResult, TAdapter>(
       const terminalCapture =
         providerCapture.request !== null
           ? providerCapture
-          : [...firedCaptures].reverse().find((capture) => capture.request !== null) ??
-            providerCapture;
+          : lastFiredCapture ?? providerCapture;
       await completeAttempt(state, {
         status: terminal.status,
         providerId: candidate.provider_id,
@@ -495,9 +502,10 @@ export async function runAttemptLoop<TResult, TAdapter>(
   if (!state.completed) {
     const terminal = classifyTerminalOutcome(lastError, state.abortController.signal);
     const lastCandidate = candidates[Math.min(index, candidates.length - 1)];
-    const terminalCapture = [...firedCaptures]
-      .reverse()
-      .find((capture) => capture.request !== null);
+    const terminalCapture =
+      lastFiredCapture?.request !== null && lastFiredCapture !== undefined
+        ? lastFiredCapture
+        : undefined;
     await completeAttempt(state, {
       status: terminal.status,
       providerId: lastCandidate?.provider_id ?? "",
