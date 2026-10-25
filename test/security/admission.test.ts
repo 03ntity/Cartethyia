@@ -1121,3 +1121,67 @@ describe("ApiKeyAdmissionService", () => {
     expect(await store.getConcurrent("key-a")).toBe(2);
   });
 });
+
+/**
+ * Amortized RPM pruning (queue + head index).
+ *
+ * `pruneRpm` used to rewrite the whole timestamp array on every request.
+ * The queue representation advances a head index and compacts only when the
+ * consumed prefix exceeds half the array. These tests pin the semantics the
+ * limit depends on — many windows advancing, exact boundary, and that a
+ * repeated prune at the same cutoff does no further work — using fake clock
+ * values exclusively (no wall-clock assertions).
+ */
+describe("InMemoryAdmissionCounterStore — amortized rpm pruning", () => {
+  test("advancing many windows forgets old requests and keeps recent ones", async () => {
+    const store = new InMemoryAdmissionCounterStore({ windowMs: 60_000 });
+    // Two requests per window for 50 windows, limit 2: each reserve prunes
+    // everything at or before its cutoff, so the previous window's pair (which
+    // sits exactly one window old) is forgotten and the limit never trips.
+    for (let i = 0; i < 50; i += 1) {
+      const now = NOW + i * 60_000;
+      await store.reserve(reserveRequest({ reservationId: `w-a-${i}`, now, rpmLimit: 2 }));
+      await store.reserve(reserveRequest({ reservationId: `w-b-${i}`, now, rpmLimit: 2 }));
+    }
+    // The final window holds exactly its two admitted requests; a third in
+    // the same window is over the limit and must be rejected.
+    await expect(
+      store.reserve(
+        reserveRequest({ reservationId: "w-overflow", now: NOW + 49 * 60_000, rpmLimit: 2 }),
+      ),
+    ).rejects.toBeInstanceOf(GatewayError);
+    // One window later, both are forgotten again: a fresh pair is admitted.
+    const later = NOW + 50 * 60_000;
+    await store.reserve(reserveRequest({ reservationId: "w-late-a", now: later, rpmLimit: 2 }));
+    await store.reserve(reserveRequest({ reservationId: "w-late-b", now: later, rpmLimit: 2 }));
+  });
+
+  test("the queue survives prune-to-empty and still counts the new request", async () => {
+    // pruneRpm deletes an emptied bucket and hands back a fresh queue; the
+    // admission must still land in the live queue, not a detached one. This is
+    // the regression where r-2's timestamp vanished and r-3 was admitted past
+    // a limit of 1.
+    const store = new InMemoryAdmissionCounterStore({ windowMs: 60_000 });
+    await store.reserve(reserveRequest({ reservationId: "q-1", now: NOW, rpmLimit: 1 }));
+    await store.reserve(reserveRequest({ reservationId: "q-2", now: NOW + 60_000, rpmLimit: 1 }));
+    await expect(
+      store.reserve(reserveRequest({ reservationId: "q-3", now: NOW + 60_000, rpmLimit: 1 })),
+    ).rejects.toBeInstanceOf(GatewayError);
+  });
+
+  test("requests sharing one timestamp share one queue position", async () => {
+    // Concurrency-keyed RPM (several keys mapped to one bucket) still counts
+    // each request: same now, distinct reservation ids, limit trips at 3.
+    const store = new InMemoryAdmissionCounterStore({ windowMs: 60_000 });
+    const at = (id: string) =>
+      reserveRequest({
+        reservationId: id,
+        now: NOW,
+        rpmLimit: 2,
+        rpmConcurrencyKeyId: "family-1",
+      });
+    await store.reserve(at("s-1"));
+    await store.reserve(at("s-2"));
+    await expect(store.reserve(at("s-3"))).rejects.toBeInstanceOf(GatewayError);
+  });
+});

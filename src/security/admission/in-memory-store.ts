@@ -36,9 +36,57 @@ const TERMINAL_RESERVATION_CAP = 10_000;
 const COUNTER_MAP_CAP = 20_000;
 
 
+/**
+ * Per-key RPM timestamp queue.
+ *
+ * Entries are appended in nondecreasing `now` order (requests are admitted
+ * under the store's exclusive gate, each stamped with its own `now`), so the
+ * window prefix is monotone: pruning advances a head index past every entry
+ * `<= cutoff` without copying the surviving suffix, and the array is compacted
+ * only when the consumed prefix exceeds half of it. Per request this is O(1)
+ * amortized instead of the previous per-request full-array rewrite.
+ *
+ * Exposed surface mirrors what the reserve path needs: `length` (window count
+ * for the limit check), `push` (append on admit), and `prune` (advance the
+ * window). `purge()` drops the whole key from the outer map.
+ */
+class RpmTimestampQueue {
+  private entries: number[] = [];
+  private head = 0;
+
+  get length(): number {
+    return this.entries.length - this.head;
+  }
+
+  push(now: number): void {
+    this.entries.push(now);
+  }
+
+  /**
+   * Drops every entry `<= cutoff`. An entry exactly one window old is expired
+   * (the existing exact-boundary semantics: `cutoff = now - window`, so an
+   * entry at `now - window` equals the cutoff and is dropped).
+   */
+  prune(now: number, windowMs: number): void {
+    const cutoff = now - windowMs;
+    while (this.head < this.entries.length && this.entries[this.head]! <= cutoff) {
+      this.head += 1;
+    }
+    if (this.head > this.entries.length / 2) {
+      this.entries = this.entries.slice(this.head);
+      this.head = 0;
+    }
+  }
+
+  /** True when no live entries remain — the caller deletes the bucket. */
+  isEmpty(): boolean {
+    return this.length === 0;
+  }
+}
+
 /** Atomic single-process admission store used by tests and single-process development. */
 export class InMemoryAdmissionCounterStore implements AdmissionCounterStore {
-  private readonly rpmTimestamps = new Map<string, number[]>();
+  private readonly rpmTimestamps = new Map<string, RpmTimestampQueue>();
   private readonly daily = new Map<string, number>();
   private readonly monthly = new Map<string, number>();
   private readonly lifetime = new Map<string, number>();
@@ -276,7 +324,7 @@ export class InMemoryAdmissionCounterStore implements AdmissionCounterStore {
   }
 
   /** Caps a bucketed counter map; oldest-inserted buckets evicted first. */
-  private evictCounter(store: Map<string, number> | Map<string, number[]>): void {
+  private evictCounter(store: Map<string, number> | Map<string, RpmTimestampQueue>): void {
     if (store.size < COUNTER_MAP_CAP) return;
     let toEvict = store.size - COUNTER_MAP_CAP + 1;
     for (const key of store.keys()) {
@@ -316,21 +364,26 @@ export class InMemoryAdmissionCounterStore implements AdmissionCounterStore {
   private value(store: ReadonlyMap<string, number>, key: string): number {
     return store.get(key) ?? 0;
   }
-  private pruneRpm(apiKeyId: string, now: number): number[] {
-    const cutoff = now - (this.options.windowMs ?? 60_000);
+  private pruneRpm(apiKeyId: string, now: number): RpmTimestampQueue {
     const existing = this.rpmTimestamps.get(apiKeyId);
     if (!existing) {
-      const fresh: number[] = [];
+      const fresh = new RpmTimestampQueue();
       this.rpmTimestamps.set(apiKeyId, fresh);
       this.evictCounter(this.rpmTimestamps);
       return fresh;
     }
-    // In-place compaction: `.filter` allocated a new array per request.
-    let write = 0;
-    for (let read = 0; read < existing.length; read += 1) {
-      if (existing[read]! > cutoff) existing[write++] = existing[read]!;
+    // Amortized: advances the head past expired entries; compaction of the
+    // consumed prefix happens only when it exceeds half the array.
+    existing.prune(now, this.options.windowMs ?? 60_000);
+    if (existing.isEmpty()) {
+      // Drop the emptied bucket so the map cannot pin one dead queue per key
+      // the process ever served, then hand the caller a fresh queue — the
+      // caller pushes this request's timestamp into whatever it gets back, and
+      // pushing into the detached object would silently drop the admission.
+      const fresh = new RpmTimestampQueue();
+      this.rpmTimestamps.set(apiKeyId, fresh);
+      return fresh;
     }
-    existing.length = write;
     return existing;
   }
   private requireReservation(
