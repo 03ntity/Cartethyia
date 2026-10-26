@@ -148,6 +148,31 @@ function model(overrides: Partial<ModelMarket> = {}): ModelMarket {
 }
 
 describe("null handling", () => {
+  test("per-model health is keyed by id, not slug", () => {
+    // `/api/status` returns `id` (`ag/claude-opus-4-6-thinking`), not `slug`.
+    // Reading `slug` matched nothing and every model reported a null success
+    // rate, which the UI shows as "unknown" and sorts last.
+    const merged = mergeModelHealth([model({ id: "ag/claude-opus-4-6-thinking" })], [
+      { id: "ag/claude-opus-4-6-thinking", successRatePct: 100, avgTtftMs: 4198, avgTps: 27.2 },
+    ]);
+    expect(merged[0]?.health.successRatePct).toBe(100);
+    expect(merged[0]?.health.avgTtftMs).toBe(4198);
+    expect(merged[0]?.health.avgTps).toBe(27.2);
+  });
+
+  test("slug is still honoured as a fallback", () => {
+    const merged = mergeModelHealth([model({ id: "cc/claude-opus-5-5" })], [
+      { slug: "cc/claude-opus-5-5", successRatePct: 97.5 },
+    ]);
+    expect(merged[0]?.health.successRatePct).toBe(97.5);
+  });
+
+  test("a model absent from status keeps a null rate", () => {
+    // Unverified, not failing.
+    const merged = mergeModelHealth([model()], [{ id: "other/model", successRatePct: 100 }]);
+    expect(merged[0]?.health.successRatePct).toBeNull();
+  });
+
   test("a null lastRate stays null, never zero", () => {
     const merged = mergeMarketPrices([model()], [{ slug: "cc/claude-opus-5-5", lastRate: null }]);
     expect(merged[0]?.lastRate).toBeNull();

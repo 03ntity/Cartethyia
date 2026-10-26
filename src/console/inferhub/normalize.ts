@@ -292,7 +292,11 @@ export function mergeModelHealth(
 ): readonly ModelMarket[] {
   const byId = new Map<string, RawStatusModel>();
   for (const entry of status) {
-    const slug = str(entry.slug);
+    // `/api/status` keys per-model health by `id` (`ag/claude-opus-4-6-thinking`),
+    // not `slug`. Reading `slug` matched nothing, so every model reported a null
+    // success rate — which the UI renders as "unknown" and sorts last, making
+    // the quality ranking useless. `slug` is kept as a fallback.
+    const slug = str(entry.id) ?? str(entry.slug);
     if (slug !== null) byId.set(slug, entry);
   }
   return models.map((model) => {

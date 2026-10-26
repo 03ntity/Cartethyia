@@ -159,6 +159,8 @@ export interface RawUpstreamCard {
 
 /** `GET /api/status` — per-model health and per-family state. */
 export interface RawStatusModel {
+  /** The full `prefix/model` key. `slug` is the fallback for older payloads. */
+  readonly id?: unknown;
   readonly slug?: unknown;
   readonly successRatePct?: unknown;
   readonly avgTtftMs?: unknown;
