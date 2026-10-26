@@ -410,6 +410,13 @@ export async function dispatchStreamingAttempt(input: StreamingDispatchInput): P
             }
             sawUpstreamActivity = true;
             if (pipeline.enqueueEvent(result.value, controller)) return;
+            // The guard terminated the stream early: stop consuming. Pulling
+            // on would keep the runaway upstream alive and bill tokens the
+            // client was already told are not coming.
+            if (pipeline.loopDetected) {
+              await finalizer.finalizeStream(controller);
+              return;
+            }
           }
         } catch (err) {
           finalizer.clearStallWatchdog();

@@ -39,15 +39,40 @@ const CLOSE_TAGS = ["</thinking>", "</think>"] as const;
  * Both case variants pass through: `<Think>` and `<THINK>` survived everyone's
  * normalizer long enough for them not to be the leak this closes.
  */
+/**
+ * Removes visible thinking tags, leaving any that sit inside a code span or
+ * fence alone.
+ *
+ * A tag inside backticks is the *subject* of the answer — documentation or a
+ * code sample showing the tag — not markup the upstream leaked, so stripping it
+ * would silently rewrite the answer.
+ */
 export function stripThinkingTags(value: string): string {
   if (!value.includes("<")) return value;
-  // Both the open-close pair and a stray marker on its own: an upstream that
-  // dropped the opening tag before `reasoning_content` was committed still
-  // leaves the closing one behind, and the lone tag reads just as badly to the
-  // client as a paired one.
-  return value
-    .replace(/<think(?:ing)?\b[^>]*>/g, "")
-    .replace(/<\/think(?:ing)?\s*>/g, "");
+  const pattern = /<think(?:ing)?\b[^>]*>|<\/think(?:ing)?\s*>|`+/g;
+  let out = "";
+  let last = 0;
+  let ticks = 0;
+  for (const match of value.matchAll(pattern)) {
+    const text = match[0];
+    const index = match.index ?? 0;
+    if (text.startsWith("`")) {
+      // A fence and an inline span are both just "inside code" here: the
+      // distinguishing case (a newline closing an unterminated span) cannot
+      // affect a tag already indexed in a settled string.
+      if (ticks === 0) {
+        ticks = text.length;
+      } else if (text.length === ticks) {
+        ticks = 0;
+      }
+      continue;
+    }
+    // Inside code: keep the tag verbatim.
+    if (ticks > 0) continue;
+    out += value.slice(last, index);
+    last = index + text.length;
+  }
+  return out + value.slice(last);
 }
 
 /** The longest suffix of `text` that is a proper prefix of any tag. */
@@ -74,6 +99,14 @@ export interface ThinkSplit {
   readonly reasoning: string;
 }
 
+/** A tag match plus the code state at the match, so the caller commits it. */
+interface TagMatch {
+  readonly index: number;
+  readonly length: number;
+  readonly codeTicks: number;
+  readonly codeFenced: boolean;
+}
+
 /**
  * Splits one upstream text chunk into answer text and reasoning text.
  *
@@ -83,6 +116,14 @@ export interface ThinkSplit {
 export class MimoThinkSplitter {
   #buffer = "";
   #inReasoning = false;
+  /** Backtick run that opened the code span/fence we are inside; 0 when not in
+   *  code. A tag inside a code span is the *subject* of the answer — a doc or a
+   *  code sample mentioning `<think>` — not a delimiter, so it must survive
+   *  verbatim instead of splitting the stream. */
+  #codeTicks = 0;
+  /** Whether `#codeTicks` opened a fenced block (closes on its own line) rather
+   *  than an inline span. */
+  #codeFenced = false;
 
   /** Feeds a chunk; returns the text/reasoning split for everything settled. */
   push(chunk: string): ThinkSplit {
@@ -94,14 +135,14 @@ export class MimoThinkSplitter {
       if (!this.#inReasoning) {
         const opened = this.#findOpen();
         if (opened === undefined) break;
-        text += this.#buffer.slice(0, opened.index);
+        text += this.#consumeUpTo(opened);
         this.#buffer = this.#buffer.slice(opened.index + opened.length);
         this.#inReasoning = true;
         continue;
       }
       const closed = this.#findClose();
       if (closed === undefined) break;
-      reasoning += this.#buffer.slice(0, closed.index);
+      reasoning += this.#consumeUpTo(closed);
       this.#buffer = this.#buffer.slice(closed.index + closed.length);
       this.#inReasoning = false;
     }
@@ -125,29 +166,64 @@ export class MimoThinkSplitter {
   flush(): ThinkSplit {
     const rest = this.#buffer;
     this.#buffer = "";
+    this.#codeTicks = 0;
+    this.#codeFenced = false;
     return this.#inReasoning
       ? { text: "", reasoning: rest }
       : { text: stripThinkingTags(rest), reasoning: "" };
   }
 
-  #findOpen(): { index: number; length: number } | undefined {
-    let best: { index: number; length: number } | undefined;
-    for (const tag of OPEN_TAGS) {
-      const index = this.#buffer.indexOf(tag);
-      if (index === -1) continue;
-      if (best === undefined || index < best.index) best = { index, length: tag.length };
-    }
-    return best;
+  /** Returns the text before a tag and commits the code state at it. */
+  #consumeUpTo(match: TagMatch): string {
+    this.#codeTicks = match.codeTicks;
+    this.#codeFenced = match.codeFenced;
+    return this.#buffer.slice(0, match.index);
   }
 
-  #findClose(): { index: number; length: number } | undefined {
-    let best: { index: number; length: number } | undefined;
-    for (const tag of CLOSE_TAGS) {
-      const index = this.#buffer.indexOf(tag);
-      if (index === -1) continue;
-      if (best === undefined || index < best.index) best = { index, length: tag.length };
+  #findOpen(): TagMatch | undefined {
+    return this.#findTag(OPEN_TAGS);
+  }
+
+  #findClose(): TagMatch | undefined {
+    return this.#findTag(CLOSE_TAGS);
+  }
+
+  /**
+   * The earliest occurrence of any of `tags` that is *not* inside a code span
+   * or fence, scanning left to right so code state is tracked exactly once per
+   * position. Returns the match and the code state at it, so `push` can commit
+   * that state when it consumes the tag.
+   */
+  #findTag(tags: readonly string[]): TagMatch | undefined {
+    const buffer = this.#buffer;
+    let ticks = this.#codeTicks;
+    let fenced = this.#codeFenced;
+    for (let i = 0; i < buffer.length; i++) {
+      const char = buffer[i];
+      if (char === "`") {
+        let run = 1;
+        while (buffer[i + run] === "`") run++;
+        if (ticks === 0) {
+          ticks = run;
+          // Three or more backticks open a fence rather than an inline span.
+          fenced = run >= 3;
+        } else if (run === ticks) {
+          ticks = 0;
+          fenced = false;
+        }
+        i += run - 1;
+        continue;
+      }
+      // A newline closes an inline span that never closed on its own line; a
+      // fence runs to a closing line instead.
+      if (char === "\n" && ticks > 0 && !fenced) ticks = 0;
+      if (char !== "<" || ticks > 0) continue;
+      for (const tag of tags) {
+        if (!buffer.startsWith(tag, i)) continue;
+        return { index: i, length: tag.length, codeTicks: ticks, codeFenced: fenced };
+      }
     }
-    return best;
+    return undefined;
   }
 }
 

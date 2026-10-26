@@ -1,6 +1,7 @@
 import type { CanonicalEvent, CanonicalStopReason } from "../../../protocol/canonical-model";
 import { jsonrepair } from "jsonrepair";
 import { reasoningSummaryIdentity, reasoningSummarySeparator, type ReasoningSummaryIdentity } from "../reasoning-summary";
+import { reasoningTextOf } from "../../../protocol/reasoning-text";
 import { eventText } from "../adapters";
 import { isRecord } from "../../../protocol/codecs";
 import {
@@ -113,9 +114,7 @@ export function eventAudio(event: CanonicalEvent): Record<string, unknown> | und
 
 export function eventReasoningText(event: CanonicalEvent): string | undefined {
   if (event.type !== "content_delta" || event.content.kind !== "reasoning") return undefined;
-  if (event.content.opaque === true) return undefined;
-  if (typeof event.content.payload === "string") return event.content.payload;
-  return typeof event.content.summary === "string" ? event.content.summary : undefined;
+  return reasoningTextOf(event.content);
 }
 
 function mergedReasoningText(events: readonly CanonicalEvent[]): string {

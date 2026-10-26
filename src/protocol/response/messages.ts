@@ -92,8 +92,12 @@ export function parseClaudeContent(value: unknown, isOAuth = false): ContentPart
     const thinking = stringValue(value.thinking) ? value.thinking : "";
     return {
       kind: "reasoning",
+      // `thinking` is the readable reasoning stream, not a digest of itself.
+      // Putting it in both `payload` and `summary` made the Responses encoder
+      // emit the same text twice — once as `reasoning_text` and again as
+      // `reasoning_summary_text` — the same bug already fixed on the Codex
+      // surface (see `reasoningEvent` in `response/codex.ts`).
       payload: thinking,
-      summary: thinking,
       ...(stringValue(value.signature) ? { signature: value.signature } : {}),
     };
   }
@@ -375,7 +379,6 @@ function streamEventToCanonical(
           content: {
             kind: "reasoning",
             payload: delta.thinking,
-            summary: delta.thinking,
           },
         });
       }

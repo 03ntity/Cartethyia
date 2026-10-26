@@ -258,6 +258,10 @@ export async function* decodeChatSseStream(
   // Single emission ledger: one entry per logical call.
   const ledger = createToolEmitLedger();
   const think = new MimoThinkSplitter();
+  // Separate splitter for the reasoning channel: `reasoning_content` is its own
+  // stream, and interleaving it into the answer splitter would let a tag in one
+  // channel swallow the other's text.
+  const reasoningThink = new MimoThinkSplitter();
   const declaredToolNames = declaredToolNamesForRequest(request);
   const callableToolNames = callableToolNamesForRequest(request);
   const contentMarkup =
@@ -344,13 +348,22 @@ export async function* decodeChatSseStream(
         const reasoningMarkupResult =
           typeof reasoningRaw === "string" ? reasoningMarkup?.push(reasoningRaw) : undefined;
         // Strip stray `<think>` tags the upstream double-wrapped inside its own
-        // reasoning stream (buddy's hy4-preview-f leaks them per-delta). Done
-        // per delta rather than once at the end because an open-ended tag that
-        // spans multiple deltas is a splitter job, not this one.
-        const reasoningText =
+        // reasoning stream (buddy's hy4-preview-f leaks them per-delta). This
+        // is the splitter's job, not `stripThinkingTags`'s: a stateless strip
+        // cannot see a tag split across two deltas, so `"<thi"` was emitted
+        // verbatim and only the following `</think>` removed.
+        const reasoningSplit =
           typeof reasoningRaw === "string"
-            ? stripThinkingTags(reasoningMarkupResult?.text ?? reasoningRaw)
-            : reasoningRaw;
+            ? reasoningThink.push(reasoningMarkupResult?.text ?? reasoningRaw)
+            : undefined;
+        // Both sides are reasoning. The splitter routes text outside a
+        // `<think>` span to its `.text` side, but this field is the reasoning
+        // stream in its entirety: untagged prose here is still thought, not
+        // answer. Taking only `.reasoning` dropped every un-tagged delta.
+        const reasoningText =
+          reasoningSplit === undefined
+            ? undefined
+            : `${reasoningSplit.reasoning}${reasoningSplit.text}`;
         if (typeof reasoningText === "string" && reasoningText.length > 0) {
           yield {
             type: "content_delta",
@@ -510,7 +523,9 @@ export async function* decodeChatSseStream(
   }
   const reasoningMarkupTail = reasoningMarkup?.flush();
   if (reasoningMarkupTail?.text) {
-    const reasoningText = stripThinkingTags(reasoningMarkupTail.text);
+    const split = reasoningThink.push(reasoningMarkupTail.text);
+    // Both sides are reasoning: see the per-delta branch above.
+    const reasoningText = `${split.reasoning}${split.text}`;
     if (reasoningText.length > 0) {
       yield {
         type: "content_delta",
@@ -518,6 +533,17 @@ export async function* decodeChatSseStream(
         content: { kind: "reasoning", payload: null, summary: reasoningText },
       } as CanonicalEvent;
     }
+  }
+  // Release anything the reasoning splitter held for a tag that never
+  // completed, before `think.flush()` and the terminal.
+  const reasoningRest = reasoningThink.flush();
+  const reasoningTail = `${reasoningRest.reasoning}${reasoningRest.text}`;
+  if (reasoningTail.length > 0) {
+    yield {
+      type: "content_delta",
+      sequence_number: seq++,
+      content: { kind: "reasoning", payload: null, summary: reasoningTail },
+    } as CanonicalEvent;
   }
   const rest = think.flush();
   if (rest.reasoning.length > 0) {

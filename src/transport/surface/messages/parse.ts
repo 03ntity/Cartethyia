@@ -145,8 +145,10 @@ export function parseBlock(value: unknown): ContentPart {
     const thinking = stringValue(value.thinking) ? value.thinking : "";
     return {
       kind: "reasoning",
+      // Readable thinking lives in `payload` only. Duplicating it into
+      // `summary` too emitted the same text twice on surfaces that carry both
+      // channels (Responses `reasoning_text` + `reasoning_summary_text`).
       payload: thinking,
-      summary: thinking,
       ...(stringValue(value.signature) ? { signature: value.signature } : {}),
     };
   }

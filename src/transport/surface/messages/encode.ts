@@ -1,6 +1,7 @@
 import type { CanonicalEvent, CanonicalStopReason, ContentPart, UsageRecord } from "../../../protocol/canonical-model";
 import { assertBoundedJsonDepth, isRecord } from "../../../protocol/codecs";
 import { messagesStopReason } from "../../../protocol/stop-reason";
+import { reasoningTextOf } from "../../../protocol/reasoning-text";
 import {
   reasoningSummaryHasBoundary,
   reasoningSummaryIdentity,
@@ -111,7 +112,7 @@ export function blockFromPart(part: ContentPart): MessagesWireObject | undefined
           : { type: "redacted_thinking", data: part.payload };
       return {
         type: "thinking",
-        thinking: part.summary ?? (typeof part.payload === "string" ? part.payload : ""),
+        thinking: reasoningTextOf(part) ?? "",
         ...(part.signature === undefined ? {} : { signature: part.signature }),
       };
     }

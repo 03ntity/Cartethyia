@@ -10,8 +10,11 @@
  * client-visible tracking → encode + enqueue) is preserved exactly.
  */
 import type { CanonicalEvent, SourceSurface, UsageRecord } from "../../../protocol/canonical-model";
+import { canonicalTerminal } from "../../../protocol/codecs";
+import { reasoningTextOf } from "../../../protocol/reasoning-text";
 import { MimoThinkSplitter } from "../../../providers/integrations/xiaomi-mimo/think-stream";
 import { createDispatchStreamEncoder, type DispatchStreamEncoder } from "../stream-bridge";
+import { THINKING_LOOP_MARKER, ThinkingLoopDetector } from "./thinking-loop";
 
 /** The terminal event shape every stream settles (or fails to settle) on. */
 export type StreamTerminalEvent = Extract<CanonicalEvent, { type: "terminal" }>;
@@ -94,6 +97,14 @@ export class StreamEventPipeline {
   // and the text/idle bookkeeping below must see the split result, not the raw
   // tagged chunk.
   private readonly thinkSplitter = new MimoThinkSplitter();
+  /**
+   * Content-level loop guard. A model that degenerates into a repeated
+   * chain-of-thought keeps sending bytes, so the stall timeout — which fires
+   * only on silence — never trips and the runaway burns the whole output
+   * budget. This detector watches the reasoning text itself and terminates the
+   * stream early when a loop shape is recognized.
+   */
+  private readonly loopDetector = new ThinkingLoopDetector();
   private lastSequenceNumber = -1;
 
   constructor(
@@ -115,6 +126,13 @@ export class StreamEventPipeline {
   /** Whether any client-renderable event has been emitted (gates the Responses prelude retry). */
   get hasClientVisibleEvent(): boolean {
     return this.clientVisibleEvent;
+  }
+
+  /** Whether the loop guard has terminated this stream early. The pull loop
+   *  stops consuming the upstream once it has: continuing would keep billing
+   *  and emitting a runaway the client was already told is over. */
+  get loopDetected(): boolean {
+    return this.loopDetector.detected;
   }
 
   /** The client-facing response transcript (decoded SSE/JSON) — distinct from the provider-side canonical events. */
@@ -235,6 +253,12 @@ export class StreamEventPipeline {
     event: CanonicalEvent,
     controller: ReadableStreamDefaultController<Uint8Array>,
   ): boolean {
+    // Once the guard has terminated the stream, the surface encoders reject
+    // any further event — content *and* a second terminal both throw
+    // (`canonical event arrived after terminal`). The pull loop stops on
+    // `loopDetected`, so this only matters for an event already in flight;
+    // dropping it is the alternative to throwing mid-stream.
+    if (this.loopDetector.detected) return false;
     // The one place every surface shares. A provider that writes its reasoning
     // into the answer as `<think>…</think>` had that text forwarded verbatim:
     // the chat wire happened to split it in its own decoder, so chat looked
@@ -244,17 +268,26 @@ export class StreamEventPipeline {
       const split = this.thinkSplitter.push(event.content.text);
       let enqueued = false;
       if (split.reasoning.length > 0) {
-        enqueued =
-          this.enqueueOne(
-            { ...event, content: { kind: "reasoning", payload: null, summary: split.reasoning } },
-            controller,
-          ) || enqueued;
+        const reasoningEvent: CanonicalEvent = {
+          ...event,
+          content: { kind: "reasoning", payload: null, summary: split.reasoning },
+        };
+        enqueued = this.enqueueOne(reasoningEvent, controller) || enqueued;
+        if (this.guardReasoning(split.reasoning, controller)) return enqueued;
       }
       if (split.text.length > 0) {
         enqueued =
           this.enqueueOne({ ...event, content: { kind: "text", text: split.text } }, controller) ||
           enqueued;
       }
+      return enqueued;
+    }
+    // Reasoning a provider already classified: feed it to the guard too, so a
+    // loop is caught whether the reasoning arrived pre-classified or was
+    // recovered from a `<think>` span in the answer.
+    if (event.type === "content_delta" && event.content.kind === "reasoning") {
+      const enqueued = this.enqueueOne(event, controller);
+      this.guardReasoning(reasoningTextOf(event.content) ?? "", controller);
       return enqueued;
     }
     // Text held back for a tag that never completed must be released *before*
@@ -284,6 +317,57 @@ export class StreamEventPipeline {
       }
     }
     return this.enqueueOne(event, controller);
+  }
+
+  /**
+   * Feeds one reasoning chunk to the loop guard and, on the first hit,
+   * terminates the stream early. Returns whether it terminated.
+   *
+   * The terminal is a real canonical terminal rather than an error frame: the
+   * client already received valid reasoning, and the runaway is cut off
+   * mid-generation — which is exactly what `stop_reason: "length"` means on
+   * every surface (`length` / `max_tokens`). `provider_stop_reason` carries the
+   * marker so the cut is distinguishable from hitting the real token cap.
+   */
+  private guardReasoning(
+    text: string,
+    controller: ReadableStreamDefaultController<Uint8Array>,
+  ): boolean {
+    const reason = text.length > 0 ? this.loopDetector.push(text) : undefined;
+    if (reason === undefined) return false;
+    // Flush before the terminal: content after it is rejected by the surface
+    // encoders, and the held-back text would be lost.
+    const rest = this.thinkSplitter.flush();
+    if (rest.reasoning.length > 0) {
+      this.enqueueOne(
+        {
+          type: "content_delta",
+          sequence_number: this.lastSequenceNumber + 1,
+          content: { kind: "reasoning", payload: null, summary: rest.reasoning },
+        },
+        controller,
+      );
+    }
+    if (rest.text.length > 0) {
+      this.enqueueOne(
+        {
+          type: "content_delta",
+          sequence_number: this.lastSequenceNumber + 1,
+          content: { kind: "text", text: rest.text },
+        },
+        controller,
+      );
+    }
+    this.enqueueOne(
+      canonicalTerminal({
+        sequenceNumber: this.lastSequenceNumber + 1,
+        state: "complete",
+        stopReason: "length",
+        providerStopReason: THINKING_LOOP_MARKER,
+      }),
+      controller,
+    );
+    return true;
   }
 
   private enqueueOne(

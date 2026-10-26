@@ -54,6 +54,13 @@ function summaryOf(events: CanonicalEvent[]): string | undefined {
   return undefined;
 }
 
+function allTextOf(events: CanonicalEvent[]): string {
+  return events
+    .filter((event) => event.type === "content_delta" && event.content.kind === "text")
+    .map((event) => (event.type === "content_delta" && event.content.kind === "text" ? event.content.text : ""))
+    .join("");
+}
+
 describe("canonical thinking sweep", () => {
   test("splits an inline think span out of the answer text", () => {
     const pipe = pipeline();
@@ -99,5 +106,19 @@ describe("canonical thinking sweep", () => {
     expect(events.findIndex((event) => event.type === "terminal")).toBeGreaterThan(
       events.findIndex((event) => event.type === "content_delta"),
     );
+  });
+
+  test("a literal think tag inside a code fence survives in the answer", () => {
+    // Finding 5: an answer that mentions the tag literally (docs, a code
+    // sample) had its tail swallowed into reasoning by a splitter, so the
+    // client saw only the text before the tag. Pinned at the pipeline every
+    // surface shares so the loss cannot come back per-surface.
+    const pipe = pipeline();
+    const answer = "Use `<think>` inside a fence to enable reasoning.";
+    pipe.enqueueEvent(textDelta(answer, 1), controller);
+
+    const events = recorded(pipe);
+    expect(allTextOf(events)).toBe(answer);
+    expect(summaryOf(events)).toBeUndefined();
   });
 });

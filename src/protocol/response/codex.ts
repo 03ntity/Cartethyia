@@ -629,11 +629,23 @@ export class CodexStreamFrameProcessor {
       if (streamError !== undefined) throw streamError;
       this.terminalStatus = "failed";
     } else if (typeof json["delta"] === "string" && json["delta"].length > 0) {
+      // An unrecognized frame carrying a bare `delta` used to be forwarded as
+      // answer text. Reasoning frames that fall through the chain above — the
+      // last `else if` is the catch-all for every type this decoder does not
+      // name — then leaked into the answer verbatim. Keeping the payload
+      // visible as an extension part is the unknown-event convention the
+      // Responses stream already uses (`responses:<type>`), so the frame stays
+      // in telemetry without ever reaching the answer. Dropping it instead
+      // would silently discard real content.
       events.push({
         type: "content_delta",
         sequence_number: this.#seq++,
-        content: { kind: "text", text: json["delta"] as string },
-      } as unknown as CanonicalEvent);
+        content: {
+          kind: "extension",
+          name: "codex:untyped_delta",
+          payload: json["delta"] as string,
+        },
+      } as CanonicalEvent);
     } else {
       const choices = json["choices"] as
         | Array<Record<string, unknown>>
