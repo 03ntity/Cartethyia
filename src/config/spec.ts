@@ -152,9 +152,12 @@ export const CONFIG_SPEC = {
     min: 1,
     max: Number.MAX_SAFE_INTEGER,
   },
-  // Opt-in forced garbage collection. Off by default: see
-  // `observability/runtime-metrics.ts` — a forced collection is not
-  // reclamation, and the synchronous form stalls concurrent requests.
+  // Opt-in forced garbage collection under memory pressure. Off by default:
+  // see `observability/runtime-metrics.ts` — a forced collection is not
+  // reclamation, and a collection that runs while requests are in flight adds
+  // a latency spike. This gates the pressure path only; idle reclaim runs
+  // unconditionally, because reclaiming when nothing is in flight stalls
+  // nothing.
   CARTETHYIA_FORCED_GC: { kind: "flag" },
   // How often runtime gauges (memory + bounded-collection sizes) are sampled.
   CARTETHYIA_RUNTIME_METRICS_INTERVAL_MS: {

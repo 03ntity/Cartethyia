@@ -235,9 +235,14 @@ export class RuntimeMetricsSampler {
    * A synchronous full collection is safe here because no request is in flight to
    * stall, and it is the only form that actually returns pages to the OS; the
    * async form used under pressure does not.
+   *
+   * Not gated on `gcOnPressure` the way `checkPressure` is. The opt-in exists
+   * because a synchronous collection stalls concurrent requests, and this path
+   * only runs when there is nothing in flight to stall — so the reason the flag
+   * is off does not apply to it. Gating it meant a gateway with no traffic at
+   * all never reclaimed anything and held its startup peak for hours.
    */
   private checkIdleReclaim(rss: number): void {
-    if (!this.gcOnPressure) return;
     if (this.inFlightSource() > 0) return;
     const now = Date.now();
     if (now - this.lastIdleGcAt < IDLE_GC_WINDOW_MS) return;

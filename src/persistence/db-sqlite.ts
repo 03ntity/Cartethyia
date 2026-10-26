@@ -1,5 +1,6 @@
 /** Embedded backend: bun:sqlite in the gateway's data dir. */
 import { Database, type SQLQueryBindings } from "bun:sqlite";
+import type { Statement } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { getTableColumns, getTableName } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -46,6 +47,36 @@ const SQLITE_LEDGER_DDL = `CREATE TABLE IF NOT EXISTS ${MIGRATION_LEDGER_TABLE} 
  */
 const SQLITE_PREPARED = new WeakSet<Database>();
 
+/**
+ * The statement cache of each wrapped database.
+ *
+ * Kept beside the weak set above rather than inside a closure so `close` can
+ * drop the whole map: a live cache would otherwise keep the statements it
+ * holds reachable past a `close(true)`, which is exactly what that call is
+ * meant to release.
+ */
+const SQLITE_STATEMENT_CACHES = new WeakMap<Database, Map<string, Statement>>();
+
+/**
+ * Compiled statements kept per database, keyed by translated SQL text.
+ *
+ * Drizzle compiles a fresh statement for every query execution
+ * (`SQLiteBunSession.prepareQuery`), and `Database.prepare` — unlike
+ * `Database.query` — does not cache. A lite-mode gateway runs ~19 scheduled
+ * tasks while idle, each executing the same handful of queries, so an uncached
+ * path compiles a new statement (and five new closures) per tick and never
+ * finalizes one: RSS climbs for hours with no traffic at all.
+ *
+ * Bounded because the SQL text is produced by a fixed set of Drizzle builders —
+ * the key space is small and stable, not caller-supplied.
+ *
+ * Only SQL that `sqliteSql` left alone is cached. A rewrite inlines a value
+ * into the text, and the two functions it rewrites (`now()`,
+ * `gen_random_uuid()`) produce a different literal on every call — caching
+ * those would pin a query to the value the first execution happened to inline.
+ */
+const SQLITE_STATEMENT_CACHE_MAX = 256;
+
 export function createSqliteDatabase(file: string): Database {
   if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
   const db = new Database(file);
@@ -58,9 +89,22 @@ export function createSqliteDatabase(file: string): Database {
   // token: ":"` from a placeholder the first pass produced.
   if (SQLITE_PREPARED.has(db)) return db;
   SQLITE_PREPARED.add(db);
+  const statementCache = new Map<string, Statement>();
+  // Per database, never shared: a statement is only usable on the connection
+  // that compiled it, and the whole map is dropped on close.
+  SQLITE_STATEMENT_CACHES.set(db, statementCache);
   const prepare = db.prepare.bind(db);
   db.prepare = ((text: string) => {
-    const statement = prepare(sqliteSql(text));
+    // `true` means the text was left untouched, so it is a key that will
+    // compile to the same statement every time it is asked for again.
+    const [translated, cacheable] = sqliteSql(text);
+    if (cacheable) {
+      const cached = statementCache.get(translated);
+      // Returned as-is: a cached statement already carries the wrapped methods
+      // below, and re-wrapping it would bind the wrapper's own wrapper.
+      if (cached !== undefined) return cached;
+    }
+    const statement = prepare(translated);
     // bun:sqlite rejects a Date binding ("Binding expected string, TypedArray,
     // boolean, number, bigint or null"), and Drizzle's pg-core timestamp
     // columns bind `Date` objects. The schema is shared with PostgreSQL, so
@@ -78,10 +122,20 @@ export function createSqliteDatabase(file: string): Database {
     statement.all = ((...args: unknown[]) => all(...bound(args))) as typeof statement.all;
     statement.get = ((...args: unknown[]) => get(...bound(args))) as typeof statement.get;
     statement.values = ((...args: unknown[]) => values(...bound(args))) as typeof statement.values;
+    if (cacheable) {
+      // Insertion-order eviction: `Map` iterates oldest-first, so the first key
+      // is the least recently inserted one. Simple, and enough because the key
+      // set is small and stable — a hit-count policy would only add state.
+      if (statementCache.size >= SQLITE_STATEMENT_CACHE_MAX) {
+        const oldest = statementCache.keys().next();
+        if (oldest.done !== true) statementCache.delete(oldest.value);
+      }
+      statementCache.set(translated, statement);
+    }
     return statement;
   }) as Database["prepare"];
   const exec = db.exec.bind(db);
-  db.exec = ((text: string) => exec(sqliteSql(text))) as Database["exec"];
+  db.exec = ((text: string) => exec(sqliteSql(text)[0])) as Database["exec"];
   return db;
 }
 
@@ -288,14 +342,18 @@ export interface SqliteAuthStatements {
 
 export function prepareAuthStatements(sqlite: Database): SqliteAuthStatements {
   const active = `enabled = 1 AND revoked_at IS NULL`;
+  // `query`, not `prepare`: bun's `prepare` compiles a statement per call and
+  // never finalizes one, while `query` caches the compiled statement behind an
+  // LRU of its own. All three are constant text run once per authenticated
+  // request, so they are the hottest statements in the process.
   return {
-    byHash: sqlite.prepare(
+    byHash: sqlite.query(
       `SELECT ${AUTH_KEY_COLUMNS} FROM api_keys WHERE key_hash = ? AND ${active} LIMIT 1`,
     ) as SqliteAuthStatements["byHash"],
-    byId: sqlite.prepare(
+    byId: sqlite.query(
       `SELECT ${AUTH_KEY_COLUMNS} FROM api_keys WHERE id = ? AND ${active} LIMIT 1`,
     ) as SqliteAuthStatements["byId"],
-    childrenConsumed: sqlite.prepare(
+    childrenConsumed: sqlite.query(
       `SELECT coalesce(sum(lifetime_tokens_consumed), 0) AS total FROM api_keys WHERE parent_key_id = ?`,
     ) as SqliteAuthStatements["childrenConsumed"],
   };
@@ -372,7 +430,17 @@ export function buildSqliteHandle(sqlite: Database): DatabaseHandle {
       return Promise.resolve();
     },
     close: () => {
-      sqlite.close();
+      // The cache has to go first: `close(true)` releases the connection
+      // immediately, and a map still holding the statements would keep them
+      // reachable after the handle is gone.
+      SQLITE_STATEMENT_CACHES.get(sqlite)?.clear();
+      SQLITE_STATEMENT_CACHES.delete(sqlite);
+      // `true`, not the default: without it bun uses `sqlite3_close_v2`, which
+      // defers the release until every outstanding statement is finalized or
+      // collected. Nothing here finalizes explicitly, so the default left the
+      // connection — and its pages — held indefinitely, which is the idle
+      // growth this backend was seeing. `sqlite3_close` finalizes them now.
+      sqlite.close(true);
       return Promise.resolve();
     },
   };
@@ -400,12 +468,16 @@ export function buildSqliteHandle(sqlite: Database): DatabaseHandle {
  * those. A statement that contains neither is returned as-is, so the common
  * case — every read, and every write that supplies its own values — pays one
  * `includes` and nothing else.
+ *
+ * The second element tells the caller whether the text is a stable cache key.
+ * Both rewrites substitute a value that differs per call, so a rewritten
+ * statement must be compiled fresh every time; see `SQLITE_STATEMENT_CACHE_MAX`.
  */
-function sqliteSql(text: string): string {
-  if (!text.includes("gen_random_uuid()") && !text.includes("now()")) return text;
-  return text
+function sqliteSql(text: string): [sql: string, cacheable: boolean] {
+  if (!text.includes("gen_random_uuid()") && !text.includes("now()")) return [text, true];
+  return [text
     .replaceAll("gen_random_uuid()", () => `'${randomUUID()}'`)
-    .replaceAll("now()", () => `'${new Date().toISOString()}'`);
+    .replaceAll("now()", () => `'${new Date().toISOString()}'`), false];
 }
 
 /**

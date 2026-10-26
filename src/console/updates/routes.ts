@@ -12,6 +12,17 @@ const UPDATE_SAMPLE_INTERVAL_MS = 60_000;
 const HIGH_MEMORY_PERCENT = 85;
 const HIGH_MEMORY_CLEAR_PERCENT = 80;
 const MEMORY_GROWTH_WINDOW_MS = 60_000;
+/**
+ * Absolute RSS growth required before a growth alert is raised, alongside the
+ * ratio below.
+ *
+ * The ratio alone reported a 2607% "sustained growth" alert for what was a
+ * baseline jump: the window's oldest sample predated an idle reclaim, so a
+ * gateway that had just given memory back looked like it had leaked 27x. A
+ * leak worth an operator's attention is measured in bytes, not multiples —
+ * 20MiB to 24MiB is a 20% ratio and means nothing.
+ */
+const MEMORY_GROWTH_MIN_BYTES = 64 * 1024 * 1024;
 const MEMORY_GROWTH_RATIO = 1.2;
 const MAX_MEMORY_SAMPLES = 8;
 const RELEASES_URL = "https://github.com/risunCodex/Cartethyia/releases";
@@ -50,6 +61,7 @@ export function memoryNotifications(
   const oldest = samples.find((sample) => latest.at - sample.at >= MEMORY_GROWTH_WINDOW_MS);
   const growth = oldest !== undefined &&
     latest.rss >= oldest.rss * MEMORY_GROWTH_RATIO &&
+    latest.rss - oldest.rss >= MEMORY_GROWTH_MIN_BYTES &&
     samples.filter((sample) => sample.at >= oldest.at).every((sample, index, window) =>
       index === 0 || sample.rss >= (window[index - 1]?.rss ?? sample.rss),
     );

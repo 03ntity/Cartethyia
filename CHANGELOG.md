@@ -337,6 +337,37 @@ database applies them in order; a fresh one builds from the current baseline.
   boundary printed both `componentStack` and `error.stack`, which name the same
   failure.
 
+- **A lite-mode gateway no longer grows while idle.** A gateway with no
+  traffic climbed from roughly 120–150 MiB to 802 MiB over about seven hours.
+  Nothing was unbounded — every cache has a cap and every idle timer writes to
+  a stable key — so the growth came from statements the SQLite backend never
+  released. Drizzle compiles a fresh statement per execution
+  (`SQLiteBunSession.prepareQuery`), `Database.prepare` caches nothing, and
+  nothing ever finalized one, so each of the ~19 scheduled sweeps compiled a
+  new statement (and five closures) per tick. Four changes: the backend's
+  `prepare` wrapper now returns a compiled statement it already holds, keyed by
+  translated SQL and evicted oldest-first at 256 entries; the three per-request
+  auth statements use `Database.query`, which carries bun's own cache; `close`
+  clears that cache and calls `close(true)`, so statements are finalized and
+  the connection released instead of deferred until they are collected; and
+  idle reclaim runs whether or not `CARTETHYIA_FORCED_GC` is set — the flag
+  exists because a synchronous collection stalls concurrent requests, which
+  cannot happen on a path gated on zero requests in flight. Measured over 500
+  iterations of two queries, native statement compilations fell from 1000 to 0.
+
+  SQL that the backend rewrites is deliberately not cached: it inlines a value
+  into the text, and both rewrites (`now()`, `gen_random_uuid()`) differ per
+  call, so caching one would have pinned a query to the value its first
+  execution happened to inline.
+
+- **"Sustained memory growth" is no longer raised on a ratio alone.** The alert
+  fired at 20% growth over a 60-second window, which reported a 2607% leak for
+  what was a baseline jump: the window's oldest sample predated an idle
+  reclaim, so a gateway that had just given memory back read as having grown
+  27×. Growth now also requires at least 64 MiB of absolute increase, so a
+  post-reclaim recovery or a startup fluctuation is silent. The message keeps
+  its percentage, because that is the readable part.
+
 ### Changed
 
 - **Per-plan admission no longer runs `KEYS`.** `snapshotAccountInflight()`

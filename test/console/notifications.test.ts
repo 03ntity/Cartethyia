@@ -3,12 +3,17 @@ import { Elysia } from "elysia";
 import { memoryNotifications, createUpdateRoutes } from "../../src/console/updates/routes";
 import type { ObservabilityStore } from "../../src/console/observability/contracts";
 
+const MIB = 1024 * 1024;
+
 test("memory watcher warns on sustained RSS growth and suppresses duplicate alerts", () => {
+  // MiB-scale: growth is only reported above an absolute byte threshold, so
+  // small numbers would exercise the gate rather than the watcher. See
+  // `memory-notification-threshold.test.ts` for the gate itself.
   const samples = [
-    { at: 0, rss: 100, percent: 40 },
-    { at: 20_000, rss: 108, percent: 42 },
-    { at: 40_000, rss: 116, percent: 44 },
-    { at: 60_000, rss: 125, percent: 46 },
+    { at: 0, rss: 150 * MIB, percent: 40 },
+    { at: 20_000, rss: 240 * MIB, percent: 42 },
+    { at: 40_000, rss: 330 * MIB, percent: 44 },
+    { at: 60_000, rss: 420 * MIB, percent: 46 },
   ];
 
   const first = memoryNotifications(samples, { high: false, growth: false });
