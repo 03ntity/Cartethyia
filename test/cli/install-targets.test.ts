@@ -11,11 +11,27 @@ import type { HealthDependencies } from "../../scripts/cli/health";
 import { statSync } from "node:fs";
 
 async function sandbox(): Promise<string> { return mkdtemp(join(tmpdir(), "carte-docker-test-")); }
-function host(calls: string[][]): HostExecutor {
+
+/**
+ * Rewrites a host-absolute path into the sandbox.
+ *
+ * The VPS installer writes unit files and Caddy config to real system paths
+ * (`/etc/systemd/system/cartethyia.service`, `/etc/caddy/Caddyfile`). A test
+ * that let those through hit `EACCES` on any non-root runner — CI runs as an
+ * unprivileged user, so three tests failed for a permission the code under
+ * test does not depend on. Redirecting keeps the assertions on `calls` intact:
+ * they check which commands ran, not what landed on disk.
+ */
+function contained(root: string, path: string): string {
+  if (!path.startsWith("/")) return path;
+  return join(root, "rootfs", path.replace(/^\/+/, ""));
+}
+
+function host(calls: string[][], root = ""): HostExecutor {
   return {
     platform: "linux",
-    async exists(path) { try { statSync(path); return true; } catch { return false; } },
-    async writeAtomic(path, content) { await Bun.write(path, content); },
+    async exists(path) { try { statSync(root ? contained(root, path) : path); return true; } catch { return false; } },
+    async writeAtomic(path, content) { await Bun.write(root ? contained(root, path) : path, content); },
     async run(args): Promise<HostResult> {
       calls.push([...args]);
       if (args[0] === "false" || (args[0] === "bun" && args.includes("build") && process.env.CARTE_TEST_BUILD_FAIL === "1")) throw new Error("command failed");
@@ -72,7 +88,7 @@ test("NAT Lite builds and enables systemd without PostgreSQL or Caddy", async ()
     await mkdir(join(root, ".git"));
     await mkdir(join(root, "data"), { recursive: true });
     const request = parseInstallArgs(["--non-interactive", "--vps", "--nat", "--lite", "--port", "8080", "--public-origin", "https://app.example.com:8080", "--root", root, "--no-start"]);
-    await installVps(request, host(calls), healthy);
+    await installVps(request, host(calls, root), healthy);
     expect(calls.some((args) => args.includes("postgresql"))).toBe(false);
     expect(calls.some((args) => args.includes("caddy"))).toBe(false);
     expect(calls.some((args) => args[0] === "systemctl" && args.includes("enable"))).toBe(true);
@@ -87,7 +103,7 @@ test("Regular VPS verifies DNS and installs Caddy before enabling the app", asyn
     await mkdir(join(root, ".git"));
     await mkdir(join(root, "data"), { recursive: true });
     const request = parseInstallArgs(["--non-interactive", "--vps", "--regular", "--lite", "--domain", "app.example.com", "--root", root, "--no-start"]);
-    await installVps(request, host(calls), healthy);
+    await installVps(request, host(calls, root), healthy);
     expect(calls.some((args) => args[0] === "getent")).toBe(true);
     expect(calls.some((args) => args.includes("caddy"))).toBe(true);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -100,7 +116,7 @@ test("Full VPS provisions PostgreSQL without npm and preserves the generated URL
     await mkdir(join(root, ".git"));
     await mkdir(join(root, "data"), { recursive: true });
     const request = parseInstallArgs(["--non-interactive", "--vps", "--nat", "--full", "--port", "8080", "--public-origin", "https://app.example.com:8080", "--root", root, "--no-start"]);
-    await installVps(request, host(calls), healthy);
+    await installVps(request, host(calls, root), healthy);
     const env = await Bun.file(join(root, ".env")).text();
     expect(env).toContain("DATABASE_URL=postgres://cartethyia:");
     expect(calls.some((args) => args.includes("createdb"))).toBe(true);

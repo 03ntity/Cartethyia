@@ -11,8 +11,24 @@ import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { mkdir, rm } from "node:fs/promises";
 
-/** Home directory — shared contract used by all injectors. */
-export { homedir as homeDir };
+/**
+ * Home directory — shared contract used by all injectors.
+ *
+ * Reads the environment on every call rather than exporting `os.homedir()`,
+ * whose value is cached at first use. That cache silently broke the redirect
+ * this module documents: a test that pointed `HOME` at a temp dir had its
+ * first path resolved correctly and every later one resolved to the home that
+ * was live when the process started — and on Linux that is the only value
+ * `os.homedir()` ever returns, so injectors wrote to the real home while the
+ * assertions read a temp dir that `afterEach` had already deleted.
+ *
+ * Production behaviour is unchanged: `HOME`/`USERPROFILE` are still what
+ * decide the directory, so an operator's environment is honoured as before.
+ */
+export function homeDir(): string {
+  const fromEnv = process.env.HOME ?? process.env.USERPROFILE;
+  return fromEnv && fromEnv.length > 0 ? fromEnv : homedir();
+}
 export { join };
 
 const IS_WIN: boolean = platform() === "win32";
