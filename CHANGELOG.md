@@ -8,6 +8,23 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.6.3] - 2026-10-27
+
+### Added
+
+- **Buddy hardening against the reference gateway.** CodeBuddy and WorkBuddy now
+  speak like the official clients: official identity prompts, the DeepSeek
+  Harness channel-identity scrub, dashed-UUID message ids on the WorkBuddy
+  desktop path, request markers on the CLI identity, and a pinned macOS SDK
+  fingerprint. See `.skills/cartethyia-provider-catalog/SKILL.md` for the
+  donor-hardening workflow.
+
+### Fixed
+
+- **Restored rows land under the restoring tenant.** A restore now writes every
+  row under the receiving tenant, and telemetry dedupe keys are computed after
+  the remap instead of against the backup's tenant.
+
 ## [2.6.2] - 2026-10-26
 
 ### Fixed
