@@ -21,6 +21,7 @@
  * a stubbed socket would test nothing about framing, backpressure, or close.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createServer } from "node:net";
 /**
  * The fixture is a self-signed loopback cert and the binding verifies
  * certificates unconditionally (`rejectUnauthorized: true`), which is correct
@@ -64,8 +65,41 @@ let responseTrailers: Record<string, string> | undefined;
 /** Response status. */
 let responseStatus = 200;
 
+/**
+ * Whether a privileged loopback port can be bound here.
+ *
+ * Tries it rather than checking `process.getuid()`: a runner can be root and
+ * still lack the port, or unprivileged but granted `CAP_NET_BIND_SERVICE`.
+ * A plain TCP socket, because only the permission is in question.
+ */
+async function probeBind(): Promise<boolean> {
+  const probe = createServer();
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  probe.on("error", reject);
+  probe.listen(443, "127.0.0.1", () => resolve());
+  try {
+    await promise;
+    return true;
+  } catch {
+    return false;
+  } finally {
+    probe.close();
+  }
+}
+
+/**
+ * False when the fixture cannot bind, so the streaming suite reports `skip`
+ * rather than six passes for tests that never ran.
+ *
+ * Probed at module scope because `describe.skipIf` needs the answer before the
+ * suite is declared. 443 is part of the SSRF policy this file exercises, so it
+ * cannot move to an ephemeral port without changing what is under test.
+ */
+const BINDABLE = await probeBind();
+
 function startServer(): Promise<void> {
-  return new Promise<void>((resolve) => {
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  {
     // `createSecureServer`, not `createServer`: the plain factory speaks
     // cleartext h2c, and the binding under test always negotiates TLS.
     server = createSecureServer({
@@ -103,13 +137,23 @@ function startServer(): Promise<void> {
         stream.end();
       }
     });
+    // The error handler matters as much as the callback: without it the
+    // EACCES from an unprivileged runner surfaced as an unhandled error
+    // *between* tests and took out whichever test ran beside this one.
+    server.on("error", reject);
     server.listen(443, "127.0.0.1", () => resolve());
-  });
+    return promise;
+  }
 }
 
-beforeAll(startServer);
+// Guarded inside rather than by passing `undefined`: `beforeAll` has no
+// overload for it, and an empty async body skips the fixture cleanly.
+beforeAll(async () => {
+  if (!BINDABLE) return;
+  await startServer();
+});
 afterAll(() => {
-  server.close();
+  server?.close();
 });
 
 /** A factory whose SSRF policy permits the loopback fixture. */
@@ -170,7 +214,7 @@ describe("validated HTTP/2 bidi target validation", () => {
   });
 });
 
-describe("validated HTTP/2 bidi streaming", () => {
+describe.skipIf(!BINDABLE)("validated HTTP/2 bidi streaming", () => {
   test("a tenant without a selected pool dials validated direct egress", async () => {
     // Live dispatch always passes a tenant id, and most installs select no
     // pool. `fetch` treats that as direct egress; bidi must match, or a

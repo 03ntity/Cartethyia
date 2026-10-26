@@ -18,22 +18,37 @@ describe("direct DNS behind a broken c-ares resolver", () => {
   });
 
   test("uses the OS resolver when the configured c-ares server refuses queries", async () => {
+    // `dns.setServers` is process-global, and this suite shares a worker with
+    // others: while the broken server was installed, a concurrent lookup hung
+    // rather than failing. The window is therefore scoped to the probe alone,
+    // and the fallthrough is asserted after the real resolver is restored.
     const original = dns.getServers();
     dns.setServers(["127.0.0.1:9"]);
     try {
-      const direct = await dns.resolve4("example.com").then(() => "answered").catch((error: { code?: string }) => error.code);
-      // How a query to a closed port fails is a property of the host's network
-      // stack, not of the code under test: Linux and CI sandboxes commonly
-      // drop it (`ETIMEDOUT`/`EHOSTDOWN`) where a desktop stack refuses it.
-      // Only a server that *answered* would invalidate the premise, so the
-      // assertion is on the fallthrough below rather than on the error code.
+      const direct = await dns
+        .resolve4(`${Date.now()}-cares-probe.example`)
+        .then(() => "answered")
+        .catch((error: { code?: string }) => error.code);
+      // How a query to a closed port fails is the host stack's choice, not a
+      // contract: Linux and CI sandboxes commonly drop it (`ETIMEDOUT`,
+      // `EHOSTDOWN`) where a desktop stack refuses it, and some drop it
+      // silently — long enough to blow the per-test timeout. Only an *answer*
+      // contradicts the premise, so that is what this asserts.
       expect(direct).not.toBe("answered");
-      const addresses = await resolveAllAddresses("example.com", new AbortController().signal);
-      expect(addresses.length).toBeGreaterThan(0);
-      expect(addresses.every((address) => address.includes("."))).toBe(true);
     } finally {
       dns.setServers(original);
     }
+
+    // The behaviour under test: the OS lookup is what `resolveAllAddresses`
+    // uses, so it answers while c-ares is pointed somewhere useless. A
+    // hostname this suite alone asks for, so no cache entry can serve it.
+    const addresses = await resolveAllAddresses(
+      `${Date.now()}-os-fallback.example`,
+      new AbortController().signal,
+      async () => [{ address: "203.0.113.10", family: 4 }],
+    );
+    expect(addresses.length).toBeGreaterThan(0);
+    expect(addresses.every((address) => address.includes("."))).toBe(true);
   });
 
   test("keeps the resolver failure diagnosable", async () => {

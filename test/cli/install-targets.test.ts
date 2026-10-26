@@ -19,11 +19,19 @@ async function sandbox(): Promise<string> { return mkdtemp(join(tmpdir(), "carte
  * (`/etc/systemd/system/cartethyia.service`, `/etc/caddy/Caddyfile`). A test
  * that let those through hit `EACCES` on any non-root runner — CI runs as an
  * unprivileged user, so three tests failed for a permission the code under
- * test does not depend on. Redirecting keeps the assertions on `calls` intact:
- * they check which commands ran, not what landed on disk.
+ * test does not depend on.
+ *
+ * Paths already inside the sandbox must pass through untouched: the installer
+ * probes `<root>/.git` to decide whether it is looking at a checkout, and
+ * rewriting that made the probe miss and every VPS test fail with "is not a
+ * Cartethyia checkout". Only system paths are redirected. The assertions are
+ * on which commands ran, not on what reached disk, so nothing they check is
+ * weakened.
  */
 function contained(root: string, path: string): string {
-  if (!path.startsWith("/")) return path;
+  // A Windows path never starts with "/", and a sandbox path already sits
+  // under `root`; both are left alone.
+  if (!path.startsWith("/") || (root !== "" && path.startsWith(root))) return path;
   return join(root, "rootfs", path.replace(/^\/+/, ""));
 }
 
