@@ -215,7 +215,8 @@ export function eventRecordFromRow(row: {
  */
 function isPostgres(db: CartethyiaDatabase): boolean {
   const dialect = (db as unknown as { dialect?: { constructor?: { name?: string } } }).dialect;
-  return dialect?.constructor?.name === "PostgresDialect";
+  const name = dialect?.constructor?.name;
+  return name === "PostgresDialect" || name === "PgDialect";
 }
 
 /**
@@ -508,9 +509,14 @@ export async function chartTelemetry(
   bucketSeconds: number,
 ): Promise<ChartBucket[]> {
   const width = Math.max(1, Math.trunc(bucketSeconds));
+  // Inlined (not parameterised) so Postgres sees the SELECT and GROUP BY
+  // expressions as identical: parameter numbers differing between the two
+  // clauses made Postgres treat them as unrelated expressions referencing
+  // `created_at`, which 42803-rejected the query.
+  const w = sql.raw(String(width));
   const bucketExpression = isPostgres(db)
-    ? sql<number>`(cast(extract(epoch from ${telemetryEvents.createdAt}) as bigint) / ${width}) * ${width}`
-    : sql<number>`(cast(strftime('%s', ${telemetryEvents.createdAt}) as integer) / ${width}) * ${width}`;
+    ? sql<number>`(cast(extract(epoch from ${telemetryEvents.createdAt}) as bigint) / ${w}) * ${w}`
+    : sql<number>`(cast(strftime('%s', ${telemetryEvents.createdAt}) as integer) / ${w}) * ${w}`;
   const rows = await db
     .select({
       at: bucketExpression,
@@ -521,8 +527,7 @@ export async function chartTelemetry(
     })
     .from(telemetryEvents)
     .where(scoped(tenantId, since))
-    .groupBy(bucketExpression)
-    .orderBy(bucketExpression);
+    .groupBy(bucketExpression);
   return rows.map((row) => ({
     at: numeric(row.at) * 1000,
     requests: numeric(row.requests),
