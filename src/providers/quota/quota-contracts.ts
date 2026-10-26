@@ -1,4 +1,5 @@
 import { decodeJwtPayload } from "../authentication/oauth-flow-store";
+import { asCoercedNumber, asRecord as sharedAsRecord } from "../../shared/coerce";
 
 export interface ProviderQuotaWindow {
   readonly kind: string;
@@ -112,9 +113,7 @@ function creditWindowBalance(
 const TIMEOUT_MS = 15_000;
 
 export function record(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+  return sharedAsRecord(value) ?? null;
 }
 
 export function text(value: unknown): string | null {
@@ -122,10 +121,7 @@ export function text(value: unknown): string | null {
 }
 
 export function number(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value)))
-    return Number(value);
-  return null;
+  return asCoercedNumber(value) ?? null;
 }
 
 export function isoDate(value: unknown): string | null {

@@ -23,6 +23,7 @@
 // in `trae_client.py`).
 
 import { randomUUID } from "node:crypto";
+import { firstNonEmptyString as firstString } from "../../../shared/coerce";
 import { OAuthClient } from "../../authentication/oauth-client";
 import type { OAuthExchangeResult, OAuthImportInput } from "../../authentication/oauth-flow-store";
 import type { OAuthTokenRefreshResult } from "../../authentication/oauth-refresh-service";
@@ -400,8 +401,8 @@ export class TraeOAuthClient extends OAuthClient {
         if (!response.ok) continue;
         const data = (await response.json()) as { Result?: Record<string, unknown> };
         const result = data.Result ?? {};
-        const email = firstStringValue(result, ["NonPlainTextEmail", "Email", "email"]);
-        const userId = firstStringValue(result, ["UserID", "userId"]);
+        const email = firstString(result, ["NonPlainTextEmail", "Email", "email"]);
+        const userId = firstString(result, ["UserID", "userId"]);
         return {
           ...(email === undefined ? {} : { email }),
           ...(userId === undefined ? {} : { userId }),
@@ -628,14 +629,6 @@ function parseExport(credential: string): TraeExport | undefined {
   };
 }
 
-function firstString(record: Record<string, unknown>, keys: readonly string[]): string | undefined {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim().length > 0) return value.trim();
-  }
-  return undefined;
-}
-
 function firstNumber(record: Record<string, unknown>, keys: readonly string[]): number | undefined {
   for (const key of keys) {
     const value = record[key];
@@ -688,13 +681,7 @@ function parseTraeCallback(raw: string): TraeCallbackPayload {
   if (text.includes("?")) query = text.slice(text.indexOf("?") + 1);
   if (text.startsWith("#")) query = text.slice(1);
   const params = Object.fromEntries(new URLSearchParams(query));
-  const pick = (keys: readonly string[]): string | undefined => {
-    for (const key of keys) {
-      const value = params[key];
-      if (typeof value === "string" && value.trim().length > 0) return value.trim();
-    }
-    return undefined;
-  };
+  const pick = (keys: readonly string[]): string | undefined => firstString(params, keys);
   const error = pick(["error", "error_code", "errorCode"]);
   if (error !== undefined) {
     const detail = pick(["error_description", "error_desc", "message"]);
@@ -714,15 +701,6 @@ function parseTraeCallback(raw: string): TraeCallbackPayload {
   throw new Error(
     "Trae callback carries neither a refreshToken nor an AuthCode — paste the full callback URL",
   );
-}
-
-/** First non-empty string among the keys, for upstream's varied spellings. */
-function firstStringValue(record: Record<string, unknown>, keys: readonly string[]): string | undefined {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim().length > 0) return value.trim();
-  }
-  return undefined;
 }
 
 /** Client bound to the intl deployment. */

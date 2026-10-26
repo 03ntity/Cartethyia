@@ -2,6 +2,7 @@ import { open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveTelemetryRetentionDays } from "../config/telemetry";
 import { resolveDataDir } from "../persistence/db-mode";
+import { hourStamp } from "../shared/time";
 
 /**
  * Per-request telemetry lives in hourly JSONL files, not in Postgres. The
@@ -122,10 +123,6 @@ function normalize(raw: Record<string, unknown>): TelemetryEventRecord | undefin
 function eventFileHour(file: string): string {
   const stamp = file.endsWith(".events.jsonl") ? `${file.slice(0, 10)}T00` : file.slice(0, 13);
   return stamp;
-}
-
-function hourStamp(date: Date): string {
-  return date.toISOString().slice(0, 13).replaceAll(":", "-");
 }
 
 /** Chunk size for the streaming scan: one line can be long, a file cannot. */

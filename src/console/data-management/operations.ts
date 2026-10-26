@@ -10,6 +10,7 @@ import type {
   ReclaimResponse,
 } from "./contracts";
 import { PurgeNotWiredError, ReclaimNotAllowedError } from "./contracts";
+import { hourStamp } from "../../shared/time";
 
 /**
  * Reads and reclaims the on-disk telemetry and payload directories, and
@@ -80,7 +81,7 @@ const isFrame = (name: string): boolean =>
 /** The UTC day a telemetry file name starts with, compared to a cutoff. */
 function eventBefore(name: string, cutoff: number): boolean {
   if (!name.endsWith(".events.jsonl")) {
-    return name.slice(0, 13) < new Date(cutoff).toISOString().slice(0, 13).replaceAll(":", "-");
+    return name.slice(0, 13) < hourStamp(new Date(cutoff));
   }
   const at = Date.parse(`${name.slice(0, 10)}T00:00:00Z`);
   return Number.isFinite(at) && at < cutoff;

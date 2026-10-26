@@ -2,6 +2,11 @@
 import { and, asc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { ConsoleDomainError } from "../../shared/errors";
 import { parseCustomProviderId, isBundledProviderId } from "../../../providers/provider-contracts";
+import {
+  asRecord,
+  firstNonEmptyString as firstString,
+  tryParseJson as safeParseJson,
+} from "../../../shared/coerce";
 import type { ModelDefinition } from "../../../providers/provider-model-definition";
 import type { ProviderRegistry } from "../../../providers/provider-registry";
 import { BUNDLED_PROVIDER_MODULES } from "../../../providers/default-registry";
@@ -37,14 +42,6 @@ import { decodeJwtPayload } from "../../../providers/authentication/oauth-flow-s
 const OAUTH_ACCESS_FIELDS = ["accessToken", "access_token", "access", "token"] as const;
 /** Field names a pasted OAuth credential may carry its refresh token under. */
 const OAUTH_REFRESH_FIELDS = ["refreshToken", "refresh_token", "refresh"] as const;
-
-function firstString(record: Record<string, unknown>, fields: readonly string[]): string | undefined {
-  for (const field of fields) {
-    const value = record[field];
-    if (typeof value === "string" && value.trim().length > 0) return value.trim();
-  }
-  return undefined;
-}
 
 /** Parses an expiry field that may be an ISO string, an epoch ms, or epoch seconds. */
 function parseExpiry(value: unknown): Date | undefined {
@@ -202,12 +199,6 @@ function pastedAuthState(
   };
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
 /**
  * Adds or removes the `image` input modality on a stored modalities blob.
  *
@@ -232,15 +223,6 @@ export function withImageModality(stored: string | null | undefined, image: bool
     input: nextInput.length > 0 ? nextInput : ["text"],
     output: output.length > 0 ? output : ["text"],
   });
-}
-
-function safeParseJson(value: string | null | undefined): unknown {
-  if (typeof value !== "string" || value.length === 0) return undefined;
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return undefined;
-  }
 }
 
 /** Normalizes a text column read as `unknown` back to a string or null. */

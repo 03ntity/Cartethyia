@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
-  captureProviderExchange,
-  providerCaptureMaxBytes,
-} from "../../src/transport/dispatch/attempt-finalize";
+import { providerCaptureMaxBytes } from "../../src/transport/dispatch/capture-policy";
+import { captureProviderExchange } from "../../src/transport/dispatch/attempt-finalize";
 
 describe("provider capture size follows the capture depth", () => {
   // The tee's cap is the most a Provider Request/Response panel can ever

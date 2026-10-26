@@ -27,6 +27,7 @@ import {
   decodeCursor,
   decodeDatedCursor,
   encodeCursor,
+  trimKeysetPage,
 } from "../../src/console/shared/cursor";
 
 /** Builds a cursor from raw JSON the way a caller with a hand-made string would. */
@@ -35,6 +36,15 @@ function cursorOf(payload: string): string {
 }
 
 const VALID: DatedCursor = { createdAt: "2024-01-01T00:00:00.000Z", id: "audit-1" };
+
+describe("trimKeysetPage", () => {
+  test("trims only the overflow row and reports whether another page exists", () => {
+    const rows = ["a", "b", "overflow"];
+    expect(trimKeysetPage(rows, 2)).toEqual({ rows: ["a", "b"], hasMore: true });
+    expect(trimKeysetPage(rows.slice(0, 2), 2)).toEqual({ rows: ["a", "b"], hasMore: false });
+    expect(trimKeysetPage([], 2)).toEqual({ rows: [], hasMore: false });
+  });
+});
 
 describe("encodeCursor", () => {
   test("emits unpadded base64url of the row's JSON", () => {

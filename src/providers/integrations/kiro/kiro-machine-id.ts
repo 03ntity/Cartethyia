@@ -1,3 +1,4 @@
+import { sha256Hex } from "../../../shared/hash";
 /**
  * Kiro machine identity.
  *
@@ -21,7 +22,6 @@
  * They are deliberately different per credential family, because an API key and
  * a refresh token for the same account must not derive the same device id.
  */
-import { createHash } from "node:crypto";
 
 /** Prefix the observed client hashes for an OAuth (refresh-token) credential. */
 const OAUTH_SALT = "KotlinNativeAPI/";
@@ -33,9 +33,7 @@ const FALLBACK_SALT = "KiroFallback/";
 /** Length of a machine id, in hex characters. */
 const MACHINE_ID_LENGTH = 64;
 
-function sha256Hex(input: string): string {
-  return createHash("sha256").update(input).digest("hex");
-}
+
 
 /**
  * Normalizes a machine id supplied from outside the derivation.

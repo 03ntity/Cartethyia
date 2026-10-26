@@ -22,6 +22,10 @@ import { describe, expect, test } from "bun:test";
 
 import { ClaudeAdapter } from "../../src/providers/integrations/claude/claude";
 import { CLAUDE_USER_PROFILES_BETA } from "../../src/providers/integrations/claude/claude-user-profiles";
+import {
+  _resetClaudeCliVersionCache,
+  getClaudeCliVersion,
+} from "../../src/providers/operations/client-versions";
 import type { CanonicalRequest, GenerationControls } from "../../src/protocol/canonical-model";
 import type {
   ProviderDispatchContext,
@@ -96,6 +100,46 @@ async function dispatchHeaders(profileId: unknown): Promise<Record<string, strin
   return seen[0] ?? {};
 }
 
+async function dispatchVersionRetry(): Promise<readonly { headers: Record<string, string>; body: string }[]> {
+  const seen: Array<{ headers: Record<string, string>; body: string }> = [];
+  let call = 0;
+  const fetchStub = (async (_url: unknown, init?: RequestInit) => {
+    seen.push({
+      headers: (init?.headers ?? {}) as Record<string, string>,
+      body: String(init?.body ?? ""),
+    });
+    call++;
+    if (call === 1) {
+      return new Response(
+        JSON.stringify({
+          type: "error",
+          error: {
+            type: "invalid_request_error",
+            message: "claude_code_version_too_old: version 9.9.9 or newer is required",
+          },
+        }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        id: "msg_retry",
+        type: "message",
+        role: "assistant",
+        model: "claude-sonnet-4-6",
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) as unknown as typeof fetch;
+
+  const stream = new ClaudeAdapter({ fetch: fetchStub }).dispatch(makeRequest(PROFILE_ID), candidate, makeContext());
+  for await (const _event of stream) void _event;
+  return seen;
+}
+
 /** Anthropic sends header names lower-cased on the wire; match case-insensitively. */
 function headerValue(
   headers: Record<string, string>,
@@ -159,5 +203,24 @@ describe("the profile beta is the dated one the donor publishes", () => {
     // A dated beta must match the donor exactly: an undated or wrongly-dated
     // value is accepted by every layer and silently ignored upstream.
     expect(CLAUDE_USER_PROFILES_BETA).toBe("user-profiles-2026-09-04");
+  });
+});
+
+describe("Claude server-named version retry", () => {
+  test("rebuilds the body from the live payload while preserving request content", async () => {
+    _resetClaudeCliVersionCache();
+    try {
+      expect(getClaudeCliVersion()).toBe("2.1.302");
+      const attempts = await dispatchVersionRetry();
+      expect(attempts).toHaveLength(2);
+      const firstBody = JSON.parse(attempts[0]?.body ?? "{}") as Record<string, unknown>;
+      const retryBody = JSON.parse(attempts[1]?.body ?? "{}") as Record<string, unknown>;
+      expect(retryBody["messages"]).toEqual(firstBody["messages"]);
+      expect(retryBody["system"]).not.toEqual(firstBody["system"]);
+      expect(JSON.stringify(retryBody["system"])).toContain("9.9.9");
+      expect(attempts[1]?.headers["User-Agent"]).toContain("claude-cli/9.9.9");
+    } finally {
+      _resetClaudeCliVersionCache();
+    }
   });
 });

@@ -149,3 +149,18 @@ export function decodeDatedCursor(cursor: string | undefined): DatedCursor | und
   if (Number.isNaN(new Date(parsed.createdAt).getTime())) return undefined;
   return parsed;
 }
+
+/**
+ * Trim a `limit + 1` keyset query result and report whether it overflowed.
+ * Callers keep cursor encoding specific to their public page contract.
+ */
+export function trimKeysetPage<T>(
+  rows: readonly T[],
+  limit: number,
+): { readonly rows: readonly T[]; readonly hasMore: boolean } {
+  const hasMore = rows.length > limit;
+  return {
+    rows: hasMore ? rows.slice(0, limit) : rows,
+    hasMore,
+  };
+}

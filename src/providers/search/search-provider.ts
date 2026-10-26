@@ -1,3 +1,5 @@
+import { asRecord } from "../../shared/coerce";
+
 /**
  * Declarative web-search provider adapters.
  *
@@ -40,12 +42,6 @@ export interface SearchProviderSpec {
   readonly buildRequest: (params: SearchParams, token: string) => SearchRequestInit;
   /** Maps the provider's own response JSON into normalized results. */
   readonly normalize: (data: unknown) => readonly WebSearchResult[];
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
 }
 
 function stringField(record: Record<string, unknown> | undefined, key: string): string {

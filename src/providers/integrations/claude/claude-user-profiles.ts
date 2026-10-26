@@ -1,3 +1,5 @@
+import { sha256Hex } from "../../../shared/hash";
+
 /**
  * Claude User Profiles REST client.
  *
@@ -32,7 +34,6 @@
  * (`claude-quota.ts:137-142`); **any future dispatch-time caller must catch and
  * continue**, because a profile lookup is metadata, not routing.
  */
-import { createHash } from "node:crypto";
 import { TtlCache } from "../../../persistence/ttl-cache";
 import { providerBaseUrl } from "../../provider-metadata";
 import type { FetchLike } from "../../quota/quota-contracts";
@@ -166,7 +167,7 @@ async function requestUserProfiles(
 }
 
 function credentialKey(credential: string): string {
-  return createHash("sha256").update(credential).digest("hex");
+  return sha256Hex(credential);
 }
 
 /** Query string built exactly as the donor builds it (`:152-157`). */

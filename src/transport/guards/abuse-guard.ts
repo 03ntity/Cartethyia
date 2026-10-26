@@ -1,12 +1,12 @@
 // IP-abuse protection guard: counts every `/v1/*` attempt against the per-IP
 // ceiling via the root `request` hook.
 import { Elysia } from "elysia";
-import { GatewayError } from "../../protocol/gateway-error";
 import type { TrustedProxyBoundary } from "../../config/network";
 import { resolveClientIdentity } from "../../security/ip-boundary";
 import type { ProxyRequestStateStore } from "../request/state";
 import { fastPathname } from "../pathname";
 import type { IpAbuseProtectionService } from "../../security/abuse";
+import { peerAddressUnavailableError } from "./guard-errors";
 
 /**
  * Counts every `/v1/*` attempt against the per-IP ceiling, including the ones
@@ -66,7 +66,7 @@ export function createIpAbuseProtectionMiddleware(deps: {
       ? deps.resolvePeerAddress(request)
       : (server?.requestIP(request)?.address ?? null);
     if (!peer)
-      throw new GatewayError("admission_unavailable", 503, "client peer address unavailable");
+      throw peerAddressUnavailableError();
     const address = resolveClientIdentity(request, deps.trustedProxyBoundary, peer);
     const state = deps.stateStore.get(request);
     try {

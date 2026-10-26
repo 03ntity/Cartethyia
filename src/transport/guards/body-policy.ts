@@ -5,6 +5,7 @@ import { assertBoundedJsonDepth } from "../../protocol/codecs";
 import type { ProxyRequestStateStore } from "../request/state";
 import { fastPathname } from "../pathname";
 import { NATIVE_SERVICE_PATHS, TOKEN_COUNT_PATH } from "../contracts";
+import { bodyTooLargeError } from "./guard-errors";
 
 /** Whether this request is a gateway (`/v1/*`) request. */
 export function isProxyRequest(request: Request): boolean {
@@ -87,7 +88,7 @@ export async function readIngressBody(
   const declared = request.headers.get("content-length");
   const parsed = declared === null ? undefined : Number(declared);
   if (declared !== null && (!/^\d+$/.test(declared) || parsed === undefined || parsed > maxBytes))
-    throw new GatewayError("invalid_request", 413, `The request body is larger than this endpoint accepts (${maxBytes} bytes). Shorten the prompt or split the request.`);
+    throw bodyTooLargeError(maxBytes);
 
   const reader = request.body?.getReader();
   if (!reader) throw new GatewayError("invalid_request", 400, "The request body could not be read. Resend it with a JSON body.");
@@ -104,7 +105,7 @@ export async function readIngressBody(
       totalBytes += chunk.byteLength;
       if (totalBytes > maxBytes) {
         await reader.cancel().catch(() => undefined);
-        throw new GatewayError("invalid_request", 413, `The request body is larger than this endpoint accepts (${maxBytes} bytes). Shorten the prompt or split the request.`);
+        throw bodyTooLargeError(maxBytes);
       }
       chunks.push(chunk);
     }

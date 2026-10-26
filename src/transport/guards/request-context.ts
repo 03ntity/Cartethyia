@@ -20,6 +20,7 @@ import {
   type ModelAbuseOutcome,
   type ModelStrikeService,
 } from "../../security/model-abuse";
+import { peerAddressUnavailableError } from "./guard-errors";
 
 /**
  * Whether a thrown error is a *model* rejection the strike layer counts: the
@@ -123,7 +124,7 @@ export function createClientIdentityMiddleware(deps: {
         ? deps.resolvePeerAddress(request)
         : (server?.requestIP(request)?.address ?? null);
       if (!peer)
-        throw new GatewayError("admission_unavailable", 503, "client peer address unavailable");
+        throw peerAddressUnavailableError();
       const address = resolveClientIdentity(request, deps.trustedProxyBoundary, peer);
       const state = deps.stateStore.require(request);
       state.clientIdentity = {

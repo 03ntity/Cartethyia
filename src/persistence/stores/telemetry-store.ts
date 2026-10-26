@@ -12,6 +12,7 @@ import {
 import { isGatewayError } from "../../observability/telemetry-status";
 import { TELEMETRY_EVENT_DIR } from "../../observability/event-log";
 import { RawTelemetryEventWriter } from "../../observability/raw-event-writer";
+import { hourStamp } from "../../shared/time";
 
 interface UsageTotalDelta {
   readonly tenantId: string;
@@ -87,7 +88,7 @@ async function pruneEventFiles(before: Date): Promise<void> {
   const files = await readdir(TELEMETRY_EVENT_DIR).catch(() => [] as string[]);
   // Two hours back: the current hour is open, the previous one can be too.
   const floor = new Date(Math.min(before.getTime(), Date.now() - 2 * 3_600_000));
-  const cutoff = floor.toISOString().slice(0, 13).replaceAll(":", "-");
+  const cutoff = hourStamp(floor);
   for (const file of files) {
     if (!file.endsWith(".jsonl") || file.endsWith(".events.jsonl")) continue;
     const hour = file.slice(0, 13);

@@ -32,11 +32,13 @@ import {
   completionContext,
   estimatedUsage,
   parseCapturedBody,
+  terminalFailure,
+} from "./attempt-finalize";
+import {
   providerCaptureMaxBytes,
   resolveCaptureDepthForRequest,
   shouldCaptureProviderBodyForRequest,
-  terminalFailure,
-} from "./attempt-finalize";
+} from "./capture-policy";
 import { runAttemptLoop } from "./attempt-loop";
 import { projectForRoute, routeCapabilitiesFor } from "../translation/capabilities";
 import { dispatchStreamingAttempt } from "./streaming/stream";

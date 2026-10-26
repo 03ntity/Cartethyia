@@ -1,6 +1,7 @@
 import type { CanonicalMessage, ContentPart, GenerationControls } from "../../../protocol/canonical-model";
 import type { SurfaceInput } from "../adapters";
 import { isRecord } from "../../../protocol/codecs";
+import { asNumber } from "../../../shared/coerce";
 import { textPart, normalizeInlineFile } from "../content-parts";
 import { SERVICE_TIERS } from "../dialects";
 import { readNumber, readString } from "../../../protocol/codecs";
@@ -75,7 +76,7 @@ export function requestBody(input: unknown): unknown {
 }
 
 export function nonNegativeNumber(value: unknown): number | undefined {
-  const number = typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  const number = asNumber(value);
   return number !== undefined && number >= 0 ? number : undefined;
 }
 

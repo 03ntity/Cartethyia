@@ -409,10 +409,86 @@ function parseUpstreamBodyReset(body: unknown): number | null {
 }
 
 
-export function classifyAccountError(
-  error: unknown,
-  options?: AccountFailureEvidence,
-): AccountErrorClassification {
+interface AccountErrorContext {
+  readonly message: string;
+  readonly lower: string;
+  readonly folded: string;
+  readonly statusCode: number | null;
+  readonly origin: AccountFailureOrigin;
+  readonly scope: AccountFailureScope;
+  readonly revocationNamed: boolean;
+  readonly accountEvidence: boolean;
+  readonly canMutate: boolean;
+  readonly providerCode: string;
+  readonly statedCooldownMs: number | null;
+  readonly reason: (prefix: string) => string;
+  readonly result: (
+    category: AccountErrorCategory,
+    status: AccountErrorClassification["status"],
+    cooldownMs: number,
+    retryAt: Date | null,
+    explanation: string,
+    mutatesAccount?: boolean,
+    modelUnsupported?: boolean,
+  ) => AccountErrorClassification;
+}
+
+/**
+ * One arm of the classifier: an ordered `(match, decide)` pair.
+ *
+ * The arms are **not** independent predicates. Later arms are deliberately
+ * broader than earlier ones — `quotaSignal` matches every price refusal, and
+ * `authSignal` matches a superset of the request-scoped codes — so a match
+ * only wins because it is tried first. That is why they live in one ordered
+ * list rather than behind a dispatch map or a set of independent `if`s: the
+ * list is the precedence, and reading it top to bottom is reading the
+ * decision.
+ *
+ * `match` is a pure function of the shared signals (no closure over the
+ * classifier's locals, no allocation per classification): the table is built
+ * once per call from values already computed for every arm.
+ */
+interface AccountErrorRule {
+  readonly name: string;
+  readonly match: (signals: AccountErrorSignals) => boolean;
+  readonly decide: (signals: AccountErrorSignals) => AccountErrorClassification;
+}
+
+/** The shared signals every arm reads, computed once per classification. */
+interface AccountErrorSignals {
+  readonly message: string;
+  readonly lower: string;
+  readonly folded: string;
+  readonly statusCode: number | null;
+  readonly origin: AccountFailureOrigin;
+  readonly scope: AccountFailureScope;
+  readonly providerCode: string;
+  readonly statedCooldownMs: number | null;
+  readonly reason: (prefix: string) => string;
+  readonly result: AccountErrorContext["result"];
+  readonly canMutate: boolean;
+  readonly accountEvidence: boolean;
+  readonly revocationNamed: boolean;
+  /** Echo of the caller's evidence; read only by the arms that need it. */
+  readonly modelId: string | undefined;
+  readonly modelBlockHits: number;
+  readonly staticToken: boolean;
+  readonly credentialKind: string | undefined;
+  /** Buddy-family provider: the only family with provider-specific codes below. */
+  readonly buddy: boolean;
+  readonly priceRefusal: boolean;
+  readonly deploymentInfraError: boolean;
+  readonly quotaSignal: boolean;
+  readonly policyRejection: boolean;
+  readonly requestScoped: boolean;
+  readonly channelRejection: boolean;
+  readonly hostedToolFailure: boolean;
+  readonly modelEntitlementFailure: boolean;
+  readonly queuedUpstream: boolean;
+}
+
+/** Build the request-independent evidence consumed by the ordered classifier. */
+function accountErrorContext(error: unknown, options?: AccountFailureEvidence): AccountErrorContext {
   const errorRecord = isRecord(error) ? error : undefined;
   const message =
     error instanceof Error
@@ -512,6 +588,49 @@ export function classifyAccountError(
     providerStated,
     modelUnsupported,
   });
+
+  return {
+    message,
+    lower,
+    folded,
+    statusCode,
+    origin,
+    scope,
+    revocationNamed,
+    accountEvidence,
+    canMutate,
+    providerCode,
+    statedCooldownMs,
+    reason,
+    result,
+  };
+}
+
+export function classifyAccountError(
+  error: unknown,
+  options?: AccountFailureEvidence,
+): AccountErrorClassification {
+  const {
+    message,
+    lower,
+    folded,
+    statusCode,
+    origin,
+    scope,
+    revocationNamed,
+    accountEvidence,
+    canMutate,
+    providerCode,
+
+    statedCooldownMs,
+    reason,
+    result,
+  } = accountErrorContext(error, options);
+  const modelId = options?.modelId;
+  const modelBlockHits = Math.max(1, Math.floor(options?.modelBlockHits ?? 1));
+  const staticToken = options?.staticToken === true;
+  const credentialKind = options?.credentialKind;
+  const buddy = BUDDY_PROVIDER_IDS.has(options?.providerId?.toLowerCase() ?? "");
 
   // A price refusal is a verdict on the *request*, not on the account. inferhub
   // answers 402 with `no provider's ask matches your max-per-mtok bid`: the
@@ -768,277 +887,39 @@ export function classifyAccountError(
     lower.includes("queuecount") ||
     lower.includes("queuetype") ||
     (lower.includes("queue") && lower.includes("modelkey"));
-  const authSignal =
-    !quotaSignal &&
-    !policyRejection &&
-    !hostedToolFailure &&
-    !modelEntitlementFailure &&
-    !queuedUpstream &&
-    (providerCode === "authentication_failed" ||
-      folded.includes("invalid api key") ||
-      folded.includes("incorrect api key") ||
-      folded.includes("invalid token") ||
-      folded.includes("token revoked") ||
-      folded.includes("invalidated oauth token") ||
-      folded.includes("reauthorization required") ||
-      folded.includes("account deactivated") ||
-      ((statusCode === 401 || statusCode === 403) && accountEvidence));
-  if (authSignal) {
-    // A static token has no refresh to run, so an auth rejection must not park
-    // the account: disabling it throws away a token that may still work (a
-    // single upstream 401 can be transient). A cooldown lets the next attempt
-    // retry the same token without losing the account.
-    const staticTokenRecovery = options?.staticToken === true;
-    const oauthRecovery =
-      !staticTokenRecovery &&
-      options?.credentialKind === "oauth" &&
-      (lower.includes("expired") || lower.includes("refresh"));
-    // A *named* revocation is the one auth outcome that still parks the account.
-    // The upstream said the credential itself is dead — not that it expired, not
-    // that this request was refused — so there is no window to wait out and no
-    // refresh to run, and a cooldown would only return it to rotation to fail
-    // again. Every other auth rejection is weak evidence (clock skew, a key
-    // rotated a moment ago, an edge answering before the credential loads) and
-    // cools down instead.
-    //
-    // This distinction is the whole fix. Reaching `disabled` from the generic
-    // `401`/`403` branch would be unrecoverable by any sweep, so one transient
-    // rejection would remove the account from rotation until an operator
-    // noticed — the exact outcome the comment above says a static token must
-    // not suffer.
-    const revoked = revocationNamed;
-    const recoverable = staticTokenRecovery || oauthRecovery || !revoked;
-    // An automatic disable is **not** terminal any more, but the deadline is what
-    // makes that safe: `sweepExpiredCooldowns` recovers a disabled row only when
-    // its `cooldownUntil` has elapsed, and an operator-disabled row keeps that
-    // column null. So the machine can undo its own verdict while an operator's
-    // decision still outranks it — see `resolveAccountDisabledRecoveryMs`.
-    const disabledRecoveryMs = resolveAccountDisabledRecoveryMs();
-    const disabledRetryAt =
-      disabledRecoveryMs > 0 ? new Date(Date.now() + disabledRecoveryMs) : null;
-    const cooldownMs = recoverable ? resolveAccountAuthRejectedCooldownMs() : disabledRecoveryMs;
-    return result(
-      "auth_invalidated",
-      recoverable ? "cooldown" : "disabled",
-      cooldownMs,
-      recoverable ? new Date(Date.now() + cooldownMs) : disabledRetryAt,
-      reason(
-        !revoked
-          ? "Provider credential rejected; retrying after a backoff"
-          : staticTokenRecovery
-            ? "Static token rejected; retrying without a refresh"
-            : oauthRecovery
-              ? "OAuth credential requires refresh"
-              : "Provider credential revoked",
-      ),
-      canMutate,
-    );
-  }
 
-  // A price refusal says the caller's bid was below every upstream ask, so the
-  // account is not at fault and must not be mutated: `mutatesAccount` is false
-  // and the deadline is left null. The category is `quota_exhausted` because the
-  // request could not be afforded — not because the account ran out — and the
-  // caller can fix it by raising its own ceiling.
-  if (priceRefusal) {
-    return result(
-      "quota_exhausted",
-      "cooldown",
-      0,
-      null,
-      reason("Request price refused by the provider"),
-      false,
-    );
-  }
+  const signals: AccountErrorSignals = {
+    message,
+    lower,
+    folded,
+    statusCode,
+    origin,
+    scope,
+    providerCode,
+    statedCooldownMs,
+    reason,
+    result,
+    canMutate,
+    accountEvidence,
+    revocationNamed,
+    modelId,
+    modelBlockHits,
+    staticToken,
+    credentialKind,
+    buddy,
+    priceRefusal,
+    deploymentInfraError,
+    quotaSignal,
+    policyRejection,
+    requestScoped,
+    channelRejection,
+    hostedToolFailure,
+    modelEntitlementFailure,
+    queuedUpstream,
+  };
 
-  if (quotaSignal) {
-    /**
-     * Qoder's `112` is a verdict on the (account, model) pair, not on the
-     * credential or the balance as a whole.
-     *
-     * The body is `{"code":"112","message":"{\"pricingUrl\":…}"}` — a link to
-     * the pricing page, i.e. "this model is not in your plan". Observed
-     * behaviour agrees: the account keeps serving every other model after the
-     * refusal. Parking the whole account therefore took healthy models down
-     * with the one that is not entitled, which is the same mistake the
-     * `model_unreachable` branch already avoids for Cursor and buddy.
-     */
-    const qoderPlanGated = providerCode === "112";
-    if (qoderPlanGated) {
-      const hits = Math.max(1, Math.floor(options?.modelBlockHits ?? 1));
-      const cooldownMs = unsupportedModelCooldownMs(hits);
-      return result(
-        "model_unreachable",
-        "cooldown",
-        cooldownMs,
-        new Date(Date.now() + cooldownMs),
-        reason("Model not included in this account's plan"),
-        origin === "upstream" && options?.modelId !== undefined,
-        true,
-      );
-    }
-    // xAI Grok Build's free tier resets on a rolling window. Use a duration
-    // stated by the provider when present; otherwise park for the conservative
-    // 24-hour fallback.
-    const grokFreeTier =
-      providerCode === "subscription:free-usage-exhausted" ||
-      providerCode.startsWith("subscription:") ||
-      lower.includes("free-usage") ||
-      lower.includes("free usage") ||
-      lower.includes("included free usage") ||
-      lower.includes("rolling 24-hour") ||
-      lower.includes("rolling 24 hour");
-    const buddyCreditsExhausted = providerCode === "14018" || lower.includes("credits exhausted");
-    const cooldownMs = grokFreeTier
-      ? (statedCooldownMs ?? GROK_QUOTA_COOLDOWN_MS)
-      : buddyCreditsExhausted
-        ? (statedCooldownMs ?? 12 * 60 * 60 * 1000)
-        : (statedCooldownMs ?? DEFAULT_QUOTA_COOLDOWN_MS());
-    // The caller records against the concrete account that just failed
-    // upstream, so a provider-scoped quota error still cools THAT account
-    // down (enables fallback to the next account). Local-origin quota must
-    // never mutate an upstream account.
-    return result(
-      "quota_exhausted",
-      "cooldown",
-      cooldownMs,
-      new Date(Date.now() + cooldownMs),
-      reason("Provider quota exhausted"),
-      origin === "upstream",
-    );
-  }
-
-  const rateSignal =
-    statusCode === 429 ||
-    providerCode === "rate_limit_exceeded" ||
-    lower.includes("rate_limit") ||
-    lower.includes("rate limit") ||
-    lower.includes("too many requests") ||
-    lower.includes("requests per minute") ||
-    lower.includes("tokens per minute") ||
-    lower.includes("tpm limit") ||
-    lower.includes("rpm limit");
-  if (rateSignal) {
-    const cooldownMs = statedCooldownMs ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS();
-    // Same per-account reasoning as quota above: the failing account (or
-    // its model, when modelId is present) backs off so routing tries the
-    // next candidate instead of hammering the same key.
-    return result(
-      "rate_limit_transient",
-      "cooldown",
-      cooldownMs,
-      new Date(Date.now() + cooldownMs),
-      reason("Provider rate limit"),
-      origin === "upstream",
-    );
-  }
-
-  const capacitySignal =
-    statusCode === 503 ||
-    statusCode === 529 ||
-    providerCode === "model_capacity" ||
-    queuedUpstream ||
-    lower.includes("model overloaded") ||
-    lower.includes("capacity exceeded") ||
-    lower.includes("temporarily unavailable");
-  if (capacitySignal) {
-    const cooldownMs = statedCooldownMs ?? MODEL_CAPACITY_COOLDOWN_MS();
-    const modelScopedMutation = origin === "upstream" && options?.modelId !== undefined;
-    return result(
-      "model_capacity",
-      "cooldown",
-      cooldownMs,
-      new Date(Date.now() + cooldownMs),
-      reason("Provider model capacity"),
-      modelScopedMutation,
-    );
-  }
-
-  // A model the upstream does not serve at all, detected before
-  // `model_unreachable`: the buddy family answers `400 {"code":"11102","msg":
-  // "service info not found"}` for an id its backend has never heard of, and
-  // the reference gateways treat that as a durable verdict on the (account,
-  // model) pair rather than as a request bug. Same category as
-  // `model_unreachable`, so the writer already does the right thing — a
-  // model-scoped cooldown that leaves the account's status alone — and what
-  // differs is the duration, which escalates per hit.
-  //
-  // The hit count the caller supplies is best-effort (absent on a pair's first
-  // report), so the classifier states the base window and the writer recomputes
-  // it from the authoritative count it reads.
-  if (isUnsupportedModelEvidence(statusCode, providerCode, folded)) {
-    const hits = Math.max(1, Math.floor(options?.modelBlockHits ?? 1));
-    const cooldownMs = unsupportedModelCooldownMs(hits);
-    return result(
-      "model_unreachable",
-      "cooldown",
-      cooldownMs,
-      new Date(Date.now() + cooldownMs),
-      reason("Model not supported by this upstream"),
-      origin === "upstream" && options?.modelId !== undefined,
-      true,
-    );
-  }
-
-  // A model the upstream says does not exist for this account is a verdict on
-  // the (account, model) pair, not on the credential. Cursor answers Connect
-  // `not_found` for a model the plan does not reach (`claude-opus-5` on a plan
-  // without it) while every other model on that same account serves normally,
-  // so parking the account would take healthy models down with it. Detected
-  // before the 5xx branch: the adapter surfaces it as a 404 carrying
-  // `providerCode: "not_found"`, and nothing else in the 5xx band is
-  // model-scoped.
-  // Keyed on the provider's own code rather than on the 404: a 404 also means
-  // an upstream *route* that does not exist (`upstream_not_found`), which says
-  // nothing about any model and must not cool one.
-  const modelUnreachable = providerCode === "not_found" || modelEntitlementFailure;
-  if (modelUnreachable) {
-    const cooldownMs = MODEL_UNREACHABLE_COOLDOWN_MS;
-    // Not credential evidence, so `classifyUpstreamFailure` scopes this to the
-    // provider and the `scope === "account"` gate the throttles use would
-    // forbid the mutation outright — leaving the probe reporting a failure that
-    // cooled nothing. The verdict is still about one (account, model) pair:
-    // `recordAccountFailure` writes `modelCooldowns[modelId]` and leaves the
-    // account's own status untouched, so all that is required is a model to
-    // write against.
-    const modelScopedMutation = origin === "upstream" && options?.modelId !== undefined;
-    return result(
-      "model_unreachable",
-      "cooldown",
-      cooldownMs,
-      new Date(Date.now() + cooldownMs),
-      reason("Model unreachable for this account"),
-      modelScopedMutation,
-    );
-  }
-
-  const serverSignal =
-    (statusCode !== null && statusCode >= 500 && statusCode <= 504) ||
-    lower.includes("timeout") ||
-    lower.includes("abort") ||
-    lower.includes("econnrefused") ||
-    lower.includes("fetch failed");
-  if (serverSignal) {
-    // A transport-shaped fault clears on its own, so it is a cooldown with a
-    // deadline rather than a state needing an operator. The deadline matters:
-    // `sweepExpiredCooldowns` selects on `cooldownUntil IS NOT NULL`, so a row
-    // parked without one is never recovered and stays out of rotation.
-    //
-    // `canMutate` rather than a flat `false`: a 5xx whose failure the caller
-    // scoped to the account (an edge/WAF challenge answered to one account's
-    // requests while its siblings on the same egress served fine) must cool
-    // that account down, or it stays `active` and is re-dialled for as long as
-    // the block lasts. Provider-scoped 5xx does not: the upstream is
-    // indiscriminately failing and no single account is at fault.
-    const transientMs = TRANSIENT_ERROR_COOLDOWN_MS();
-    return result(
-      lower.includes("timeout") ? "timeout" : "server_error",
-      "cooldown",
-      transientMs,
-      new Date(Date.now() + transientMs),
-      reason(`Provider ${statusCode ?? "network"} failure`),
-      canMutate,
-    );
+  for (const rule of ACCOUNT_ERROR_RULES) {
+    if (rule.match(signals)) return rule.decide(signals);
   }
 
   // Same reasoning as above, with the shortest backoff: an unmapped failure
@@ -1054,6 +935,326 @@ export function classifyAccountError(
   );
 }
 
+/**
+ * The ordered arms of {@link classifyAccountError}, tried top to bottom; the
+ * first match decides. Order is behavior, not presentation — see
+ * {@link AccountErrorRule}.
+ */
+const ACCOUNT_ERROR_RULES: readonly AccountErrorRule[] = [
+  {
+    name: "deployment-infrastructure",
+    match: (s) => s.deploymentInfraError,
+    decide: (s) =>
+      s.result(
+        "server_error",
+        "cooldown",
+        60_000,
+        null,
+        `Proxy deployment error: ${s.message.slice(0, 160)}`,
+        false,
+      ),
+  },
+  {
+    name: "model-frequency-window",
+    match: (s) => s.lower.includes("frequency limit") && s.lower.includes("switch to the other models"),
+    decide: (s) => {
+      const cooldownMs = s.statedCooldownMs ?? DEFAULT_QUOTA_COOLDOWN_MS();
+      return s.result(
+        "rate_limit_transient",
+        "cooldown",
+        cooldownMs,
+        new Date(Date.now() + cooldownMs),
+        s.reason("Provider frequency limit for this model"),
+        // Provider-scoped evidence still has to reach the writer: a stream frame
+        // carries no credential detail, so `canMutate` is false and without this
+        // the pair would be retried for the whole window it was closed for.
+        s.origin === "upstream" && s.scope === "provider",
+      );
+    },
+  },
+  {
+    name: "content-policy-block",
+    match: (s) => s.policyRejection && s.buddy,
+    decide: (s) => {
+      const policyBlockMs = resolveAccountPolicyBlockCooldownMs();
+      return s.result(
+        "policy_blocked",
+        "cooldown",
+        policyBlockMs,
+        new Date(Date.now() + policyBlockMs),
+        s.reason("Provider content-policy block"),
+        s.origin === "upstream",
+      );
+    },
+  },
+  {
+    name: "request-scoped-rejection",
+    match: (s) => s.requestScoped && s.buddy,
+    decide: (s) =>
+      s.result("unknown", "cooldown", 0, null, s.reason("Request-scoped upstream rejection"), false),
+  },
+  {
+    name: "channel-rejection",
+    match: (s) => s.channelRejection && s.buddy,
+    decide: (s) => {
+      const channelBlockMs = resolveAccountPolicyBlockCooldownMs();
+      return s.result(
+        "policy_blocked",
+        "cooldown",
+        channelBlockMs,
+        new Date(Date.now() + channelBlockMs),
+        s.reason("Provider channel rejection"),
+        s.origin === "upstream",
+      );
+    },
+  },
+  {
+    name: "credential-rejected",
+    match: (s) =>
+      !s.quotaSignal &&
+      !s.policyRejection &&
+      !s.hostedToolFailure &&
+      !s.modelEntitlementFailure &&
+      !s.queuedUpstream &&
+      (s.providerCode === "authentication_failed" ||
+        s.folded.includes("invalid api key") ||
+        s.folded.includes("incorrect api key") ||
+        s.folded.includes("invalid token") ||
+        s.folded.includes("token revoked") ||
+        s.folded.includes("invalidated oauth token") ||
+        s.folded.includes("reauthorization required") ||
+        s.folded.includes("account deactivated") ||
+        ((s.statusCode === 401 || s.statusCode === 403) && s.accountEvidence)),
+    decide: (s) => {
+      // A static token has no refresh to run, so an auth rejection must not park
+      // the account: disabling it throws away a token that may still work (a
+      // single upstream 401 can be transient). A cooldown lets the next attempt
+      // retry the same token without losing the account.
+      const oauthRecovery =
+        !s.staticToken &&
+        s.credentialKind === "oauth" &&
+        (s.lower.includes("expired") || s.lower.includes("refresh"));
+      // A *named* revocation is the one auth outcome that still parks the account.
+      // The upstream said the credential itself is dead — not that it expired, not
+      // that this request was refused — so there is no window to wait out and no
+      // refresh to run, and a cooldown would only return it to rotation to fail
+      // again. Every other auth rejection is weak evidence (clock skew, a key
+      // rotated a moment ago, an edge answering before the credential loads) and
+      // cools down instead.
+      //
+      // This distinction is the whole fix. Reaching `disabled` from the generic
+      // `401`/`403` branch would be unrecoverable by any sweep, so one transient
+      // rejection would remove the account from rotation until an operator
+      // noticed — the exact outcome the comment above says a static token must
+      // not suffer.
+      const revoked = s.revocationNamed;
+      const recoverable = s.staticToken || oauthRecovery || !revoked;
+      // An automatic disable is **not** terminal any more, but the deadline is what
+      // makes that safe: `sweepExpiredCooldowns` recovers a disabled row only when
+      // its `cooldownUntil` has elapsed, and an operator-disabled row keeps that
+      // column null. So the machine can undo its own verdict while an operator's
+      // decision still outranks it — see `resolveAccountDisabledRecoveryMs`.
+      const disabledRecoveryMs = resolveAccountDisabledRecoveryMs();
+      const disabledRetryAt =
+        disabledRecoveryMs > 0 ? new Date(Date.now() + disabledRecoveryMs) : null;
+      const cooldownMs = recoverable ? resolveAccountAuthRejectedCooldownMs() : disabledRecoveryMs;
+      return s.result(
+        "auth_invalidated",
+        recoverable ? "cooldown" : "disabled",
+        cooldownMs,
+        recoverable ? new Date(Date.now() + cooldownMs) : disabledRetryAt,
+        s.reason(
+          !revoked
+            ? "Provider credential rejected; retrying after a backoff"
+            : s.staticToken
+              ? "Static token rejected; retrying without a refresh"
+              : oauthRecovery
+                ? "OAuth credential requires refresh"
+                : "Provider credential revoked",
+        ),
+        s.canMutate,
+      );
+    },
+  },
+  {
+    name: "price-refusal",
+    match: (s) => s.priceRefusal,
+    decide: (s) =>
+      s.result("quota_exhausted", "cooldown", 0, null, s.reason("Request price refused by the provider"), false),
+  },
+  {
+    name: "model-plan-gated",
+    match: (s) => s.quotaSignal && s.providerCode === "112",
+    decide: (s) => {
+      const cooldownMs = unsupportedModelCooldownMs(s.modelBlockHits);
+      return s.result(
+        "model_unreachable",
+        "cooldown",
+        cooldownMs,
+        new Date(Date.now() + cooldownMs),
+        s.reason("Model not included in this account's plan"),
+        s.origin === "upstream" && s.modelId !== undefined,
+        true,
+      );
+    },
+  },
+  {
+    name: "quota-exhausted",
+    match: (s) => s.quotaSignal,
+    decide: (s) => {
+      // xAI Grok Build's free tier resets on a rolling window. Use a duration
+      // stated by the provider when present; otherwise park for the conservative
+      // 24-hour fallback.
+      const grokFreeTier =
+        s.providerCode === "subscription:free-usage-exhausted" ||
+        s.providerCode.startsWith("subscription:") ||
+        s.lower.includes("free-usage") ||
+        s.lower.includes("free usage") ||
+        s.lower.includes("included free usage") ||
+        s.lower.includes("rolling 24-hour") ||
+        s.lower.includes("rolling 24 hour");
+      const buddyCreditsExhausted =
+        s.providerCode === "14018" || s.lower.includes("credits exhausted");
+      const cooldownMs = grokFreeTier
+        ? (s.statedCooldownMs ?? GROK_QUOTA_COOLDOWN_MS)
+        : buddyCreditsExhausted
+          ? (s.statedCooldownMs ?? 12 * 60 * 60 * 1000)
+          : (s.statedCooldownMs ?? DEFAULT_QUOTA_COOLDOWN_MS());
+      // The caller records against the concrete account that just failed
+      // upstream, so a provider-scoped quota error still cools THAT account
+      // down (enables fallback to the next account). Local-origin quota must
+      // never mutate an upstream account.
+      return s.result(
+        "quota_exhausted",
+        "cooldown",
+        cooldownMs,
+        new Date(Date.now() + cooldownMs),
+        s.reason("Provider quota exhausted"),
+        s.origin === "upstream",
+      );
+    },
+  },
+  {
+    name: "rate-limit",
+    match: (s) =>
+      s.statusCode === 429 ||
+      s.providerCode === "rate_limit_exceeded" ||
+      s.lower.includes("rate_limit") ||
+      s.lower.includes("rate limit") ||
+      s.lower.includes("too many requests") ||
+      s.lower.includes("requests per minute") ||
+      s.lower.includes("tokens per minute") ||
+      s.lower.includes("tpm limit") ||
+      s.lower.includes("rpm limit"),
+    decide: (s) => {
+      const cooldownMs = s.statedCooldownMs ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS();
+      // Same per-account reasoning as quota above: the failing account (or
+      // its model, when modelId is present) backs off so routing tries the
+      // next candidate instead of hammering the same key.
+      return s.result(
+        "rate_limit_transient",
+        "cooldown",
+        cooldownMs,
+        new Date(Date.now() + cooldownMs),
+        s.reason("Provider rate limit"),
+        s.origin === "upstream",
+      );
+    },
+  },
+  {
+    name: "model-capacity",
+    match: (s) =>
+      s.statusCode === 503 ||
+      s.statusCode === 529 ||
+      s.providerCode === "model_capacity" ||
+      s.queuedUpstream ||
+      s.lower.includes("model overloaded") ||
+      s.lower.includes("capacity exceeded") ||
+      s.lower.includes("temporarily unavailable"),
+    decide: (s) => {
+      const cooldownMs = s.statedCooldownMs ?? MODEL_CAPACITY_COOLDOWN_MS();
+      const modelScopedMutation = s.origin === "upstream" && s.modelId !== undefined;
+      return s.result(
+        "model_capacity",
+        "cooldown",
+        cooldownMs,
+        new Date(Date.now() + cooldownMs),
+        s.reason("Provider model capacity"),
+        modelScopedMutation,
+      );
+    },
+  },
+  {
+    name: "model-unsupported",
+    match: (s) => isUnsupportedModelEvidence(s.statusCode, s.providerCode, s.folded),
+    decide: (s) => {
+      const cooldownMs = unsupportedModelCooldownMs(s.modelBlockHits);
+      return s.result(
+        "model_unreachable",
+        "cooldown",
+        cooldownMs,
+        new Date(Date.now() + cooldownMs),
+        s.reason("Model not supported by this upstream"),
+        s.origin === "upstream" && s.modelId !== undefined,
+        true,
+      );
+    },
+  },
+  {
+    name: "model-unreachable",
+    match: (s) => s.providerCode === "not_found" || s.modelEntitlementFailure,
+    decide: (s) => {
+      const cooldownMs = MODEL_UNREACHABLE_COOLDOWN_MS;
+      // Not credential evidence, so `classifyUpstreamFailure` scopes this to the
+      // provider and the `scope === "account"` gate the throttles use would
+      // forbid the mutation outright — leaving the probe reporting a failure that
+      // cooled nothing. The verdict is still about one (account, model) pair:
+      // `recordAccountFailure` writes `modelCooldowns[modelId]` and leaves the
+      // account's own status untouched, so all that is required is a model to
+      // write against.
+      const modelScopedMutation = s.origin === "upstream" && s.modelId !== undefined;
+      return s.result(
+        "model_unreachable",
+        "cooldown",
+        cooldownMs,
+        new Date(Date.now() + cooldownMs),
+        s.reason("Model unreachable for this account"),
+        modelScopedMutation,
+      );
+    },
+  },
+  {
+    name: "transport-fault",
+    match: (s) =>
+      (s.statusCode !== null && s.statusCode >= 500 && s.statusCode <= 504) ||
+      s.lower.includes("timeout") ||
+      s.lower.includes("abort") ||
+      s.lower.includes("econnrefused") ||
+      s.lower.includes("fetch failed"),
+    decide: (s) => {
+      // A transport-shaped fault clears on its own, so it is a cooldown with a
+      // deadline rather than a state needing an operator. The deadline matters:
+      // `sweepExpiredCooldowns` selects on `cooldownUntil IS NOT NULL`, so a row
+      // parked without one is never recovered and stays out of rotation.
+      //
+      // `canMutate` rather than a flat `false`: a 5xx whose failure the caller
+      // scoped to the account (an edge/WAF challenge answered to one account's
+      // requests while its siblings on the same egress served fine) must cool
+      // that account down, or it stays `active` and is re-dialled for as long as
+      // the block lasts. Provider-scoped 5xx does not: the upstream is
+      // indiscriminately failing and no single account is at fault.
+      const transientMs = TRANSIENT_ERROR_COOLDOWN_MS();
+      return s.result(
+        s.lower.includes("timeout") ? "timeout" : "server_error",
+        "cooldown",
+        transientMs,
+        new Date(Date.now() + transientMs),
+        s.reason(`Provider ${s.statusCode ?? "network"} failure`),
+        s.canMutate,
+      );
+    },
+  },
+];
 
 /** Persists one classified failure to the account row and appends a health event. */
 export async function recordAccountFailure(

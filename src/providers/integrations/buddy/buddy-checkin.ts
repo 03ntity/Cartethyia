@@ -1,3 +1,5 @@
+import { asCoercedNumber as sharedAsNumber, asRecord as sharedAsRecord } from "../../../shared/coerce";
+
 // Buddy-family daily check-in (daily login credit claim), shared by all three
 // variants (`cb`, `cbcn`, `workbuddy`): same Tencent billing facade, same
 // status/claim contract — only the endpoint base and identity headers differ
@@ -370,19 +372,13 @@ function isRetryableClaim(error: unknown, status: number | null): boolean {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+  return sharedAsRecord(value) ?? null;
 }
 
 function asNumber(value: unknown): number | null {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
+  return sharedAsNumber(value) ?? null;
 }
+
 
 /** Reads the envelope's business code; `0` means success. */
 function envelopeCode(payload: unknown): number | null {

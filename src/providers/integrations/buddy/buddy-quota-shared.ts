@@ -1,3 +1,5 @@
+import { asNumber as sharedAsNumber } from "../../../shared/coerce";
+
 /**
  * Shared Tencent billing-meter parsing for the CodeBuddy family
  * (`cb`, `cbcn`, `workbuddy`).
@@ -348,7 +350,7 @@ function enterpriseUsageUrl(resourceUrl: string): string {
 }
 
 function finiteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return sharedAsNumber(value);
 }
 
 /**

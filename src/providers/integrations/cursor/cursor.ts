@@ -17,6 +17,7 @@
 // `rejected` so the model can continue without the gateway ever touching a
 // filesystem or a shell on the caller's behalf.
 import { GatewayError } from "../../../protocol/gateway-error";
+import { asRecord as recordOf } from "../../../shared/coerce";
 import type {
   CanonicalEvent,
   CanonicalRequest,
@@ -258,12 +259,6 @@ function usageFromTurnEnded(turnEnded: Record<string, unknown>): UsageRecord {
     estimated_cost: null,
     total_tokens: input + output,
   };
-}
-
-function recordOf(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
 }
 
 function nonEmptyStringOf(value: unknown): string | undefined {

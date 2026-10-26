@@ -13,6 +13,7 @@
  */
 import type { Table } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
+import { isRecord as isPlainObject } from "../../protocol/codecs";
 import { decryptCredentialToString } from "../../security/crypto";
 import {
   BACKUP_APP,
@@ -98,10 +99,6 @@ function normalizeLegacyCiphertext(table: Table, row: Record<string, unknown>): 
     }
   }
   return normalized;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Column name → its Drizzle data type, so validation knows what may nest. */

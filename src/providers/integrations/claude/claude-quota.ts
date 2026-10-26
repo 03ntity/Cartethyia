@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Hex } from "../../../shared/hash";
 import { TtlCache } from "../../../persistence/ttl-cache";
 import type { FetchLike, ProviderQuotaResult, ProviderQuotaWindow } from "../../quota/quota-contracts";
 import { authCredential, getJson, percentWindow, record, text, number } from "../../quota/quota-contracts";
@@ -102,7 +102,7 @@ export async function fetchClaudeQuota(
   credential: string,
   fetcher: FetchLike,
 ): Promise<ProviderQuotaResult> {
-  const key = createHash("sha256").update(credential).digest("hex");
+  const key = sha256Hex(credential);
   const cached = quotaCache.get(key);
   if (cached !== undefined) return cached;
   if (quotaCooldown.get(key) !== undefined) {

@@ -250,7 +250,8 @@ describe("payload retention", () => {
  * pin the byte basis on both the record budget and the provider tee.
  */
 import { truncateUtf8 } from "../../src/observability/payload-capture";
-import { captureProviderExchange, providerCaptureMaxBytes } from "../../src/transport/dispatch/attempt-finalize";
+import { providerCaptureMaxBytes } from "../../src/transport/dispatch/capture-policy";
+import { captureProviderExchange } from "../../src/transport/dispatch/attempt-finalize";
 
 describe("truncateUtf8", () => {
   test("never splits a code point at the cut", () => {

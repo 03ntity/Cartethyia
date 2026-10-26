@@ -21,7 +21,7 @@ import { clientNameFromUserAgent } from "../../observability/client-name";
 // imports of `clientNameFromUserAgent` keep working.
 export { clientNameFromUserAgent };
 import { cachedReadWithEtag, type CachedResult } from "../shared/read-through-cache";
-import { decodeDatedCursor, encodeCursor } from "../shared/cursor";
+import { decodeDatedCursor, encodeCursor, trimKeysetPage } from "../shared/cursor";
 import { CARTETHYIA_VERSION } from "../../version";
 import { CachedPreferencesReader, DrizzlePreferencesReader, type PreferencesReader } from "../../persistence/tenant-preferences";
 import type {
@@ -827,10 +827,7 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
       limit: limit + 1,
       ...(before === undefined ? {} : { cursor: encodeCursor({ createdAt: before.createdAt, id: before.id }) }),
     });
-    const events = page.events;
-    const rows = events.slice(0, limit + 1);
-    const overflow = rows.length > limit;
-    const trimmed = overflow ? rows.slice(0, limit) : rows;
+    const { rows: trimmed, hasMore: overflow } = trimKeysetPage(page.events, limit);
     const entries = trimmed.map(mapTelemetryEventRow);
     const lastEntry = entries[entries.length - 1];
     const nextCursor =

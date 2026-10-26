@@ -1,3 +1,4 @@
+import { sha256Hex } from "../../../shared/hash";
 // Stable, non-secret installation identity for the Cursor integration.
 //
 // Cursor keys device identity off the ids embedded in `x-cursor-checksum` and
@@ -12,16 +13,13 @@
 // installation and is never derived from a credential. A credential-derived id
 // would rotate whenever an operator re-authenticated, which is exactly the
 // "too many devices" symptom the stability exists to avoid.
-import { createHash } from "node:crypto";
 import { getOrCreateInstallId } from "../shared/install-id";
 
 /** One process-lifetime cache: the id is stable, so it is read once. */
 let cached: { machineId: string; macMachineId: string } | undefined;
 let inFlight: Promise<{ machineId: string; macMachineId: string }> | undefined;
 
-function sha256Hex(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
+
 
 /**
  * Stable device fingerprints for the `x-cursor-checksum` header.

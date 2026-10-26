@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { Worker } from "node:worker_threads";
+import { hourStamp } from "../shared/time";
 
 export interface PayloadFileReference {
   readonly storage: "jsonl-file";
@@ -170,7 +171,7 @@ function checksum(value: Buffer | readonly Buffer[]): string {
 }
 
 function fileName(now = new Date()): string {
-  return `${now.toISOString().slice(0, 13).replaceAll(":", "-")}-${process.pid}${FRAME_FILE_SUFFIX}`;
+  return `${hourStamp(now)}-${process.pid}${FRAME_FILE_SUFFIX}`;
 }
 
 /**

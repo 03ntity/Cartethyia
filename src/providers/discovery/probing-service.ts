@@ -1,10 +1,12 @@
 import {
-  captureDepthMaxBytes,
   captureProviderExchange,
   providerRequestMetadataOnly,
-  providerCaptureMaxBytes,
   type ProviderExchangeCapture,
 } from "../../transport/dispatch/attempt-finalize";
+import {
+  captureDepthMaxBytes,
+  providerCaptureMaxBytes,
+} from "../../transport/dispatch/capture-policy";
 import { globalOrOwnedBy } from "../../persistence/tenant-scope";
 /**
  * Provider probing and model-discovery orchestration.

@@ -7,10 +7,9 @@ import type { UsageRecord } from "../../protocol/canonical-model";
 import { classifyUpstreamFailure } from "../failure-policy";
 import type { AdmissionLease } from "../../security/admission/contracts";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
-import { TelemetryPayloadCapture, truncateUtf8 } from "../../observability/payload-capture";
+import { resolvePayloadCapture, TelemetryPayloadCapture, truncateUtf8 } from "../../observability/payload-capture";
 import { payloadDirectory } from "../../observability/payload-store";
 import type { TelemetryBatchBuffer } from "../../observability/telemetry-buffer";
-import type { TelemetryPayloadDepth, TelemetryPayloadMode } from "../../console/settings/contracts";
 import type { ProxyRequestOutcome, ProxyRequestState } from "../request/state";
 import type { PayloadCaptureState } from "../../observability/payload-capture";
 import { finalizeRequestTelemetry } from "../guards/error-lifecycle";
@@ -22,153 +21,7 @@ import {
   recordPoolDispatchOutcome,
 } from "../../network/pool-health-machine";
 import { ProxyConnectRefusalError } from "../../network/pool/agent";
-import {
-  payloadCaptureKeepsBodies,
-  payloadRetentionMs,
-  resolvePayloadCapture,
-} from "../../observability/payload-capture";
-
-/**
- * True when the tenant keeps response bodies (mode `full`). The dispatch
- * path calls this once per attempt to decide whether the provider-response
- * tee is worth its clone + bounded read; `none`/`metadata` skip the body.
- */
-export async function shouldCaptureProviderBody(
-  db: CartethyiaDatabase,
-  tenantId: string | null,
-): Promise<boolean> {
-  return payloadCaptureKeepsBodies(db, tenantId);
-}
-
-/**
- * Per-stage cap for the provider request/response tee at one capture depth.
- *
- * The tee is what the drawer's "Provider Request" and "Provider Response"
- * panels read, so its cap is the most a provider panel can ever show. It used
- * to be a flat 256 KiB at every depth: on a large request the translated
- * provider body was clipped to 256 KiB before the shared record budget ever
- * ran, so a tenant who raised the depth to Maximum — 16 MiB — still saw a
- * quarter-megabyte provider request and an empty provider response. Derived
- * from the same depth tiers as the record budget, so raising the depth now
- * raises both.
- *
- * Capped at a quarter of the depth's total budget: four panels share it, and
- * one of them must never be able to spend the whole thing.
- */
-export function providerCaptureMaxBytes(depth?: TelemetryPayloadDepth): number {
-  if (depth === "moderate") return 2 * 1024 * 1024;
-  if (depth === "maximum") return 4 * 1024 * 1024;
-  // Minimum depth still tees a full MiB in `full` mode: the record budget at
-  // this depth is 1 MiB (see captureDepthMaxBytes), and a 256 KiB tee clipped
-  // bodies the record could have kept whole. Metadata-mode callers never read
-  // the body at all, so the floor costs nothing there.
-  return 1024 * 1024;
-}
-
-/**
- * Same answer as {@link shouldCaptureProviderBody}, memoized on the request.
- *
- * The preference is a tenant setting, so it cannot change between attempts of
- * one request. Resolving it per attempt meant a request with several attempts
- * paid for it repeatedly, and the per-attempt answer could in principle differ
- * from the one the terminal capture then acted on. Passing `state` lets every
- * attempt of a request share one resolution.
- */
-export async function shouldCaptureProviderBodyForRequest(
-  db: CartethyiaDatabase,
-  tenantId: string | null,
-  state: { payloadCapturePreference?: unknown },
-): Promise<boolean> {
-  if (state.payloadCapturePreference === undefined) {
-    state.payloadCapturePreference = await resolvePayloadCapture(db, tenantId);
-  }
-  const resolved = state.payloadCapturePreference as
-    | { readonly ok: true; readonly mode: string }
-    | { readonly ok: false };
-  return resolved.ok === true && resolved.mode === "full";
-}
-
-/**
- * The tenant's capture mode, memoized on the request like the body answer.
- *
- * Resolved once so callers that gate diagnostics on the mode (the stream
- * pipeline's transcript and client-response copies) share one preference read
- * with the capture path itself; `none` is also the fail-closed answer for a
- * failed preference read, which is the same answer `resolvePayloadCapture`
- * itself gives.
- */
-export async function resolveCaptureModeForRequest(
-  db: CartethyiaDatabase,
-  tenantId: string | null,
-  state: { payloadCapturePreference?: unknown },
-): Promise<TelemetryPayloadMode> {
-  if (state.payloadCapturePreference === undefined) {
-    state.payloadCapturePreference = await resolvePayloadCapture(db, tenantId);
-  }
-  const resolved = state.payloadCapturePreference as
-    | { readonly ok: true; readonly mode: TelemetryPayloadMode }
-    | { readonly ok: false };
-  return resolved.ok === true ? resolved.mode : "none";
-}
-
-/**
- * The tenant's capture depth, memoized on the request like the mode above.
- *
- * Read *after* {@link shouldCaptureProviderBodyForRequest} has populated the
- * memo, so the two answers come from one preference read. It sizes the
- * provider tee: a tenant who raised the depth is asking for more of every
- * panel, and a flat cap would answer with the same clipped body regardless.
- */
-export async function resolveCaptureDepthForRequest(
-  db: CartethyiaDatabase,
-  tenantId: string | null,
-  state: { payloadCapturePreference?: unknown },
-): Promise<TelemetryPayloadDepth> {
-  if (state.payloadCapturePreference === undefined) {
-    state.payloadCapturePreference = await resolvePayloadCapture(db, tenantId);
-  }
-  const resolved = state.payloadCapturePreference as
-    | { readonly ok: true; readonly depth: TelemetryPayloadDepth }
-    | { readonly ok: false };
-  return resolved.ok === true ? resolved.depth : "minimum";
-}
-
-/**
- * The tenant's chosen payload retention, memoized on the request like the mode
- * and depth above — and resolved *after* one of them has populated the memo, so
- * all three come from one preference read.
- *
- * Falls back to the deployment default when the read failed, which is the same
- * answer the capture path reaches on its own; returning it here keeps the
- * caller from having to know the fallback exists.
- */
-export async function resolveCaptureRetentionForRequest(
-  db: CartethyiaDatabase,
-  tenantId: string | null,
-  state: { payloadCapturePreference?: unknown },
-): Promise<number> {
-  if (state.payloadCapturePreference === undefined) {
-    state.payloadCapturePreference = await resolvePayloadCapture(db, tenantId);
-  }
-  const resolved = state.payloadCapturePreference as
-    | { readonly ok: true; readonly retentionMs: number }
-    | { readonly ok: false };
-  return resolved.ok === true ? resolved.retentionMs : payloadRetentionMs();
-}
-
-/**
- * Combined body cap for one capture depth. Fixed size tiers: every depth
- * stores all four drawer panels (client request, translated provider
- * request, raw provider response, final client response) — only the cap
- * changes, so raising the depth never changes *what* is visible, only how
- * much of large bodies survives. Moderate and maximum spike CPU/memory while
- * active; minimum is light enough to leave on.
- */
-export function captureDepthMaxBytes(depth: TelemetryPayloadDepth): number {
-  if (depth === "moderate") return 8 * 1024 * 1024;
-  if (depth === "maximum") return 16 * 1024 * 1024;
-  return 1 * 1024 * 1024;
-}
+import { captureDepthMaxBytes, providerCaptureMaxBytes } from "./capture-policy";
 
 /**
  * What the client received for a failed terminal attempt, in the same public

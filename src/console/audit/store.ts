@@ -3,7 +3,7 @@ import { caseInsensitiveLike } from "../../persistence/dialect";
 import { globalOrOwnedBy, ownedByOnly } from "../../persistence/tenant-scope";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import { adminAuditLog, consoleUsers } from "../../persistence/schema";
-import { decodeDatedCursor, encodeCursor } from "../shared/cursor";
+import { decodeDatedCursor, encodeCursor, trimKeysetPage } from "../shared/cursor";
 import type { AuditEntry, AuditListPage, AuditReadStore } from "./contracts";
 
 /**
@@ -125,8 +125,7 @@ export class DrizzleAuditReadStore implements AuditReadStore {
       .orderBy(desc(adminAuditLog.createdAt), desc(adminAuditLog.id))
       .limit(params.limit + 1);
 
-    const overflow = rows.length > params.limit;
-    const trimmed = overflow ? rows.slice(0, params.limit) : rows;
+    const { rows: trimmed, hasMore: overflow } = trimKeysetPage(rows, params.limit);
     const actorNames = await this.resolveActorNames(trimmed.map((row) => row.actor));
     const entries = trimmed.map((row) => mapAuditRow(row, actorNames));
     const lastEntry = entries[entries.length - 1];

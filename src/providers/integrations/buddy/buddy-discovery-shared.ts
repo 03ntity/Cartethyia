@@ -1,3 +1,5 @@
+import { asNumber as sharedAsNumber, asRecord } from "../../../shared/coerce";
+
 /**
  * Model discovery for the buddy family (CodeBuddy intl / CN, WorkBuddy).
  *
@@ -77,14 +79,8 @@ function siteOrigin(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, "").replace(/\/v\d+$/, "");
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
 function asNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  return sharedAsNumber(value) ?? null;
 }
 
 /**

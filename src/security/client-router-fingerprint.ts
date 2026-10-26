@@ -1,3 +1,5 @@
+import { getHeader as readRecordHeader } from "../protocol/canonical-model";
+
 // Client-router fingerprinting for inbound `/v1/*` traffic.
 //
 // Several AI-gateway products can themselves be pointed at this gateway. An
@@ -133,13 +135,7 @@ export interface ClientRouterProbe {
 function readHeader(probe: ClientRouterProbe, name: string): string | undefined {
   const headers = probe.headers;
   if (headers instanceof Headers) return headers.get(name) ?? undefined;
-  const direct = headers[name];
-  if (direct !== undefined) return direct;
-  const lowered = name.toLowerCase();
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === lowered) return value;
-  }
-  return undefined;
+  return readRecordHeader(headers, name);
 }
 
 function signalMatches(signal: ClientRouterSignal, value: string): boolean {

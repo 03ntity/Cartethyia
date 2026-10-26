@@ -33,7 +33,13 @@ import type { NetworkPoolSelector } from "../../network/pool/selector";
 import type { ProxyRequestState } from "../request/state";
 import type { TelemetryBatchBuffer } from "../../observability/telemetry-buffer";
 import { flagPoolBlocked, flagPoolCooldown } from "../../network/pool-health";
-import { completeAttempt, errorClientResponseBody, estimatedUsage, type ProviderExchangeCapture } from "./attempt-finalize";
+import {
+  completeAttempt,
+  errorClientResponseBody,
+  estimatedUsage,
+  type AttemptCompletion,
+  type ProviderExchangeCapture,
+} from "./attempt-finalize";
 import { repriceUsage } from "../../providers/provider-usage";
 import { isFreeTierIpBlock, isOAuthCredentialInvalidated, shouldCooldownPool } from "./retry-policy";
 import { drainAbortReason } from "../shutdown-notice";
@@ -90,6 +96,50 @@ function buildMemberOrdinals(
     if (!ordinals.has(key)) ordinals.set(key, ordinals.size);
   }
   return ordinals;
+}
+
+/** Build the common failure payload; the call site supplies only attempt-specific decisions. */
+function failureCompletion(input: {
+  readonly state: ProxyRequestState;
+  readonly deps: AttemptLoopDeps;
+  readonly candidate?: RouteCandidate | undefined;
+  readonly status: AttemptCompletion["status"];
+  readonly errorCategory?: string;
+  readonly errorOrigin?: string;
+  readonly error: unknown;
+  readonly tenantId: string | null;
+  readonly terminal: boolean;
+  readonly networkPoolId?: string | undefined;
+  readonly lease?: AdmissionLease | undefined;
+  readonly commitUsage?: AttemptCompletion["commitUsage"];
+  readonly providerCapture?: ProviderExchangeCapture | undefined;
+  readonly includeClientResponse: boolean;
+}): AttemptCompletion {
+  const { state, deps, candidate } = input;
+  return {
+    status: input.status,
+    providerId: candidate?.provider_id ?? "",
+    ...(candidate?.provider_account_id ? { accountId: candidate.provider_account_id } : {}),
+    ...(candidate?.provider_account_label ? { accountLabel: candidate.provider_account_label } : {}),
+    ...(candidate?.model_id === undefined ? {} : { modelId: candidate.model_id }),
+    ...(input.networkPoolId === undefined ? {} : { networkPoolId: input.networkPoolId }),
+    ...(input.errorCategory === undefined ? {} : { errorCategory: input.errorCategory }),
+    ...(input.errorOrigin === undefined ? {} : { errorOrigin: input.errorOrigin }),
+    error: input.error,
+    ...(input.lease === undefined ? {} : { lease: input.lease }),
+    ...(input.commitUsage === undefined ? {} : { commitUsage: input.commitUsage }),
+    terminal: input.terminal,
+    tenantId: input.tenantId,
+    ingressBody: state.ingressBody,
+    responseBody: null,
+    ...(input.includeClientResponse && input.status !== "cancelled"
+      ? { clientResponseText: errorClientResponseBody(input.error) }
+      : {}),
+    ...(input.providerCapture === undefined ? {} : { providerCapture: input.providerCapture }),
+    db: deps.db,
+    ...(deps.telemetryBuffer === undefined ? {} : { telemetryBuffer: deps.telemetryBuffer }),
+    ...(deps.snapshotService === undefined ? {} : { snapshotService: deps.snapshotService }),
+  };
 }
 
 /** Route-specific preconditions resolved for one candidate before its leases are taken. */
@@ -231,33 +281,19 @@ export async function runAttemptLoop<TResult, TAdapter>(
             lastFiredCapture?.request !== null && lastFiredCapture !== undefined
               ? lastFiredCapture
               : undefined;
-          await completeAttempt(state, {
+          await completeAttempt(state, failureCompletion({
+            state,
+            deps,
+            candidate,
             status: terminal.status,
-            providerId: candidate.provider_id,
-            ...(candidate.provider_account_id
-              ? { accountId: candidate.provider_account_id }
-              : {}),
-            ...(candidate.provider_account_label
-              ? { accountLabel: candidate.provider_account_label }
-              : {}),
             errorCategory: terminal.errorCategory,
             errorOrigin: terminal.errorOrigin,
-            modelId: candidate.model_id,
             error: lastError,
-            terminal: true,
             tenantId: input.tenantId,
-            ingressBody: state.ingressBody,
-            responseBody: null,
-            ...(terminal.status !== "cancelled"
-              ? { clientResponseText: errorClientResponseBody(lastError) }
-              : {}),
-            // Same fallback the terminal catch uses: a request that did fire
-            // upstream keeps that exchange in Request Detail.
-            ...(lastFired ? { providerCapture: lastFired } : {}),
-            db: deps.db,
-            ...(deps.telemetryBuffer ? { telemetryBuffer: deps.telemetryBuffer } : {}),
-            ...(deps.snapshotService ? { snapshotService: deps.snapshotService } : {}),
-          });
+            terminal: true,
+            providerCapture: lastFired,
+            includeClientResponse: true,
+          }));
           metrics.proxy_requests_total.inc(1, {
             status: terminal.status === "cancelled" ? "cancelled" : "failed",
           });
@@ -376,48 +412,38 @@ export async function runAttemptLoop<TResult, TAdapter>(
         providerCapture.request !== null
           ? providerCapture
           : lastFiredCapture ?? providerCapture;
-      await completeAttempt(state, {
+      await completeAttempt(state, failureCompletion({
+        state,
+        deps,
+        candidate,
         status: terminal.status,
-        providerId: candidate.provider_id,
-        ...(candidate.provider_account_id ? { accountId: candidate.provider_account_id } : {}),
-        ...(candidate.provider_account_label ? { accountLabel: candidate.provider_account_label } : {}),
         errorCategory: terminal.errorCategory,
         errorOrigin: terminal.errorOrigin,
-        modelId: candidate.model_id,
-        ...(networkPoolId ? { networkPoolId } : {}),
         error,
-        ...(lease ? { lease } : {}),
+        tenantId: input.tenantId,
+        terminal: terminalAttempt,
+        networkPoolId,
+        lease,
         // A failed attempt may have sent bytes upstream, so it is not free —
         // but it must not be charged the full input estimate plus a full
         // output reserve either, because a request that walks N candidates
         // would then leave N estimates on the counters for one client request.
         // Commit the input estimate only: nothing was generated, and the
         // `finally` release then refunds the (uncommitted) output reserve.
-        ...(!cancelled && bindingEstablished
-          ? {
-              commitUsage: repriceUsage(
-                estimatedUsage(leaseSource.estimatedInputTokens, 0),
-                candidate.provider_id,
-                candidate.model_id,
-              ),
-            }
-          : {}),
-        terminal: terminalAttempt,
-        tenantId: input.tenantId,
-        ingressBody: state.ingressBody,
-        responseBody: null,
+        commitUsage: !cancelled && bindingEstablished
+          ? repriceUsage(
+              estimatedUsage(leaseSource.estimatedInputTokens, 0),
+              candidate.provider_id,
+              candidate.model_id,
+            )
+          : undefined,
         // The client still receives the public error envelope on the wire —
         // store it so Request Detail's Client Response panel traces failures
         // exactly as the client saw them. Cancelled requests have no client
         // response (the caller is gone).
-        ...(terminalAttempt && !cancelled
-          ? { clientResponseText: errorClientResponseBody(error) }
-          : {}),
         providerCapture: terminalCapture,
-        db: deps.db,
-        ...(deps.telemetryBuffer ? { telemetryBuffer: deps.telemetryBuffer } : {}),
-        ...(deps.snapshotService ? { snapshotService: deps.snapshotService } : {}),
-      });
+        includeClientResponse: terminalAttempt,
+      }));
       // A 403 can be a deterministic provider policy rejection, not an
       // invalid OAuth credential. Only the evidence-based classifier above
       // may trigger a refresh.
@@ -506,33 +532,21 @@ export async function runAttemptLoop<TResult, TAdapter>(
       lastFiredCapture?.request !== null && lastFiredCapture !== undefined
         ? lastFiredCapture
         : undefined;
-    await completeAttempt(state, {
+    await completeAttempt(state, failureCompletion({
+      state,
+      deps,
+      candidate: lastCandidate,
       status: terminal.status,
-      providerId: lastCandidate?.provider_id ?? "",
-      ...(lastCandidate?.provider_account_id
-        ? { accountId: lastCandidate.provider_account_id }
-        : {}),
-      ...(lastCandidate?.provider_account_label
-        ? { accountLabel: lastCandidate.provider_account_label }
-        : {}),
       errorCategory: terminal.errorCategory,
       errorOrigin: terminal.errorOrigin,
-      ...(lastCandidate?.model_id === undefined ? {} : { modelId: lastCandidate.model_id }),
       error: lastError,
       terminal: true,
       tenantId: input.tenantId,
-      ingressBody: state.ingressBody,
-      responseBody: null,
       // The client receives the public error envelope on the wire — store it
       // so the Client Response panel traces the failure as the client saw it.
-      ...(terminal.status === "cancelled"
-        ? {}
-        : { clientResponseText: errorClientResponseBody(lastError) }),
-      ...(terminalCapture === undefined ? {} : { providerCapture: terminalCapture }),
-      db: deps.db,
-      ...(deps.telemetryBuffer ? { telemetryBuffer: deps.telemetryBuffer } : {}),
-      ...(deps.snapshotService ? { snapshotService: deps.snapshotService } : {}),
-    });
+      providerCapture: terminalCapture,
+      includeClientResponse: true,
+    }));
   }
   metrics.proxy_requests_total.inc(1, { status: "failed" });
   throw lastError;

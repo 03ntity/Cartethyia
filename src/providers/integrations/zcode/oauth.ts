@@ -25,8 +25,8 @@
 import {
   nonEmptyTrimmedString,
   readJsonResponse,
-  record,
 } from "../../authentication/oauth-flow-store";
+import { asRecord as record } from "../../../shared/coerce";
 import type {
   OAuthAuthorizeRequest,
   OAuthExchangeResult,

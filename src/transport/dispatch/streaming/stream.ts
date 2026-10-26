@@ -43,13 +43,13 @@ import type { AdmissionLease } from "../../../security/admission/contracts";
 import type { NetworkPoolSelector } from "../../../network/pool/selector";
 import type { TelemetryBatchBuffer } from "../../../observability/telemetry-buffer";
 import type { ProviderExchangeCapture } from "../attempt-finalize";
+import { captureProviderExchange } from "../attempt-finalize";
 import {
-  captureProviderExchange,
   providerCaptureMaxBytes,
   resolveCaptureDepthForRequest,
   resolveCaptureModeForRequest,
   shouldCaptureProviderBodyForRequest,
-} from "../attempt-finalize";
+} from "../capture-policy";
 import { resolveTenantImageClampMaxBytes } from "../../request/tenant-preferences";
 import { proxySuccessHeaders, buildUpstreamDispatchContext } from "../upstream";
 import type { AttemptLeaseOwnership } from "../leases";

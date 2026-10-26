@@ -1,6 +1,7 @@
 import { mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { hourStamp } from "../shared/time";
 
 interface AppendHandle {
   appendFile?(buffer: Buffer): Promise<void>;
@@ -62,7 +63,7 @@ export class RawTelemetryEventWriter {
     // Serialize before queueing so a backlog does not retain row graphs and no
     // JSON encoding work happens while a descriptor is open.
     const body = Buffer.from(`${rows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
-    const hour = this.now().toISOString().slice(0, 13).replaceAll(":", "-");
+    const hour = hourStamp(this.now());
     const file = `${hour}-${this.writerId}.jsonl`;
     const write = this.state.tail.then(() => this.write(file, body));
     this.state.tail = write.catch(() => undefined);

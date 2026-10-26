@@ -35,6 +35,7 @@ import { telemetryEvents, telemetryReconciliationState } from "../persistence/sc
 import { TELEMETRY_EVENT_DIR } from "./event-log";
 import { clientNameFromUserAgent } from "./client-name";
 import type { TelemetryEventRecord } from "./event-log";
+import { hourStamp } from "../shared/time";
 
 /** The single job name: one reconciliation stream, one checkpoint. */
 const JOB_NAME = "raw_to_sql_v1";
@@ -103,10 +104,7 @@ function nowMs(options: ReconcileOptions): number {
 async function candidateFiles(): Promise<readonly string[]> {
   const all = await readdir(TELEMETRY_EVENT_DIR).catch(() => [] as string[]);
   // The current and previous hour are still being written; see HOURS_TO_SKIP.
-  const floor = new Date(Date.now() - HOURS_TO_SKIP * 3_600_000)
-    .toISOString()
-    .slice(0, 13)
-    .replaceAll(":", "-");
+  const floor = hourStamp(new Date(Date.now() - HOURS_TO_SKIP * 3_600_000));
   return all
     .filter((file) => file.endsWith(".jsonl") && !file.endsWith(".compacted.jsonl"))
     .filter((file) => file.slice(0, 13) < floor)

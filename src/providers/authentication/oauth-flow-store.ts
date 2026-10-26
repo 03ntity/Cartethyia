@@ -2,6 +2,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { base64url, decodeJwt } from "jose";
+import { asRecord as record, asTrimmedString as nonEmptyTrimmedString } from "../../shared/coerce";
 import type { RedisClient } from "../../persistence/redis";
 import { TtlCache } from "../../persistence/ttl-cache";
 
@@ -268,18 +269,10 @@ export function devicePollBackoff(
 }
 
 /** Trimmed non-empty string, or `undefined` for anything else. */
-export function nonEmptyTrimmedString(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
+export { nonEmptyTrimmedString };
 
 /** Object (non-array) narrowing for untyped upstream JSON. */
-export function record(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
+export { record };
 
 
 interface PkcePair {
