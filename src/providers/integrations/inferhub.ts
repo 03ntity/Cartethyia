@@ -168,19 +168,45 @@ const INFERHUB_CHAT_SPEC: ApiKeyProviderSpec = {
  * nothing — a `config_read` key is rejected by the inference host with 403, so
  * a failed discovery is common and is not "InferHub has no models".
  *
- * Deliberately one row. The marketplace republishes its whole roster (270 model
- * rows across 21 upstreams) and it moves faster than a committed array can, so
- * a hand-kept list is a snapshot that is stale the moment it is written and
- * wrong in ways nobody notices: an id that no longer exists still routes, and a
- * new one is invisible. One row is enough to keep the provider usable offline
- * without pretending to be a catalog.
+ * Every context, output, modality and reasoning scale below is copied from the
+ * upstream's own `/api/catalog` row rather than guessed, because a wrong limit
+ * is worse than a missing one: an overstated context window is rejected by the
+ * provider at request time, and an understated one truncates silently.
+ *
+ * Only `ag/` and `cc/` are listed. The marketplace republishes its whole roster
+ * (270 rows across 21 upstreams) and moves faster than a committed array can,
+ * so a wider hand-kept list would be stale the moment it was written.
  */
 const INFERHUB_MODELS_RAW: readonly {
   id: string;
   contextLimit: number;
   outputLimit: number;
+  /** Upstream `modalities`: both prefixes report `["text","image"]`. */
+  readonly modalities?: readonly ("text" | "image")[];
+  /** Upstream `reasoningLevels`; absent means the model exposes no scale. */
+  readonly reasoningLevels?: readonly string[];
 }[] = [
-  { id: "cb/deepseek-v4.1-flash", contextLimit: 1000000, outputLimit: 384000 },
+  // ag/ — Antigravity. Every row: 1M context, text+image input, text output.
+  { id: "ag/claude-opus-4-6-thinking", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"] },
+  { id: "ag/claude-opus-5-5", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["low", "medium", "high"] },
+  { id: "ag/claude-sonnet-4-6", contextLimit: 1000000, outputLimit: 64000, modalities: ["text", "image"] },
+  { id: "ag/claude-sonnet-5-5", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["low", "medium", "high"] },
+  { id: "ag/gemini-3.8-flash-high", contextLimit: 1000000, outputLimit: 65536, modalities: ["text", "image"], reasoningLevels: ["low", "medium", "high"] },
+  { id: "ag/gemini-4-argon", contextLimit: 1000000, outputLimit: 65536, modalities: ["text", "image"], reasoningLevels: ["low", "medium", "high"] },
+  // cc/ — Claude Code. Haiku 4-5 and Opus 4-5 are the 200k-context rows.
+  { id: "cc/claude-fable-5", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"] },
+  { id: "cc/claude-fable-5-1", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"] },
+  { id: "cc/claude-haiku-4-5", contextLimit: 200000, outputLimit: 64000, modalities: ["text", "image"], reasoningLevels: ["none", "low", "medium", "high"] },
+  { id: "cc/claude-haiku-5-5", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["none", "low", "medium", "high"] },
+  { id: "cc/claude-opus-4-5", contextLimit: 200000, outputLimit: 64000, modalities: ["text", "image"], reasoningLevels: ["none", "low", "medium", "high"] },
+  { id: "cc/claude-opus-4-6", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["none", "low", "medium", "high"] },
+  { id: "cc/claude-opus-4-7", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["none", "low", "medium", "high"] },
+  { id: "cc/claude-opus-4-8", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["none", "low", "medium", "high"] },
+  { id: "cc/claude-opus-5", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["none", "low", "medium", "high"] },
+  { id: "cc/claude-opus-5-5", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["low", "medium", "high"] },
+  { id: "cc/claude-sonnet-4-6", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["none", "low", "medium", "high"] },
+  { id: "cc/claude-sonnet-5", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["none", "low", "medium", "high"] },
+  { id: "cc/claude-sonnet-5-5", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["low", "medium", "high"] },
 ] as const;
 /**
  * Claude-backed inferhub models (`*claude-*` across `ag/`/`cb/`/`cc/`) speak
@@ -318,8 +344,15 @@ export const INFERHUB_MODELS: readonly ModelDefinition[] = INFERHUB_MODELS_RAW.m
     id: e.id,
     ctx: e.contextLimit,
     out: e.outputLimit,
-    vision: true,
-    reasoning: true,
+    // Vision follows the upstream's own `modalities` rather than a blanket
+    // true: a row that does not accept images must not advertise that it does.
+    vision: e.modalities?.includes("image") ?? false,
+    // Reasoning is driven by the scale the upstream publishes. A model with no
+    // `reasoningLevels` at all exposes no effort control, so claiming it would
+    // let the console offer an effort the provider ignores.
+    ...(e.reasoningLevels !== undefined && e.reasoningLevels.length > 0
+      ? { reasoning: true, reasoningEfforts: e.reasoningLevels }
+      : { reasoning: false }),
     // Claude-backed models resolve to messages rows so thinking blocks and
     // native tool_use survive; the chat wire strips both server-side.
     // GPT-5/6 + o-series resolve to responses rows for the same reason.

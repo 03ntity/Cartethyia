@@ -107,13 +107,21 @@ describe("InferHub model discovery", () => {
   });
 
   test("re-derives the wire family for the fallback list too", async () => {
-    // The fallback is a single non-Claude row, so this pins that a fallback
-    // row is still classified rather than passed through unclassified.
+    // The fallback is the ag/ + cc/ roster, so every Claude row must come back
+    // on Messages even though the committed list is not the live source.
     const models = await discover("nope", 500);
-    expect(models?.map((model) => model.modelId)).toEqual(["cb/deepseek-v4.1-flash"]);
+    expect(models?.length).toBe(INFERHUB_MODELS.length);
     for (const model of models ?? []) {
-      expect(model.wireFamily).not.toBe("messages");
+      const isClaude = model.modelId.toLowerCase().includes("claude-");
+      expect(model.wireFamily === "messages").toBe(isClaude);
+      if (isClaude) expect(model.endpointPath).toBe("/v1/messages");
     }
+  });
+
+  test("the fallback roster is the Antigravity and Claude Code prefixes", async () => {
+    const models = await discover("nope", 500);
+    const prefixes = new Set((models ?? []).map((model) => model.modelId.split("/")[0]));
+    expect([...prefixes].sort()).toEqual(["ag", "cc"]);
   });
 
   test("a Claude row in the discovered list is forced onto Messages", async () => {
