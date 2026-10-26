@@ -118,10 +118,31 @@ describe("InferHub model discovery", () => {
     }
   });
 
-  test("the fallback roster is the Antigravity and Claude Code prefixes", async () => {
+  test("the fallback roster covers every committed prefix", async () => {
     const models = await discover("nope", 500);
     const prefixes = new Set((models ?? []).map((model) => model.modelId.split("/")[0]));
-    expect([...prefixes].sort()).toEqual(["ag", "cc"]);
+    // ag, ali, alicn, cb, cbcn, cc, cmc, cx, grok, mm, mmcn, ocg
+    expect(prefixes.size).toBe(12);
+    expect(prefixes.has("ag")).toBe(true);
+    expect(prefixes.has("cc")).toBe(true);
+    expect(prefixes.has("cmc")).toBe(true);
+  });
+
+  test("the fallback roster has no duplicate ids", async () => {
+    // A duplicate would make two rows fight over one route key.
+    const models = await discover("nope", 500);
+    const ids = (models ?? []).map((model) => model.modelId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test("every Claude row in the fallback is on the Messages wire", async () => {
+    const models = await discover("nope", 500);
+    const claude = (models ?? []).filter((model) => model.modelId.toLowerCase().includes("claude-"));
+    expect(claude.length).toBeGreaterThan(0);
+    for (const model of claude) {
+      expect(model.wireFamily).toBe("messages");
+      expect(model.endpointPath).toBe("/v1/messages");
+    }
   });
 
   test("a Claude row in the discovered list is forced onto Messages", async () => {

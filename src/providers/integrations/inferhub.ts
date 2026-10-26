@@ -179,10 +179,11 @@ const INFERHUB_CHAT_SPEC: ApiKeyProviderSpec = {
  */
 const INFERHUB_MODELS_RAW: readonly {
   id: string;
-  contextLimit: number;
-  outputLimit: number;
-  /** Upstream `modalities`: both prefixes report `["text","image"]`. */
-  readonly modalities?: readonly ("text" | "image")[];
+  /** Null when the upstream states no window; `defineModel` marks it estimated. */
+  contextLimit: number | null;
+  outputLimit: number | null;
+  /** Upstream `modalities`. A row without `image` must not advertise vision. */
+  readonly modalities?: readonly ("text" | "image" | "video")[];
   /** Upstream `reasoningLevels`; absent means the model exposes no scale. */
   readonly reasoningLevels?: readonly string[];
 }[] = [
@@ -207,6 +208,92 @@ const INFERHUB_MODELS_RAW: readonly {
   { id: "cc/claude-sonnet-4-6", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["none", "low", "medium", "high"] },
   { id: "cc/claude-sonnet-5", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["none", "low", "medium", "high"] },
   { id: "cc/claude-sonnet-5-5", contextLimit: 1000000, outputLimit: 128000, modalities: ["text", "image"], reasoningLevels: ["low", "medium", "high"] },
+  // cb/
+  { id: "cb/claude-opus-4.6", contextLimit: 1000000, outputLimit: 128000, modalities: ["text","image"] },
+  { id: "cb/claude-opus-4.7-1m", contextLimit: 1000000, outputLimit: 128000, modalities: ["text","image"] },
+  { id: "cb/deepseek-v4.1-flash", contextLimit: 1000000, outputLimit: 393216, modalities: ["text","image"] },
+  { id: "cb/gemini-2.5-flash-image", contextLimit: null, outputLimit: null, modalities: ["text","image"] },
+  { id: "cb/gemini-3.1-pro", contextLimit: 1000000, outputLimit: 65536, modalities: ["text","image","video"], reasoningLevels: ["low","high"] },
+  { id: "cb/glm-5.3", contextLimit: 1000000, outputLimit: 48000, modalities: ["text"], reasoningLevels: ["low","high","max"] },
+  { id: "cb/glm-5.3-flash", contextLimit: 1000000, outputLimit: 48000, modalities: ["text"], reasoningLevels: ["low","high","max"] },
+  { id: "cb/gpt-5.3-codex", contextLimit: 272000, outputLimit: 128000, modalities: ["text","image"], reasoningLevels: ["low","medium","high"] },
+  { id: "cb/kimi-k3.1-pro", contextLimit: 1000000, outputLimit: 32000, modalities: ["text","image"], reasoningLevels: ["low","high","max"] },
+  { id: "cb/minimax-m3.1-flash", contextLimit: 1000000, outputLimit: 128000, modalities: ["text","image"], reasoningLevels: ["low","medium","high","xhigh","max"] },
+  // cbcn/
+  { id: "cbcn/deepseek-v4-pro", contextLimit: 1000000, outputLimit: 393216, modalities: ["text","image"] },
+  { id: "cbcn/deepseek-v4.1-flash", contextLimit: 1000000, outputLimit: 128000, modalities: ["text","image"] },
+  { id: "cbcn/glm-5.3", contextLimit: 1000000, outputLimit: 48000, modalities: ["text","image"], reasoningLevels: ["low","high","max"] },
+  { id: "cbcn/glm-5.3-flash", contextLimit: 1000000, outputLimit: 48000, modalities: ["text","image"], reasoningLevels: ["low","high","max"] },
+  { id: "cbcn/hy4-preview", contextLimit: 1000000, outputLimit: 64000, modalities: ["text","image"] },
+  { id: "cbcn/kimi-k2.8-preview", contextLimit: 1000000, outputLimit: 32000, modalities: ["text","image"], reasoningLevels: ["none","low","high","max"] },
+  { id: "cbcn/kimi-k3.1-pro", contextLimit: 1000000, outputLimit: 32000, modalities: ["text","image"], reasoningLevels: ["low","high","max"] },
+  { id: "cbcn/minimax-m3.1-flash", contextLimit: 1000000, outputLimit: 128000, modalities: ["text","image"], reasoningLevels: ["low","medium","high","xhigh","max"] },
+  // cmc/
+  { id: "cmc/MiniMaxAI/MiniMax-M3", contextLimit: 1000000, outputLimit: 262144, modalities: ["text"] },
+  { id: "cmc/Qwen/Qwen3.7-Max", contextLimit: 1000000, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/Qwen/Qwen3.7-Plus", contextLimit: 1000000, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/Qwen/Qwen3.8-Flash", contextLimit: 1000000, outputLimit: 131072, modalities: ["text"] },
+  { id: "cmc/Qwen/Qwen3.8-Max", contextLimit: 1000000, outputLimit: 131072, modalities: ["text"] },
+  { id: "cmc/deepseek/deepseek-v4-flash", contextLimit: 1000000, outputLimit: 393216, modalities: ["text"], reasoningLevels: ["none","low","high","max"] },
+  { id: "cmc/deepseek/deepseek-v4-pro", contextLimit: 1000000, outputLimit: 393216, modalities: ["text"], reasoningLevels: ["none","low","high","max"] },
+  { id: "cmc/deepseek/deepseek-v4.1-flash", contextLimit: 1000000, outputLimit: 393216, modalities: ["text"], reasoningLevels: ["none","low","high","max"] },
+  { id: "cmc/deepseek/deepseek-v4.1-flash-fast", contextLimit: 1000000, outputLimit: 393216, modalities: ["text"], reasoningLevels: ["none","low","high","max"] },
+  { id: "cmc/gpt-5.6-luna", contextLimit: 1050000, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/gpt-6-luna", contextLimit: 1050000, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/meituan/LongCat-2.0", contextLimit: 1048576, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/meta/muse-spark-1.2", contextLimit: 1000000, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/meta/muse-spark-1.2-contributor", contextLimit: 1000000, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/meta/muse-spark-1.3", contextLimit: 1000000, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/meta/muse-spark-1.3-contributor", contextLimit: 1000000, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/mistral/mistral-large-4", contextLimit: 524288, outputLimit: 262144, modalities: ["text"] },
+  { id: "cmc/moonshotai/Kimi-K2.6", contextLimit: 262144, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/moonshotai/Kimi-K2.7-Code", contextLimit: 262144, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/moonshotai/Kimi-K2.7-Code-Highspeed", contextLimit: 262144, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/moonshotai/Kimi-K3", contextLimit: 1000000, outputLimit: null, modalities: ["text"], reasoningLevels: ["low","high","max"] },
+  { id: "cmc/moonshotai/Kimi-K3.1-Pro", contextLimit: 1000000, outputLimit: null, modalities: ["text"], reasoningLevels: ["low","high","max"] },
+  { id: "cmc/tencent/hy4-preview", contextLimit: 1048576, outputLimit: 64000, modalities: ["text"] },
+  { id: "cmc/xai/grok-4.5", contextLimit: 500000, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/xai/grok-4.6", contextLimit: 500000, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/xai/grok-4.7", contextLimit: 500000, outputLimit: null, modalities: ["text"] },
+  { id: "cmc/xiaomi/mimo-v2.6-flash", contextLimit: 1000000, outputLimit: 131072, modalities: ["text"] },
+  { id: "cmc/xiaomi/mimo-v2.6-pro", contextLimit: 1000000, outputLimit: 131072, modalities: ["text"] },
+  { id: "cmc/z-ai/glm-5.3-flashx", contextLimit: 1000000, outputLimit: 128000, modalities: ["text"], reasoningLevels: ["low","high","max"] },
+  { id: "cmc/zai-org/GLM-5.2", contextLimit: 1000000, outputLimit: 128000, modalities: ["text"], reasoningLevels: ["high","max"] },
+  { id: "cmc/zai-org/GLM-5.3", contextLimit: 1000000, outputLimit: 128000, modalities: ["text"], reasoningLevels: ["low","high","max"] },
+  // grok/
+  { id: "grok/grok-4.5", contextLimit: 500000, outputLimit: null, modalities: ["text","image"], reasoningLevels: ["low","medium","high"] },
+  { id: "grok/grok-4.6", contextLimit: 500000, outputLimit: null, modalities: ["text"] },
+  { id: "grok/grok-4.7", contextLimit: 500000, outputLimit: null, modalities: ["text"] },
+  { id: "grok/grok-4.7-build-fast", contextLimit: 500000, outputLimit: null, modalities: ["text"], reasoningLevels: ["low","medium","high","xhigh"] },
+  // mm/
+  { id: "mm/MiniMax-M3.1-Flash", contextLimit: 1000000, outputLimit: 524288, modalities: ["text","image"], reasoningLevels: ["low","medium","high","xhigh","max"] },
+  // mmcn/
+  { id: "mmcn/MiniMax-M3.1-Flash", contextLimit: 1000000, outputLimit: 524288, modalities: ["text","image"], reasoningLevels: ["low","medium","high","xhigh","max"] },
+  // cx/
+  { id: "cx/gpt-5.6-luna", contextLimit: 272000, outputLimit: 128000, modalities: ["text","image"], reasoningLevels: ["none","low","medium","high","xhigh","max"] },
+  { id: "cx/gpt-5.6-sol", contextLimit: 272000, outputLimit: 128000, modalities: ["text","image"], reasoningLevels: ["none","low","medium","high","xhigh","max"] },
+  { id: "cx/gpt-5.6-terra", contextLimit: 272000, outputLimit: 128000, modalities: ["text","image"], reasoningLevels: ["none","low","medium","high","xhigh","max"] },
+  { id: "cx/gpt-6-astra", contextLimit: 272000, outputLimit: 128000, modalities: ["text","image"], reasoningLevels: ["low","medium","high","xhigh","max"] },
+  { id: "cx/gpt-6-luna", contextLimit: 272000, outputLimit: 128000, modalities: ["text","image"], reasoningLevels: ["none","low","medium","high","xhigh","max"] },
+  { id: "cx/gpt-6-sol", contextLimit: 272000, outputLimit: 128000, modalities: ["text","image"], reasoningLevels: ["none","low","medium","high","xhigh","max"] },
+  { id: "cx/gpt-6.1-sol", contextLimit: 500000, outputLimit: 128000, modalities: ["text","image"], reasoningLevels: ["low","medium","high","xhigh","max"] },
+  { id: "cx/gpt-image-2-codex", contextLimit: null, outputLimit: null, modalities: ["text"] },
+  // ocg/
+  { id: "ocg/deepseek-v4.1-flash", contextLimit: 1000000, outputLimit: 393216, modalities: ["text","image"] },
+  // ali/
+  { id: "ali/deepseek-v4-flash-0731", contextLimit: 1000000, outputLimit: 393216, modalities: ["text"] },
+  { id: "ali/deepseek-v4-pro-0813", contextLimit: 1000000, outputLimit: 393216, modalities: ["text"] },
+  { id: "ali/deepseek-v4.1-flash", contextLimit: 1000000, outputLimit: 393216, modalities: ["text","image"] },
+  { id: "ali/deepseek-v4.1-flash-1017", contextLimit: 1000000, outputLimit: 393216, modalities: ["text","image"] },
+  { id: "ali/glm-5.3", contextLimit: 1000000, outputLimit: 128000, modalities: ["text"], reasoningLevels: ["low","high","max"] },
+  { id: "ali/kimi-k2.7-code", contextLimit: 262144, outputLimit: null, modalities: ["text","image"] },
+  // alicn/
+  { id: "alicn/deepseek-v4-flash-0731", contextLimit: 1000000, outputLimit: 393216, modalities: ["text"] },
+  { id: "alicn/deepseek-v4-pro-0813", contextLimit: 1000000, outputLimit: 393216, modalities: ["text"] },
+  { id: "alicn/deepseek-v4.1-flash", contextLimit: 1000000, outputLimit: 393216, modalities: ["text","image"] },
+  { id: "alicn/deepseek-v4.1-flash-1017", contextLimit: 1000000, outputLimit: 393216, modalities: ["text","image"] },
+  { id: "alicn/glm-5.3", contextLimit: 1000000, outputLimit: 128000, modalities: ["text"], reasoningLevels: ["low","high","max"] },
+  { id: "alicn/kimi-k2.7-code", contextLimit: 262144, outputLimit: null, modalities: ["text","image"] },
 ] as const;
 /**
  * Claude-backed inferhub models (`*claude-*` across `ag/`/`cb/`/`cc/`) speak
