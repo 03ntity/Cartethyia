@@ -11,6 +11,52 @@ import {
 } from "../../src/security/crypto";
 import { seedBundledProviders } from "../../src/providers/operations/provider-catalog-service";
 
+test("a restore remaps restored rows to the restoring tenant", async () => {
+  const tenantId = randomUUID();
+  const oldTenantId = randomUUID();
+  const accountId = randomUUID();
+  const ciphertext = encryptCredential("imported-token").toString("base64");
+  const sqlite = createSqliteDatabase(":memory:");
+  try {
+    await applySqliteMigrations(sqlite);
+    const { db } = buildSqliteHandle(sqlite);
+    await seedBundledProviders(db);
+
+    const service = new BackupService({ db, verifyPassword: async () => true });
+    const result = await service.restore("password", {
+      app: "cartethyia",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      sections: {
+        config: {
+          tenants: [
+            { id: oldTenantId, name: "old tenant", status: "active" },
+            { id: tenantId, name: "restored", status: "active" },
+          ],
+          provider_accounts: [
+            {
+              id: accountId,
+              provider_id: "openai",
+              tenant_id: oldTenantId,
+              label: "old account",
+              credential_ciphertext: { __bytes: ciphertext },
+              credential_kind: "api_key",
+              status: "active",
+            },
+          ],
+        },
+      },
+    }, tenantId);
+
+    expect(result.restored["provider_accounts"]).toBe(1);
+    const account = (await db.select().from(providerAccounts)).find((row) => row.id === accountId);
+    expect(account?.tenantId).toBe(tenantId);
+  } finally {
+    sqlite.close();
+  }
+});
+
+
 test("restores legacy sealed credentials with the active encryption key", async () => {
   const previousKey = snapshotCredentialEncryptionKeyForTesting();
   const key = randomBytes(32);

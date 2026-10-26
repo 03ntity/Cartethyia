@@ -559,6 +559,7 @@ async function insertRows(
     readonly keyOf?: (row: BackupRow) => string;
     readonly conflictTarget?: readonly Column[];
     readonly ignoreConflicts?: boolean;
+    readonly tenantId?: string;
   } = {},
 ): Promise<number> {
   // Normalise rows up front: filter skips, drop empty-value rows (no
@@ -570,6 +571,7 @@ async function insertRows(
       continue;
     }
     const values = toValues(table, row);
+    if (options.tenantId !== undefined && "tenantId" in values) values.tenantId = options.tenantId;
     if (Object.keys(values).length === 0) continue;
     prepared.push(values);
   }
@@ -828,6 +830,7 @@ export async function applyRestore(
           : entry.rows;
       restored[tableName(table)] = await insertRows(scoped, table, rows, {
         ...(ownership.kind === "authored" ? { conflictTarget: ownership.keyColumns } : {}),
+        tenantId,
       });
     }
 
@@ -837,8 +840,12 @@ export async function applyRestore(
       const entry = validation.tables.get(table);
       if (entry === undefined) continue;
       if (table === telemetryEvents) {
+        // The payload rows are remapped to the restoring tenant before the
+        // idempotency filter runs, so the dedupe keys and the appended file
+        // rows are owned by the receiving tenant, not the backup's tenant.
+        const remapped = entry.rows.map((row) => ({ ...row, tenant_id: tenantId }));
         const existing = await existingEventFileKeys(db, tenantId, entry.rows);
-        const fresh = entry.rows.filter((row) => !existing.has(telemetryKey(row)));
+        const fresh = remapped.filter((row) => !existing.has(telemetryKey(row)));
         await appendRestoredEvents(fresh);
         restored[tableName(table)] = fresh.length;
         skipped[tableName(table)] = entry.rows.length - fresh.length;
@@ -850,11 +857,12 @@ export async function applyRestore(
             telemetryUsageTotals.entityId,
           ],
           ignoreConflicts: true,
+          tenantId,
         });
         restored[tableName(table)] = restoredCount;
         skipped[tableName(table)] = entry.rows.length - restoredCount;
       } else {
-        restored[tableName(table)] = await insertRows(scoped, table, entry.rows);
+        restored[tableName(table)] = await insertRows(scoped, table, entry.rows, { tenantId });
       }
     }
   });
