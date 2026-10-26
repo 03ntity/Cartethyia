@@ -34,6 +34,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { generateCartethyiaEncryptionKey } from "../cli/env";
 
 const PROJECT_ROOT = join(import.meta.dir, "..", "..");
 const DASHBOARD_ROOT = join(PROJECT_ROOT, "dashboard");
@@ -149,6 +150,15 @@ Object.assign(sharedEnv, {
   HOME: join(sandboxRoot, "home"),
   USERPROFILE: join(sandboxRoot, "home"),
 });
+
+// A generated throwaway key when the environment carries none. `.env` is
+// gitignored, so CI has no `CARTETHYIA_ENCRYPTION_KEY` at all, and every test
+// that seals a credential then died with "CARTETHYIA_ENCRYPTION_KEY is
+// required" — a missing fixture, not a defect. One key per run, and it never
+// touches the operator's real one: an explicit variable still wins.
+if (!sharedEnv.CARTETHYIA_ENCRYPTION_KEY?.trim()) {
+  sharedEnv.CARTETHYIA_ENCRYPTION_KEY = generateCartethyiaEncryptionKey();
+}
 
 /**
  * One `bun test` invocation.
