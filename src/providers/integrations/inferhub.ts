@@ -163,80 +163,24 @@ const INFERHUB_CHAT_SPEC: ApiKeyProviderSpec = {
   buildExtraHeaders: (context, request) => inferhubSessionHeaders(context, request),
 };
 
-/** InferHub — full marketplace catalog from your paste (80+ models, 4 providers ag/cc/cb/cbcn/cx/ocg/ali/mimo/zai). Context sizes via websearch (Claude 1M/200k, Gemini 1M). */
+/**
+ * Offline fallback, used only when a live `/v1/models` read fails or returns
+ * nothing — a `config_read` key is rejected by the inference host with 403, so
+ * a failed discovery is common and is not "InferHub has no models".
+ *
+ * Deliberately one row. The marketplace republishes its whole roster (270 model
+ * rows across 21 upstreams) and it moves faster than a committed array can, so
+ * a hand-kept list is a snapshot that is stale the moment it is written and
+ * wrong in ways nobody notices: an id that no longer exists still routes, and a
+ * new one is invisible. One row is enough to keep the provider usable offline
+ * without pretending to be a catalog.
+ */
 const INFERHUB_MODELS_RAW: readonly {
   id: string;
   contextLimit: number;
   outputLimit: number;
 }[] = [
-  // ag/ — Antigravity (4 models) — sonnet 251k per request
-  { id: "ag/claude-sonnet-4-6", contextLimit: 251000, outputLimit: 64000 },
-  { id: "ag/gemini-3.7-flash-high", contextLimit: 1048576, outputLimit: 65536 },
-  { id: "ag/gemini-3.8-flash-high", contextLimit: 1048576, outputLimit: 65536 },
-  { id: "ag/gemini-pro-agent", contextLimit: 1048576, outputLimit: 65536 },
-  // cc/ — Claude Code (10 models)
-  { id: "cc/claude-fable-5", contextLimit: 1000000, outputLimit: 128000 },
-  { id: "cc/claude-fable-5-1", contextLimit: 1000000, outputLimit: 128000 },
-  { id: "cc/claude-haiku-4-5", contextLimit: 200000, outputLimit: 64000 },
-  { id: "cc/claude-opus-4-6", contextLimit: 1000000, outputLimit: 128000 },
-  { id: "cc/claude-opus-4-7", contextLimit: 1000000, outputLimit: 128000 },
-  { id: "cc/claude-opus-4-8", contextLimit: 1000000, outputLimit: 128000 },
-  { id: "cc/claude-opus-5", contextLimit: 1000000, outputLimit: 128000 },
-  { id: "cc/claude-sonnet-4-5", contextLimit: 200000, outputLimit: 64000 },
-  // 128K: Sonnet 4.6 is in the 1M/128K generation, the same as the Opus 4.6
-  // row directly above it and every other 4.6+ row here.
-  { id: "cc/claude-sonnet-4-6", contextLimit: 1000000, outputLimit: 128000 },
-  { id: "cc/claude-sonnet-5", contextLimit: 1000000, outputLimit: 128000 },
-  // cb/ — CodeBuddy (12 models)
-  { id: "cb/claude-opus-4.6", contextLimit: 1000000, outputLimit: 128000 },
-  { id: "cb/claude-opus-4.7-1m", contextLimit: 1000000, outputLimit: 64000 },
-  { id: "cb/claude-opus-5", contextLimit: 1000000, outputLimit: 128000 },
   { id: "cb/deepseek-v4.1-flash", contextLimit: 1000000, outputLimit: 384000 },
-  { id: "cb/gemini-3.1-pro", contextLimit: 1048576, outputLimit: 65536 },
-  { id: "cb/glm-5.2", contextLimit: 1000000, outputLimit: 131072 },
-  { id: "cb/glm-5.3", contextLimit: 1000000, outputLimit: 131072 },
-  { id: "cb/gpt-5.6-luna", contextLimit: 1050000, outputLimit: 128000 },
-  { id: "cb/gpt-5.6-sol", contextLimit: 1050000, outputLimit: 128000 },
-  { id: "cb/gpt-5.6-terra", contextLimit: 1050000, outputLimit: 128000 },
-  { id: "cb/kimi-k3", contextLimit: 1048576, outputLimit: 131072 },
-  { id: "cb/minimax-m3", contextLimit: 512000, outputLimit: 80000 },
-  // cbcn/ — CodeBuddy CN
-  { id: "cbcn/deepseek-v4-flash", contextLimit: 1000000, outputLimit: 384000 },
-  { id: "cbcn/deepseek-v4-pro", contextLimit: 1000000, outputLimit: 384000 },
-  { id: "cbcn/glm-5.2", contextLimit: 1000000, outputLimit: 131072 },
-  { id: "cbcn/glm-5.3", contextLimit: 1000000, outputLimit: 131072 },
-  { id: "cbcn/glm-5.3-flash", contextLimit: 1000000, outputLimit: 131072 },
-  { id: "cbcn/kimi-k2.6", contextLimit: 262144, outputLimit: 262144 },
-  { id: "cbcn/kimi-k2.7", contextLimit: 128000, outputLimit: 8192 },
-  { id: "cbcn/kimi-k3", contextLimit: 1048576, outputLimit: 131072 },
-  { id: "cbcn/minimax-m2.7", contextLimit: 204800, outputLimit: 131072 },
-  { id: "cbcn/minimax-m3", contextLimit: 512000, outputLimit: 80000 },
-  // cx/ — Codex 
-  { id: "cx/gpt-5.6-luna", contextLimit: 1050000, outputLimit: 128000 },
-  { id: "cx/gpt-5.6-sol", contextLimit: 1050000, outputLimit: 128000 },
-  { id: "cx/gpt-5.6-terra", contextLimit: 1050000, outputLimit: 128000 },
-  { id: "cx/gpt-6-astra", contextLimit: 1050000, outputLimit: 128000 },
-  // ocg/ — OpenCode Go 
-  { id: "ocg/deepseek-v4-flash-0731", contextLimit: 1000000, outputLimit: 384000 },
-  { id: "ocg/deepseek-v4-pro", contextLimit: 1000000, outputLimit: 384000 },
-  { id: "ocg/glm-5.2", contextLimit: 1000000, outputLimit: 131072 },
-  { id: "ocg/glm-5.3", contextLimit: 1000000, outputLimit: 131072 },
-  { id: "ocg/glm-5.3-flash", contextLimit: 1000000, outputLimit: 131072 },
-  // ali/ — Alibaba 
-  { id: "ali/deepseek-v4.1-flash", contextLimit: 1000000, outputLimit: 384000 },
-  { id: "ali/deepseek-v4-flash-0731", contextLimit: 1000000, outputLimit: 384000 },
-  { id: "ali/deepseek-v4-pro-0813", contextLimit: 1048576, outputLimit: 384000 },
-  { id: "ali/glm-5.2", contextLimit: 1000000, outputLimit: 131072 },
-  { id: "ali/kimi-k2.7-code", contextLimit: 262144, outputLimit: 262144 },
-  { id: "ali/kimi-k3", contextLimit: 1048576, outputLimit: 131072 },
-  { id: "ali/qwen3.8-max", contextLimit: 991000, outputLimit: 65536 },
-  // mimo/ — MiMo (2 models)
-  { id: "mimo/mimo-v2.5", contextLimit: 1048576, outputLimit: 131072 },
-  { id: "mimo/mimo-v2.5-pro", contextLimit: 1048576, outputLimit: 131072 },
-  // zai/ — Z.AI 
-  { id: "zai/glm-5.2", contextLimit: 1000000, outputLimit: 131072 },
-  { id: "zai/glm-5.3", contextLimit: 1000000, outputLimit: 131072 },
-  { id: "zai/glm-5.3-flash", contextLimit: 1000000, outputLimit: 131072 },
 ] as const;
 /**
  * Claude-backed inferhub models (`*claude-*` across `ag/`/`cb/`/`cc/`) speak

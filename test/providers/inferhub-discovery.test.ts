@@ -106,10 +106,24 @@ describe("InferHub model discovery", () => {
     expect(models).toHaveLength(INFERHUB_MODELS.length);
   });
 
-  test("still re-derives the wire family for the fallback list", async () => {
+  test("re-derives the wire family for the fallback list too", async () => {
+    // The fallback is a single non-Claude row, so this pins that a fallback
+    // row is still classified rather than passed through unclassified.
     const models = await discover("nope", 500);
+    expect(models?.map((model) => model.modelId)).toEqual(["cb/deepseek-v4.1-flash"]);
+    for (const model of models ?? []) {
+      expect(model.wireFamily).not.toBe("messages");
+    }
+  });
+
+  test("a Claude row in the discovered list is forced onto Messages", async () => {
+    // Classification must survive the fallback path, not only the live one.
+    const models = await discover(
+      JSON.stringify({ object: "list", data: [{ id: "cc/claude-opus-5-5" }] }),
+      200,
+    );
     const claude = models?.filter((model) => model.wireFamily === "messages") ?? [];
-    expect(claude.length).toBeGreaterThan(0);
-    for (const model of claude) expect(model.endpointPath).toBe("/v1/messages");
+    expect(claude.length).toBe(1);
+    expect(claude[0]?.endpointPath).toBe("/v1/messages");
   });
 });
