@@ -8,6 +8,27 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.6.1] - 2026-10-26
+
+### Fixed
+
+- **Hide to Tray starts the gateway again, and opens the console.** Launched
+  from the menu it failed with `ENOENT: scandir 'B:\migrations\lite-sqlite3'`.
+  The compiled gateway binary resolves its assets from
+  `CARTETHYIA_PACKAGE_ROOT`, and a compiled Bun executable has a virtual
+  `import.meta.dir` (`B:/~BUN/root/cartethyia`), so an unset root fell back to
+  the drive root. Only the local and VPS installers ever set it, so an npm
+  install never had one — and the compiled binary is the default gateway
+  executable whenever `dist/cartethyia` exists. Both the npm launcher and the
+  CLI entrypoint now set it, covering `carte --tray` and the menu's handoff
+  alike.
+
+  Hide to Tray now also opens the dashboard once the handoff reports ready. It
+  is the one menu action that ends with no menu and no console in front of the
+  operator, so it should leave them somewhere; every other action stays in the
+  menu or is an explicit "Open Console" press. It waits for readiness, so a
+  failed handoff does not point the browser at a gateway that never started.
+
 ## [2.6.0] - 2026-10-26
 
 This is the lightweight-runtime release: a 1-core / 2 GiB deployment should
@@ -367,25 +388,6 @@ database applies them in order; a fresh one builds from the current baseline.
   27×. Growth now also requires at least 64 MiB of absolute increase, so a
   post-reclaim recovery or a startup fluctuation is silent. The message keeps
   its percentage, because that is the readable part.
-
-- **Hide to Tray starts the gateway again, and opens the console.** Launched
-  from the menu it failed with `ENOENT: scandir 'B:\migrations\lite-sqlite3'`.
-  The compiled gateway binary resolves its assets from `CARTETHYIA_PACKAGE_ROOT`,
-  and a compiled Bun executable has a virtual `import.meta.dir`
-  (`B:/~BUN/root/cartethyia`), so an unset root fell back to the drive root.
-  Only the local and VPS installers ever set it, so an npm install never had
-  one — and the compiled binary is the default executable whenever
-  `dist/cartethyia` exists. Both the npm launcher and the CLI entrypoint now
-  set it, which covers `carte --tray` and the menu's handoff alike. Measured:
-  the same binary that reported `B:\migrations` now completes
-  `database-connect` and its migrations.
-
-  Hide to Tray also opens the dashboard when the handoff reports ready. It is
-  the one menu action that ends with no menu and no console in front of the
-  operator, so it should leave them somewhere; every other action either stays
-  in the menu or is an explicit "Open Console" press. It opens only after the
-  tray reports ready, so a failed handoff does not point the browser at a
-  gateway that never started.
 
 ### Changed
 
