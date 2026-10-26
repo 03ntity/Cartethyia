@@ -44,7 +44,25 @@ const CATALOG: readonly ProviderResponse[] = [
   provider("opencode", { configured: false, requiresAccount: false, displayName: "OpenCode Free" }),
 ];
 
-const seed = [{ key: queryKeys.providers.all, data: CATALOG }];
+/**
+ * The InferHub marketplace section reads on mount, so the seed carries an
+ * empty summary too. Without it the page issues a real request in a test that
+ * has nothing to do with pricing, and the late resolve updates state outside
+ * `act`.
+ */
+const seed = [
+  { key: queryKeys.providers.all, data: CATALOG },
+  {
+    key: queryKeys.inferhub.summary,
+    data: {
+      models: [],
+      providers: [],
+      pricingConfig: null,
+      meta: { fetchedAt: 0, ageSeconds: 0, stale: false },
+      error: null,
+    },
+  },
+];
 
 test("custom provider cards show their configured Base URL", async () => {
   const customProvider = provider("my-gateway", {

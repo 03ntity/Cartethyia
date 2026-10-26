@@ -86,4 +86,13 @@ export const queryKeys = {
     account: (accountId: string) => ["console", "quota", "account", accountId] as const,
     resets: (accountId: string) => ["console", "quota", "account", accountId, "resets"] as const,
   },
+  /**
+   * InferHub market data. Deliberately has **no** `refetchInterval` anywhere it
+   * is used: price and availability are read when an operator opens a page, not
+   * polled in the background.
+   */
+  inferhub: {
+    summary: ["console", "inferhub", "summary"] as const,
+    models: (prefix?: string) => ["console", "inferhub", "models", prefix ?? "all"] as const,
+  },
 } as const;

@@ -968,15 +968,20 @@ function readCollapsedSections(): ReadonlySet<string> {
   }
 }
 
+/** Shared section heading, so new sections do not add styling debt. */
+const SECTION_TITLE = "text-body font-bold tracking-[-0.01em]";
+
 const SECTIONS = [
   {
     title: "Founding Friend & Sponsors",
     subtitle: "Super Cheap inference pool",
-    filter: (p: ProviderResponse) => FOUNDING_IDS.has(p.providerId.toLowerCase()),
+    filter: (p: ProviderResponse) =>
+      FOUNDING_IDS.has(p.providerId.toLowerCase()),
   },
   {
     title: "Free Limited Providers",
-    filter: (p: ProviderResponse) => FREE_LIMITED_IDS.has(p.providerId.toLowerCase()),
+    filter: (p: ProviderResponse) =>
+      FREE_LIMITED_IDS.has(p.providerId.toLowerCase()),
   },
   {
     title: "OAuth & Agent Providers",
@@ -1193,7 +1198,7 @@ export default function Providers(): ReactNode {
             >
               <ChevronDown size={15} className={cn("mt-1 shrink-0 transition-transform", collapsed && "-rotate-90")} />
               <Stack gap="1px">
-                <h2 className="text-body font-bold tracking-[-0.01em]">
+                <h2 className={SECTION_TITLE}>
                   {section.title} ({section.providers.length}){collapsed ? " (Hidden)" : ""}
                 </h2>
                 {!collapsed && section.subtitle ? (

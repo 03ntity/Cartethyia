@@ -53,6 +53,9 @@ export function registerDom(): void {
     HTMLButtonElement: window.HTMLButtonElement,
     HTMLAnchorElement: window.HTMLAnchorElement,
     HTMLTextAreaElement: window.HTMLTextAreaElement,
+    // Radix Select walks up to the owning form through `HTMLFormElement` on
+    // mount; without it every rendered Select throws in this DOM.
+    HTMLFormElement: window.HTMLFormElement,
     Element: window.Element,
     Node: window.Node,
     Event: window.Event,
