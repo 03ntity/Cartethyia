@@ -43,23 +43,17 @@
   /* Two rules about the sidebar column, both about tracking the frame rather
      than a number baked in up front.
 
-     It scales with the frame instead of staying pinned to 272px: a fixed track
-     meant the content absorbed every extra pixel and the rail looked bolted
-     on, so widening the window changed nothing about the layout. `minmax`
-     keeps 272px as the floor, so a narrow frame still reserves the room the
-     nav needs before the drawer breakpoint takes over.
+     It scales with the frame instead of staying pinned to a fixed width: a
+     fixed track meant the content absorbed every extra pixel and the rail
+     looked bolted on, so widening the window changed nothing about the layout.
+     `minmax` keeps 252px as the floor, so a narrow frame still reserves the
+     room the nav needs before the drawer breakpoint takes over.
 
      And it collapses the moment the *shell* is too narrow to hold it, not at a
      fixed viewport width. A window can be wide while this column is not (a
      docked panel, a split view), and a viewport query kept reserving the track
-     there, pushing the page off the right edge.
-
-     The 20% upper bound is capped by `min`: without a ceiling the track kept
-     growing with the frame, so on a wide monitor the rail stretched well past
-     the width its labels need — 20% of a 2560px frame is 512px of nav. 304px
-     is the point where the longest nav label stops gaining anything from more
-     room, and the content column takes the rest. */
-  grid-template-columns: minmax(272px, min(304px, 20%)) minmax(0, 1fr);
+     there, pushing the page off the right edge. */
+  grid-template-columns: minmax(252px, min(280px, 18%)) minmax(0, 1fr);
   gap: 16px;
   box-sizing: border-box;
 }
@@ -87,7 +81,7 @@
     position: absolute;
     inset: 0;
     z-index: 50;
-    background: var(--drawer-scrim);
+    background: rgba(0, 0, 0, 0.62);
     border-radius: var(--radius-card);
     pointer-events: auto;
   }
@@ -129,20 +123,6 @@
     transform: translateX(calc(-100% - 24px));
     transition: transform 280ms var(--ease-spring);
     box-shadow: var(--shadow-popout);
-    /* Opaque while off-canvas, and `!important` because the chrome blur rule in
-       base.css sets `background` and `backdrop-filter` with `!important` too —
-       without it the rail stays glass here and samples the scrim it floats
-       above, so on a light page it washed out to grey and its labels lost
-       contrast against the dimmed content behind.
-
-       Nothing may show through the rail in this state: it overlays the page
-       rather than framing it, so the content behind is the wrong thing to see
-       — frosted over nothing is still frosted. The blur is dropped rather than
-       kept, because blurring a solid surface is a no-op that still costs a
-       compositing pass on every frame of the slide-in. */
-    background: var(--surface-1) !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
   }
   .app-sidebar.is-open {
     transform: translateX(0);
