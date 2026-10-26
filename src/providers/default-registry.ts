@@ -532,7 +532,12 @@ export const PROVIDER_CAPABILITIES = {
   },
   inferhub: {
     loadAdapter: async () => (await import("./integrations/inferhub")).createInferhubAdapter(),
+    // Live `/v1/models` is the primary source: the marketplace republishes its
+    // whole roster and it moves faster than a committed array can. The static
+    // list stays as the offline fallback when the fetch fails.
     loadModels: async () => (await import("./integrations/inferhub")).INFERHUB_MODELS,
+    loadModelDiscovery: async () =>
+      (await import("./integrations/inferhub")).inferhubModelDiscovery()(),
     loadQuotaCollector: quotaCapability(() => import("./integrations/inferhub"), "fetchInferhubQuota"),
   },
   hermes: {

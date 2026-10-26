@@ -3,6 +3,7 @@
 // stays bespoke; the chat leg is a declarative spec row.
 import type { ProviderDispatchTarget, ProviderAdapter, ProviderDispatchContext } from "../provider-contracts";
 import type { ModelDefinition } from "../provider-model-definition";
+import type { ProviderModelDiscovery } from "../discovery/discovery-types";
 import { providerBaseUrl } from "../provider-metadata";
 import { defineModel, isResponsesNativeModelId } from "../provider-model-definition";
 import { createApiKeyAdapter, type ApiKeyProviderSpec } from "../configured-provider";
@@ -12,6 +13,7 @@ import type { CanonicalEvent, CanonicalRequest, ContentPart } from "../../protoc
 import { GatewayError } from "../../protocol/gateway-error";
 import { applyParamQuirks } from "../../transport/translation/quirks";
 import { buildClaudeMessagesRequest, filterClaudeCustomHeaders } from "./shared/claude-messages";
+import { resolveInboundSessionId } from "../operations/session-resolution";
 import { isRecord } from "../../protocol/codecs";
 import { sendClaudeMessagesRequest } from "../../protocol/upstream/send-claude-messages";
 
@@ -92,6 +94,46 @@ export const INFERHUB_BASE_URL = providerBaseUrl("inferhub");
 export const INFERHUB_PROVIDER_ID = "inferhub" as const;
 
 /**
+ * Live `/v1/models` discovery for InferHub.
+ *
+ * The generic OpenAI discovery loader classifies a model as `responses` only
+ * when `isResponsesNativeModelId` matches and otherwise says `chat`, so every
+ * Claude-backed InferHub id came back `chat` — and the chat wire strips
+ * thinking and native tool_use server-side. The wire family is therefore
+ * re-derived here from the id, the same way the offline catalog does it, with
+ * Claude ids forced onto Messages.
+ */
+export function inferhubModelDiscovery(): () => Promise<ProviderModelDiscovery> {
+  return async () => async (input) => {
+    // dynamic-import: the OpenAI `/models` fetcher is the same module every
+    // discovery-backed provider loads lazily, and a static import here would
+    // pull it into every process that touches InferHub metadata.
+    const { fetchOpenAICompatibleModels } = await import("../discovery/openai-model-discovery");
+    const models = await fetchOpenAICompatibleModels({
+      baseUrl: input.baseUrl,
+      providerId: INFERHUB_PROVIDER_ID,
+      headers: { authorization: `Bearer ${input.credential}` },
+      ...(input.fetcher ? { fetcher: input.fetcher } : {}),
+    });
+    // A `config_read` key is rejected by the inference host with 403, and any
+    // other failure leaves `models` null. Neither means "InferHub has no
+    // models" — the committed list is a valid answer, so probing keeps working
+    // instead of failing the whole refresh with "no usable models".
+    const source: readonly ModelDefinition[] =
+      models === null || models.length === 0 ? INFERHUB_MODELS : models;
+    return source.map((model) =>
+      isInferhubClaudeModel(model.modelId)
+        ? {
+            ...model,
+            wireFamily: "messages" as const,
+            endpointPath: "/v1/messages",
+          }
+        : model,
+    );
+  };
+}
+
+/**
  * Chat + Responses legs of InferHub. Claude-backed models are routed to
  * `InferhubMessagesAdapter` by wire family instead (see
  * `createInferhubAdapter`), so this spec declares chat + responses.
@@ -99,9 +141,26 @@ export const INFERHUB_PROVIDER_ID = "inferhub" as const;
  * `POST /v1/responses` (native reasoning + tool_use survive; the chat wire
  * answers too but strips reasoning server-side).
  */
+/**
+ * InferHub pins a conversation to one upstream provider for as long as
+ * `X-Session-Id` stays the same, which is what keeps the prompt cache warm
+ * across turns (the pin lapses after roughly ten minutes idle). The id is the
+ * client's own session when it sends one and a stable affinity key derived from
+ * the opening turn otherwise — never a per-request random value, which would
+ * re-pin on every turn and defeat the header.
+ */
+function inferhubSessionHeaders(
+  context: ProviderDispatchContext,
+  request?: CanonicalRequest,
+): Record<string, string> {
+  const sessionId = resolveInboundSessionId(context, request);
+  return sessionId === undefined ? {} : { "X-Session-Id": sessionId };
+}
+
 const INFERHUB_CHAT_SPEC: ApiKeyProviderSpec = {
   provider_id: INFERHUB_PROVIDER_ID,
   endpoint_paths_by_wire_family: { responses: "/responses" },
+  buildExtraHeaders: (context, request) => inferhubSessionHeaders(context, request),
 };
 
 /** InferHub — full marketplace catalog from your paste (80+ models, 4 providers ag/cc/cb/cbcn/cx/ocg/ali/mimo/zai). Context sizes via websearch (Claude 1M/200k, Gemini 1M). */
@@ -238,6 +297,11 @@ export class InferhubMessagesAdapter implements ProviderAdapter {
       endpointPath: candidate.endpoint_path,
       mutatePayload: ensureInferhubMessagesTextBreakpoints,
     });
+    // Same conversation pin as the chat leg, applied after the shared Claude
+    // header builder rather than through `customHeaders`: that field is
+    // credential-derived (it is filtered and round-trips per account), and a
+    // per-conversation value does not belong in it.
+    Object.assign(outbound.headers, inferhubSessionHeaders(context, request));
     yield* sendClaudeMessagesRequest(
       outbound.url,
       outbound.headers,

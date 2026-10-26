@@ -582,6 +582,8 @@ const CONTEXT_LENGTH_CODES: ReadonlySet<string> = new Set([
   "context_length_exceeded",
   "context_too_large",
   "model_context_window_exceeded",
+  // InferHub's spelling for the same condition.
+  "context_too_long",
 ]);
 
 /**
@@ -733,6 +735,14 @@ const QUOTA_ERROR_IDENTIFIERS: ReadonlySet<string> = new Set([
   "usage_not_included",
   "subscription:free-usage-exhausted",
   "resource_exhausted",
+  // InferHub publishes its own vocabulary in `error.code`. The two 403s below
+  // are deliberate absences: `account_blocked` means the account was blocked
+  // (an auth/entitlement verdict, not a spend limit) and
+  // `model_not_allowed_for_key` is a per-key allowlist refusal — both are
+  // classified separately rather than cooled as quota.
+  "rate_limited",
+  "providers_out_of_quota",
+  "providers_at_capacity",
 ]);
 const CAPACITY_ERROR_IDENTIFIERS: ReadonlySet<string> = new Set([
   "overloaded_error",
@@ -740,6 +750,9 @@ const CAPACITY_ERROR_IDENTIFIERS: ReadonlySet<string> = new Set([
   "model_at_capacity",
   "server_is_overloaded",
   "model_capacity",
+  // InferHub: no live provider could take the request right now.
+  "providers_busy",
+  "providers_overloaded",
 ]);
 const AUTH_ERROR_IDENTIFIERS: ReadonlySet<string> = new Set([
   "authentication_error",
@@ -749,6 +762,12 @@ const AUTH_ERROR_IDENTIFIERS: ReadonlySet<string> = new Set([
   "unauthenticated",
   "permission_denied",
   "permissiondenied",
+  // InferHub: the account was blocked, and a key whose scope or allowlist does
+  // not cover the request. `credentialEvidence` is what cools the account
+  // rather than the provider.
+  "account_blocked",
+  "insufficient_key_scope",
+  "model_not_allowed_for_key",
 ]);
 const PLATFORM_ERROR_IDENTIFIERS: ReadonlySet<string> = new Set([
   "server_error",
@@ -895,6 +914,14 @@ export function classifyUpstreamError(
     };
   if (normalized === "model_not_found")
     return { code: "model_not_found", status: 404, origin: "upstream" };
+  // InferHub: no live publisher serves the requested model at all. That is a
+  // property of the model/upstream pair, not of the account or a spend limit,
+  // so it is not retried as quota and does not cool the account — the next
+  // attempt should pick a different route.
+  if (normalized === "no_provider")
+    return { code: "model_not_found", status: 404, origin: "upstream" };
+  if (normalized === "content_rejected")
+    return { code: "policy_rejected", status: 403, origin: "upstream" };
   if (
     normalized === "not_found_error" ||
     normalized === "resource_not_found" ||
