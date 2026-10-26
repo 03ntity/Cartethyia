@@ -15,10 +15,19 @@ import { launchBackgroundWithStatus, openUrl } from "./background";
 import { chooseFromMenu, confirmByTyping, confirmStep, type MenuRow } from "./prompt";
 import { renderWordmark } from "./wordmark";
 import { exportBackup, resetConsoleAccount } from "./admin";
-import { runDetachedUpdate } from "./update";
+import { printUpdateInstructions, runDetachedUpdate } from "./update";
 import { acquireController } from "./controller";
 import { restoreControllerAfterFailedHandoff } from "./controller";
 import { attachGateway as attachRunningGateway } from "./instance";
+
+/**
+ * Seconds to keep the update notice on screen before returning to the shell.
+ *
+ * The notice tells the operator to close the window, so it has to stay long
+ * enough to be read. Exiting immediately meant an install that silently did
+ * nothing looked like it had succeeded.
+ */
+const UPDATE_NOTICE_SECONDS = 30;
 
 
 /**
@@ -265,16 +274,17 @@ async function runMenu(handoff: { readonly token: string; readonly parentPid: nu
       // running out of it: on Windows the rename fails with EBUSY and npm
       // exits 14. Even with the gateway stopped, the CLI itself is executing
       // from that directory, so an in-process install can never succeed.
-      // Print the command and exit, the way 9router does.
       await shutDown();
       runDetachedUpdate();
-      console.log("");
-      console.log(`Update available: ${currentVersion} \u2192 ${latestVersion}`);
-      console.log("Detached update started; this process will exit now.");
-      console.log("Re-run `carte` after it finishes.");
-      console.log("");
+      printUpdateInstructions(currentVersion, latestVersion);
+      // Held open, not exited instantly: the message tells the operator to
+      // close this window, and an EXIT-key press after it returns them to the
+      // shell. Exiting immediately closed the terminal before the notice
+      // could be read, which is why an update that silently did nothing looked
+      // like it had succeeded.
+      console.log(`This window closes in ${UPDATE_NOTICE_SECONDS} seconds, or close it now.`);
+      await Bun.sleep(UPDATE_NOTICE_SECONDS * 1_000);
       running = false;
-      process.exit(0);
     };
     const extendedActions: readonly (() => Promise<void>)[] = upToDate
       ? actions

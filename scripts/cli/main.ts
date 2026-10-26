@@ -15,6 +15,12 @@ process.env.CARTETHYIA_CONFIG_DIR ??= resolveUserConfigDir();
 // `ENOENT: scandir 'B:\migrations\lite-sqlite3'`.
 process.env.CARTETHYIA_PACKAGE_ROOT ??= PACKAGE_ROOT;
 
+/**
+ * Seconds to hold the window open after reporting that another instance owns
+ * this installation. Long enough to read, short enough not to feel like a hang.
+ */
+const DOUBLE_INSTANCE_EXIT_SECONDS = 30;
+
 const HELP = (minimumBunVersion: string) => `Cartethyia ${minimumBunVersion}+ (Bun is required)
 
 Usage:
@@ -186,8 +192,15 @@ main().catch(async (error: unknown) => {
     await reportTrayFailed(message);
   }
   if (message.includes("not starting another instance")) {
+    // Exits on its own after a short pause rather than vanishing instantly.
+    // Double-clicking a shortcut or re-running a command in a terminal that is
+    // already serving used to print nothing visible — the window closed before
+    // the operator could read why. The delay is also long enough to notice in
+    // a console that stays open, and short enough not to feel like a hang.
     console.error(`Cartethyia is already running.\n${message}`);
+    console.error(`\nThis window will close in ${DOUBLE_INSTANCE_EXIT_SECONDS} seconds.`);
     process.exitCode = 1;
+    await Bun.sleep(DOUBLE_INSTANCE_EXIT_SECONDS * 1_000);
     return;
   }
   console.error(`Cartethyia failed: ${message}`);
