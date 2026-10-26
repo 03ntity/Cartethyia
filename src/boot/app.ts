@@ -269,7 +269,17 @@ export function createGatewayApp(deps: GatewayAppDeps) {
   const INFLIGHT_BACKSTOP_INTERVAL_MS = 30_000;
   const INFLIGHT_BACKSTOP_GRACE_MS = 30_000;
   const INFLIGHT_BACKSTOP_HARD_GRACE_MS = 120_000;
-  if (deps.mode === "production") deps.scheduledTasks?.register({
+  // Registered in every mode, not just production. The gauge is the operator's
+  // concurrency signal, and a cancelled request that never ran a finalizer
+  // leaves its flight behind — gating the only thing that reaps those on
+  // production made a permanently wrong count depend on how the gateway was
+  // started. The registry exists in every mode, so there is no mode where
+  // running this is wrong.
+  // `scheduledTasks` is declared on the production shape only, so it is
+  // narrowed rather than reached through the union — a shell composition
+  // without the registry simply skips the backstop, exactly as before.
+  const backstopTasks = "scheduledTasks" in deps ? deps.scheduledTasks : undefined;
+  backstopTasks?.register({
     name: "inflight-backstop",
     intervalMs: INFLIGHT_BACKSTOP_INTERVAL_MS,
     run: () => {
