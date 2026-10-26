@@ -63,19 +63,20 @@ export const CUSTOMIZATION_DEFAULTS: CustomizationSettings = {
   backgroundScale: 100,
   backgroundX: 0,
   backgroundY: 0,
-  backgroundBlur: 5,
+  backgroundBlur: 2,
   // The console already ships frosted; a fresh profile keeps that look.
   blurCards: "frosted",
   blurChrome: "frosted",
-  // Cards read as glass over the page background, so they carry more blur than
-  // the chrome that frames them: card clarity 45 / depth 20 resolves to an 11px
-  // backdrop blur, chrome 25 / 10 to 7.5px. Kept as separate amounts because
-  // clarity (how much the surface shows through) and depth (how far it is
-  // diffused) are independent — one slider never writes both.
+  // Cards and chrome carry the same clarity and depth: the two surfaces are
+  // framed by the same page background, so giving the chrome less of each made
+  // it read as a different material rather than the same glass. Clarity 45 /
+  // depth 40 resolves to a 22px backdrop blur on both. Kept as separate amounts
+  // because clarity (how much the surface shows through) and depth (how far it
+  // is diffused) are independent — one slider never writes both.
   blurCardsAmount: 45,
-  blurCardsDepth: 20,
-  blurChromeAmount: 25,
-  blurChromeDepth: 10,
+  blurCardsDepth: 40,
+  blurChromeAmount: 45,
+  blurChromeDepth: 40,
   blurCardsEnabled: true,
   blurChromeEnabled: true,
   emptyOutline: false,

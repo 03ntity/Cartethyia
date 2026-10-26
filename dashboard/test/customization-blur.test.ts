@@ -33,12 +33,15 @@ describe("customization blur defaults", () => {
 
   test("ships the intended clarity and depth for each surface", () => {
     expect(CUSTOMIZATION_DEFAULTS.blurCardsAmount).toBe(45);
-    expect(CUSTOMIZATION_DEFAULTS.blurCardsDepth).toBe(20);
-    expect(CUSTOMIZATION_DEFAULTS.blurChromeAmount).toBe(25);
-    expect(CUSTOMIZATION_DEFAULTS.blurChromeDepth).toBe(10);
+    expect(CUSTOMIZATION_DEFAULTS.blurCardsDepth).toBe(40);
+    expect(CUSTOMIZATION_DEFAULTS.blurChromeAmount).toBe(45);
+    expect(CUSTOMIZATION_DEFAULTS.blurChromeDepth).toBe(40);
   });
 
-  test("cards blur harder than the chrome that frames them", () => {
+  test("both surfaces resolve to the same blur on a fresh profile", () => {
+    // Cards and chrome sit in front of the same page background, so differing
+    // amounts made them read as two different materials. They are separate
+    // sliders, but a fresh profile starts them matched.
     const cards = resolvedBlurPx(
       CUSTOMIZATION_DEFAULTS.blurCardsAmount,
       CUSTOMIZATION_DEFAULTS.blurCardsDepth,
@@ -47,9 +50,8 @@ describe("customization blur defaults", () => {
       CUSTOMIZATION_DEFAULTS.blurChromeAmount,
       CUSTOMIZATION_DEFAULTS.blurChromeDepth,
     );
-    expect(cards).toBe(11);
-    expect(chrome).toBe(7.5);
-    expect(cards).toBeGreaterThan(chrome);
+    expect(cards).toBe(22);
+    expect(chrome).toBe(22);
   });
 
   test("both surfaces keep a non-zero blur on a fresh profile", () => {

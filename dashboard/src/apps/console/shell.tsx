@@ -81,17 +81,10 @@ export const navigationGroups: readonly NavGroupDef[] = [
   {
     label: "Tools",
     items: [
-      { label: "Coming soon", path: "#tools-coming-soon-1", icon: Globe, disabled: true },
       {
-        label: "Coming soon",
-        path: "#tools-coming-soon-2",
+        label: "Tools",
         icon: Globe,
-        children: Array.from({ length: 5 }, (_, index) => ({
-          label: `Coming soon ${index + 1}`,
-          path: `#tools-coming-soon-${index + 3}`,
-          icon: Globe,
-          disabled: true,
-        })),
+        children: [],
       },
     ],
   },
@@ -625,13 +618,13 @@ function SidebarNavList({
                     <button
                       key={child.path ?? child.label}
                       type="button"
-                      className="nav-link-item w-full cursor-not-allowed opacity-55"
-                      disabled
-                      title="Coming soon"
+                      className="nav-link-item w-full"
+                      disabled={child.disabled === true}
+                      title={child.label}
                     >
                       <child.icon size={15} className="nav-link-icon" />
                       <span>{child.label}</span>
-                      <span className="nav-link-badge">Soon</span>
+                      {child.badge ? <span className="nav-link-badge">{child.badge}</span> : null}
                     </button>
                   ))}
                 </div>
