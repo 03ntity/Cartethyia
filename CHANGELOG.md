@@ -587,6 +587,40 @@ database applies them in order; a fresh one builds from the current baseline.
   per-tenant cost later makes page-load fetches too expensive, the next step is
   a longer `staleTime`, not a periodic fetch.
 
+- **Continuous integration runs green for the first time on this branch,**
+  which took fixing the suite rather than the product. Every failure was a
+  test asserting something that belongs to the machine it runs on — CI is an
+  unprivileged Linux runner with no `.env`, while development happens on a
+  workstation that has one. 74 failures, one cause at a time.
+
+  The largest was a missing fixture, not a defect: `.env` is gitignored, so CI
+  had no `CARTETHYIA_ENCRYPTION_KEY` and every test that seals a credential
+  died with "required" — 65 failures. The test runner already redirects
+  config, data and telemetry roots into a per-run sandbox; it now generates a
+  throwaway key there when the environment carries none, reusing the
+  installer's own generator so the encoding cannot drift. An explicit variable
+  still wins, so an operator's real key is never reached for.
+
+  The rest were host dependencies. The VPS installer writes unit files to
+  `/etc/systemd/system/`, which needs root, so those writes are redirected
+  into the sandbox. The HTTP/2 fixture binds 443, also privileged; it cannot
+  move to an ephemeral port because the port is part of the SSRF policy under
+  test, so the bind is probed and the streaming suite reports `skip` — not six
+  passes for tests that never ran, which is what returning early would have
+  reported. `dns.setServers` is process-global and was poisoning the shared
+  worker, so the DNS suite no longer touches it and supplies the lookup
+  instead.
+
+  One production change came out of it: `homeDir` re-exported `os.homedir()`,
+  whose value is cached at first use. A test pointing `HOME` at a temp
+  directory had its first path resolve correctly and every later one resolve to
+  the process-start home — and on Linux that is the only value it ever
+  returns, so a CLI-tool injector wrote to the real home while the assertions
+  read a directory `afterEach` had already removed. It now reads
+  `HOME`/`USERPROFILE` per call, which is what that module's contract already
+  claimed. Production behaviour is unchanged: those variables are still what
+  decide the directory.
+
 ## [2.5.10] - 2026-10-25
 
 ### Fixed
