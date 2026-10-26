@@ -179,6 +179,10 @@ export const BUDDY_PRO_ONLY_MODEL_IDS: ReadonlySet<string> = new Set([
   "grok-4.6",
   "grok-4.7",
   "kimi-k3.1-pro-highspeed",
+  // The Opus rows: both are refused on free while Sonnet 4.6 at the same
+  // 1M window is served, so this is the tier rather than the size.
+  "claude-opus-4.6",
+  "claude-opus-4.7-1m",
 ]);
 
 /**
