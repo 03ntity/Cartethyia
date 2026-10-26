@@ -116,6 +116,64 @@ id roster and the model metadata (`id`, `name`, token limits, `supportsImages`,
 `data/provider-catalogs/buddy-live-model-catalogs-<date>.json`. Never persist
 headers, tokens, the account UID, or email. CN hosts are a separate variant and
 are not covered by that snapshot.
+
+## Harden Buddy from the reference gateway
+
+The donor gateway is a reverse-engineered Python implementation kept in step
+with the official Buddy clients. When hardening Cartethyia's Buddy providers,
+port from it by **comparison, not wholesale copy**:
+
+1. **Map both sides first.** Read the donor's recent commits (`git log`) and the
+   matching Cartethyia files (`src/providers/integrations/buddy/**`). Subagent
+   summaries orient you, but **read the actual Cartethyia code yourself before
+   editing headers, identity, or payload shape** — that surface is what gets an
+   account blocked, and a paraphrase is not evidence.
+2. **Flag conflicts; do not silently flip them.** The two gateways each make
+   *reasoned, empirically-tested* choices that sometimes disagree. When they do,
+   present both with the evidence and let the owner decide — a header change can
+   block a live account, and "both work today" is a real, common state.
+3. **Keep divergences honest.** Where Cartethyia deliberately differs from the
+   donor, the code comment records why. If you adopt the donor's behavior,
+   rewrite the comment's rationale in the same change — never leave a comment
+   that contradicts the code.
+4. **Verify at the boundary.** `bun run typecheck`, the `test/providers/buddy-*`
+   suite, and a runtime probe that prints the emitted header/payload set. A
+   passing type-check does not show headers; print them.
+
+Decisions already made against the donor — treat as settled unless the owner
+reopens them. Exact strings live in the owning code, not here:
+
+- **Official identity prompts** — `cb` sends the CodeBuddy Code prompt and the
+  WorkBuddy variants the WorkBuddy prompt, matching the official client instead
+  of a neutral stand-in (`codebuddy/provider.ts`, `workbuddy/provider.ts`).
+- **DSH channel-identity scrub** — `scrubBuddyChannelIdentity`
+  (`buddy-chat-shared.ts`) rewrites DeepSeek Harness role identities to the
+  WorkBuddy identity, zero-width-space tolerant.
+- **Message-id wire format** — WorkBuddy *desktop* emits dashed-UUID
+  `x-conversation-message-id`/`x-request-id`; CLI and all of CodeBuddy stay
+  32-hex; the turn key and B3/W3C trace ids are always hex
+  (`buddy-conversation-headers.ts`).
+- **CLI request markers** — the CLI identity keeps `x-requested-with` +
+  `x-codebuddy-request` but drops browser *transport* headers and the device
+  token (`codebuddy/shared.ts`, `workbuddy/shared.ts`).
+- **Stainless fingerprint is pinned to macOS** (`MacOS`/`x64`/a fixed Node), not
+  host-derived (`buddy-cli-headers.ts`). A deliberate owner choice; the donor
+  pins Linux. Unverified against the live upstream — if blocks appear, `arm64`
+  or host-derived are the first knobs to try.
+
+Known open conflicts with the donor, **not** changed — do not flip without the
+owner's go-ahead or live evidence:
+
+- **`11140` semantics** — donor: account restriction → auto-disable; Cartethyia:
+  content-policy (403, not credential invalidation).
+- **`/console/chat/completions` fallback** — donor retries once there on a
+  `11128` channel-check error; Cartethyia has no URL-level fallback.
+- **WorkBuddy UA token** — donor uses the brand string `WorkBuddy AI`; Cartethyia
+  uses the wire token `workbuddy-ai`, which it verified is what passes (the brand
+  string drew `403 · 11140`).
+- **Client version pins** — Cartethyia's are auto-discovered and usually newer
+  than the donor's static pins; never downgrade from the donor.
+
 ## Daily check-in coordination
 
 Buddy accounts have three check-in paths and they must not race:

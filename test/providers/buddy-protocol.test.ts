@@ -1,9 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { buddyPrePayloadCommon, buildBuddyPromptCacheKey } from "../../src/providers/integrations/buddy/buddy-chat-shared";
 import {
   applyBuddySystemPrompt,
+  buddyPrePayloadCommon,
+  buildBuddyPromptCacheKey,
   dropEmptyBuddyMessages,
+  scrubBuddyChannelIdentityText,
 } from "../../src/providers/integrations/buddy/buddy-chat-shared";
+import { CODEBUDDY_SYSTEM_PROMPT } from "../../src/providers/integrations/buddy/codebuddy/provider";
+import {
+  workbuddyPrePayload,
+  WORKBUDDY_SYSTEM_PROMPT,
+} from "../../src/providers/integrations/buddy/workbuddy/provider";
 import { codeBuddyCnPrePayload } from "../../src/providers/integrations/buddy/codebuddy/cn-provider";
 import { readBuddyDeviceToken, workbuddyHeaders } from "../../src/providers/integrations/buddy/workbuddy/shared";
 import { fetchTencentBillingQuota } from "../../src/providers/integrations/buddy/buddy-quota-shared";
@@ -642,5 +649,85 @@ describe("Buddy empty-reasoning drop (upstream 11151 'history not found')", () =
         expect(hasToolCalls || hasToolCallId).toBe(true);
       }
     }
+  });
+});
+
+describe("Buddy client-identity hardening", () => {
+  const wbCandidate = {
+    provider_id: "workbuddy",
+    model_id: "m",
+    wire_family: "openai-chat",
+    endpoint_path: "/v2/chat/completions",
+    capabilities: {},
+  } as unknown as ProviderDispatchTarget;
+  const wbRequest = { model: "m", messages: [] } as unknown as CanonicalRequest;
+  const wbContext = {
+    credential: { account_id: "acct123456", auth_state: {} },
+  } as unknown as ProviderDispatchContext;
+
+  test("the intl variants install the official client identity prompt", () => {
+    // Fidelity with the real client: the leading system turn is the official
+    // CodeBuddy CLI / WorkBuddy prompt, not a neutral stand-in, so a proxied
+    // request matches what the official client emits.
+    expect(CODEBUDDY_SYSTEM_PROMPT.startsWith("You are CodeBuddy Code.")).toBe(true);
+    expect(WORKBUDDY_SYSTEM_PROMPT.startsWith("You are WorkBuddy, a powerful AI assistant.")).toBe(true);
+    // Both end on the shared instruction the upstream keys on.
+    expect(CODEBUDDY_SYSTEM_PROMPT).toContain("<user_query>");
+    expect(WORKBUDDY_SYSTEM_PROMPT).toContain("<user_query>");
+  });
+
+  test("a replayed DeepSeek Harness history is rewritten to the WorkBuddy identity", () => {
+    const payload: Record<string, unknown> = {
+      model: "m",
+      messages: [
+        { role: "system", content: "You are DeepSeek Harness" },
+        { role: "user", content: "hi" },
+        { role: "assistant", content: "You are DeepSeek Harness. Understood." },
+        { role: "assistant", reasoning_content: "You are a coding agent powered by the deepseek-v4 model" },
+      ],
+    };
+    workbuddyPrePayload(payload, wbRequest, wbCandidate, wbContext);
+    const messages = payload["messages"] as Array<Record<string, unknown>>;
+    // The caller's DSH system turn is dropped and the official prompt installed.
+    expect(messages[0]?.["role"]).toBe("system");
+    expect(messages[0]?.["content"]).toBe(WORKBUDDY_SYSTEM_PROMPT);
+    // Assistant identity and the coding-persona reasoning are scrubbed; the
+    // named model survives in the rewrite.
+    const assistantText = messages
+      .filter((m) => m["role"] === "assistant")
+      .map((m) => `${typeof m["content"] === "string" ? m["content"] : ""}${typeof m["reasoning_content"] === "string" ? m["reasoning_content"] : ""}`)
+      .join(" ");
+    expect(assistantText).toContain("You are WorkBuddy, a powerful AI assistant");
+    expect(assistantText).not.toContain("DeepSeek Harness");
+    expect(assistantText).toContain("deepseek-v4");
+  });
+
+  test("the DSH identity scrub tolerates zero-width-space splitting", () => {
+    // Upstream can interleave U+200B between characters; the match must still
+    // fire so a normalized-away identity cannot slip through.
+    const scrubbed = scrubBuddyChannelIdentityText("You\u200bare DeepSeek\u200b Harness");
+    expect(scrubbed).toBe("You are WorkBuddy, a powerful AI assistant");
+    const gui = scrubBuddyChannelIdentityText("Open the DeepSeek Harness Web GUI");
+    expect(gui).toBe("Open the WorkBuddy Web GUI");
+  });
+
+  test("the scrub leaves unrelated text untouched", () => {
+    const plain = "Let us harness the power of deepseek models by reading docs.";
+    expect(scrubBuddyChannelIdentityText(plain)).toBe(plain);
+  });
+
+  test("CodeBuddy CN keeps its own neutral prompt", () => {
+    // Regression guard: CN neutralizes agent identities rather than adopting the
+    // intl CodeBuddy Code prompt, so the CN path must not pick up the official
+    // identity from the shared constant.
+    const payload: Record<string, unknown> = {
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+    };
+    codeBuddyCnPrePayload(payload, wbRequest, wbCandidate, wbContext);
+    const messages = payload["messages"] as Array<Record<string, unknown>>;
+    expect(messages[0]?.["role"]).toBe("system");
+    expect(messages[0]?.["content"]).toBe("You are a helpful AI assistant that helps with software engineering tasks.");
+    expect(messages[0]?.["content"]).not.toContain("CodeBuddy Code");
   });
 });

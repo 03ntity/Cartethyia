@@ -48,24 +48,24 @@ export const CODEBUDDY_BASE_URL = providerBaseUrl("cb");
 /**
  * Leading system turn for this variant.
  *
- * The upstream validates that the wire *opens* with a `system` turn (code
- * `11128`) but does not check its text — the CN variant installs a plain
- * engineering-assistant sentence in the same slot and the gateway accepts it.
- * So this text is a product choice rather than a wire contract, and the
- * previous vendor-branded line ("You are CodeBuddy Code.") made every request
- * claim an identity the caller never chose, while also discarding whatever
- * system prompt the caller actually sent.
+ * The wire contract is that the request *opens* with a `system` turn (code
+ * `11128`); the gateway replaces any caller `system`/`developer` turn with this
+ * fixed prompt. The text is the CodeBuddy CLI's own leading prompt — the same
+ * one the reference client (and the donor gateway's `prepend` prompt mode)
+ * sends — so a proxied request is byte-faithful to an official client rather
+ * than a neutral stand-in.
  *
- * The prompt is therefore a neutral assistant identity with an explicit
- * persona: pragmatic, direct, and honest — no sycophancy, no hedging, no
- * invented certainty.
+ * Keeping the official identity is forward-compatible: the upstream is not
+ * observed to validate this text today, but a proxy that claims the real
+ * client's identity cannot be caught out if it starts to. A previous neutral
+ * persona ("You are a pragmatic and direct software engineering assistant…")
+ * worked, but diverged from every request the official CLI emits.
  */
 export const CODEBUDDY_SYSTEM_PROMPT =
-  "You are a pragmatic and direct software engineering assistant. " +
-  "Be honest and truthful: state what you know, say plainly when you are unsure " +
-  "or do not know, and never claim to have done something you have not done. " +
-  "Prefer concrete answers over filler, and say so when a request is ambiguous " +
-  "instead of guessing silently.";
+  "You are CodeBuddy Code.\n\n" +
+  "You are an interactive CLI tool that helps users with software engineering tasks. " +
+  "Use the instructions below and the tools available to you to assist the user. " +
+  "Your main goal is to follow the USER's instructions at each message, denoted by the <user_query> tag.";
 
 function codeBuddyIntlPrePayload(
   payload: Record<string, unknown>,

@@ -69,19 +69,29 @@ export async function workbuddyHeaders(
   clientVersion = getWorkBuddyClientVersion(),
   cliIdentity?: boolean,
 ): Promise<Record<string, string>> {
+  const identity = resolveBuddyIdentity(context, cliIdentity);
   const conversation = buddyConversationHeaders({
     ...(resolveInboundSessionId(context, request) === undefined
       ? {}
       : { conversationId: resolveInboundSessionId(context, request) }),
+    // The reference emits dashed-UUID message/request ids on the WorkBuddy
+    // desktop product and 32-hex on CLI traffic (build_attempt_headers converts
+    // only the message/request ids, and only for the WorkBuddy profiles).
+    messageIdStyle: identity === "desktop" ? "uuid" : "hex",
   });
   const accountId = context?.credential.account_id;
-  if (resolveBuddyIdentity(context, cliIdentity) === "cli") {
-    // The reference CLI: issued by the OpenAI Node SDK, so no browser header
-    // and no device token, and the machine/session device pair does not
-    // exist — only `X-User-Id`, which is `anonymous` without a uid.
+  if (identity === "cli") {
+    // The reference CLI: issued by the OpenAI Node SDK, so no browser
+    // *transport* header (origin/referer/accept-language) and no device token,
+    // and the machine/session device pair does not exist — only `X-User-Id`,
+    // which is `anonymous` without a uid. It keeps the request-shape markers
+    // (`x-requested-with`, `x-codebuddy-request`) the reference sends on every
+    // call regardless of transport.
     return {
       accept: "application/json",
       "user-agent": `CLI/${getWorkBuddyCliVersion()} CodeBuddy/${getWorkBuddyCliVersion()}`,
+      "x-requested-with": "XMLHttpRequest",
+      "x-codebuddy-request": "1",
       "x-domain": domain,
       "x-agent-purpose": "conversation",
       "x-ide-name": "CLI",

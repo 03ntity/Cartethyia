@@ -34,6 +34,11 @@ function newMessageId(): string {
   return crypto.randomUUID().replaceAll("-", "");
 }
 
+/** Renders a 32-char hex id as a dashed UUID (`8-4-4-4-12`). */
+function toUuidHex(hex: string): string {
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 /** True when `value` is a valid B3 trace id: 16 or 32 hex characters. */
 function isValidTraceId(value: string): boolean {
   if (value.length !== 16 && value.length !== 32) return false;
@@ -53,6 +58,18 @@ export interface BuddyConversationIds {
   readonly conversationRequestId?: string | undefined;
   /** Inbound trace id to pass through; falls back to the conversation request id. */
   readonly traceId?: string | undefined;
+  /**
+   * Wire format for the two message-scoped ids (`x-conversation-message-id`,
+   * `x-request-id`).
+   *
+   * The reference emits these as dashed UUIDs on the WorkBuddy desktop product
+   * and as 32-hex on CLI traffic (`build_attempt_headers` converts only the
+   * message/request ids, and only for the WorkBuddy profiles). The turn
+   * aggregation key (`x-conversation-request-id` / `x-root-request-id`) and the
+   * B3/W3C trace ids stay hex in both styles, because B3's spec accepts only
+   * hex. Default `"hex"`.
+   */
+  readonly messageIdStyle?: "hex" | "uuid" | undefined;
 }
 
 /**
@@ -71,14 +88,17 @@ export function buddyConversationHeaders(
       ? ids.conversationRequestId.trim()
       : newMessageId();
   const messageId = newMessageId();
+  // The message-scoped ids may render as a dashed UUID (WorkBuddy desktop) or
+  // as 32-hex (CLI); the raw hex is still what the B3/W3C trace ids derive from.
+  const messageHeaderValue = ids.messageIdStyle === "uuid" ? toUuidHex(messageId) : messageId;
   const traceId =
     ids.traceId && ids.traceId.trim().length > 0 ? ids.traceId.trim() : conversationRequestId;
   const b3TraceId = isValidTraceId(conversationRequestId) ? conversationRequestId : messageId;
 
   const headers: Record<string, string> = {
     "x-conversation-request-id": conversationRequestId,
-    "x-conversation-message-id": messageId,
-    "x-request-id": messageId,
+    "x-conversation-message-id": messageHeaderValue,
+    "x-request-id": messageHeaderValue,
     "x-root-request-id": conversationRequestId,
     "x-trace-id": traceId,
     // W3C trace context alongside the B3 set below: the upstream reads both,

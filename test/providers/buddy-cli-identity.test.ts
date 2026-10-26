@@ -2,11 +2,14 @@
  * The buddy CLI identity.
  *
  * These assertions come from the two reference gateways, which agree on the
- * split: the desktop product sends browser transport plus a device token, and
- * the CLI — issued by the OpenAI Node SDK — sends neither, and adds the agent
- * envelope and the SDK fingerprint. The hybrid this repo used to send
- * (`X-IDE-Type: CLI` alongside `x-requested-with` and `text/event-stream`) is
- * not a client either reference can produce, and it is what these tests pin.
+ * split: the desktop product sends browser *transport* headers plus a device
+ * token, and the CLI — issued by the OpenAI Node SDK — sends neither, and adds
+ * the agent envelope and the SDK fingerprint. The CLI still keeps the
+ * request-shape markers (`x-requested-with`, `x-codebuddy-request`) the
+ * reference sends on every call; what it drops is the browser transport
+ * (`accept: text/event-stream`, `origin`, `referer`, `accept-language`) and the
+ * device token — that combination is what separates CLI from the desktop
+ * hybrid these tests pin.
  *
  * Opt-in is pinned too: an unset flag must leave every header exactly as it
  * was, because a wrong identity upstream is what gets an account blocked.
@@ -16,14 +19,11 @@ import { codebuddyHeaders } from "../../src/providers/integrations/buddy/codebud
 import { workbuddyHeaders } from "../../src/providers/integrations/buddy/workbuddy/shared";
 import type { ProviderDispatchContext } from "../../src/providers/provider-contracts";
 
-/** No browser header survives into the CLI identity. */
-const BROWSER_HEADERS = [
-  "origin",
-  "referer",
-  "accept-language",
-  "x-requested-with",
-  "x-codebuddy-request",
-] as const;
+/** No browser *transport* header survives into the CLI identity. */
+const BROWSER_HEADERS = ["origin", "referer", "accept-language"] as const;
+
+/** Request-shape markers the reference sends on every call, CLI included. */
+const REQUEST_MARKERS = ["x-requested-with", "x-codebuddy-request"] as const;
 
 const AGENT_ENVELOPE = ["X-Agent-Intent", "X-Agent-Type", "X-Agent-Runtime"] as const;
 
@@ -55,15 +55,22 @@ describe("CodeBuddy CLI identity", () => {
     expect(headers["X-Agent-Runtime"]).toBe("other");
     for (const name of STAINLESS) expect(headers[name]).toBeDefined();
     expect(headers["x-stainless-package-version"]).toBe("6.25.0");
+    // The fingerprint is pinned to macOS rather than host-derived, so every
+    // dispatch presents the same client OS regardless of the running machine.
+    expect(headers["x-stainless-os"]).toBe("MacOS");
   });
 
-  test("drops every browser header and the device token", async () => {
+  test("drops browser transport and the device token, keeps the request markers", async () => {
     const headers = await codebuddyHeaders("CLI", context, undefined, true);
     for (const name of BROWSER_HEADERS) expect(headers[name]).toBeUndefined();
     // The account carries a device token; the CLI never sends one.
     expect(headers["X-Device-Token"]).toBeUndefined();
     expect(headers["x-device-token"]).toBeUndefined();
     expect(headers["accept"]).toBe("application/json");
+    // The request-shape markers the reference sends on every call survive.
+    for (const name of REQUEST_MARKERS) expect(headers[name]).toBeDefined();
+    expect(headers["x-requested-with"]).toBe("XMLHttpRequest");
+    expect(headers["x-codebuddy-request"]).toBe("1");
   });
 
   test("sets X-User-Id from the account, and anonymous without one", async () => {
@@ -90,10 +97,13 @@ describe("CodeBuddy CLI identity", () => {
 });
 
 describe("WorkBuddy CLI identity", () => {
-  test("carries the agent envelope and drops browser transport", async () => {
+  test("carries the agent envelope, drops browser transport, keeps the markers", async () => {
     const headers = await workbuddyHeaders(context, undefined, "www.workbuddy.ai", "5.8.4", true);
     for (const name of AGENT_ENVELOPE) expect(headers[name]).toBeDefined();
     for (const name of BROWSER_HEADERS) expect(headers[name]).toBeUndefined();
+    for (const name of REQUEST_MARKERS) expect(headers[name]).toBeDefined();
+    expect(headers["x-requested-with"]).toBe("XMLHttpRequest");
+    expect(headers["x-codebuddy-request"]).toBe("1");
     expect(headers["x-device-token"]).toBeUndefined();
     expect(headers["accept"]).toBe("application/json");
   });
@@ -142,5 +152,20 @@ describe("the desktop identity is unchanged", () => {
     const headers = await workbuddyHeaders(cliAccount, undefined, "www.workbuddy.ai", "5.8.4");
     expect(headers["x-ide-name"]).toBe("CLI");
     expect(headers["x-device-token"]).toBeUndefined();
+  });
+
+  test("desktop message ids are dashed UUIDs while CLI message ids stay hex", async () => {
+    // The reference emits dashed-UUID message/request ids on the WorkBuddy
+    // desktop product and 32-hex on CLI traffic.
+    const desktop = await workbuddyHeaders(context, undefined, "www.workbuddy.ai", "5.8.4");
+    expect(desktop["x-conversation-message-id"]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+    expect(desktop["x-request-id"]).toBe(desktop["x-conversation-message-id"]);
+    // The turn aggregation key stays hex even on desktop.
+    expect(desktop["x-conversation-request-id"]).toMatch(/^[0-9a-f]{32}$/);
+    const cli = await workbuddyHeaders(context, undefined, "www.workbuddy.ai", "5.8.4", true);
+    expect(cli["x-conversation-message-id"]).toMatch(/^[0-9a-f]{32}$/);
+    expect(cli["x-request-id"]).toBe(cli["x-conversation-message-id"]);
   });
 });

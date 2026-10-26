@@ -49,20 +49,21 @@ export const WORKBUDDY_BASE_URL = providerBaseUrl("workbuddy");
 /**
  * Leading system turn for this variant.
  *
- * The upstream does validate the leading system turn's *text*, not just that
- * the wire opens with one: sending caller text in its place answers
- * `400 · 11128 "Illegal API invocation from an unapproved channel"` on
- * CodeBuddy, which treats that prompt as the calling channel's identity. So
- * this prompt is a wire contract, not merely a product choice — see the
- * sibling in `codebuddy.ts`. The previous line named the vendor product, which
- * made every request claim an identity the caller never chose.
+ * The upstream validates that the wire opens with a `system` turn and treats
+ * that prompt as the calling channel's identity: forwarding caller text in its
+ * place answers `400 · 11128 "Illegal API invocation from an unapproved
+ * channel"`. So this prompt is a wire contract, not merely a product choice —
+ * see the sibling in `codebuddy.ts`.
+ *
+ * The text is WorkBuddy's own leading prompt, matching what the official client
+ * (and the donor gateway's `prepend` prompt mode) sends, so a proxied request
+ * carries the real client's identity instead of a neutral stand-in. A previous
+ * neutral persona was accepted but diverged from every request the official
+ * desktop client emits.
  */
 export const WORKBUDDY_SYSTEM_PROMPT =
-  "You are a pragmatic and direct software engineering assistant. " +
-  "Be honest and truthful: state what you know, say plainly when you are unsure " +
-  "or do not know, and never claim to have done something you have not done. " +
-  "Prefer concrete answers over filler, and say so when a request is ambiguous " +
-  "instead of guessing silently.";
+  "You are WorkBuddy, a powerful AI assistant.\n\n" +
+  "Your main goal is to follow the USER's instructions at each message, denoted by the <user_query> tag.";
 
 /**
  * Reconstructs generic function declarations when a later tool-history turn

@@ -41,11 +41,11 @@ export async function codebuddyHeaders(
   });
   if (resolveBuddyIdentity(context, cliIdentity) === "cli") {
     return {
-      // The CLI sends `Accept: application/json` and no device token. The
-      // browser-shaped pair (`X-Requested-With`, `x-codebuddy-request`) stays
-      // off this branch: a request carrying both halves is a hybrid no real
-      // client produces, and that is a fidelity choice, not a requirement —
-      // the live API answers either way.
+      // The CLI sends `Accept: application/json` and no device token. It keeps
+      // the request-shape markers (`X-Requested-With`, `X-CodeBuddy-Request`)
+      // the reference sends on every call regardless of transport, but drops
+      // the browser *transport* header (`accept: text/event-stream`) — so the
+      // identity is still CLI, not the desktop hybrid.
       accept: "application/json",
       "User-Agent": `CLI/${getCodeBuddyVersion()} CodeBuddy/${getCodeBuddyVersion()}`,
       "X-Product": "SaaS",
@@ -53,6 +53,8 @@ export async function codebuddyHeaders(
       "X-IDE-Name": "CLI",
       "X-IDE-Version": getCodeBuddyVersion(),
       "X-Domain": codebuddyDomain(variant),
+      "x-requested-with": "XMLHttpRequest",
+      "x-codebuddy-request": "1",
       // The conversation purpose the reference client states. Not required —
       // verified against the live API that a request succeeds without it — but
       // it is part of the client's real request, and matching the client is the
