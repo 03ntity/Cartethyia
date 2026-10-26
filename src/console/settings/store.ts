@@ -5,6 +5,10 @@ import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import { consoleSettings, type ConsoleSettingsPreferences } from "../../persistence/schema";
 import type { RedisBackend } from "../../persistence/redis";
 import { bumpSettingsRevision } from "../../persistence/settings-revision";
+import { resolveTelemetryRetentionDays } from "../../config/telemetry";
+import { resolveUpstreamTimeoutMs } from "../../config/timeouts";
+import { payloadRetentionMs } from "../../observability/payload-capture";
+import { IMAGE_CLAMP_MAX_BYTES } from "../../protocol/image-clamp";
 import {
   PONYTAIL_LEVELS,
   RESPONSES_REASONING_SUMMARIES,
@@ -145,6 +149,17 @@ function mapRuntimeSettingsRow(
     telemetryWindowMinutes: normalizeTelemetryWindowMinutes(prefs.telemetryWindowMinutes),
     imageClampMaxBytes: normalizeImageClampMaxBytes(prefs.imageClampMaxBytes),
     updatedAt,
+    /*
+     * Resolved at request time, not at module load: all four come from env the
+     * operator can change without rebuilding, and a cached value would keep
+     * quoting a default the deployment no longer has.
+     */
+    defaults: {
+      upstreamTimeoutSeconds: Math.round(resolveUpstreamTimeoutMs() / 1000),
+      telemetryWindowMinutes: Math.round(payloadRetentionMs() / 60_000),
+      imageClampMaxBytes: IMAGE_CLAMP_MAX_BYTES,
+      telemetryRetentionDays: resolveTelemetryRetentionDays(),
+    },
   };
 }
 

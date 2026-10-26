@@ -89,7 +89,13 @@ export function DataManagementPanel(): ReactNode {
        * Hourly files carry no reclaim action: the backend refuses to delete
        * them, so the card says why instead of offering a button that fails.
        */}
-      <div className="grid grid-cols-3 gap-6 w-full min-w-0 max-medium:grid-cols-1">
+      {/*
+       * Four cards in one row: the two disk buckets plus the health log and
+       * the flush control. `auto-fit` with a floor rather than a fixed column
+       * count, so a narrow window gets fewer columns instead of a row of
+       * cards too thin to read — and no empty slot when one is absent.
+       */}
+      <div className="settings-bucket-grid">
         {data.buckets.map((bucket) => {
           const action = reclaimActionFor(bucket);
           return (
@@ -104,101 +110,78 @@ export function DataManagementPanel(): ReactNode {
             />
           );
         })}
-      </div>
-
-      {/*
-        * `data-panel`, not `data-bucket`: this row is not one of the grid's
-        * buckets. It carried `data-bucket` while being rendered outside the
-        * grid, so a selector for the buckets counted four cards where the grid
-        * holds three.
-        */}
-      <div
-        data-panel="health_events"
-        className="flex items-center justify-between gap-6 rounded-control border border-inner-border px-6 py-5"
-      >
-        <span className="min-w-0 flex items-center gap-4">
-          <span className="grid size-9 shrink-0 place-items-center rounded-control bg-surface-1 text-text-secondary">
-            <Activity size={15} aria-hidden="true" />
-          </span>
-          <span className="min-w-0">
-            <strong className="block text-body">Health &amp; Error Log</strong>
-            <small className="text-caption text-text-tertiary">
-              {healthEventCount === undefined
-                ? "Purging is not offered in this deployment's console composition."
-                : `${formatNumber(healthEventCount)} recorded transition${healthEventCount === 1 ? "" : "s"} across accounts and pools. Purge clears only this audit trail — account statuses and cooldowns stay as they are, and this cannot be undone.`}
-            </small>
-          </span>
-        </span>
-        {healthEventCount !== undefined ? (
-          confirmingPurge ? (
-            <span className="shrink-0 flex items-center gap-3">
-              <Button variant="secondary" size="sm" onClick={() => setConfirmingPurge(false)} disabled={purge.isPending}>
-                Cancel
-              </Button>
-              <Button
-                variant="danger"
-                size="sm"
-                icon={<Trash2 size={14} />}
-                disabled={purge.isPending}
-                onClick={() =>
-                  purge.mutate(undefined, {
-                    onSuccess: (result) => {
-                      setConfirmingPurge(false);
-                      toast.success(
-                        result.deleted === 0
-                          ? "Health & error log was already empty."
-                          : `Purged ${formatNumber(result.deleted)} health event${result.deleted === 1 ? "" : "s"}.`,
-                      );
-                    },
-                    onError: (error) => toast.error(getErrorMessage(error, "Purge failed.")),
-                  })
-                }
-              >
-                Delete
-              </Button>
+        <ActionCard
+          icon={Activity}
+          title="Health &amp; Error Log"
+          note={
+            healthEventCount === undefined
+              ? "Purging is not offered in this deployment's console composition."
+              : `${formatNumber(healthEventCount)} recorded transition${healthEventCount === 1 ? "" : "s"} across accounts and pools. Purge clears only this audit trail — account statuses and cooldowns stay as they are, and this cannot be undone.`
+          }
+          testId="health_events"
+        >
+          {healthEventCount === undefined ? null : confirmingPurge ? (
+            <span className="flex flex-col gap-3">
+              <span className="flex items-center gap-3">
+                <Button variant="secondary" size="sm" onClick={() => setConfirmingPurge(false)} disabled={purge.isPending}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  icon={<Trash2 size={14} />}
+                  disabled={purge.isPending}
+                  onClick={() =>
+                    purge.mutate(undefined, {
+                      onSuccess: (result) => {
+                        setConfirmingPurge(false);
+                        toast.success(
+                          result.deleted === 0
+                            ? "Health & error log was already empty."
+                            : `Purged ${formatNumber(result.deleted)} health event${result.deleted === 1 ? "" : "s"}.`,
+                        );
+                      },
+                      onError: (error) => toast.error(getErrorMessage(error, "Purge failed.")),
+                    })
+                  }
+                >
+                  Delete
+                </Button>
+              </span>
             </span>
           ) : (
             <Button
               variant="secondary"
               size="sm"
-              className="shrink-0"
               icon={<Trash2 size={14} />}
               disabled={purge.isPending || healthEventCount === 0}
               onClick={() => setConfirmingPurge(true)}
             >
               Purge
             </Button>
-          )
-        ) : null}
-      </div>
-
-      <div className="flex items-center justify-between gap-6 rounded-control border border-inner-border px-6 py-5">
-        <span className="min-w-0 flex items-center gap-4">
-          <span className="grid size-9 shrink-0 place-items-center rounded-control bg-surface-1 text-text-secondary">
-            <HardDriveDownload size={15} aria-hidden="true" />
-          </span>
-          <span className="min-w-0">
-            <strong className="block text-body">Flush pending writes</strong>
-            <small className="text-caption text-text-tertiary">
-              Write queued telemetry, usage, and health events now instead of waiting for
-              the interval. Nothing is deleted.
-            </small>
-          </span>
-        </span>
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={<Zap size={14} />}
-          disabled={flush.isPending}
-          onClick={() =>
-            flush.mutate(undefined, {
-              onSuccess: () => toast.success("Buffers flushed."),
-              onError: (error) => toast.error(getErrorMessage(error, "Flush failed.")),
-            })
-          }
+          )}
+        </ActionCard>
+        <ActionCard
+          icon={HardDriveDownload}
+          title="Flush pending writes"
+          note="Write queued telemetry, usage, and health events now instead of waiting for the interval. Nothing is deleted."
+          testId="flush"
         >
-          {flush.isPending ? "Flushing…" : "Flush"}
-        </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Zap size={14} />}
+            disabled={flush.isPending}
+            onClick={() =>
+              flush.mutate(undefined, {
+                onSuccess: () => toast.success("Buffers flushed."),
+                onError: (error) => toast.error(getErrorMessage(error, "Flush failed.")),
+              })
+            }
+          >
+            {flush.isPending ? "Flushing…" : "Flush"}
+          </Button>
+        </ActionCard>
       </div>
 
       {reclaim.isError ? (
@@ -207,6 +190,58 @@ export function DataManagementPanel(): ReactNode {
         </Banner>
       ) : null}
     </Stack>
+  );
+}
+
+/**
+ * One action that is not a disk bucket, as a card with the same shape.
+ *
+ * The health log and the flush control used to render as two full-width rows
+ * below a three-column grid holding two buckets, so the grid showed an empty
+ * slot and the rows below it were a different width for no reason. Giving
+ * them the bucket card's frame puts all four in one row of four.
+ *
+ * The body is a slot rather than props for a title and a note: the health log
+ * needs a confirm/cancel pair where another card needs one button, and a
+ * component that took both would be four props of which each card uses two.
+ */
+function ActionCard({
+  icon: Icon,
+  title,
+  note,
+  children,
+  testId,
+}: {
+  readonly icon: LucideIcon;
+  readonly title: string;
+  readonly note: string;
+  readonly children: ReactNode;
+  /** Stable hook for a test, so it need not walk up from the title. */
+  readonly testId: string;
+}): ReactNode {
+  return (
+    <div
+      data-panel={testId}
+      className="flex flex-col rounded-control border border-inner-border px-6 py-5 min-w-0"
+    >
+      <span className="flex items-start gap-4">
+        <span className="grid size-9 shrink-0 place-items-center rounded-control bg-surface-1 text-text-secondary">
+          <Icon size={15} aria-hidden="true" />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-caption text-text-tertiary">{title}</span>
+          <span className="mt-1 block text-caption text-text-tertiary">{note}</span>
+        </span>
+      </span>
+      {/*
+       * Pinned to the bottom so the row's actions line up however the notes
+       * wrap, and right-aligned so every card's button sits in the same
+       * corner. A grid of cards is read column-wise as much as row-wise; with
+       * the buttons all bottom-right, the eye finds the next action by
+       * following the diagonal instead of hunting each card for its own.
+       */}
+      <div className="mt-auto flex justify-end pt-5">{children}</div>
+    </div>
   );
 }
 
@@ -279,9 +314,10 @@ function BucketCard({
 
       {/*
        * Pinned to the bottom so the three cards' actions line up even when
-       * their notes wrap to different heights.
+       * their notes wrap to different heights, and right-aligned so the
+       * buttons share one corner across the row.
        */}
-      <div className="mt-auto pt-5">
+      <div className="mt-auto flex justify-end pt-5">
         {action === null ? (
           <p className="text-caption text-text-tertiary">Kept — no other copy.</p>
         ) : confirming ? (

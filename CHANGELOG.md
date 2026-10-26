@@ -92,14 +92,16 @@ database applies them in order; a fresh one builds from the current baseline.
   concurrency limit — previously always zero — is settable, so the effective
   ceiling is `limit + tolerance` and only requests past it are refused. It
   lives in two places with distinct scopes: `CARTETHYIA_CONCURRENCY_TOLERANCE`
-  as the deployment-wide default, and `max_concurrent_tolerance` per key
-  (migration 0021) for per-key tuning. The key's own value wins; the
-  deployment default is only the answer for a key never given one. Both the
-  settings modal and the Edit API Key modal spell out the resulting effective
-  max as the sum, because reading the two numbers separately is how an operator
-  thinks they have 5 slots when they have 8, or the reverse. NULL on a
-  pre-migration key means no allowance, and the tenant preference is kept as
-  the fallback so nobody already using it loses it.
+  as the deployment-wide default, and a per-tenant value in Settings (migration
+  0021) for per-tenant tuning. A per-key `max_concurrent_tolerance` column
+  shipped earlier in this release and is dropped again by migration 0023: the
+  two stacked, with the key's own value winning, which made the tenant-wide
+  number look broken for any key that had quietly been given an override. See
+  the Changed entry below. Both the Settings row and the Edit API Key modal
+  spell out the resulting effective max as the sum, because reading the two
+  numbers separately is how an operator thinks they have 5 slots when they
+  have 8, or the reverse. NULL means no allowance, and the tenant preference
+  is kept as the fallback so nobody already using it loses it.
 
 - **Cursor native tool calls relay.** A Cursor host-exec frame (`read_args`,
   `shell_args`, `pi_read_args`, …) becomes an ordinary tool call for the client
@@ -458,6 +460,46 @@ database applies them in order; a fresh one builds from the current baseline.
   "Coming soon" entries and a hardcoded "Soon" badge; the placeholders are gone
   and the expandable item remains.
 
+- **Concurrency slack is tenant-wide only; the per-key override is gone.**
+  `api_keys.max_concurrent_tolerance` is dropped by migration
+  `0023_drop_api_key_concurrency_tolerance.sql` (both dialects) and the field
+  is removed from the API-key contract, store, auth snapshot, and the Edit API
+  Key modal. The two numbers used to stack, with the key's own value winning,
+  so raising the tenant-wide allowance in Settings appeared to do nothing for
+  a key that had quietly been given an override. Admission now reads one
+  value: the tenant's `concurrencyTolerance` above a key's own limit. A key
+  that had an override falls back to the tenant value — the behaviour every
+  other key already had. Dropped rather than left behind: a column nothing
+  reads is still one an operator finds in a backup or a query and trusts.
+
+- **The Settings page is one column, every section on the page.** The page
+  previously hid sections behind a tab strip, then behind a two-up grid; both
+  are gone. Security and Privacy share a row because both are short, and every
+  other section takes a row of its own, in order: Backup, Operations, Data
+  Management. Operations keeps its own grouping — Routing, Admission, Request
+  handling, Response shaping — as headings inside its card rather than as four
+  separate sections, which turned one populated card into four sparse ones.
+
+- **Runtime settings state their deployment default as a number.** Each bounded
+  dropdown used to offer a bare "Deployment default", asking the operator to
+  accept a value they could not see. The settings route now returns a
+  `defaults` object resolved from the same functions the request path uses —
+  `resolveUpstreamTimeoutMs()`, `payloadRetentionMs()`,
+  `resolveTelemetryRetentionDays()`, `IMAGE_CLAMP_MAX_BYTES` — so the choice
+  reads "Deployment default (75 seconds)", "(15 min)", "(10 MB)", and a
+  changed env still shows the truth. The two-state settings read `Off` / `On`
+  rather than naming their effect: "Enforced" gave no clue which way the
+  setting was set.
+
+- **Data Management reports the tenant's retention window, not the
+  deployment's.** The panel resolved `payloadRetentionMs` once at registration
+  and answered every tenant with the deployment default, so a tenant
+  configured for 60 minutes was told 15. `DataManagementConfig.payloadRetentionMs`
+  is now a resolver taking the tenant id, and `/usage` passes the caller's
+  tenant through. The panel's four cards — the two disk buckets, the health and
+  error log, and flush — share one grid, and each card's action is pinned
+  bottom-right so the buttons line up however the card notes wrap.
+
 ### Notes
 
 - **VPS capacity numbers are not yet measured.** The formulas, defaults and
@@ -467,14 +509,19 @@ database applies them in order; a fresh one builds from the current baseline.
   records what was measured and what was not.
 
 - **Migration and cutover order** for an existing install: drain and stop the
-  old writers, apply migrations 0020 through 0022 in order, run
+  old writers, apply migrations 0020 through 0023 in order, run
   `carte telemetry reconcile --apply` then `--verify`, then start the new
   processes. Running old file-only writers beside new SQL readers is an
   unsupported window. Migration 0021 adds `max_concurrent_tolerance` to
   `api_keys` — a NULL on a pre-migration key means no allowance, so existing
   behaviour is unchanged until a value is set. Migration 0022 creates
   `inferhub_config_keys`, which is empty on upgrade: the market module reports
-  "no key configured" until an operator adds one.
+  "no key configured" until an operator adds one. Migration 0023 drops
+  `max_concurrent_tolerance` again: the per-key override is gone, so a key
+  that had one now uses the tenant-wide `concurrencyTolerance` instead. An
+  operator relying on a per-key value should set the tenant-wide number to
+  match before applying it, or that key's effective ceiling drops to the
+  tenant value the moment the migration lands.
 
 - **The raw JSONL mirror is retained** as the at-least-once recovery source.
   SQL uniqueness plus backfill dedupe is the consistency boundary; torn raw

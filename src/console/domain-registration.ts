@@ -45,7 +45,7 @@ import { createBackupRoutes } from "./backup/routes";
 import { BackupService } from "./backup/service";
 import type { ConsoleCredentialService } from "./auth/credentials";
 import { resolveTelemetryRetentionDays } from "../config/telemetry";
-import { payloadRetentionMs } from "../observability/payload-capture";
+import { payloadRetentionMs, resolvePayloadCapture } from "../observability/payload-capture";
 import { TELEMETRY_EVENT_DIR } from "../observability/event-log";
 
 import { InMemoryOAuthFlowStore, OAuthFlowStore } from "../providers/authentication/oauth-flow-store";
@@ -303,7 +303,20 @@ export function registerConsoleDomains(
     createDataManagementRoutes({
       telemetryDir: TELEMETRY_EVENT_DIR,
       retentionDays: resolveTelemetryRetentionDays(),
-      payloadRetentionMs: payloadRetentionMs(),
+      /*
+       * Resolved per tenant, not once at boot: the Request detail window is a
+       * per-tenant setting, and this panel is the only place that reports the
+       * number back. A deployment-level value made it show the default while
+       * the gateway applied the tenant's own window.
+       *
+       * It goes through the same `resolvePayloadCapture` the dispatch path
+       * uses, so the panel and the gateway cannot disagree about how long a
+       * frame lives.
+       */
+      payloadRetentionMs: async (tenantId) => {
+        const resolved = await resolvePayloadCapture(ctx.db, tenantId);
+        return resolved.ok ? resolved.retentionMs : payloadRetentionMs();
+      },
       accessResolver: ctx.accessResolver,
       auditSink: ctx.auditRecorder,
       flusher: ctx.flushBuffers,

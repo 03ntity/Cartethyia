@@ -747,8 +747,6 @@ export const apiKeys = pgTable(
       .notNull()
       .default(0),
     maxConcurrentRequests: integer("max_concurrent_requests"),
-    /** Slack above `maxConcurrentRequests`; NULL means no allowance. */
-    maxConcurrentTolerance: integer("max_concurrent_tolerance"),
     /**
      * `whitelist` = only the names in `modelList` may be used (empty = all);
      * `blacklist` = the names in `modelList` are refused (empty = none). One

@@ -155,9 +155,39 @@ describe("DataManagementPanel", () => {
       const parents = new Set(Array.from(cards).map((c) => c.parentElement));
       expect(parents.size).toBe(1);
       const grid = cards[0]?.parentElement;
-      expect(grid?.className).toContain("grid-cols-3");
-      // Collapses on narrow screens, where three columns would be unreadable.
-      expect(grid?.className).toContain("max-medium:grid-cols-1");
+      // `auto-fit` with a floor, not a fixed column count: the panel renders
+      // a variable number of cards — the health log is absent in a reduced
+      // composition — and a fixed count left an empty slot whenever one was
+      // missing. The floor is what collapses it on narrow screens.
+      expect(grid?.className).toContain("settings-bucket-grid");
+      // The four cards share the grid, so the actions are comparable with the
+      // sizes rather than sitting at a different width below them.
+      const panels = container.querySelectorAll("[data-panel]");
+      expect(panels).toHaveLength(2);
+      for (const panel of panels) {
+        expect(panel.parentElement ?? null).toBe(grid ?? null);
+      }
+    } finally {
+      unmount();
+      restore();
+    }
+  });
+
+  test("every card's action sits bottom-right", async () => {
+    // The cards are read column-wise as much as row-wise, so the buttons share
+    // one corner: the eye finds the next action by following the diagonal
+    // instead of hunting each card for its own. Buttons are pinned to the
+    // bottom regardless, so notes wrapping to different heights do not move
+    // them. Asserted on the wrapper's classes, since a test DOM has no layout.
+    const { container, unmount, restore } = await mountPanel();
+    try {
+      const cards = container.querySelectorAll("[data-panel]");
+      expect(cards.length).toBeGreaterThan(1);
+      for (const card of cards) {
+        const footer = card.lastElementChild;
+        expect(footer?.className).toContain("mt-auto");
+        expect(footer?.className).toContain("justify-end");
+      }
     } finally {
       unmount();
       restore();

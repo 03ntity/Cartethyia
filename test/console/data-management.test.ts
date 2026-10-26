@@ -13,7 +13,7 @@
  * pretending the two can be pointed apart.
  */
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, writeFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readdir, rm, unlink, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -32,7 +32,7 @@ const { writePayloadFrame } = await import("../../src/observability/payload-stor
 const OPS = createDataManagementOperations({
   telemetryDir: TELEMETRY_DIR,
   retentionDays: 30,
-  payloadRetentionMs: 15 * 60_000,
+  payloadRetentionMs: async () => 15 * 60_000,
 });
 
 /** A UTC day offset from today, as `YYYY-MM-DD`. */
@@ -71,7 +71,7 @@ describe("disk usage", () => {
     // as nothing and the payload bucket silently reads zero.
     await writeFile(join(PAYLOAD_DIR, "frame.jsonl"), "z".repeat(25));
 
-    const usage = await OPS.usage();
+    const usage = await OPS.usage(null);
     const byId = Object.fromEntries(usage.buckets.map((b) => [b.id, b]));
 
     expect(byId.telemetry_events?.bytes).toBe(100);
@@ -91,7 +91,7 @@ describe("disk usage", () => {
   });
 
   test("an empty install reports zeroes rather than failing", async () => {
-    const usage = await OPS.usage();
+    const usage = await OPS.usage(null);
     expect(usage.totalBytes).toBe(0);
     expect(usage.buckets.every((b) => b.files === 0)).toBe(true);
   });
@@ -101,11 +101,45 @@ describe("payload frames", () => {
   test("a live frame is not offered for reclaim", async () => {
     const recent = new Date(Date.now() - 60 * 60_000);
     await writePayloadFrame({ probe: true }, recent);
-    const usage = await OPS.usage();
+    const usage = await OPS.usage(null);
     const frames = usage.buckets.find((b) => b.id === "payload_frames");
     expect(frames?.files).toBe(1);
     expect(frames?.reclaimableFiles).toBe(0);
     expect(frames?.reclaimableBytes).toBe(0);
+  });
+
+  test("the window is the tenant's, not the deployment's", async () => {
+    // The bug this pins: the panel resolved the payload window once at boot
+    // from the deployment default, so a tenant that set Request detail window
+    // to 60 minutes was still told "expiring 15 min after write" — and frames
+    // the gateway held as live were counted reclaimable.
+    const ops = createDataManagementOperations({
+      telemetryDir: TELEMETRY_DIR,
+      retentionDays: 30,
+      payloadRetentionMs: async (tenantId) =>
+        tenantId === "tenant-long" ? 60 * 60_000 : 15 * 60_000,
+    });
+    /*
+     * The scan keys staleness off the file's mtime, so what the window is
+     * compared against is when the file was written — the frame's own expiry
+     * lives inside the file and only the prune reads it.
+     */
+    const file = join(PAYLOAD_DIR, "window.jsonl");
+    await writeFile(file, "y".repeat(32));
+    // 30 minutes old: past a 15-minute window, inside a 60-minute one.
+    const stamp = new Date(Date.now() - 30 * 60_000);
+    await utimes(file, stamp, stamp);
+
+    const short = await ops.usage("tenant-short");
+    const shortFrames = short.buckets.find((b) => b.id === "payload_frames");
+    expect(shortFrames?.reclaimableFiles).toBe(1);
+    expect(shortFrames?.note).toContain("15 min");
+
+    const long = await ops.usage("tenant-long");
+    const longFrames = long.buckets.find((b) => b.id === "payload_frames");
+    expect(longFrames?.reclaimableFiles).toBe(0);
+    expect(longFrames?.note).toContain("1 hour");
+    await unlink(file);
   });
 
 });
@@ -172,13 +206,13 @@ describe("the health & error log purge", () => {
     const ops = createDataManagementOperations({
       telemetryDir: TELEMETRY_DIR,
       retentionDays: 30,
-      payloadRetentionMs: 15 * 60_000,
+      payloadRetentionMs: async () => 15 * 60_000,
       healthEvents: store,
     });
-    const usage = await ops.usage();
+    const usage = await ops.usage(null);
     expect(usage.healthEventCount).toBe(3);
     expect(await ops.purge("health_events")).toBe(3);
-    const after = await ops.usage();
+    const after = await ops.usage(null);
     expect(after.healthEventCount).toBe(0);
   });
 
@@ -190,7 +224,7 @@ describe("the health & error log purge", () => {
   });
 
   test("usage omits the count rather than reporting zero when unwired", async () => {
-    const usage = await OPS.usage();
+    const usage = await OPS.usage(null);
     expect(usage.healthEventCount).toBeUndefined();
   });
 });

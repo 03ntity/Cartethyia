@@ -1,4 +1,14 @@
-import { Download, Trash2, Upload } from "lucide-react";
+import {
+  Database,
+  Download,
+  FileClock,
+  Layers,
+  Network,
+  Server,
+  Trash2,
+  Upload,
+  type LucideIcon,
+} from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { Button } from "./ui/button";
 import { Banner } from "./patterns/banner";
@@ -55,6 +65,57 @@ function SubsectionHeading({
       <p className="mt-1 text-caption text-text-secondary">{description}</p>
     </div>
   );
+}
+
+/**
+ * One selectable scope, as a card with a glyph.
+ *
+ * The same shape Data Management gives its disk buckets — icon, name, one line
+ * of what it covers — so a checkbox that swallows a whole category reads as
+ * the thing it will delete rather than as one row in a list. Checked state is
+ * carried by `has-checked:` on the card, so the whole tile lights up instead
+ * of just the box.
+ *
+ * The input stays a real checkbox inside a real label: that is what makes the
+ * tile clickable and keyboard-operable without a click handler of its own.
+ */
+function ScopeCard({
+  icon: Icon,
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  readonly icon: LucideIcon;
+  readonly label: string;
+  readonly description: string;
+  readonly checked: boolean;
+  readonly onChange: () => void;
+}): ReactNode {
+  return (
+    <label className="flex items-start gap-5 min-h-21 px-6 py-5 border border-inner-border rounded-control bg-surface-2 text-text-primary text-caption leading-snug cursor-pointer hover:border-border-strong hover:bg-hover has-checked:border-accent has-checked:bg-accent-soft">
+      <input type="checkbox" checked={checked} onChange={onChange} />
+      <span className="grid size-9 shrink-0 place-items-center rounded-control bg-surface-1 text-text-secondary">
+        <Icon size={15} aria-hidden="true" />
+      </span>
+      <span className="flex flex-col gap-1 min-w-0">
+        <strong>{label}</strong>
+        <small className="text-text-tertiary text-badge">{description}</small>
+      </span>
+    </label>
+  );
+}
+
+/**
+ * One glyph per delete scope.
+ *
+ * "All configuration" is the union of the other two, so it gets the wider
+ * glyph — a stack rather than one of the two things inside it.
+ */
+function deleteIconFor(scope: DeleteAllScope): LucideIcon {
+  if (scope === "providers") return Server;
+  if (scope === "proxies") return Network;
+  return Layers;
 }
 
 /** Renders a router-import report: what landed, what did not, and why. */
@@ -377,7 +438,7 @@ export function BackupPanel(): ReactNode {
       <div className="grid grid-cols-2 gap-8 w-full min-w-0 max-medium:grid-cols-1">
         <section aria-label="Backup" className="min-w-0">
           <SubsectionHeading
-            title="Backup"
+            title="Export and restore"
             description="Download a JSON snapshot, or restore one you already trust."
           />
           <Stack gap="14px">
@@ -385,34 +446,20 @@ export function BackupPanel(): ReactNode {
               <legend className="mb-4 text-text-secondary text-caption font-semibold">
                 Include in the download
               </legend>
-              <label className="flex items-start gap-5 min-h-21 px-6 py-5 border border-inner-border rounded-control bg-surface-2 text-text-primary text-caption leading-snug cursor-pointer hover:border-border-strong hover:bg-hover has-checked:border-accent has-checked:bg-accent-soft">
-                <input
-                  type="checkbox"
-                  checked={includeConfig}
-                  onChange={(event) => setIncludeConfig(event.target.checked)}
-                />
-                <span className="flex flex-col gap-1 min-w-0">
-                  <strong>Account, proxy &amp; settings</strong>
-                  <small className="text-text-tertiary text-badge">
-                    Credentials, API-key hashes, routing, and settings
-                  </small>
-                </span>
-              </label>
-              <label className="flex items-start gap-5 min-h-21 px-6 py-5 border border-inner-border rounded-control bg-surface-2 text-text-primary text-caption leading-snug cursor-pointer hover:border-border-strong hover:bg-hover has-checked:border-accent has-checked:bg-accent-soft">
-                <input
-                  type="checkbox"
-                  checked={includeTelemetry}
-                  onChange={(event) =>
-                    setIncludeTelemetry(event.target.checked)
-                  }
-                />
-                <span className="flex flex-col gap-1 min-w-0">
-                  <strong>Telemetry history</strong>
-                  <small className="text-text-tertiary text-badge">
-                    Status, tokens, cost, latency — never prompt bodies
-                  </small>
-                </span>
-              </label>
+              <ScopeCard
+                icon={Database}
+                label="Account, proxy &amp; settings"
+                description="Credentials, API-key hashes, routing, and settings"
+                checked={includeConfig}
+                onChange={() => setIncludeConfig(!includeConfig)}
+              />
+              <ScopeCard
+                icon={FileClock}
+                label="Telemetry history"
+                description="Status, tokens, cost, latency — never prompt bodies"
+                checked={includeTelemetry}
+                onChange={() => setIncludeTelemetry(!includeTelemetry)}
+              />
             </fieldset>
             <div className="flex items-center justify-between gap-6 rounded-control border border-inner-border px-6 py-5">
               <span>
@@ -498,7 +545,7 @@ export function BackupPanel(): ReactNode {
           </Stack>
         </section>
 
-        <section aria-label="Delete data" className="settings-danger min-w-0">
+        <section aria-label="Delete data" className="min-w-0">
           <SubsectionHeading
             title="Delete data"
             description="Removes the scopes you check. Console users, sessions, and audit history stay."
@@ -527,25 +574,23 @@ export function BackupPanel(): ReactNode {
                   ],
                 ] as const
               ).map(([scope, label, description]) => (
-                <label
+                <ScopeCard
                   key={scope}
-                  className="flex items-start gap-5 min-h-21 px-6 py-5 border border-inner-border rounded-control bg-surface-2 text-text-primary text-caption leading-snug cursor-pointer hover:border-border-strong hover:bg-hover has-checked:border-accent has-checked:bg-accent-soft"
-                >
-                  <input
-                    type="checkbox"
-                    checked={deleteScopes.has(scope)}
-                    onChange={() => toggleDeleteScope(scope)}
-                  />
-                  <span className="flex flex-col gap-1 min-w-0">
-                    <strong>{label}</strong>
-                    <small className="text-text-tertiary text-badge">
-                      {description}
-                    </small>
-                  </span>
-                </label>
+                  icon={deleteIconFor(scope)}
+                  label={label}
+                  description={description}
+                  checked={deleteScopes.has(scope)}
+                  onChange={() => toggleDeleteScope(scope)}
+                />
               ))}
             </fieldset>
-            <div className="mt-auto flex justify-end">
+            {/*
+             * One way out, and it re-authenticates: a scoped delete empties
+             * more than the three labels name — "Providers" also takes the
+             * models and OAuth states hanging off it. The password prompt is
+             * the last chance to notice that.
+             */}
+            <div className="mt-auto flex justify-end gap-4 flex-wrap">
               <Button
                 variant="danger"
                 size="sm"

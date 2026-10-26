@@ -35,7 +35,16 @@ import { hourStamp } from "../../shared/time";
 export interface DataManagementConfig {
   readonly telemetryDir: string;
   readonly retentionDays: number;
-  readonly payloadRetentionMs: number;
+  /**
+   * How long a payload frame lives, for one tenant.
+   *
+   * A function of the tenant, not a number: the Request detail window in
+   * Settings is per tenant, and a single deployment-level number made this
+   * panel report the deployment default while the gateway applied the tenant's
+   * own window. The same panel then offered to reclaim frames the gateway
+   * still considered live, and left alone ones it had already expired.
+   */
+  readonly payloadRetentionMs: (tenantId: string | null) => Promise<number>;
   /**
    * The health & error log store, backing the console's only row-level purge.
    * Absent (a reduced console composition) means the purge is not offered
@@ -78,6 +87,27 @@ const isEventLog = (name: string): boolean =>
 const isFrame = (name: string): boolean =>
   name.endsWith(".jsonl");
 
+/**
+ * A duration in minutes as the operator's own units, not raw milliseconds.
+ *
+ * An hour is "1 hour" rather than "60 min" because that is how the window was
+ * chosen — the dropdown they picked it from says "1 hour", and a note that
+ * renders the same choice as "60 min" makes the two screens disagree about
+ * what was set.
+ */
+function formatMinutes(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return `${days} day${days === 1 ? "" : "s"}`;
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  return `${minutes} min`;
+}
+
 /** The UTC day a telemetry file name starts with, compared to a cutoff. */
 function eventBefore(name: string, cutoff: number): boolean {
   if (!name.endsWith(".events.jsonl")) {
@@ -89,8 +119,17 @@ function eventBefore(name: string, cutoff: number): boolean {
 
 export function createDataManagementOperations(config: DataManagementConfig) {
   const payloadDir = (): string => payloadDirectory();
-  async function usage(): Promise<DiskUsageResponse> {
-    const payloadCutoff = Date.now() - config.payloadRetentionMs;
+  /**
+   * Disk usage for one tenant.
+   *
+   * `tenantId` is required because the payload window is a per-tenant setting:
+   * counting "stale" frames against the deployment default declared frames
+   * stale while the gateway still held them as live, and under-counted them
+   * for a tenant that had shortened its window.
+   */
+  async function usage(tenantId: string | null): Promise<DiskUsageResponse> {
+    const retentionMs = await config.payloadRetentionMs(tenantId);
+    const payloadCutoff = Date.now() - retentionMs;
 
     const [events, frames, staleFrames, healthEventCount] = await Promise.all([
       scan(config.telemetryDir, isEventLog),
@@ -99,13 +138,20 @@ export function createDataManagementOperations(config: DataManagementConfig) {
       config.healthEvents?.count(),
     ]);
 
+    /*
+     * The notes name the same knobs Operations exposes, read at request time
+     * rather than written into the copy. A fixed "15 min" was wrong the moment
+     * an operator changed the tenant's window: the panel kept quoting the
+     * deployment default while the gateway applied their number, so the one
+     * place that could correct the assumption repeated it.
+     */
     const buckets: DiskUsageBucket[] = [
       {
         id: "telemetry_events",
         label: "Request event files",
         bytes: events.bytes,
         files: events.files,
-        note: "Feeds the request list and detail drawer.",
+        note: `Feeds the request list and detail drawer. Kept ${config.retentionDays} days.`,
         reclaimableBytes: null,
         reclaimableFiles: null,
       },
@@ -114,9 +160,7 @@ export function createDataManagementOperations(config: DataManagementConfig) {
         label: "Payload frames",
         bytes: frames.bytes,
         files: frames.files,
-        note: `Captured bodies, expiring ${Math.round(
-          config.payloadRetentionMs / 60_000,
-        )} min after write by default.`,
+        note: `Captured bodies, expiring ${formatMinutes(retentionMs)} after write.`,
         reclaimableBytes: staleFrames.bytes,
         reclaimableFiles: staleFrames.files,
       },
@@ -126,7 +170,7 @@ export function createDataManagementOperations(config: DataManagementConfig) {
       buckets,
       totalBytes: buckets.reduce((sum, bucket) => sum + bucket.bytes, 0),
       retentionDays: config.retentionDays,
-      payloadRetentionMs: config.payloadRetentionMs,
+      payloadRetentionMs: retentionMs,
       ...(healthEventCount === undefined ? {} : { healthEventCount }),
     };
   }

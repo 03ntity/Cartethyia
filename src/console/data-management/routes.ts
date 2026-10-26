@@ -46,8 +46,10 @@ export function createDataManagementRoutes(
     .get("/usage", async ({ request, set }) => {
       try {
         const access = requireAnyScope(config.accessResolver(request), WRITE_SCOPES);
-        void access;
-        return await operations.usage();
+        // The tenant decides the payload window, so the scan needs it: the
+        // count of reclaimable frames is measured against that tenant's own
+        // retention, not the deployment's.
+        return await operations.usage(access.tenantId ?? null);
       } catch (error) {
         return errorResponse(error, set, "Could not read disk usage");
       }

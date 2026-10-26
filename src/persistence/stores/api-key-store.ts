@@ -40,7 +40,6 @@ export interface ApiKeyRecord {
   readonly monthlyTokenLimit?: number;
   readonly lifetimeTokenBudget?: number;
   readonly maxConcurrentRequests?: number;
-  readonly maxConcurrentTolerance?: number | null;
   readonly modelPrefix?: string;
   readonly modelAccessMode?: ApiKeyModelAccessMode;
   readonly modelList?: readonly string[];
@@ -83,7 +82,6 @@ export interface ApiKeyPatch
     | "monthlyTokenLimit"
     | "lifetimeTokenBudget"
     | "maxConcurrentRequests"
-    | "maxConcurrentTolerance"
   > {
   readonly keyHash?: string | null;
   readonly keyEncrypted?: Buffer | null;
@@ -102,7 +100,6 @@ export interface ApiKeyPatch
   readonly monthlyTokenLimit?: number | null;
   readonly lifetimeTokenBudget?: number | null;
   readonly maxConcurrentRequests?: number | null;
-  readonly maxConcurrentTolerance?: number | null;
 }
 
 interface PopupFields {
@@ -248,9 +245,6 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
       ...(row.maxConcurrentRequests === null
         ? {}
         : { maxConcurrentRequests: row.maxConcurrentRequests }),
-      ...(row.maxConcurrentTolerance === null
-        ? {}
-        : { maxConcurrentTolerance: row.maxConcurrentTolerance }),
       ...(row.modelPrefix === null ? {} : { modelPrefix: row.modelPrefix }),
       modelAccessMode: row.modelAccessMode,
       ...(row.modelList === null ? {} : { modelList: row.modelList as string[] }),
@@ -341,7 +335,6 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
       monthlyTokenLimit: record.monthlyTokenLimit ?? null,
       lifetimeTokenBudget: record.lifetimeTokenBudget ?? null,
       maxConcurrentRequests: record.maxConcurrentRequests ?? null,
-      maxConcurrentTolerance: record.maxConcurrentTolerance ?? null,
       modelPrefix: record.modelPrefix ?? null,
       modelAccessMode: record.modelAccessMode ?? "whitelist",
       modelList: record.modelList ?? null,
@@ -408,9 +401,6 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
             : {}),
           ...(patch.maxConcurrentRequests !== undefined
             ? { maxConcurrentRequests: patch.maxConcurrentRequests }
-            : {}),
-          ...(patch.maxConcurrentTolerance !== undefined
-            ? { maxConcurrentTolerance: patch.maxConcurrentTolerance }
             : {}),
           ...(patch.modelPrefix !== undefined ? { modelPrefix: patch.modelPrefix } : {}),
           ...(patch.modelAccessMode !== undefined ? { modelAccessMode: patch.modelAccessMode } : {}),
@@ -547,7 +537,6 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
       lifetimeTokenBudget: integer("lifetime_token_budget"),
       lifetimeTokensConsumed: integer("lifetime_tokens_consumed") ?? 0,
       maxConcurrentRequests: integer("max_concurrent_requests"),
-      maxConcurrentTolerance: integer("max_concurrent_tolerance"),
       modelAccessMode: (text("model_access_mode") ?? "whitelist") as ApiKeyModelAccessMode,
       modelList: json("model_list"),
       clientRouterDenylist: json("client_router_denylist"),

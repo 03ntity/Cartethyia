@@ -1,0 +1,13 @@
+-- Concurrency slack is tenant-wide now, so the per-key column goes away.
+--
+-- The two used to stack: a key's own `max_concurrent_tolerance` won, and the
+-- tenant's `concurrencyTolerance` was only the answer for a key that had never
+-- been given one. One number in two places meant an operator setting the
+-- tenant-wide value could not tell why one key still refused early — the
+-- override was invisible from the Settings page that appears to own the number.
+--
+-- Dropped rather than left behind: a column nothing reads is still one an
+-- operator finds in a backup or a query and trusts. Keys that had an override
+-- now fall back to the tenant value, which is the behaviour every other key
+-- already had.
+ALTER TABLE api_keys DROP COLUMN max_concurrent_tolerance;

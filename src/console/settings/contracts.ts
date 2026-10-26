@@ -54,6 +54,28 @@ export interface RuntimeSettingsResponse {
   /** Per-tenant inline attachment ceiling in bytes; null means deployment default. */
   readonly imageClampMaxBytes: number | null;
   readonly updatedAt: string;
+  /*
+   * What each `null` actually resolves to, in the same units the row stores.
+   *
+   * A row that says "Deployment default" without the number makes the operator
+   * guess, and the guess is the one thing they cannot check from here: the
+   * value lives in an env var on a server they are not looking at. Sent in the
+   * same response rather than mirrored in the client, because a copied number
+   * is right until someone changes the deployment — then it lies quietly.
+   */
+  readonly defaults: RuntimeSettingsDefaults;
+}
+
+/** The deployment-level values a `null` runtime setting falls back to. */
+export interface RuntimeSettingsDefaults {
+  /** Seconds; from `CARTETHYIA_UPSTREAM_TIMEOUT_MS`. */
+  readonly upstreamTimeoutSeconds: number;
+  /** Minutes; what the payload store expires frames after. */
+  readonly telemetryWindowMinutes: number;
+  /** Bytes; the inline attachment ceiling. */
+  readonly imageClampMaxBytes: number;
+  /** Days; how long raw event files are kept. */
+  readonly telemetryRetentionDays: number;
 }
 
 /**

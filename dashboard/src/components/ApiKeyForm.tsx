@@ -328,7 +328,6 @@ export interface KeyFormInput {
   scopes: string[];
   requestsPerMinute?: number | null;
   maxConcurrentRequests?: number | null;
-  maxConcurrentTolerance?: number | null;
   dailyTokenLimit?: number | null;
   monthlyTokenLimit?: number | null;
   lifetimeTokenBudget?: number | null;
@@ -405,9 +404,6 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
       : "recurring",
   );
   const [concurrent, setConcurrent] = useState(record?.maxConcurrentRequests?.toString() ?? "");
-  const [concurrentTolerance, setConcurrentTolerance] = useState(
-    record?.maxConcurrentTolerance?.toString() ?? "",
-  );
   const [scopes, setScopes] = useState<string[]>(() => initialApiKeyScopes(record));
   const [modelAccessMode, setModelAccessMode] = useState<"whitelist" | "blacklist">(
     (record as unknown as { modelAccessMode?: "whitelist" | "blacklist" | null })?.modelAccessMode ??
@@ -497,7 +493,6 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
       clientRouterDenylist: blockedRouters,
       requestsPerMinute: parseLimitOrNull(rpm),
       maxConcurrentRequests: parseLimitOrNull(concurrent),
-      maxConcurrentTolerance: parseLimitOrNull(concurrentTolerance),
       dailyTokenLimit: isOneTime ? null : (parseTokenLimit(daily) ?? null),
       monthlyTokenLimit: isOneTime ? null : (parseTokenLimit(monthly) ?? null),
       lifetimeTokenBudget: isOneTime ? (parseTokenLimit(lifetime) ?? null) : null,
@@ -669,32 +664,18 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
             placeholder="Unlimited…"
             disabled={busy}
           />
-          <Input
-            label="Concurrency tolerance"
-            type="number"
-            min="0"
-            value={concurrentTolerance}
-            onChange={(e) => setConcurrentTolerance(e.target.value)}
-            placeholder="None"
-            disabled={busy}
-          />
         </div>
         {/*
-          * The three numbers spelled out together. The limit is what is chosen
-          * here and what a refusal names; the tolerance is slack above it so a
-          * run landing a few over is not refused at that number; the effective
-          * max is the sum. Stating the sum is the point — reading the two
-          * fields separately is how an operator thinks they have 5 slots when
-          * they have 8, or the reverse.
+          * The limit is the number a refusal names. The allowance above it is
+          * tenant-wide — set once in Settings, not per key — so it is named
+          * here only to point at where it lives. Editing it per key was the
+          * double logic this replaced: one number, two places, and the one in
+          * this modal silently won.
           */}
         <p className="text-micro leading-normal text-text-tertiary">
           {concurrent === ""
-            ? "No concurrency limit, so the tolerance does nothing."
-            : `Effective max concurrent: ${
-                Number(concurrent) + Number(concurrentTolerance || 0)
-              }. The limit (${concurrent}) is what a refusal names; the tolerance (${
-                concurrentTolerance || 0
-              }) is extra room on top so a run landing slightly over is not refused.`}
+            ? "No concurrency limit, so the tenant allowance does nothing."
+            : `Limit ${concurrent} concurrent. Refusals name this number; the allowance above it is tenant-wide and set in Settings.`}
         </p>
         <div
           className="flex items-center justify-between gap-4 rounded-panel border border-inner-border px-4 py-3 bg-surface-2"

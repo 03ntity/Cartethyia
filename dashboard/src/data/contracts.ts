@@ -145,7 +145,8 @@ export type {
 export type { BackupPayload as BackupExportResponse } from "../../../src/console/backup/contracts";
 export type { ImportResult as BackupImportResponse } from "../../../src/console/backup/service";
 export type { ImportReport as BackupImportReport } from "../../../src/console/backup/nine-router";
-
+import type { DeleteAllScope } from "../../../src/console/backup/store";
+export type { DeleteAllScope };
 export type { AuditEntry, AuditListPage } from "../../../src/console/audit/contracts";
 
 export type {

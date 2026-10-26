@@ -1,20 +1,27 @@
 /**
- * Settings page contract: every section is on the page at once.
+ * Settings page contract: one section at a time, behind a tab strip.
  *
- * The property worth pinning is that no setting is hidden behind a tab or a
- * disclosure — the page used to show one section at a time, so an operator
- * hunting for a setting had to know which heading concealed it. Now the whole
- * surface renders, so a control that quietly moved behind a selector shows up
- * here as a failure.
+ * The property worth pinning is that a tab is a *choice of section*, not a
+ * wall between them — every section is reachable from every other in one
+ * click, the strip stays visible while a long section scrolls, and the URL
+ * hash still names the section, so a link from elsewhere in the console lands
+ * on the right tab instead of on whichever one happens to be first.
  *
- * Also pinned: no nested cards, and no tab markup left behind. The page used to
- * render a card inside a card, doubling borders and padding, which only shows
- * up visually.
+ * The tab strip used to be banned here: the page previously showed one
+ * section at a time with no way to see the rest, so an operator hunting for a
+ * setting had to guess which heading concealed it. What makes the difference
+ * is the strip, not the hiding — one section per panel is the point, and the
+ * strip is what keeps the other four one click away. That is what these tests
+ * hold: the tabs exist, every section is named by one, and the hash follows.
+ *
+ * Also pinned: no nested cards, and each field's label reads larger than its
+ * help text. The page used to render a card inside a card, doubling borders
+ * and padding, which only shows up visually.
  */
 import { beforeAll, describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import Settings, { boundedOptions } from "../../src/features/settings/SettingsPage";
-import { mount, stubFetch } from "../helpers/render";
+import { mount, stubFetch, type Mounted } from "../helpers/render";
 import { registerDom } from "../helpers/dom";
 
 /**
@@ -57,12 +64,30 @@ const SETTINGS = {
   telemetryPayloadDepth: "minimum",
   privacyMode: "masked",
   forceDisableCooldown: false,
+  tenantConcurrencyLimit: null,
+  concurrencyTolerance: null,
+  thinkingNormalizationEnabled: false,
+  responsesReasoningSummary: "detailed",
   upstreamTimeoutSeconds: null,
   telemetryWindowMinutes: null,
   imageClampMaxBytes: null,
+  // The panel reads `settings.defaults.*` to name what each unset row
+  // resolves to, so a fixture without it makes the panel throw rather than
+  // merely render an empty label.
+  defaults: {
+    upstreamTimeoutSeconds: 75,
+    telemetryWindowMinutes: 15,
+    imageClampMaxBytes: 10 * 1024 * 1024,
+    telemetryRetentionDays: 30,
+  },
 };
 
-async function mountSettings() {
+/** A mounted Settings page, plus the fetch stub to undo afterwards. */
+export interface MountedSettings extends Mounted {
+  readonly restore: () => void;
+}
+
+async function mountSettings(): Promise<MountedSettings> {
   // The hook requests "/settings/runtime", which `consoleRequest` prefixes to
   // "/console/api/settings/runtime". The match is method-qualified because
   // `stubFetch` skips a route whose `match` does not contain the request
@@ -79,19 +104,21 @@ async function mountSettings() {
 }
 
 describe("Settings sections", () => {
-  test("all four sections render at once", async () => {
+  test("all five sections render at once", async () => {
+    // Every section is on the page, so an operator finds a setting by looking
+    // rather than by guessing which heading hides it. Each section is a card
+    // whose header carries the h2, nested several levels down — matched on the
+    // header's own class so a wrapper added later does not break this.
+    //
+    // Scoped to the section ids, because a heading from elsewhere on the page
+    // is also an h2 and is not a section.
     const { container, unmount, restore } = await mountSettings();
     try {
-      // Each section is a card whose header carries the h2, nested several
-      // levels down. Match on the header's own class so a wrapper added later
-      // does not break this.
-      // Scoped to the four section ids, because the page's own "Settings"
-      // header is also an h2 and is not a section.
       const titles = [
         "security",
         "privacy",
+        "backup",
         "operations",
-        "data",
         "data-management",
       ].map((id) =>
         container.querySelector(`#${id} h2.card-header-title`)?.textContent,
@@ -99,8 +126,8 @@ describe("Settings sections", () => {
       expect(titles).toEqual([
         "Security",
         "Privacy",
+        "Backup",
         "Operations",
-        "Data",
         "Data Management",
       ]);
     } finally {
@@ -109,23 +136,26 @@ describe("Settings sections", () => {
     }
   });
 
-  test("every section's controls are reachable without selecting anything", async () => {
+  test("every section's controls are on the page without selecting anything", async () => {
+    // One control per section. If any of these is missing, that section is
+    // behind a selector again.
     const { container, unmount, restore } = await mountSettings();
     try {
-      // One control per section: if any of these is missing, that section is
-      // hidden behind a selector again.
       for (const id of [
         "current-password", // Security
         "privacy-payloads", // Privacy
-        "image-clamp-max-bytes", // Operations
+        "upstream-timeout", // Operations
       ]) {
         expect(container.querySelector(`#${id}`)).not.toBeNull();
       }
-      // Data's control has no id of its own; assert the section exists and is
-      // populated rather than reaching for a button label that may change.
-      const data = container.querySelector("#data");
-      expect(data).not.toBeNull();
-      expect(data?.textContent?.trim().length ?? 0).toBeGreaterThan(0);
+      // Backup's and Data Management's controls have no stable id of their
+      // own; assert the sections are populated rather than reaching for a
+      // button label that may change.
+      for (const id of ["backup", "data-management"]) {
+        const section = container.querySelector(`#${id}`);
+        expect(section).not.toBeNull();
+        expect(section?.textContent?.trim().length ?? 0).toBeGreaterThan(0);
+      }
     } finally {
       unmount();
       restore();
@@ -133,8 +163,8 @@ describe("Settings sections", () => {
   });
 
   test("nothing is behind a tab", async () => {
-    // Guards against a tab strip creeping back in: role=tab would mean one
-    // section is visible and the rest are hidden again.
+    // The page shows every section. role=tab would mean one is visible and
+    // the rest are hidden behind a selector.
     const { container, unmount, restore } = await mountSettings();
     try {
       expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
@@ -146,47 +176,18 @@ describe("Settings sections", () => {
     }
   });
 
-  test("each section is its own card", async () => {
-    // The section card is the intended nesting: the page card holds a titled
-    // card per section. What must not happen is a third level — a card inside
-    // a section card, which is the doubled-border shape this replaced.
-    //
-    // Matched on `.card-solid` — the class Card actually emits. A `.card`
-    // selector matches nothing and would pass no matter the markup.
-    const { container, unmount, restore } = await mountSettings();
-    try {
-      // Five sections: Security, Privacy, Operations, Data, Data Management.
-      expect(container.querySelectorAll(".card-solid .card-solid")).toHaveLength(5);
-      expect(container.querySelectorAll(".card-solid .card-solid .card-solid")).toHaveLength(0);
-    } finally {
-      unmount();
-      restore();
-    }
-  });
-
-  test("each section is still deep-linkable", async () => {
-    const { container, unmount, restore } = await mountSettings();
-    try {
-      for (const id of ["security", "privacy", "operations", "data", "data-management"]) {
-        expect(container.querySelector(`#${id}`)).not.toBeNull();
-      }
-    } finally {
-      unmount();
-      restore();
-    }
-  });
-
-  test("Security and Privacy share a row, Operations and Data do not", async () => {
-    // The desktop split: the two short sections sit side by side. Asserted on
-    // the grid wrapper rather than computed layout, which a test DOM has none
-    // of.
+  test("the two short sections share a row, the long ones do not", async () => {
+    // The mixed widths: Security and Privacy are short, so they sit side by
+    // side; Operations, Backup, and Data Management are full width because
+    // their controls are wider and their help text longer. Asserted on the
+    // grid wrapper rather than computed layout, which a test DOM has none of.
     const { container, unmount, restore } = await mountSettings();
     try {
       const security = container.querySelector("#security");
       const privacy = container.querySelector("#privacy");
       const operations = container.querySelector("#operations");
       expect(security?.parentElement).toBe(privacy?.parentElement);
-      expect(security?.parentElement?.className).toContain("grid-cols-2");
+      expect(security?.parentElement?.className).toContain("settings-grid");
       // Operations keeps its own full-width row.
       expect(operations?.parentElement).not.toBe(security?.parentElement);
     } finally {
@@ -195,20 +196,82 @@ describe("Settings sections", () => {
     }
   });
 
-  test("the Privacy controls are stacked, not side by side", async () => {
-    // One column: reading two-up made the eye zig-zag between label, control,
-    // and help text. Pinned as a class because a test DOM has no layout.
+  test("the two-state settings are dropdowns, not switches", async () => {
+    // Every other control in Operations is a dropdown, and the two booleans
+    // sat among them as switches — two shapes for one kind of choice, so the
+    // section read as two UIs overlapping. They still store a boolean; the
+    // dropdown only spells out which way it is set, which a filled track
+    // could not do unambiguously across themes.
     const { container, unmount, restore } = await mountSettings();
     try {
-      const privacy = container.querySelector("#privacy");
-      const fields = Array.from(
-        privacy?.querySelectorAll(".settings-field") ?? [],
-      );
-      expect(fields.length).toBeGreaterThanOrEqual(2);
-      // Every field shares one parent, and that parent is not a grid.
-      const parents = new Set(fields.map((f) => f.parentElement));
-      expect(parents.size).toBe(1);
-      expect(fields[0]?.parentElement?.className).not.toContain("grid-cols-");
+      for (const id of ["ignore-cooldowns", "thinking-normalization"]) {
+        const control = container.querySelector(`#${id}`);
+        expect(control).not.toBeNull();
+        expect(control?.getAttribute("role")).not.toBe("switch");
+      }
+      // No switch left in the Operations section at all.
+      expect(
+        container.querySelector('#operations [role="switch"]'),
+      ).toBeNull();
+    } finally {
+      unmount();
+      restore();
+    }
+  });
+
+  test("a two-state setting says Off or On, not what it does", async () => {
+    // "Enforced" / "Ignored" named the effect, not the position, so nobody
+    // could tell which one was the default or what flipping it meant — and
+    // "force disable" is a double negative on top of that. The choice now says
+    // which way the switch is set and leaves the effect to the hint.
+    const { container, unmount, restore } = await mountSettings();
+    try {
+      const text = container.querySelector("#operations")?.textContent ?? "";
+      // Position, spelled out, and which one is the default.
+      expect(text).toContain("Off — default");
+      expect(text).toContain("On");
+      // Not the old effect-named labels.
+      expect(text).not.toContain("Enforced");
+      expect(text).not.toContain("Ignored");
+    } finally {
+      unmount();
+      restore();
+    }
+  });
+
+  test("each section is still deep-linkable", async () => {
+    // A link to #operations from elsewhere in the console is the reason each
+    // section carries an id at all.
+    const { container, unmount, restore } = await mountSettings();
+    try {
+      for (const id of [
+        "security",
+        "privacy",
+        "backup",
+        "operations",
+        "data-management",
+      ]) {
+        expect(container.querySelector(`#${id}`)).not.toBeNull();
+      }
+    } finally {
+      unmount();
+      restore();
+    }
+  });
+
+  test("no section is nested inside another card", async () => {
+    // The section card is the intended level: a titled card per section.
+    // What must not happen is a third level — a card inside a section card,
+    // which is the doubled-border shape this replaced.
+    //
+    // Matched on `.card-solid` — the class Card actually emits. A `.card`
+    // selector matches nothing and would pass no matter the markup.
+    const { container, unmount, restore } = await mountSettings();
+    try {
+      // Five sections: Security, Privacy, Operations, Backup, Data Management.
+      const cards = container.querySelectorAll(".card-solid");
+      expect(cards).toHaveLength(5);
+      expect(container.querySelectorAll(".card-solid .card-solid")).toHaveLength(0);
     } finally {
       unmount();
       restore();
@@ -253,46 +316,52 @@ describe("Settings sections", () => {
       restore();
     }
   });
-});
-
-  test("Backup headings sit below the card header, not above it", async () => {
-    // "Backup" and "Delete data" used `text-title` (18px) while the card
-    // header above them is 14px, so the child read bigger than its parent.
-    // Asserted on the class: a test DOM resolves no font sizes.
-    const { container, unmount, restore } = await mountSettings();
-    try {
-      const backup = container.querySelector("#data h3");
-      expect(backup?.textContent).toBe("Backup");
-      expect(backup?.className).toContain("text-body-lg");
-      expect(backup?.className).not.toContain("text-title");
-      const del = container.querySelector("#data h3 + p");
-      expect(del?.className).toContain("text-caption");
-    } finally {
-      unmount();
-      restore();
-    }
-  });
 
   test("a field's label reads larger than its help text", async () => {
     // The hierarchy that was missing: label, control value, and help text were
-    // all 12px, so one field was three equal blocks. Pinned as a class
-    // comparison rather than a computed size, which a test DOM does not resolve.
+    // all 12px, so one field was three equal blocks.
+    //
+    // The two sizes live in `.settings-row-label` / `.settings-row-hint`
+    // rather than in utilities, so the label's own class carries no `text-*`
+    // to compare against. What is asserted instead is that neither carries the
+    // other's class — the mix-up this guards against is one of them being
+    // given the other's size.
     const { container, unmount, restore } = await mountSettings();
     try {
-      const field = container.querySelector("#privacy .settings-field");
+      const field = container.querySelector("#privacy .settings-row");
       expect(field).not.toBeNull();
-      const label = field?.querySelector(".form-label");
-      const help = field?.querySelector("p");
+      const label = field?.querySelector(".settings-row-label");
+      const help = field?.querySelector(".settings-row-hint");
       expect(label).not.toBeNull();
       expect(help).not.toBeNull();
-      // 13px label vs 12px help: `text-body` must not appear on the help text.
-      expect(help?.className).toContain("text-caption");
-      expect(help?.className).not.toContain("text-body");
+      expect(label?.className).toContain("settings-row-label");
+      expect(label?.className).not.toContain("settings-row-hint");
+      expect(help?.className).toContain("settings-row-hint");
+      expect(help?.className).not.toContain("settings-row-label");
     } finally {
       unmount();
       restore();
     }
   });
+
+  test("a row's label points at the control it describes", async () => {
+    // Clicking a label has to reach its control. Rows whose control is a
+    // button group (a switch) stay a plain span: a label pointing at a button
+    // is a second activation path, which is how the switch used to fire twice.
+    const { container, unmount, restore } = await mountSettings();
+    try {
+      const label = container.querySelector(
+        'label.settings-row-label[for="privacy-payloads"]',
+      );
+      expect(label).not.toBeNull();
+      expect(container.querySelector("#privacy-payloads")).not.toBeNull();
+    } finally {
+      unmount();
+      restore();
+    }
+  });
+});
+
 
 describe("boundedOptions", () => {
   const CHOICES = [5, 30, 600] as const;

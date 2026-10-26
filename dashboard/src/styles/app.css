@@ -1761,3 +1761,136 @@ html[data-app="landing"] .landing-story-visual {
 .donate-qr-image {
   max-width: 220px;
 }
+
+/* ==========================================================================
+   Settings page: every section at once, mixed widths.
+   ========================================================================== */
+
+/* The page root is not a card. Each section is one, and wrapping them in a
+   second frame doubled every border and padding — the shape this replaced. */
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  /* The last card grows to fill the page floor, so a short page still ends at
+     the viewport bottom instead of stopping short of it. */
+  flex: 1 1 auto;
+}
+
+/* One setting. Label and hint on the left, control on the right, so the
+   control edges align down the card and scanning for a setting is one
+   straight line. The hint stays under the label it explains rather than
+   between the label and the control. */
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 300px);
+  gap: 12px 24px;
+  align-items: start;
+  padding: 15px 0;
+  min-width: 0;
+}
+/*
+ * A divider between consecutive rows. Written as "any row that follows
+ * another", not "a row followed by a row", because a group heading sits
+ * between two of them — with the sibling form the heading would break the
+ * chain and the row below it would lose its rule.
+ */
+.settings-row + .settings-row {
+  border-top: 1px solid var(--border-subtle);
+}
+/* A row below a group heading is the top of its group, so it carries no rule:
+   the heading already separates it from what came before. */
+.settings-group-head + .settings-row {
+  border-top: 0;
+}
+.settings-row-text {
+  min-width: 0;
+}
+.settings-row-label {
+  display: block;
+  font-weight: 600;
+  font-size: var(--text-body);
+  cursor: default;
+}
+label.settings-row-label {
+  cursor: pointer;
+}
+.settings-row-hint {
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  line-height: 1.5;
+  margin: 3px 0 0;
+  max-width: 52ch;
+}
+.settings-row-control {
+  justify-self: end;
+  width: 100%;
+  min-width: 0;
+}
+/* The two short sections, side by side. `auto-fit` with a floor rather than a
+   fixed two columns: below the floor the pair stacks on its own, so a narrow
+   window gets one column without a breakpoint to keep in sync. */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+  gap: 18px;
+  min-width: 0;
+}
+/* A warning that belongs to the row above it. Sits inside the row's own
+   padding band rather than as a sibling row, so it does not read as a
+   setting of its own. */
+.settings-row-banner {
+  padding: 0 0 15px;
+}
+/* Narrow viewports: one column, so a 300px control beside a 52ch hint does
+   not squeeze both. */
+@media (max-width: 820px) {
+  .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-row-control {
+    justify-self: start;
+  }
+}
+
+/* The row of buttons that ends a section. Right-aligned and separated, so it
+   reads as the section's action rather than another setting. */
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* A group of settings inside one section. Operations carries seven controls
+   across three concerns, and a flat list of seven makes the timeout and the
+   reasoning summary look like neighbours. The heading is a caption in the
+   tertiary colour — below the section title, above a row label — so it reads
+   as a divider and never as a third level of title. */
+.settings-group-head {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--text-tertiary);
+  padding: 18px 0 2px;
+}
+/* The first group of a section needs no top gap: the card header already gave
+   one, and a heading should not appear to float. */
+.settings-group-head:first-child {
+  padding-top: 4px;
+}
+
+/* Data Management's four cards. `auto-fit` with a floor rather than a fixed
+   column count: the panel renders a variable number of cards (the health log
+   is absent in a reduced composition), and a fixed count left an empty slot
+   whenever one was missing. Below the floor they stack on their own. */
+.settings-bucket-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 12px;
+  min-width: 0;
+}
