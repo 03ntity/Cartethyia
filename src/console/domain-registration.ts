@@ -5,6 +5,8 @@ import { createAccountQuotaRoutes } from "./quota/account-quota";
 import { createApiKeyRoutes } from "./api-keys/routes";
 import { familyBucketSpend } from "./api-keys/bucket-spend";
 import { createProviderCatalogRoutes } from "./providers/catalog/routes";
+import { createInferhubRoutes } from "./inferhub/routes";
+import { createInferhubKeyStore } from "./inferhub/key-store";
 import {
   createProviderDetailRoutes,
 } from "./providers/detail/routes";
@@ -249,6 +251,14 @@ export function registerConsoleDomains(
     service: createRemoteSupportService({ port: resolvePort() }),
   }));
   console.use(createAuditRoutes({ store: auditReadStore, accessResolver: ctx.accessResolver }));
+  // InferHub market data. On demand only: a route fetches when its snapshot is
+  // past its freshness window, so a page nobody opens causes no upstream calls.
+  const inferhubKeys = createInferhubKeyStore(ctx.db);
+  console.use(createInferhubRoutes({
+    accessResolver: ctx.accessResolver,
+    resolveConfigKey: () => inferhubKeys.read(),
+    keyStore: inferhubKeys,
+  }));
   if (ctx.modelStrikes) {
     console.use(createModelAbuseRoutes({
       strikes: ctx.modelStrikes,

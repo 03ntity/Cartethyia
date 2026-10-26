@@ -1109,6 +1109,22 @@ export const consoleSettings = pgTable("console_settings", {
   updatedAt: updatedAtColumn(),
 });
 
+// InferHub `config_read` key. One row for the whole deployment.
+//
+// Deliberately NOT `provider_accounts.auth_state`: that field is documented as
+// per-account *non-secret* upstream config and travels with the account through
+// backup/restore, so a credential stored there is copied around and readable by
+// anything that reads accounts. This key is a secret and gets its own encrypted
+// row, unreachable from the account paths.
+export const inferhubConfigKeys = pgTable("inferhub_config_keys", {
+  id: text("id").primaryKey(),
+  /** `encryptCredential` output — never plaintext, never returned by an API. */
+  ciphertext: bytea("ciphertext").notNull(),
+  /** Hash only, for "did it change" checks. Not used to verify the key. */
+  fingerprint: text("fingerprint").notNull(),
+  updatedAt: updatedAtColumn(),
+});
+
 
 // CLI Tools (CLI tool configuration): per-tenant mapping table that lets a coding-agent
 // slot (e.g. Claude Code's "opus" slot) target a specific Cartethyia model. Rows
