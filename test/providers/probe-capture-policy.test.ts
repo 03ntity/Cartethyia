@@ -21,6 +21,7 @@ import {
 import { consoleSettings, tenants } from "../../src/persistence/schema";
 import { eq } from "drizzle-orm";
 import { loadProbePreferences } from "../../src/providers/discovery/probe-phases";
+import { DEFAULT_PAYLOAD_RETENTION_MS } from "../../src/observability/payload-capture";
 
 async function fixture(preferences: Record<string, unknown> | null) {
   const dir = mkdtempSync(join(tmpdir(), "carte-probe-prefs-"));
@@ -119,8 +120,10 @@ describe("loadProbePreferences — capture policy per tenant mode", () => {
     try {
       const { payloadCapture } = await load(db, tenantId);
       expect(payloadCapture.depth).toBe("minimum");
-      // Deployment default retention (15 minutes), not a probe-specific one.
-      expect(payloadCapture.retentionMs).toBe(15 * 60_000);
+      // The deployment default, not a probe-specific one. Asserted against the
+      // exported fallback rather than a literal so raising the default is a
+      // policy change and not a test edit.
+      expect(payloadCapture.retentionMs).toBe(DEFAULT_PAYLOAD_RETENTION_MS);
     } finally {
       cleanup();
     }

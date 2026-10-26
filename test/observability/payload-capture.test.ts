@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { normalizeTelemetryPayloadMode } from "../../src/console/settings/store";
 import {
   buildPayloadRecord,
+  DEFAULT_PAYLOAD_RETENTION_MS,
   MAX_PAYLOAD_RETENTION_MS,
   payloadRetentionMs,
   payloadPruneBound,
@@ -183,7 +184,14 @@ describe("payload retention", () => {
   test("retention is bounded at seven days however long it is asked for", () => {
     // The ceiling is what keeps the prune pass and the disk-usage panel honest:
     // both judge a frame file dead by age, and a frame allowed to outlive that
-    expect(payloadRetentionMs()).toBe(15 * 60_000);
+    // bound would be deleted while its row is still current.
+    //
+    // Asserted against the fallback rather than a literal, because the number
+    // is a policy choice the deployment overrides with
+    // CARTETHYIA_TELEMETRY_PAYLOAD_RETENTION_MS — pinning 15 minutes here would
+    // have made this test the reason the default could not be raised.
+    expect(payloadRetentionMs()).toBe(DEFAULT_PAYLOAD_RETENTION_MS);
+    expect(payloadRetentionMs()).toBeLessThanOrEqual(MAX_PAYLOAD_RETENTION_MS);
   });
 
   test("the prune bound is the longest retention, not the deployment default", () => {

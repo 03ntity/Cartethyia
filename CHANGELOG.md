@@ -491,6 +491,16 @@ database applies them in order; a fresh one builds from the current baseline.
   rather than naming their effect: "Enforced" gave no clue which way the
   setting was set.
 
+- **The deployment payload-retention default is one hour, not fifteen
+  minutes.** `payloadRetentionMs()` fell back to 15 minutes, which is shorter
+  than the gap between noticing a bad response and opening the request drawer:
+  the frame was already gone by the time anyone looked for it. A captured
+  frame is the only record of what a request actually sent and received, so
+  the window is the time an operator has to go back and read it. The cost is
+  disk, which Data Management reports and a tenant can reclaim on demand.
+  `CARTETHYIA_TELEMETRY_PAYLOAD_RETENTION_MS` still overrides it, and the
+  seven-day ceiling is unchanged.
+
 - **Data Management reports the tenant's retention window, not the
   deployment's.** The panel resolved `payloadRetentionMs` once at registration
   and answered every tenant with the deployment default, so a tenant

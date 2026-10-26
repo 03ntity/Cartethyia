@@ -492,7 +492,7 @@ function OperationalPanel(): ReactNode {
       ) : null}
 
       {/*
-       * Tenant-wide concurrency. The allowance above a key's own limit used to
+       * Tenant-wide concurrency. The tolerance above a key's own limit used to
        * be editable per key in the Edit API Key modal, which silently won over
        * this value — so raising it here appeared to do nothing for that key.
        * Both now live in this one place.
@@ -529,13 +529,13 @@ function OperationalPanel(): ReactNode {
         }
       />
       <SettingsRow
-        label="Concurrency allowance"
+        label="Concurrency tolerance"
         labelFor="concurrency-tolerance"
         hint="Slack added above a key's own concurrency limit. The effective ceiling is the key's limit plus this, so a run landing a few over is not refused at the number it was told."
         control={
           <Input
             id="concurrency-tolerance"
-            aria-label="Concurrency allowance"
+            aria-label="Concurrency tolerance"
             type="number"
             min="0"
             max="1024"
@@ -546,14 +546,14 @@ function OperationalPanel(): ReactNode {
             onChange={(event) => {
               const raw = event.target.value.trim();
               if (raw === "") {
-                save({ concurrencyTolerance: null }, "Allowance removed.");
+                save({ concurrencyTolerance: null }, "Tolerance removed.");
                 return;
               }
               const parsed = Number(raw);
               // 0–1024, the range the store clamps to. Held rather than sent
               // while it is out of range, so a mistyped digit does not persist.
               if (!Number.isInteger(parsed) || parsed < 0 || parsed > 1024) return;
-              save({ concurrencyTolerance: parsed }, "Concurrency allowance updated.");
+              save({ concurrencyTolerance: parsed }, "Concurrency tolerance updated.");
             }}
           />
         }

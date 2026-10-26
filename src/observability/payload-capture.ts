@@ -13,15 +13,32 @@ export type CaptureScope = "tenant" | "debug_session" | "operator_flag";
 /**
  * How long a captured payload frame lives when the deployment has not chosen.
  *
+ * An hour, not fifteen minutes: a frame is the only record of what a request
+ * actually sent and received, and the window is when an operator can still go
+ * back and read it. Fifteen minutes is shorter than the time between noticing
+ * a bad response and opening the drawer, so the frame was already gone by the
+ * time someone looked for it. The cost is disk, which the Data Management
+ * panel reports and a tenant can reclaim on demand.
+ *
  * Exported so surfaces that report on disk usage quote the same window the
  * capture path enforces, rather than a second copy of the default that would
  * drift the first time this one changes.
  */
 export function payloadRetentionMs(): number {
-  const raw = Number(process.env.CARTETHYIA_TELEMETRY_PAYLOAD_RETENTION_MS ?? 15 * 60_000);
-  if (!Number.isFinite(raw) || raw < 1_000 || raw > MAX_PAYLOAD_RETENTION_MS) return 15 * 60_000;
+  const raw = Number(process.env.CARTETHYIA_TELEMETRY_PAYLOAD_RETENTION_MS ?? DEFAULT_PAYLOAD_RETENTION_MS);
+  if (!Number.isFinite(raw) || raw < 1_000 || raw > MAX_PAYLOAD_RETENTION_MS) return DEFAULT_PAYLOAD_RETENTION_MS;
   return Math.floor(raw);
 }
+
+/**
+ * The fallback window, exported so a test can assert the default without
+ * pinning the number.
+ *
+ * A literal in a test is a veto on changing policy: the assertion fails the
+ * moment the default moves, so the number stops being a choice and becomes
+ * whatever the test happened to be written against.
+ */
+export const DEFAULT_PAYLOAD_RETENTION_MS = 60 * 60_000;
 
 /** Upper bound for a deployment-level retention override, not a tenant setting. */
 export const MAX_PAYLOAD_RETENTION_MS = 7 * 24 * 60 * 60_000;
