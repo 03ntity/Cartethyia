@@ -197,6 +197,12 @@ async function runMenu(handoff: { readonly token: string; readonly parentPid: nu
           );
           console.log(`Cartethyia is running in the background at ${url || dashboardUrl}.`);
           console.log("The tray icon owns it; use Exit there to stop it.");
+          // Hide to Tray is the one action that ends with the menu gone and no
+          // console in front of the operator, so it opens the dashboard itself.
+          // Every other action either stays in the menu or is an explicit "Open
+          // Console" press. Only after the handoff reports ready — opening on
+          // failure would point the browser at a gateway that is not running.
+          await openUrl(url || dashboardUrl);
         } catch (error) {
           restoreControllerAfterFailedHandoff(handoff);
           handedOff = false;

@@ -2,11 +2,18 @@
 // module its command needs so `cartethyia --help` and `cartethyia stop` do
 // not drag the gateway, dashboard, and database driver into memory.
 import { mkdirSync } from "node:fs";
-import { resolveUserConfigDir } from "../../src/config/package-paths";
+import { PACKAGE_ROOT, resolveUserConfigDir } from "../../src/config/package-paths";
 import { readRequiredBunVersion, assertBunVersion } from "./version";
 import { printUpdateInstructions, runDetachedUpdate } from "./update";
 
 process.env.CARTETHYIA_CONFIG_DIR ??= resolveUserConfigDir();
+// Covers every entry into the CLI that is not the npm launcher — the menu's
+// "Hide to Tray" spawns this file directly, and the compiled gateway binary
+// it then starts resolves its assets from the package root. A compiled Bun
+// executable has a virtual `import.meta.dir` (`B:/~BUN/root/cartethyia`), so
+// an unset root becomes `B:\` and startup dies with
+// `ENOENT: scandir 'B:\migrations\lite-sqlite3'`.
+process.env.CARTETHYIA_PACKAGE_ROOT ??= PACKAGE_ROOT;
 
 const HELP = (minimumBunVersion: string) => `Cartethyia ${minimumBunVersion}+ (Bun is required)
 

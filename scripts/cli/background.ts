@@ -113,7 +113,10 @@ function spawnBackground(args: readonly string[], env: NodeJS.ProcessEnv): void 
   const launcher = resolvePackagePath("scripts", "cli", "tray", "hidden-window.vbs");
   const child = spawn(
     "wscript.exe",
-    ["//nologo", launcher, process.execPath, ...args],
+    // PACKAGE_ROOT first: the VBS sets it as the child's working directory.
+    // `cwd` on this spawn does not reach the grandchild, and wscript.exe hands
+    // its own inherited directory to the child instead.
+    ["//nologo", launcher, PACKAGE_ROOT, process.execPath, ...args],
     { cwd: PACKAGE_ROOT, detached: true, stdio: "ignore", windowsHide: true, env },
   );
   child.unref();

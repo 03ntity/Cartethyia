@@ -17,6 +17,13 @@ const configDir = process.env.CARTETHYIA_CONFIG_DIR || (
       : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "Cartethyia")
 );
 const trayMode = process.argv[2] === "tray";
+// The compiled gateway binary resolves its assets from this. A compiled Bun
+// executable has a virtual `import.meta.dir` (`B:/~BUN/root/cartethyia`), so
+// without it the package root falls back to `B:\` and startup dies with
+// `ENOENT: scandir 'B:\migrations\lite-sqlite3'`. Only the local/VPS installers
+// set it, so an npm install never had it — and the compiled binary is the
+// default gateway executable whenever `dist/cartethyia` exists.
+process.env.CARTETHYIA_PACKAGE_ROOT = packageRoot;
 // The launcher itself runs under Node, so `process.execPath` is node.exe — not
 // the Bun the child needs. Resolve bun from PATH instead; WScript.Shell does
 // not inherit this process's environment, so the child needs an absolute path.
@@ -52,7 +59,10 @@ const child = useWindowsDetach
       // Absolute path, not "bun": the VBS runs through WScript.Shell, which
       // does not inherit this process's PATH additions and resolves a bare
       // name against the system PATH only.
-      ["//nologo", hiddenLauncher, resolveBunPath(), "run", cliPath, ...process.argv.slice(2)],
+      // packageRoot is the first argument: the VBS sets it as the child's
+      // working directory. `cwd` below does not reach the grandchild, and
+      // wscript.exe otherwise passes on its own inherited directory.
+      ["//nologo", hiddenLauncher, packageRoot, resolveBunPath(), "run", cliPath, ...process.argv.slice(2)],
       {
         cwd: packageRoot,
         detached: true,
