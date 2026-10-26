@@ -8,16 +8,18 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.6.0] - 2026-10-25
+## [2.6.0] - 2026-10-26
 
 This is the lightweight-runtime release: a 1-core / 2 GiB deployment should
 again serve its users with the dashboard open, without adding RAM. It closes
 the regression traced to 2.5.10's raw-file analytics reader and removes the
 per-request costs that made a saturated box worse the more it was asked to do.
 
-Migration `0020_add_telemetry_event_analytics.sql` ships in both
+Migrations `0020_add_telemetry_event_analytics.sql`,
+`0021_add_api_key_concurrency_tolerance.sql` and
+`0022_add_inferhub_config_key.sql` ship in both
 `migrations/full-postgres/` and `migrations/lite-sqlite3/`. An existing
-database applies it; a fresh one builds from the current baseline.
+database applies them in order; a fresh one builds from the current baseline.
 
 ### Added
 
@@ -54,6 +56,63 @@ database applies it; a fresh one builds from the current baseline.
   regenerates `data/provider-catalogs/` from a live directory read; earlier
   captures were produced by a script that was never committed and so could not
   be reproduced. `--check` reports drift without writing.
+
+- **An InferHub market module.** Price and availability for every upstream
+  InferHub publishes, read **on demand only** — when an operator opens the
+  Providers page or the InferHub detail page. There is no poller, no scheduler,
+  no SSE consumer and no background refetch: the store's fresh read misses
+  without fetching, so a page nobody opens costs nothing upstream. A snapshot
+  past its window is served with `stale` and `ageSeconds` rather than hidden,
+  and a failed refresh never blanks good data. Available at
+  `/console/api/inferhub/*` (global admin only, because the `config_read` key
+  is one shared operator credential) and rendered as a per-provider section on
+  the InferHub detail page plus a strip on its card. InferHub is the only
+  provider with a pricing surface, because it is the only one that publishes
+  per-ask prices that move.
+
+  The `config_read` key is stored **encrypted on its own table**
+  (`inferhub_config_keys`, migration 0022), not in
+  `provider_accounts.auth_state` — that field is documented as the per-account
+  non-secret config and travels with the account through backup/restore. Only
+  its last four characters are ever returned by the API.
+
+- **A tenant kill switch.** `invokeDisabled`, a per-tenant preference, refuses
+  every `/v1/*` request with 503 while it is on. Nothing is dispatched
+  upstream, and no account, key or model is changed — the console stays
+  reachable, which is the point: an operator must be able to stop traffic and
+  still reach the UI that turns it back on. 503 rather than 403 because nothing
+  about the request is invalid. Stored on the existing
+  `consoleSettings.preferences` JSONB, so no migration, and enforced in the
+  auth guard after the key resolves, so one tenant switching itself off does
+  not stop the others the gateway serves. The dashboard toggle sits on the
+  overview beside the gateway endpoint card and presents the positive state
+  ("invoke on"), inverting on write.
+
+- **Configurable concurrency tolerance.** The slack above each key's
+  concurrency limit — previously always zero — is settable, so the effective
+  ceiling is `limit + tolerance` and only requests past it are refused. It
+  lives in two places with distinct scopes: `CARTETHYIA_CONCURRENCY_TOLERANCE`
+  as the deployment-wide default, and `max_concurrent_tolerance` per key
+  (migration 0021) for per-key tuning. The key's own value wins; the
+  deployment default is only the answer for a key never given one. Both the
+  settings modal and the Edit API Key modal spell out the resulting effective
+  max as the sum, because reading the two numbers separately is how an operator
+  thinks they have 5 slots when they have 8, or the reverse. NULL on a
+  pre-migration key means no allowance, and the tenant preference is kept as
+  the fallback so nobody already using it loses it.
+
+- **Cursor native tool calls relay.** A Cursor host-exec frame (`read_args`,
+  `shell_args`, `pi_read_args`, …) becomes an ordinary tool call for the client
+  to answer, with MCP as the fallback. `protocol/tool-canonical.ts` is one join
+  point for `agent.v1.ToolCall`'s ~30 arms across three unrelated generations
+  (legacy natives, the modern exec family, MCP): one table maps a wire arm to a
+  canonical identity and decode/encode are written once against it, so a new
+  variant is one row rather than a new converter. Arguments are canonicalised
+  to OpenAI-style snake_case recursively at that boundary — the point where a
+  Cursor call becomes a tool call every other protocol can read. Results carry
+  provenance so they encode back into the arm they arrived on; without it
+  `pi_read` in and `read` out silently breaks the client's own tool loop. Only
+  a tool the request actually declared may relay.
 
 ### Fixed
 
@@ -146,6 +205,136 @@ database applies it; a fresh one builds from the current baseline.
   reference fallback table listed them, and a fallback row for a retired model
   routes to an id that answers 400.
 
+- **The concurrency slot is refunded to the key it was charged to.** A share
+  child reserves under its own id while the reservation is recorded against its
+  parent, so the counter was incremented under one key and decremented under
+  another — in both stores, on both the reconcile and the release path. The
+  child's count never fell, so after `limit` requests it was permanently full
+  and refused everything. That is the "never invoked again" symptom, and it
+  looked like a scope bug ("someone else's usage affects me") because the leak
+  is invisible from outside: each individual rejection was correct, and the
+  only clue was a key that would not admit again. The reservation now records
+  the key it was charged to and refunds that one.
+
+- **Antigravity ships tool schemas instead of empty objects.** Two gaps on the
+  tools wire, together making a declared tool arrive as `{"type":"object"}`
+  with every property gone. `normalizeAntigravityToolSchemas` was **dead
+  code** — it existed, was documented and had unit tests pinning it, but
+  `buildAntigravityEnvelope` called `buildGeminiPayload` first and that
+  builder's sanitizer has no `parametersJsonSchema` key in its allowlist, so
+  the wrapper and the schema inside it were both dropped. It now runs before
+  the builder, which is the only order that works. Separately, the
+  canonicalizer never looked under `parametersJsonSchema` at all, so a Cloud
+  Code Assist-shaped declaration resolved to `{}` before Antigravity saw it.
+  The new envelope-level test is the one that would have caught this; the
+  existing unit tests all passed while the helper was unused.
+
+- **A rate limit whose body states its own window is honored.** A
+  `limit_window_minutes: 43200` body was cooling for the 15-minute fallback
+  regardless, because the message names no window and parsing prose found
+  nothing — so an account re-entered rotation minutes later on a limit that
+  resets in ~23 days, turning one refusal into a retry loop against an account
+  that cannot serve. The classifier now reads structured reset fields as a
+  third source of evidence beside the header and the prose, and the longest
+  honest statement wins (`resets_at`, `resets_in_seconds`, `reset_in_seconds`,
+  `retry_after_seconds`, minute-valued windows, from the top level or a nested
+  `error`). It parses `details.raw` when no caller passed a body, because that
+  is where the upstream JSON actually reaches the classifier — requiring
+  callers to thread a parsed body would have left the live dispatch path fixed
+  by nothing. Bounded to a day, matching the failure policy's own cap. A stale
+  `resets_at` in the past is not a window.
+
+- **A rate limit that does not move the account is still logged.** A
+  `rate_limit_transient` seen on a stream frame carries no credential detail,
+  so it classifies at provider scope and `mutatesAccount` is false.
+  `recordAccountFailure` returned on that flag before writing anything, which
+  meant the request table showed a rate limit while the account's health log
+  was empty — the symptom with no recorded cause. Not mutating is correct here
+  (the upstream's own remedy only works if the account keeps serving), so the
+  fix is to log, not to cool. The table renders such a row as `logged · ACTIVE`
+  rather than `ACTIVE → ACTIVE`, which read as a broken transition.
+
+- **The default gateway key is created unlimited.** First boot seeded it with
+  `requestsPerMinute: 240` — a ceiling the operator never chose, on the key
+  that carries every early request, so the first sign of the limit was a
+  refusal with no visible cause. Now unset, which admission and the UI both
+  read as unlimited, matching the empty field and "Unlimited…" the Edit API Key
+  modal already shows.
+
+- **Codex model discovery is wired, and no longer bets on one path.**
+  "codex publishes no model-listing endpoint" was wrong twice over. Discovery
+  was never wired: `discoverCodexModels` existed and was tested, but the
+  registry entry had no `loadModelDiscovery`, so the service took the branch
+  that reports none exists — Codex does publish one, we simply never asked.
+  And the single registry path was a single point of failure: the donor now
+  tries `/codex/models` then `/models`, so one upstream shape change no longer
+  removes discovery entirely and surfaces as a claim about the provider rather
+  than about the path we happened to ask.
+
+- **Cline seeds the roster its account actually serves.** It inherited the
+  shared OpenRouter free roster alongside Kilo and OpenRouter. One list for
+  three providers is right for a catalog fact and wrong for an account fact:
+  probed with a live key, `/models` names 17 `:free` ids while the account's
+  own `free` bucket names 5, and **the two sets do not intersect**. Every id
+  Cline seeded was one its account cannot route, so it was offered, chosen and
+  failed at dispatch — and nothing prunes a builtin row, so they stayed. Cline
+  now declares its own 5 free and 15 `cline-pass` rows read from
+  `/ai/cline/recommended-models`, with `proOnly` on the pass rows so a
+  subscription-only row says so on the card instead of 401ing at request time.
+  Kilo and OpenRouter keep the shared list; those ids are verified and served
+  under those accounts.
+
+- **Hermes: the missing free row, and longcat's vision.** Probed live against
+  `/v1/models` (424 models). `ornith/ornith-1.5-122b:free` was absent from the
+  static roster while being live, free and answering 200 on dispatch, so
+  asking for it resolved to nothing. `meituan/longcat-2.5-preview:free` was
+  published without vision although the live `architecture.input_modalities`
+  lists `image` for it, so images were being stripped that the model accepts.
+  `meituan/longcat-2.0:free` stays excluded and the exclusion is now verified
+  rather than assumed — it is in the live catalog as free, but dispatch answers
+  404 "This model is no longer free". All 7 static rows now agree with the live
+  catalog on context, output, vision, toolCall and reasoning.
+
+- **Repeated thinking text no longer leaks across surfaces.** Reasoning text is
+  extracted once and guarded against re-emitting the same block on a loop,
+  instead of each surface reading whichever of summary/payload happened to be
+  set. Chat, Codex and Messages now agree on one source, so a stream that
+  restarts a thinking block no longer duplicates it.
+
+- **The shell follows the viewport instead of stopping at 1560px.** Zooming out
+  does not make the CSS viewport smaller — it makes it wider (50% zoom turns a
+  1920px screen into 3840 CSS px), and the capped, centred frame simply stopped
+  growing and parked every extra pixel as empty margin on both sides. That is
+  what read as "the page does not adjust its width": zooming out showed more
+  blank space, not more page. The cap is gone, and the sidebar column now
+  scales with the frame instead of being pinned at 272px, which meant the
+  content absorbed all the growth and the rail looked bolted on. **The sidebar
+  track is now capped** at `min(280px, 18%)` with a 252px floor — without a
+  ceiling it kept growing with the frame, so a wide monitor got ~500px of nav,
+  far past the width its labels need; the cap hands the rest to the content.
+
+- **The donate dialog puts the QR beside the text again.** `lg:donate-qr-grid`
+  produced no rule at all: Tailwind only generates variant prefixes for
+  utilities it owns, and `.donate-qr-grid` is defined in `app.css`, so the
+  `lg:` form matched nothing and the dialog stayed a single stacked column at
+  every viewport. The breakpoint moves into the stylesheet as a plain `@media`
+  block.
+
+- **InferHub per-model health is read by `id`, not `slug`.** `/api/status` keys
+  per-model health by `id` (`ag/claude-opus-4-6-thinking`); reading `slug`
+  matched nothing, so all 270 models reported a null success rate — shown as
+  "unknown" and sorted last, which made the quality ranking useless. 95 of 270
+  now carry a rate.
+
+- **The InferHub market group memo no longer sits below an early return.** The
+  `useMemo` was below the "no data yet" returns, so the render that finally had
+  a summary ran one more hook than the render that did not; React reads a
+  changed hook count as a changed hook order and threw "Rendered more hooks
+  than during the previous render", blanking the provider detail page. Also
+  stops the error surface rendering twice: two boundaries were nested and the
+  boundary printed both `componentStack` and `error.stack`, which name the same
+  failure.
+
 ### Changed
 
 - **Per-plan admission no longer runs `KEYS`.** `snapshotAccountInflight()`
@@ -197,6 +386,78 @@ database applies it; a fresh one builds from the current baseline.
   LRU whose capability key includes the modality set, so a modality edit
   invalidates.
 
+- **Concurrency tolerance lives on the key.** It moved from the runtime
+  settings modal to the key it widens: the tolerance was tenant-wide while the
+  limit is per key, so an operator tuning one key's concurrency had to look in
+  two places and add the numbers up in their head. Both remain — the key's own
+  value wins and the tenant preference is the fallback — but the field now sits
+  beside `Max concurrent requests` in the Edit API Key modal, followed by the
+  effective max spelled out as the sum.
+
+- **Cursor dials direct and Trae proxies by default.** Cursor's upstream is
+  reached over its own HTTP/2 path that an egress proxy in front of it breaks,
+  so making the operator discover that after the first failures is the wrong
+  default. Trae is the opposite: it applies account-level ban/detection
+  heuristics to the request origin, and a direct egress makes every account in
+  the pool leave from one identifiable address, so the pool is what gets
+  flagged rather than one account. Direct stays available as an explicit
+  `skipProxy` patch — the default moved, it is not a lock.
+
+- **Trae's international realm defaults to the SG core instead of US.** Region
+  routing is a property of the account, not the deployment: an account
+  provisioned into `sg` only authenticates against the SG host, and sending it
+  to the US core answers `1001 "we are not able to authenticate you"`. Accounts
+  whose region was captured still resolve to their own host, so this decides
+  only accounts with no recorded region — and SG serves the wider international
+  roster. US is demoted to the first fallback rather than removed. The
+  `store-country-code` header falls back to `sg` with it, since that header is
+  part of the identity the commercial surface checks and has to agree with the
+  host it is sent to. The request-body `region` tag stays `US`: it is a
+  realm-level value upstream does not enforce for auth, and changing it without
+  evidence would be a guess.
+
+- **The ban-duration menu opens downward.** It used `bottom-full`, so it
+  rendered above the split control and read as belonging to whatever sat above
+  it rather than to the caret that opened it.
+
+- **Account ids are no longer capped at 100.** The quota refresh, batch
+  enable/disable and daily-growth route each refused more than 100 with
+  "exceeds the limit of 100", so refreshing a several-hundred-account fleet
+  meant hand-batching in the UI. The work was already drained through a bounded
+  worker pool — 5 at a time — which is what actually protects the upstream, so
+  the cap protected nothing. The frontend's matching batching is gone with it,
+  and `useRefreshAllQuotas` reports checked-of-total so a large run shows
+  progress instead of looking hung.
+
+- **InferHub sends `X-Session-Id`, discovers models live, and maps its own
+  errors.** The session id comes from the shared affinity resolver rather than
+  a new one, so a conversation that repeats its opening turn keeps one upstream
+  pin instead of re-pinning every request. `/v1/models` is now the primary
+  model source, with Claude ids re-derived onto the Messages wire because the
+  generic loader only ever emits chat/responses and the chat wire strips
+  thinking server-side; a failed or empty read falls back to the committed
+  list, since a `config_read` key is rejected by the inference host with 403,
+  which is not "InferHub has no models". InferHub failure codes land on
+  existing error classes; no new code.
+
+- **The InferHub static fallback is a fallback, not a catalog.** The committed
+  list was a hand-kept snapshot of a marketplace that republishes 270 model
+  rows across 21 upstreams, so it was stale the moment it was written and wrong
+  in ways nobody notices: an id that no longer exists still routes, and a new
+  one is invisible. It is now 95 verified rows across 12 prefixes (ag, ali,
+  alicn, cb, cbcn, cc, cmc, cx, grok, mm, mmcn, ocg), every slug checked to
+  exist upstream before being written. Context, output, modalities and the
+  reasoning scale come from each upstream's own row: rows stating no context or
+  output cap are recorded as null rather than guessed, vision follows the
+  published `modalities` (43 of 95 do not accept images and no longer claim
+  to), and reasoning follows `reasoningLevels` — a row with no scale exposes no
+  effort control, because claiming one lets the console offer an effort the
+  provider ignores. Live discovery remains the primary source.
+
+- **The console sidebar drops its placeholder items.** The Tools group held two
+  "Coming soon" entries and a hardcoded "Soon" badge; the placeholders are gone
+  and the expandable item remains.
+
 ### Notes
 
 - **VPS capacity numbers are not yet measured.** The formulas, defaults and
@@ -206,14 +467,37 @@ database applies it; a fresh one builds from the current baseline.
   records what was measured and what was not.
 
 - **Migration and cutover order** for an existing install: drain and stop the
-  old writers, apply migration 0020, run `carte telemetry reconcile --apply`
-  then `--verify`, then start the new processes. Running old file-only writers
-  beside new SQL readers is an unsupported window.
+  old writers, apply migrations 0020 through 0022 in order, run
+  `carte telemetry reconcile --apply` then `--verify`, then start the new
+  processes. Running old file-only writers beside new SQL readers is an
+  unsupported window. Migration 0021 adds `max_concurrent_tolerance` to
+  `api_keys` — a NULL on a pre-migration key means no allowance, so existing
+  behaviour is unchanged until a value is set. Migration 0022 creates
+  `inferhub_config_keys`, which is empty on upgrade: the market module reports
+  "no key configured" until an operator adds one.
 
 - **The raw JSONL mirror is retained** as the at-least-once recovery source.
   SQL uniqueness plus backfill dedupe is the consistency boundary; torn raw
   tails are skipped and conflicts are reported rather than silently
   overwritten.
+
+- **One CLI test is skipped, not deleted.** The SGR mouse-click test hung
+  intermittently under a full parallel run and passed reliably in isolation, so
+  it failed for a reason other than the behaviour it asserts. The click targets
+  a hardcoded screen row (14) while an action's row is `headerLines + 3` and
+  `renderWordmark()` emits 9 lines with colour and 0 without it, so the literal
+  matches only one of those; deriving the row from the rendered header fixed
+  the isolated runs (6/6, both colour modes) but not the suite, which points at
+  the PTY under load rather than the arithmetic. It is skipped with this
+  diagnosis recorded because the path is real behaviour worth testing.
+  `menuResult` also gained bounded waits — it awaited two promises that resolve
+  only if the child happens to print the marker, so an unresolved one hung
+  until Bun's timeout; it now fails in 5s naming the phase that never arrived.
+
+- **The InferHub market is on demand by explicit decision.** No background
+  worker, no scheduler task, no SSE consumer, no `refetchInterval`. If
+  per-tenant cost later makes page-load fetches too expensive, the next step is
+  a longer `staleTime`, not a periodic fetch.
 
 ## [2.5.10] - 2026-10-25
 
