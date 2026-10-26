@@ -167,24 +167,26 @@ function ProtectedRoutes(): ReactNode {
     );
   return (
     <DashboardShell user={state.user}>
-      <ErrorBoundary resetKey={location.pathname}>
-        <Routes>
-          <Route path="/" element={<Overview />} />
-          <Route path="/usage" element={<Usage />} />
-          <Route path="/providers" element={<Providers />} />
-          <Route path="/providers/:providerId" element={<ProviderDetail />} />
-          <Route path="/combos" element={<Combos />} />
-          <Route path="/quota" element={<Quota />} />
-          <Route path="/proxy" element={<Proxy />} />
-          <Route path="/console-log" element={<ConsoleLogPage />} />
-          <Route path="/customization" element={<Customization />} />
-          <Route path="/model-lab" element={<Studio />} />
-          <Route path="/cli-tools" element={<CliTools />} />
-          <Route path="/cli-tools/:toolId" element={<CliToolDetail />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </ErrorBoundary>
+      {/* No second boundary here. `RouteErrorBoundary` already wraps this whole
+          tree, and nesting one inside it caught the same throw twice — React
+          re-throws an error the nearest boundary did not commit, so the operator
+          saw the error surface rendered inside itself. */}
+      <Routes>
+        <Route path="/" element={<Overview />} />
+        <Route path="/usage" element={<Usage />} />
+        <Route path="/providers" element={<Providers />} />
+        <Route path="/providers/:providerId" element={<ProviderDetail />} />
+        <Route path="/combos" element={<Combos />} />
+        <Route path="/quota" element={<Quota />} />
+        <Route path="/proxy" element={<Proxy />} />
+        <Route path="/console-log" element={<ConsoleLogPage />} />
+        <Route path="/customization" element={<Customization />} />
+        <Route path="/model-lab" element={<Studio />} />
+        <Route path="/cli-tools" element={<CliTools />} />
+        <Route path="/cli-tools/:toolId" element={<CliToolDetail />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </DashboardShell>
   );
 }

@@ -284,4 +284,30 @@ describe("InferhubMarket collapse", () => {
     expect(view.container.textContent).not.toContain("Adds a short system note");
     view.unmount();
   });
+
+  test("survives summary arriving after the first render", async () => {
+    // The bug this pins: a hook sat below the "no data yet" early return, so
+    // the render that finally had summary ran one more hook than the render
+    // that did not. React reads a changed hook count as a changed hook order
+    // and throws "Rendered more hooks than during the previous render".
+    //
+    // Mounting with no seed gives that exact sequence: first render has no
+    // summary, then the query resolves and the component re-renders with one.
+    const view = await mount(createElement(InferhubMarket), {});
+    await view.flush();
+    // Seed the cache after mount, then let the component re-render with data.
+    await view.act(async () => {
+      view.queryClient.setQueryData(queryKeys.inferhub.summary, SUMMARY);
+    });
+    await view.flush();
+    // No throw, and the data renders.
+    expect(view.container.textContent).toContain("InferHub market");
+    await view.act(() => {
+      toggle(view.container).click();
+    });
+    await view.flush();
+    expect(view.container.textContent).toContain("Claude Code");
+    expect(view.container.textContent).toContain("cc/claude-opus-4-6");
+    view.unmount();
+  });
 });

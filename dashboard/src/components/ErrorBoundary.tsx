@@ -40,6 +40,14 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
 
   override render(): ReactNode {
     if (this.state.error === null) return this.props.children;
+    const componentStack = this.state.componentStack?.trim();
+    const errorStack = this.state.error.stack?.trim();
+    const trace =
+      componentStack !== undefined && componentStack.length > 0
+        ? componentStack
+        : errorStack !== undefined && errorStack.length > 0
+          ? errorStack
+          : null;
     return (
       <main className="auth-viewport">
         <div className="card-solid auth-window border border-red-soft">
@@ -55,14 +63,14 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
             <span className="select-text break-words">
               {this.state.error.message}
             </span>
-            {this.state.componentStack ? (
+            {/* One trace, not two. `componentStack` and `error.stack` name the
+                same failure and overlap almost entirely, so showing both read
+                as the same error printed twice. The component stack wins when
+                present because it names the component that threw; the raw stack
+                is the fallback for an error caught without one. */}
+            {trace !== null ? (
               <pre className="mt-4 max-h-80 overflow-auto whitespace-pre-wrap break-words text-badge text-text-tertiary">
-                {this.state.componentStack.trim()}
-              </pre>
-            ) : null}
-            {this.state.error.stack ? (
-              <pre className="mt-4 max-h-80 overflow-auto whitespace-pre-wrap break-words text-badge text-text-tertiary">
-                {this.state.error.stack}
+                {trace}
               </pre>
             ) : null}
           </div>

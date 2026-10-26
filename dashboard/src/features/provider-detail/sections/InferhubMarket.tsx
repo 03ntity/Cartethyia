@@ -140,6 +140,30 @@ export function InferhubMarket(): ReactNode {
   const [showUpstreams, setShowUpstreams] = useState(true);
   const [sort, setSort] = useState<SortKey>("provider");
 
+  // Every hook runs before any early return. The memo used to sit below the
+  // "no data yet" returns, so a render that had summary ran one more hook than
+  // a render that did not — React reads that as a changed hook order and throws
+  // "Rendered more hooks than during the previous render".
+  const models = summary?.models ?? [];
+  const usable = models.filter(isUsable);
+  const grouped = useMemo(() => {
+    const source = showAll ? models : usable;
+    const sorted = [...source].sort(comparator(sort));
+    const byPrefix = new Map<string, InferhubModel[]>();
+    for (const model of sorted) {
+      const bucket = byPrefix.get(model.prefix);
+      if (bucket === undefined) byPrefix.set(model.prefix, [model]);
+      else bucket.push(model);
+    }
+    // `provider` sorts by family name so the groups read A–Z; any other sort
+    // keeps groups ordered by their best-ranked model.
+    return [...byPrefix.entries()].map(([prefix, items]) => ({
+      prefix,
+      family: items[0]?.family ?? prefix,
+      models: items,
+    }));
+  }, [models, usable, showAll, sort]);
+
   const refreshButton = (
     <Button
       variant="secondary"
@@ -182,27 +206,9 @@ export function InferhubMarket(): ReactNode {
     );
   }
 
-  const models = summary.models;
-  const usable = models.filter(isUsable);
-  const sorted = [...(showAll ? models : usable)].sort(comparator(sort));
-  const shown = sorted;
-  const hiddenCount = models.length - shown.length;
-  // Grouped by provider, in the order the sort produced. `provider` sorts by
-  // family name so the groups read A–Z; any other sort keeps the groups ordered
-  // by their best-ranked model.
-  const groups = useMemo(() => {
-    const byPrefix = new Map<string, InferhubModel[]>();
-    for (const model of shown) {
-      const bucket = byPrefix.get(model.prefix);
-      if (bucket === undefined) byPrefix.set(model.prefix, [model]);
-      else bucket.push(model);
-    }
-    return [...byPrefix.entries()].map(([prefix, items]) => ({
-      prefix,
-      family: items[0]?.family ?? prefix,
-      models: items,
-    }));
-  }, [shown]);
+  const groups = grouped;
+  const shownCount = groups.reduce((total, group) => total + group.models.length, 0);
+  const hiddenCount = models.length - shownCount;
 
   return (
     <Card>
@@ -286,7 +292,7 @@ export function InferhubMarket(): ReactNode {
 
         <div className="flex items-center justify-between gap-2">
           <p className="text-micro text-text-tertiary">
-            {shown.length} of {models.length} models
+            {shownCount} of {models.length} models
           </p>
           <label className="flex items-center gap-2 text-caption text-text-secondary cursor-pointer">
             <input
