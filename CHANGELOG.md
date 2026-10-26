@@ -8,6 +8,27 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.6.2] - 2026-10-26
+
+### Fixed
+
+- **The update and already-running paths can be read.** Two exits happened too
+  fast to be read, and both made a failed action look like a successful one.
+
+  An update that could not install still printed "this process will exit now"
+  and exited, so a version that never changed looked updated. The notice now
+  names what actually blocks the install — npm replaces the package by
+  renaming its directory, which Windows refuses while any process holds it,
+  and the hold can outlive the process that took it — and prints the command
+  to run by hand. The menu holds the notice for 30 seconds instead of
+  exiting, and the installer stops `cartethyia`/`carte` first so the rename
+  has a chance.
+
+  A second instance reported "already running" and exited immediately, so a
+  double-clicked shortcut or a re-run in a terminal that is already serving
+  closed the window before the reason could be seen. It now waits 30 seconds
+  before closing.
+
 ## [2.6.1] - 2026-10-26
 
 ### Fixed
