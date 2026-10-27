@@ -107,7 +107,7 @@ export type { ProbeReasoningEffort } from "../../../src/providers/discovery/disc
  * `(level)` string here would drift from `parseThinkingSuffix` the moment
  * either side changes.
  */
-export { formatThinkingSuffix } from "../../../src/transport/translation/thinking";
+export { formatThinkingSuffix } from "../../../src/protocol/translation/thinking";
 
 export type {
   ComboStrategy,

@@ -19,7 +19,7 @@ means and where it comes from.
 
 - `model(max)` — **no space** — is the syntax a client actually sends. It is a
   supported feature: a thinking-effort level carried in the model name.
-  `parseThinkingSuffix` (`src/transport/translation/thinking.ts`) strips it
+  `parseThinkingSuffix` (`src/protocol/translation/thinking.ts`) strips it
   before anything reads the model name, because alias resolution, the
   allowlist, the prefix check, and routing all match against registered ids and
   a name carrying `(max)` would fail every one of them. It is stripped on the

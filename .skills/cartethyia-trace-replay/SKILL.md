@@ -93,7 +93,7 @@ presence changes the result as the trigger, then verify its mechanism.
 
 | Suspect | Owner |
 |---|---|
-| Output-limit fields | `WIRE_TOKEN_BOUNDS` / `resolveWireMaxTokens` in `src/transport/translation/quirks.ts` |
+| Output-limit fields | `WIRE_TOKEN_BOUNDS` / `resolveWireMaxTokens` in `src/protocol/translation/quirks.ts` |
 | Chat body | `canonicalToChatPayload` in `src/protocol/request/chat.ts` |
 | Responses body | `canonicalToResponsesPayload` in `src/protocol/request/responses.ts` |
 | Provider-specific hooks | `buddyPrePayloadCommon` in `src/providers/integrations/buddy/buddy-chat-shared.ts`, and each adapter's `prePayload` |

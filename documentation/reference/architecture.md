@@ -172,9 +172,12 @@ The PostgreSQL baseline defines the foundational schema for a new database;
 both backends to the current schema. **In-place upgrades are not supported.**
 An existing database with retired migration history, or
 tables without the current baseline ledger entry, is rejected at startup.
-Create a fresh database and restore a backup. Restore maps the retired
-`bypass_proxy` name, `bridge` pool kind, old provider User-Agent default, and
-legacy Cline/fusion values to the current schema.
+Create a fresh database and restore a backup. Restore maps retired names and
+values to the current schema: renamed provider ids (`opencodeft`/`opencodezen`/
+`opencodego`), the `bridge` pool kind to `https`, legacy Cline routing to
+`skip_proxy: true`, and `fusion` combos to `fallback`. Columns the current
+schema never had are dropped with a warning rather than failing the restore
+(`src/console/backup/validate.ts`).
 
 ## Console and dashboard
 

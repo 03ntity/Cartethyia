@@ -34,7 +34,7 @@ any other value is rejected with the received value echoed in the message.
 Do not silently coerce an unknown value — surfaces downstream read the parsed
 field as authoritative.
 
-Wire normalization lives in `src/transport/translation/quirks.ts`
+Wire normalization lives in `src/protocol/translation/quirks.ts`
 (`resolveWireMaxTokens`): a caller value below `minTokens: 16` is lifted to 16
 for chat/responses/messages before any tool-floor or ceiling clamps, and the
 Responses builder bounds `max_output_tokens` through the same resolver.

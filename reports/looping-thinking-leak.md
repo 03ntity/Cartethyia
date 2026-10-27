@@ -260,7 +260,7 @@ only collects `kind === "text"`. These two providers are the divergent ones.
 
 ## Finding 10 — no test covers any of the above
 
-**VERIFIED.** `src/transport/translation/thinking.ts` has **zero** test imports. There is no unit test
+**VERIFIED.** `src/protocol/translation/thinking.ts` has **zero** test imports. There is no unit test
 of the `MimoThinkSplitter` class itself (only the stateless `stripThinkingTags`). No test asserts
 strictly increasing `sequence_number` out of the pipeline. No cross-surface reasoning round-trip test.
 No test file covers `src/protocol/sse-decoder.ts` at all. There is no shared
@@ -275,9 +275,9 @@ Full gap list:
 5. Non-streaming chat think-split path (`chat.ts:89-113`) — untested.
 6. Messages-surface reasoning — untested.
 7. Cross-surface reasoning round-trip — untested.
-8. `src/transport/translation/thinking.ts` — untested.
+8. `src/protocol/translation/thinking.ts` — untested.
 9. Responses prelude retry duplicating frames — untested.
-10. `provider-reasoning.ts` (`applyOpenAIReasoning`, `applyDeepSeekReasoning`,
+10. `src/protocol/reasoning.ts` (`applyOpenAIReasoning`, `applyDeepSeekReasoning`,
     `backfillDeepSeekReasoningContent`) — untested.
 
 ---

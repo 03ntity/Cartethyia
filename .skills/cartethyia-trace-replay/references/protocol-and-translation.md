@@ -78,7 +78,7 @@ alias and CLI remapping resolve the target
 dropped, capabilities are derived and the plan is built, degraded
 variants are tried when nothing supports the full request, tool rounds
 are repaired, and the request is projected onto the winning candidate
-(`projectForRoute`, `src/transport/translation/capabilities.ts`). Projection
+(`projectForRoute`, `src/protocol/translation/capabilities.ts`). Projection
 throws `capability_unsupported` rather than silently dropping semantics. The
 attempt loop re-projects per candidate in
 `src/transport/dispatch/proxy-request.ts`.
@@ -93,12 +93,12 @@ call their own builder: `canonicalToCodexResponsesPayload`
 (`request/codex.ts`), `buildGeminiPayload` (`request/gemini.ts`).
 
 Per-provider quirks are declarative, not scattered `delete payload.x` calls.
-`src/transport/translation/quirks.ts` holds `PARAM_QUIRKS` — a provider id,
+`src/protocol/translation/quirks.ts` holds `PARAM_QUIRKS` — a provider id,
 an optional model matcher, and the strip/clamp — applied by `applyParamQuirks` before wire translation. Add a row only when a concrete upstream 400/422
 proves it. Output-token bounds per wire are one table, `WIRE_TOKEN_BOUNDS`,
 resolved by `resolveWireMaxTokens`, so the three codecs cannot drift; each
 builder calls it (`request/chat.ts`, `request/responses.ts`). Cache
-breakpoint marking is shared in `src/transport/translation/cache-controls.ts`
+breakpoint marking is shared in `src/protocol/translation/cache-controls.ts`
 because the marker differs per wire but the scan does not.
 
 ## Response path
@@ -181,10 +181,10 @@ and lifecycle violations.
 | New client request field | `protocol/canonical-model.ts`, then the surface `parse` + `dialects.ts`, then every codec that must carry it |
 | New client response field | the surface encoder (`surface/*/encode.ts` or `messages/stream.ts`), and the decoder that must produce the event |
 | New wire family | `canonical-model.ts` (`WIRE_FAMILIES`), `protocol/registry.ts`, a `protocol/request/*` + `protocol/response/*` pair, `capabilities.ts` matrices |
-| Provider rejects a control combination | `transport/translation/quirks.ts` (one row, only with a proven 400/422) |
+| Provider rejects a control combination | `protocol/translation/quirks.ts` (one row, only with a proven 400/422) |
 | Output-token floor/ceiling differs per wire | `WIRE_TOKEN_BOUNDS` in `quirks.ts`, then the builder that calls `resolveWireMaxTokens` |
 | Capability not granted to a route | `capabilities.ts` (`routeCapabilitiesFor`, `deriveRequiredCapabilities`) and the snapshot profile in `routing/route-catalog.ts` |
-| Tool-call ids or indexes disagree across frames | `protocol/tool-identity.ts`, then `transport/translation/tool-repair.ts` |
+| Tool-call ids or indexes disagree across frames | `protocol/tool-identity.ts`, then `protocol/translation/tool-repair.ts` |
 | Upstream error lands with the wrong code | `transport/failure-policy.ts` (`classifyUpstreamError`), plus `protocol/stream-error-frames.ts` for in-stream cases |
 | Public error envelope shape | `protocol/gateway-error.ts`, then `transport/guards/error-lifecycle.ts` |
 | Usage or cost is wrong | decoders → `UsageRecord`; pricing is `repriceUsage` in `providers/provider-usage.ts` |
