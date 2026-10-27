@@ -37,6 +37,12 @@ export interface ScheduledTaskRegistryOptions {
   readonly lease?: MaintenanceLeaseStore | undefined;
   /** Injected clock for deterministic tests. */
   readonly now?: (() => number) | undefined;
+  /**
+   * How long a tick may wait for the lease before force-skipping. Defaults to
+   * the production bound (5s); tests inject a short value instead of waiting
+   * out the real deadline.
+   */
+  readonly leaseAttemptTimeoutMs?: number | undefined;
 }
 
 /**
@@ -135,6 +141,8 @@ export class ScheduledTaskRegistry {
   private readonly lease: MaintenanceLeaseStore | undefined;
   /** Injected clock, so a test can drive the maintenance cadence deterministically. */
   private readonly now: () => number;
+  /** Lease wait bound; see `ScheduledTaskRegistryOptions.leaseAttemptTimeoutMs`. */
+  private readonly leaseTimeoutMs: number;
   /** Ticks that could not acquire the fleet lease. Diagnostic, not a queue. */
   private readonly skippedByLease = new Map<string, number>();
   /** When each task last skipped on the lease, from the injected clock. */
@@ -149,6 +157,7 @@ export class ScheduledTaskRegistry {
     this.disabled = new Set(disabledTaskNames);
     this.lease = options.lease;
     this.now = options.now ?? Date.now;
+    this.leaseTimeoutMs = options.leaseAttemptTimeoutMs ?? LEASE_ACQUIRE_TIMEOUT_MS;
   }
 
   /**
@@ -282,7 +291,7 @@ export class ScheduledTaskRegistry {
         this.lease !== undefined && task.shared === true
           ? await withDeadline(
               this.lease.tryAcquire(task.name, leaseTtlMs(task.intervalMs)),
-              LEASE_ACQUIRE_TIMEOUT_MS,
+              this.leaseTimeoutMs,
             )
           : undefined;
     } catch (error) {

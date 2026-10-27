@@ -16,10 +16,12 @@ import { ScheduledTaskRegistry } from "../../src/workers/scheduler";
 import type { MaintenanceLease, MaintenanceLeaseStore } from "../../src/workers/maintenance-lease";
 
 /**
- * The lease wait is bounded at 5s in production, so a test that exercises the
- * silent-lease path must outlast it. Bun's default is 5s.
+ * The lease wait is bounded at 5s in production. The tests inject a short
+ * bound so the silent-lease path is exercised without waiting out the real
+ * deadline; the timeout is a ceiling for the test harness, not the wait.
  */
-const HANG_TIMEOUT_MS = 12_000;
+const HANG_TIMEOUT_MS = 2_000;
+const TEST_LEASE_TIMEOUT_MS = 50;
 
 /** A lease store whose answer never arrives. */
 function silentLease(): MaintenanceLeaseStore {
@@ -35,7 +37,7 @@ const GRANTED: MaintenanceLease = {
 
 test("a lease that never answers does not block the tick", async () => {
   const store = silentLease();
-  const registry = new ScheduledTaskRegistry([], { lease: store });
+  const registry = new ScheduledTaskRegistry([], { lease: store, leaseAttemptTimeoutMs: TEST_LEASE_TIMEOUT_MS });
   let ran = 0;
   registry.register({ name: "shared", intervalMs: 60_000, shared: true, run: () => {
     ran += 1;
@@ -51,7 +53,7 @@ test("a lease that never answers does not block the tick", async () => {
 
 test("the gate is released after a silent lease, so a later tick still runs", async () => {
   const store = silentLease();
-  const registry = new ScheduledTaskRegistry([], { lease: store });
+  const registry = new ScheduledTaskRegistry([], { lease: store, leaseAttemptTimeoutMs: TEST_LEASE_TIMEOUT_MS });
   let ran = 0;
   registry.register({ name: "first", intervalMs: 60_000, shared: true, run: () => Promise.resolve() });
   registry.register({ name: "second", intervalMs: 60_000, run: () => {
