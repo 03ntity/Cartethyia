@@ -52,6 +52,12 @@ const app = boot
       modelStrikes: boot.deps.modelStrikes,
       maxBodyBytes: resolveMaxBodyBytes(),
       scheduledTasks: boot.deps.scheduledTasks,
+      // The sampler is constructed in the dependency graph and already
+      // sampling on its own interval; without passing it here the app cannot
+      // bind its in-flight source, so `cartethyia_process_in_flight` stays
+      // pinned at the constructor's `() => 0` placeholder forever while the
+      // registry it was meant to read reports real flights.
+      runtimeMetricsSampler: boot.deps.runtimeMetricsSampler,
       shutdownCoordinator: boot.shutdownCoordinator,
       // Signal-free graceful stop for platforms where a catchable signal cannot
       // be delivered (Windows). Off unless `CARTETHYIA_DRAIN_TOKEN` is set.
