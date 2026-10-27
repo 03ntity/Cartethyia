@@ -12,11 +12,13 @@
  * One entry per cooling provider, keyed by the lowercased provider id — the
  * same normalization the selector applies to its in-memory key.
  */
+import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { CartethyiaDatabase } from "../persistence/db-handle";
 import { networkPools, healthEvents } from "../persistence/schema";
 import { log } from "../observability/logger";
-import type { ProxyCooldownEntry } from "./pool/selector";
+import { providerRateLimitIsIpScoped } from "../providers/provider-metadata";
+import { PROVIDER_BLOCK_MS, type ProxyCooldownEntry } from "./pool/selector";
 
 type PoolProviderCooldownMap = NonNullable<
   (typeof networkPools.$inferSelect)["providerCooldowns"]
@@ -119,35 +121,40 @@ export async function dropAllProviderCooldownMarkers(
 }
 
 /**
- * Writes a probe-measured 429 the same way a dispatch-side 429 would be
- * recorded: one mirror marker and one `rate_limit_transient` audit row.
+ * Writes a probe-measured verdict the same way a dispatch-side event would be
+ * recorded: one mirror marker and one audit row.
  *
- * The probe's 429 is a fresh measurement of "this egress is out of allowance"
- * — without this, an operator who tested a rate-limited pool saw "rate
- * limited" once, refreshing lost it, and the activity panel showed nothing:
- * the fact existed only in the remembered HTTP response.
+ * The probe is the only writer that can flag a cooldown from the control
+ * plane — its 429 is a fresh measurement of "this egress is out of allowance"
+ * (a cooldown marker), and its 403 is a fresh measurement of "this egress was
+ * retired" (a block marker). Without this, an operator who tested a
+ * rate-limited or retired pool saw the verdict once, refreshing lost it, and
+ * the activity panel showed nothing: the fact existed only in the remembered
+ * HTTP response.
  *
  * Not coalesced: a probe is operator-initiated and one row per click is the
  * visible history the panel exists for.
  */
-export async function recordProbeCooldown(
+export async function recordProbeVerdict(
   db: CartethyiaDatabase,
   poolId: string,
   providerId: string,
-  marker: { until: number; reason: string },
+  marker: { until: number; reason: string; blocked?: boolean },
 ): Promise<void> {
   await upsertProviderCooldownMarker(db, poolId, providerId, marker);
   try {
     await db.insert(healthEvents).values({
+      id: randomUUID(),
       entityKind: "pool",
       networkPoolId: poolId,
       fromStatus: null,
       toStatus: "cooldown",
       reason: `provider ${providerId}: ${marker.reason}`,
-      errorCategory: "rate_limit_transient",
+      errorCategory: marker.blocked === true ? "egress_blocked" : "rate_limit_transient",
+      createdAt: new Date(),
     });
   } catch (error) {
-    log.warn("pool probe cooldown event failed", { networkPoolId: poolId, providerId, error: String(error) });
+    log.warn("pool probe event failed", { networkPoolId: poolId, providerId, error: String(error) });
   }
 }
 
@@ -183,4 +190,63 @@ export async function restoreProviderCooldownMarkers(
     }
   }
   return restored;
+}
+
+/** The columns the probe-verdict reconciliation reads, mirroring the row's own read path. */
+function probeEndpointOf(endpointConfig: unknown): string {
+  const raw = (endpointConfig ?? {}) as Record<string, unknown>;
+  return typeof raw["endpoint"] === "string" ? raw["endpoint"] : "";
+}
+
+/**
+ * Re-enforces the stored probe verdicts at boot (new: replay, read-ahead).
+ *
+ * A stored `blocked` verdict is a *state*, not a decoration. If the marker the
+ * probe flagged failed to persist, or the verdict predated the marker column,
+ * the egress would return to rotation after restart and get refused again —
+ * dispatch spending a real request to rediscover a refusal the row already
+ * knew. So the boot read reconciles: a fresh (endpoint still matches) `blocked`
+ * verdict for an address-keyed provider becomes a block flag, even when the
+ * mirror has nothing (or has an older, cooler entry — the retirement claim is
+ * the sharper fact and wins).
+ *
+ * `throttled` is deliberately **not** replayed into a cooldown: the cooldown
+ * the probe flagged already carries the measured window, and blind-replaying
+ * one from a verdict that predates the restart could outlive the upstream's
+ * actual window.
+ *
+ * Returns how many verdicts were replayed.
+ */
+export async function restorePoolProbeVerdicts(
+  selector: { hydrateProviderCooldown(entry: ProxyCooldownEntry): void },
+  db: CartethyiaDatabase,
+): Promise<number> {
+  const rows = await db
+    .select({
+      id: networkPools.id,
+      status: networkPools.status,
+      endpointConfig: networkPools.endpointConfig,
+      providerProbeProviderId: networkPools.providerProbeProviderId,
+      providerProbeStatus: networkPools.providerProbeStatus,
+      providerProbeReason: networkPools.providerProbeReason,
+      providerProbeEndpoint: networkPools.providerProbeEndpoint,
+    })
+    .from(networkPools);
+  let replayed = 0;
+  for (const row of rows) {
+    if (row.status !== "active") continue;
+    if (row.providerProbeStatus !== "blocked") continue;
+    if (row.providerProbeEndpoint !== probeEndpointOf(row.endpointConfig)) continue;
+    const providerId = row.providerProbeProviderId;
+    if (typeof providerId !== "string" || !providerRateLimitIsIpScoped(providerId)) continue;
+    selector.hydrateProviderCooldown({
+      poolId: row.id,
+      providerId: providerId.toLowerCase(),
+      until: Date.now() + PROVIDER_BLOCK_MS,
+      reason: row.providerProbeReason ?? "Upstream refused this egress address",
+      blocked: true,
+    });
+    replayed += 1;
+  }
+  return replayed;
 }

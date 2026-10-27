@@ -597,10 +597,10 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
     tenantId: string,
     poolId: string,
     providerId: string,
-    marker: { until: number; reason: string },
+    marker: { until: number; reason: string; blocked?: boolean },
   ): Promise<void> {
     if ((await this.get(tenantId, poolId)) === undefined) return;
-    await poolCooldownStore.recordProbeCooldown(this.db, poolId, providerId, marker);
+    await poolCooldownStore.recordProbeVerdict(this.db, poolId, providerId, marker);
   }
 
   async recover(tenantId: string, poolId: string): Promise<boolean> {

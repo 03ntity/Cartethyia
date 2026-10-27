@@ -642,6 +642,7 @@ async function recordResetActivity(
       })
       .where(eq(providerAccounts.id, accountId));
     await db.insert(healthEvents).values({
+      id: randomUUID(),
       entityKind: "account",
       accountId,
       fromStatus: currentStatus,
@@ -655,6 +656,7 @@ async function recordResetActivity(
   }
 
   await db.insert(healthEvents).values({
+    id: randomUUID(),
     entityKind: "account",
     accountId,
     fromStatus: currentStatus,

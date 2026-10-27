@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { CartethyiaDatabase } from "../persistence/db-handle";
 import { healthEvents } from "../persistence/schema";
 import type { NetworkPoolSelector } from "./pool/selector";
@@ -45,12 +46,14 @@ async function recordPoolCooldownEvent(
   if (last !== undefined && now - last < POOL_COOLDOWN_EVENT_WINDOW_MS) return;
   try {
     await db.insert(healthEvents).values({
+      id: randomUUID(),
       entityKind: "pool",
       networkPoolId: poolId,
       fromStatus: null,
       toStatus: "cooldown",
       reason: `provider ${providerId}: ${reason}`,
       errorCategory: "rate_limit_transient",
+      createdAt: new Date(),
     });
   } catch {
     // Non-fatal: observability writes must never fail dispatch. The
@@ -129,12 +132,14 @@ async function recordPoolBlockEvent(
   error: GatewayError,
 ): Promise<void> {
   await db.insert(healthEvents).values({
+    id: randomUUID(),
     entityKind: "pool",
     networkPoolId: poolId,
     fromStatus: null,
     toStatus: "cooldown",
     reason: `provider ${providerId}: ${reason}${providerCodeSuffix(error)}`,
     errorCategory: "egress_blocked",
+    createdAt: new Date(),
   });
 }
 

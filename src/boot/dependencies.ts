@@ -48,7 +48,7 @@ import {
   ValidatedNetworkBindingFactory,
 } from "../network/pool/resolver";
 import { NetworkPoolSelector } from "../network/pool/selector";
-import { restoreProviderCooldownMarkers } from "../network/pool-cooldown-store";
+import { restorePoolProbeVerdicts, restoreProviderCooldownMarkers } from "../network/pool-cooldown-store";
 import { ScheduledTaskRegistry } from "../workers/scheduler";
 import { quotaRefreshSweep } from "../workers/quota-refresh-sweep";
 import { markProviderApiKeyCredential } from "../console/quota/account-quota-shared";
@@ -397,7 +397,10 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
   // a fresh deployment would do.
   try {
     const restored = await restoreProviderCooldownMarkers(poolSelector, db);
-    if (restored > 0) log.info("[pool-selector] restored provider cooldown markers", { restored });
+    const replayed = await restorePoolProbeVerdicts(poolSelector, db);
+    if (restored > 0 || replayed > 0) {
+      log.info("[pool-selector] restored provider cooldown state", { mirrored: restored, probeVerdictsApplied: replayed });
+    }
   } catch (error) {
     log.warn("[pool-selector] provider cooldown restore failed", { error: String(error) });
   }

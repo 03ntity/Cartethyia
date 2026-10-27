@@ -13,12 +13,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { buildSqliteHandle, applySqliteMigrations } from "../../src/persistence/db-sqlite";
-import { networkPools, tenants } from "../../src/persistence/schema";
+import { healthEvents, networkPools, tenants } from "../../src/persistence/schema";
 import { NetworkPoolSelector, PROVIDER_BLOCK_MS } from "../../src/network/pool/selector";
 import {
   dropAllProviderCooldownMarkers,
   dropProviderCooldownMarker,
+  recordProbeVerdict,
+  restorePoolProbeVerdicts,
   restoreProviderCooldownMarkers,
   upsertProviderCooldownMarker,
 } from "../../src/network/pool-cooldown-store";
@@ -219,6 +222,100 @@ describe("dispatch flagging writes the mirror", () => {
       const state = await selector.isProviderCooldown(poolId, "opencode");
       expect(state.blocked).toBe(true);
       expect(state.inCooldown).toBe(true);
+    } finally {
+      close();
+    }
+  });
+});
+
+describe("the probe verdict is enforced state, not a decoration", () => {
+  test("a probe verdict lands in the mirror and the health history", async () => {
+    const { db, close } = await bootedSqlite();
+    try {
+      const poolId = randomUUID();
+      await insertPool(db, poolId);
+
+      const until = Date.now() + PROVIDER_BLOCK_MS;
+      await recordProbeVerdict(db, poolId, "opencode", {
+        until,
+        reason: "Upstream refused this egress address",
+        blocked: true,
+      });
+      await recordProbeVerdict(db, poolId, "another-pool-fake", {
+        until: Date.now() + 60 * 60 * 1000,
+        reason: "Operator probe measured a provider 429",
+      });
+
+      const events = await db.select({ reason: healthEvents.reason, category: healthEvents.errorCategory }).from(healthEvents);
+      expect(events[0]?.category).toBe("egress_blocked");
+      expect(events[0]?.reason).toContain("opencode");
+      // The block marker is intact for restart restore.
+      const selector = new NetworkPoolSelector();
+      await restoreProviderCooldownMarkers(selector, db);
+      expect((await selector.isProviderCooldown(poolId, "opencode")).blocked).toBe(true);
+    } finally {
+      close();
+    }
+  });
+
+  test("boot replays a fresh stored blocked verdict, and skips stale or throttled ones", async () => {
+    const { db, close } = await bootedSqlite();
+    try {
+      const fresh = randomUUID();
+      const stale = randomUUID();
+      await insertPool(db, fresh);
+      await insertPool(db, stale);
+
+      // Fresh: verdict endpoint matches the row's endpoint, provider is keyed
+      // by address, row active — replay it as a block.
+      await db
+        .update(networkPools)
+        .set({
+          providerProbeProviderId: "opencode",
+          providerProbeStatus: "blocked",
+          providerProbeReason: "Upstream refused this egress address",
+          providerProbeEndpoint: "http://pool.example:8080",
+          providerProbeAt: new Date(),
+        })
+        .where(eq(networkPools.id, fresh));
+
+      // Stale: the verdict describes the pool *id* (the pre-90dc16a0 shape),
+      // which cannot describe this row's address — replaying it would enforce
+      // a claim about an address the row never used.
+      await db
+        .update(networkPools)
+        .set({
+          providerProbeProviderId: "opencode",
+          providerProbeStatus: "blocked",
+          providerProbeAt: new Date(),
+          providerProbeEndpoint: stale,
+        })
+        .where(eq(networkPools.id, stale));
+
+      // Throttled: a 429 verdict never replays into a cooldown — its window
+      // lives in the mirror markers, not in a stale copy of a verdict.
+      const throttled = randomUUID();
+      await insertPool(db, throttled);
+      await db
+        .update(networkPools)
+        .set({
+          providerProbeProviderId: "opencode",
+          providerProbeStatus: "throttled",
+          providerProbeEndpoint: "http://pool.example:8080",
+          providerProbeAt: new Date(),
+        })
+        .where(eq(networkPools.id, throttled));
+
+      const selector = new NetworkPoolSelector();
+      expect(await restorePoolProbeVerdicts(selector, db)).toBe(1);
+
+      const enforced = await selector.isProviderCooldown(fresh, "opencode");
+      expect(enforced.blocked).toBe(true);
+      expect(enforced.inCooldown).toBe(true);
+      expect((await selector.isProviderCooldown(stale, "opencode")).inCooldown).toBe(false);
+      expect((await selector.isProviderCooldown(throttled, "opencode")).inCooldown).toBe(false);
+      // And the replayed block keeps the pool out of rotation immediately.
+      expect(await selector.tryAcquireAvailablePool([fresh], "opencode")).toBeUndefined();
     } finally {
       close();
     }

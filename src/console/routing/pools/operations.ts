@@ -529,6 +529,17 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
           providerId,
           "Upstream refused this egress address",
         );
+        if (entry.blocked === true) {
+          // The retirement claim lands in the mirror and the health history
+          // with its provider named, like every other verdict — an enforced
+          // state the operator cannot see is the "colour, not a decision"
+          // failure mode again.
+          await config.store.recordProviderProbeCooldown?.(a.tenantId, poolId, providerId, {
+            until: entry.until,
+            reason: entry.reason,
+            blocked: true,
+          });
+        }
         return { ...result, blockedPool: entry.blocked === true };
       }
       // A measured success releases the address — in rotation and in the

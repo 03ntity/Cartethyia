@@ -417,7 +417,7 @@ export interface NetworkPoolStore {
     tenantId: string,
     poolId: string,
     providerId: string,
-    marker: { until: number; reason: string },
+    marker: { until: number; reason: string; blocked?: boolean },
   ): Promise<void>;
   /** Per-tenant pool-group selection strategy; an absent row reads as
    * `DEFAULT_POOL_STRATEGY`. */

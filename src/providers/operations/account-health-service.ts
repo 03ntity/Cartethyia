@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { healthEventBuffer } from "../../persistence/health-event-flush";
 import { and, count, desc, eq, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { affectedRows, pruneExpiredCooldowns } from "../../persistence/dialect";
@@ -320,6 +321,7 @@ export async function recordAccountSuccess(
       .where(eq(providerAccounts.id, accountId));
     if (hadFailures && typeof client.insert === "function") {
       await client.insert(healthEvents).values({
+        id: randomUUID(),
         entityKind: "account",
         accountId,
         fromStatus: fromStatus as "active" | "cooldown" | "disabled",
@@ -457,6 +459,7 @@ export async function sweepExpiredCooldowns(db: CartethyiaDatabase): Promise<num
         for (let offset = 0; offset < expired.length; offset += 500) {
           await client.insert(healthEvents).values(
             expired.slice(offset, offset + 500).map((account) => ({
+              id: randomUUID(),
               entityKind: "account" as const,
               accountId: account.id,
               fromStatus: account.status,
@@ -543,7 +546,7 @@ async function writeHealthEvent(
     return;
   }
   if (typeof client.insert !== "function") return;
-  await client.insert(healthEvents).values(row as never);
+  await client.insert(healthEvents).values({ id: randomUUID(), ...row } as never);
 }
 
 export async function reportAttemptOutcome(

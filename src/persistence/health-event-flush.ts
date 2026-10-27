@@ -15,6 +15,7 @@
 // Same shape as `persistence/usage-flush.ts`: enqueue and return, a timer
 // flushes, shutdown flushes what remains. A crash loses the unflushed rows and
 // nothing else — the durable state routing depends on was never in here.
+import { randomUUID } from "node:crypto";
 import type { CartethyiaDatabase } from "./db-handle";
 import { healthEvents } from "./schema";
 
@@ -141,6 +142,7 @@ export class HealthEventFlushBuffer {
     try {
       await this.db.insert(healthEvents).values(
         batch.map((row) => ({
+          id: randomUUID(),
           entityKind: row.entityKind,
           accountId: row.accountId ?? null,
           networkPoolId: row.networkPoolId ?? null,
