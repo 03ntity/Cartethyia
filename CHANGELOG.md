@@ -8,7 +8,61 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.6.3] - 2026-10-27
+## [2.6.4] - 2026-10-27
+
+### Fixed
+
+- **A full max-inflight is no longer an account rate limit.**
+  `provider_capacity_exhausted` is raised by this gateway's own routing when
+  every account serving a model is at its max-inflight — the credential is
+  fine, the ceiling is what rejected the request. But it is a 429 whose text
+  says "rate limit", so it matched the rate-limit arm and cooled the account
+  for the full 15-minute window. Every account then read `cooldown` at once,
+  so all of them looked busy while requests piled up. Now classified as
+  capacity with zero cooldown and no account penalty.
+
+- **A refused CONNECT tunnel is a pool failure, not an account failure.**
+  `Proxy CONNECT failed: 403 Forbidden` fell through to the unclassified
+  provider arm, which cooled every account behind that pool — so one dead
+  front door on one provider took unrelated providers down with it. Now
+  scoped to the pool.
+
+### Changed
+
+- **`policy_blocked` split into a ban and a request refusal.** One category
+  served two shapes needing opposite remedies:
+
+  - `11140` whose body names a restriction on the account ("Your account has
+    been restricted due to unusual activity") is now
+    `policy_blocked_banned`. It disables immediately with no window — and no
+    window is what keeps it disabled, since the recovery sweep only revives a
+    disabled row whose deadline has elapsed.
+  - `11-128` and safety reviews are now `policy_blocked_invalid_request`.
+    The credential is fine, so this mutates nothing: the only correct move is
+    to stop retrying verbatim.
+
+  Told apart by the body, not the code alone, and gated on the buddy family,
+  so an unrelated upstream saying "restricted" cannot disable accounts.
+
+- **The usage floor shows inactive accounts separately.** "Pooled credits"
+  counted active accounts only and silently dropped the rest, so the pooled
+  number looked wrong with nothing to explain it. The inactive count is now
+  shown alongside.
+
+### Added
+
+- **The accounts toolbar is flat.** The bulk actions (Recover, Enable,
+  Disable, Export, Delete) had lived behind an "Actions" chevron, so most of
+  what the toolbar could do was invisible until accounts were selected. They
+  are now persistent buttons that grey out when they do not apply, so the
+  toolbar's shape never depends on what is selected.
+
+- **A static JWT's issuer is shown** on the account health modal, under
+  Credential management. Read from the `iss` claim at registration, since the
+  secret is unreadable afterwards. Only shown when the payload carried the
+  claim. Accounts registered before this release show no issuer until re-added.
+
+## [2.6.2] - 2026-10-26
 
 ### Added
 
@@ -24,10 +78,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Restored rows land under the restoring tenant.** A restore now writes every
   row under the receiving tenant, and telemetry dedupe keys are computed after
   the remap instead of against the backup's tenant.
-
-## [2.6.2] - 2026-10-26
-
-### Fixed
 
 - **The update and already-running paths can be read.** Two exits happened too
   fast to be read, and both made a failed action look like a successful one.
