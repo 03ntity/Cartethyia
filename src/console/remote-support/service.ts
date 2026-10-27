@@ -237,6 +237,42 @@ function tailscaleDnsName(): string | null {
   return null;
 }
 
+/**
+ * Whether `tailscale serve` is actually publishing anything.
+ *
+ * `serve status --json` is `{}` when nothing is served and gains `Web`
+ * (handlers) or `TCP` entries when something is. The node being online says
+ * nothing about this: stopping the tunnel leaves the node up and empties the
+ * status, which is why an online node alone was read as "still active".
+ */
+export function tailscaleServing(): boolean {
+  const result = spawnSync("tailscale", ["serve", "status", "--json"], { encoding: "utf8", windowsHide: true });
+  if (result.status !== 0) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    return false;
+  }
+  return serveStatusHasHandler(parsed);
+}
+
+/**
+ * Whether a parsed `serve status` body publishes anything.
+ *
+ * Split from the spawn so the shape rules are testable without a daemon: `{}`
+ * is the empty answer, and any entry under `Web` or `TCP` is a live one.
+ */
+export function serveStatusHasHandler(parsed: unknown): boolean {
+  const bag: Record<string, unknown> =
+    typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  for (const key of ["Web", "TCP"]) {
+    const entries = bag[key];
+    if (typeof entries === "object" && entries !== null && Object.keys(entries).length > 0) return true;
+  }
+  return false;
+}
+
 function dnsNameFromStatus(args: readonly string[]): string | null {
   const result = spawnSync("tailscale", [...args], { encoding: "utf8", windowsHide: true });
   if (result.status !== 0) return null;
@@ -343,7 +379,11 @@ export function createRemoteSupportService(config: RemoteSupportServiceConfig): 
       // Tailscale runs as a system service — its serve daemon owns its own
       // lifecycle, so a pid file is not reliable. Ask the daemon.
       if (tool === "tailscale") {
-        const url = tailscaleUrlFromDaemon();
+        // Both halves are required. A node that is up but serving nothing is
+        // not publishing an address, and reporting it as active left the
+        // toggle on and a stale link in place after the operator stopped it —
+        // `serve status` goes back to `{}` but the node stays `Online`.
+        const url = tailscaleServing() ? tailscaleUrlFromDaemon() : null;
         if (url) return { tool: "tailscale", url };
         continue;
       }
