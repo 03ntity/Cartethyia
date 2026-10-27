@@ -630,15 +630,15 @@ export function providerBaseUrl(providerId: string): string {
 export const PROVIDER_COMPATIBILITY_PROFILES: Record<string, CompatibilityProfile> = {
   opencode: {
     endpoint_paths_by_wire_family: {
-      chat: "/inference/v1/chat/completions",
-      responses: "/inference/v1/responses",
+      chat: "/inference/openai/v1/chat/completions",
+      responses: "/inference/openai/v1/responses",
     },
     model_wire_families: [{ pattern: "^muse-spark", wire_family: "responses" }],
   },
   "opencode-zen": {
     endpoint_paths_by_wire_family: {
-      chat: "/inference/v1/chat/completions",
-      responses: "/inference/v1/responses",
+      chat: "/inference/openai/v1/chat/completions",
+      responses: "/inference/openai/v1/responses",
     },
     model_wire_families: [{ pattern: "^muse-spark", wire_family: "responses" }],
   },

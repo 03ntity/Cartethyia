@@ -366,10 +366,11 @@ export const PROVIDER_CAPABILITIES = {
     // catalog row behind it.
     // Dispatch base, not the catalog base: `/zen/v1/models` publishes the
     // listing while `/inference/v1/models` answers 404, and a byte-exact replay
-    // against `/inference/v1` returned 200 where `/zen/v1` did not.
+    // against `/inference/v1` returned 200 where `/zen/v1` did not. The wire
+    // paths are the 2.1 family-segment shapes on the `/inference` origin.
     endpointPathsByWireFamily: {
-      chat: "/inference/v1/chat/completions",
-      responses: "/inference/v1/responses",
+      chat: "/inference/openai/v1/chat/completions",
+      responses: "/inference/openai/v1/responses",
     },
     loadAdapter: async () => createApiKeyAdapter((await import("./integrations/opencode/provider")).OPENCODE_FREE_SPEC),
     loadModels: async () => (await import("./integrations/opencode/provider")).OPENCODE_FREE_MODELS,
@@ -386,8 +387,8 @@ export const PROVIDER_CAPABILITIES = {
   },
   "opencode-zen": {
     endpointPathsByWireFamily: {
-      chat: "/inference/v1/chat/completions",
-      responses: "/inference/v1/responses",
+      chat: "/inference/openai/v1/chat/completions",
+      responses: "/inference/openai/v1/responses",
     },
     loadAdapter: async () => createApiKeyAdapter((await import("./integrations/opencode/provider")).OPENCODE_ZEN_SPEC),
     loadModels: async () => (await import("./integrations/opencode/provider")).OPENCODE_ZEN_MODELS,
