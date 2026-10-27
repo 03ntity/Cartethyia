@@ -25,6 +25,7 @@ import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { log } from "../../../observability/logger";
+import { resolveInstallIdDir } from "../../../config/providers";
 
 /** Overrides the directory the install ids are persisted in. */
 const INSTALL_ID_DIR_ENV = "CARTETHYIA_INSTALL_ID_DIR";
@@ -40,7 +41,7 @@ const INSTALL_ID_DIR_ENV = "CARTETHYIA_INSTALL_ID_DIR";
  */
 function installIdDirectories(): readonly string[] {
   const candidates: string[] = [];
-  const configured = process.env[INSTALL_ID_DIR_ENV]?.trim();
+  const configured = resolveInstallIdDir()?.trim();
   if (configured && configured.length > 0) candidates.push(configured);
   const home = (process.env["HOME"] ?? process.env["USERPROFILE"])?.trim();
   if (home && home.length > 0) candidates.push(join(home, ".cartethyia"));

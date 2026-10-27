@@ -4,7 +4,7 @@
  * public origin.
  */
 
-import { CONFIG_SPEC, readInt, readRequired, readText } from "./spec";
+import { CONFIG_SPEC, readInt, readOptionalText, readRequired, readText } from "./spec";
 
 /** Reads and normalizes the public OAuth origin. */
 export function requirePublicOrigin(): string {
@@ -45,6 +45,18 @@ export function resolveKimiQuotaBaseUrl(): string {
   return readText(
     "CARTETHYIA_KIMI_QUOTA_BASE_URL",
     CONFIG_SPEC.CARTETHYIA_KIMI_QUOTA_BASE_URL,
+  );
+}
+
+/**
+ * Operator override for the directory installation identities are persisted in.
+ * Read here so the only literal `process.env` for this value stays in config;
+ * the providers that stamp an install id consume the resolver instead.
+ */
+export function resolveInstallIdDir(): string | undefined {
+  return readOptionalText(
+    "CARTETHYIA_INSTALL_ID_DIR",
+    CONFIG_SPEC.CARTETHYIA_INSTALL_ID_DIR,
   );
 }
 

@@ -55,7 +55,10 @@ import {
 } from "../providers/operations/provider-credential-service";
 import { syncByokProvider } from "../providers/operations/provider-catalog-service";
 import { DrizzleApiKeyStore } from "../persistence/stores/api-key-store";
-import { DrizzleShareLinkStore } from "../persistence/stores/share-store";
+import {
+  DrizzleShareLinkStore,
+  type ShareLinkStore,
+} from "../persistence/stores/share-store";
 import { createShareUsagePort } from "./share/share-usage";
 import { resolveSsrfPolicy } from "../config/network";
 import { createValidatedFetch } from "../network/outbound-fetch";
@@ -99,6 +102,12 @@ export interface ConsoleDomainContext {
   };
   /** Owns the live in-flight gauge the console surfaces. */
   readonly stateStore?: LiveInFlightSource;
+  /**
+   * Share-link store shared with the public share router, so both surfaces
+   * wrap the same table through one instance. Falls back to a fresh store
+   * when absent (reduced compositions, tests).
+   */
+  readonly shareStore?: ShareLinkStore;
   readonly admissionService: Pick<ApiKeyAdmissionService, "purgeKey">;
   readonly readRoutingAccountInflight?:
     | ((
@@ -225,7 +234,7 @@ export function registerConsoleDomains(
   const runtimeSettingsStore = new DrizzleRuntimeSettingsStore(ctx.db, resolveRedisBackend(ctx.redis));
   const modelRoutingStore = new DrizzleModelRoutingStore(ctx.db);
   const apiKeyStore = new DrizzleApiKeyStore(ctx.db);
-  const shareStore = new DrizzleShareLinkStore(ctx.db);
+  const shareStore = ctx.shareStore ?? new DrizzleShareLinkStore(ctx.db);
   const shareActivity = createShareUsagePort({ db: ctx.db, redis: ctx.redis });
 
 

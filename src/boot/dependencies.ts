@@ -59,7 +59,7 @@ import {
   syncBuddyUsage,
 } from "../workers/buddy-growth-tasks";
 import { createAccountSecretResolver } from "../providers/operations/provider-credential-service";
-import { quotaCacheSize } from "../console/quota/cache";
+import { quotaCacheSize } from "../providers/quota/cache";
 import { modelCatalogCacheSize } from "../providers/operations/model-catalog-cache";
 import { preferencesReaderFor } from "../persistence/tenant-preferences";
 import { sweepExpiredCooldowns } from "../providers/operations/account-health-service";
@@ -256,39 +256,6 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
     redis ? new RedisAdmissionController(redis) : undefined,
     redis,
   );
-  const readRoutingAccountInflight = async (
-    providerId: string,
-    tenantId: string | null,
-  ): Promise<readonly { accountId: string; inflight: number }[]> => {
-    if (providerId === "" || tenantId === null) return [];
-    const accounts = await new DrizzleProviderCatalogStore(db, {
-      telemetryBuffer,
-      bundledModelCatalog: bundledCatalog,
-      providerRegistry: registry,
-      outboundFetchFor: async () => ({ fetch: networkBindingFactory.fetch(undefined, tenantId) }),
-      snapshotInvalidator: snapshotService,
-    }).listAccounts(tenantId, providerId);
-    const owned = new Set(accounts.map((account) => account.id));
-    // Scoped read: only the provider's own candidates for this tenant are
-    // queried, so the console read costs one exact MGET over the accounts it
-    // is about to report on — not a fleet-wide `KEYS` scan whose cost is the
-    // size of every bucket every process ever wrote.
-    const routeSnapshot = await snapshotService.getSnapshot();
-    const ownedCandidates = routeSnapshot.candidates.filter(
-      (candidate) =>
-        candidate.provider_id === providerId &&
-        candidate.provider_account_id !== undefined &&
-        owned.has(candidate.provider_account_id),
-    );
-    const snapshot = await routingEngine.accountInflightSnapshot(ownedCandidates);
-    const totals = new Map<string, number>();
-    for (const [bucket, count] of snapshot) {
-      const accountId = bucket.slice(bucket.lastIndexOf(":") + 1);
-      if (!owned.has(accountId)) continue;
-      totals.set(accountId, (totals.get(accountId) ?? 0) + count);
-    }
-    return [...totals].map(([accountId, inflight]) => ({ accountId, inflight }));
-  };
   // Peer processes' settings mutations arrive here. Subscribed once for the
   // process: the revision counter is process-global, and the handler only
   // moves it forward.
@@ -425,6 +392,49 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
     undefined,
     poolAgentResolver,
   );
+  // The account-inflight reader the console queries. It lives after the deps
+  // it closes over (telemetry buffer, binding factory), so the closure never
+  // touches a TDZ binding; it also reuses one catalog store per tenant instead
+  // of constructing a fresh store object on every console read.
+  let lastInflightTenant = "";
+  let lastInflightStore: DrizzleProviderCatalogStore | undefined;
+  const readRoutingAccountInflight = async (
+    providerId: string,
+    tenantId: string | null,
+  ): Promise<readonly { accountId: string; inflight: number }[]> => {
+    if (providerId === "" || tenantId === null) return [];
+    if (tenantId !== lastInflightTenant || lastInflightStore === undefined) {
+      lastInflightStore = new DrizzleProviderCatalogStore(db, {
+        telemetryBuffer,
+        bundledModelCatalog: bundledCatalog,
+        providerRegistry: registry,
+        outboundFetchFor: async () => ({ fetch: networkBindingFactory.fetch(undefined, tenantId) }),
+        snapshotInvalidator: snapshotService,
+      });
+      lastInflightTenant = tenantId;
+    }
+    const accounts = await lastInflightStore.listAccounts(tenantId, providerId);
+    const owned = new Set(accounts.map((account) => account.id));
+    // Scoped read: only the provider's own candidates for this tenant are
+    // queried, so the console read costs one exact MGET over the accounts it
+    // is about to report on — not a fleet-wide `KEYS` scan whose cost is the
+    // size of every bucket every process ever wrote.
+    const routeSnapshot = await snapshotService.getSnapshot();
+    const ownedCandidates = routeSnapshot.candidates.filter(
+      (candidate) =>
+        candidate.provider_id === providerId &&
+        candidate.provider_account_id !== undefined &&
+        owned.has(candidate.provider_account_id),
+    );
+    const snapshot = await routingEngine.accountInflightSnapshot(ownedCandidates);
+    const totals = new Map<string, number>();
+    for (const [bucket, count] of snapshot) {
+      const accountId = bucket.slice(bucket.lastIndexOf(":") + 1);
+      if (!owned.has(accountId)) continue;
+      totals.set(accountId, (totals.get(accountId) ?? 0) + count);
+    }
+    return [...totals].map(([accountId, inflight]) => ({ accountId, inflight }));
+  };
   // Runtime gauges (memory + bounded-collection sizes) sampled on the shared
   // maintenance cadence. The sampler reads live sizes through closures so the
   // observability layer never holds direct references to routing/pool state.

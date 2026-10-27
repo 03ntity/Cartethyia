@@ -145,13 +145,18 @@ export class UsageFlushBuffer {
    * cost the others their delta. A key whose write fails goes back into the
    * pending map, added to anything enqueued while the flush ran, so a
    * transient failure retries instead of dropping.
+   *
+   * `force` bypasses the outage backoff. The scheduled timer never passes it —
+   * a failing database should not be probed on every tick — but `stop({flush:
+   * true})` must, or a shutdown during a backoff window would return without
+   * even attempting to persist the pending deltas.
    */
-  async flush(): Promise<void> {
+  async flush(options?: { force?: boolean }): Promise<void> {
     if (this.flushing || this.pending.size === 0) return;
     // Backing off during a sustained outage: without this the writer probed a
     // failing database on every tick, adding write load to the very overload
     // that caused the failure.
-    if (Date.now() < this.backoffUntil) return;
+    if (Date.now() < this.backoffUntil && options?.force !== true) return;
     this.flushing = true;
     const batch = new Map(this.pending);
     this.pending.clear();
@@ -210,7 +215,7 @@ export class UsageFlushBuffer {
       clearTimeout(this.timer);
       this.timer = undefined;
     }
-    if (options?.flush) await this.flush();
+    if (options?.flush) await this.flush({ force: true });
   }
 
   private arm(): void {

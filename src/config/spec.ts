@@ -137,6 +137,7 @@ export const CONFIG_SPEC = {
   // requires a loopback peer and a timing-safe token match; unset = the route
   // does not exist.
   CARTETHYIA_DRAIN_TOKEN: { kind: "optional-text" },
+  CARTETHYIA_INSTALL_ID_DIR: { kind: "optional-text" },
 
   // Network policy (trusted proxy + SSRF)
   TRUSTED_PROXY_CIDRS: { kind: "list" },

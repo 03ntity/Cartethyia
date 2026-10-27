@@ -175,6 +175,13 @@ export class ScheduledTaskRegistry {
       log.info(`[scheduled-task:${task.name}] disabled by CARTETHYIA_DISABLED_TASKS`);
       return;
     }
+    // Idempotent re-registration: a task name is a stable identity, and a
+    // second `register` for the same name (a `bun --hot` reload re-running a
+    // composition root, or a test building the app twice) must not stack a
+    // second timer for the same work. Keeping the first registration means a
+    // reload keeps one timer; registering the same name with different
+    // options is not a supported operation, so there is nothing to reconcile.
+    if (this.tasks.some((existing) => existing.name === task.name)) return;
     this.tasks.push(task);
     if (this.started) this.schedule(task);
   }

@@ -30,6 +30,7 @@ import type { RedisClient } from "../persistence/redis";
 import { CliToolMappingStore } from "./cli-tools/store";
 import { CliToolService } from "./cli-tools/service";
 import { DrizzleCliToolSecretSource } from "./cli-tools/secret-source";
+import type { ShareLinkStore } from "../persistence/stores/share-store";
 import type { ProviderRegistry } from "../providers/provider-registry";
 import type { BundledProviderCatalog } from "../providers/operations/provider-catalog-service";
 import type { ValidatedNetworkBindingFactory } from "../network/pool/resolver";
@@ -64,6 +65,12 @@ export interface ConsoleApiCompositionDeps {
   readonly networkBindingFactory: ValidatedNetworkBindingFactory;
   readonly redis: RedisClient | undefined;
   readonly oauthRefreshService: OAuthRefreshService;
+  /**
+   * Share-link store shared with the public share router, so both surfaces
+   * wrap the same table through one instance. Optional: absent means the
+   * console builds its own store from `db`.
+   */
+  readonly shareStore?: ShareLinkStore;
   readonly admissionService: Pick<ApiKeyAdmissionService, "purgeKey">;
   readonly readRoutingAccountInflight?:
     | ((
@@ -183,6 +190,7 @@ export function createConsoleRouter(deps: ConsoleApiCompositionDeps): Elysia {
     poolSelector,
     telemetryBuffer,
     ...(deps.stateStore ? { stateStore: deps.stateStore } : {}),
+    ...(deps.shareStore ? { shareStore: deps.shareStore } : {}),
     providerRegistry: deps.providerRegistry,
     bundledModelCatalog: deps.bundledModelCatalog,
     networkBindingFactory: deps.networkBindingFactory,

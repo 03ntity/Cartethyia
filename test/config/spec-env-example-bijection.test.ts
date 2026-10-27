@@ -40,6 +40,9 @@ const SPEC_ONLY_KEYS: Readonly<Record<string, true>> = {
   CARTETHYIA_RUNTIME_METRICS_INTERVAL_MS: true,
   // Advanced knobs documented in `documentation/reference/configuration.md`.
   CARTETHYIA_DISABLED_TASKS: true,
+  // Install-identity directory; only hosters who need a stable identity across
+  // restarts touch it, and the reference doc covers it.
+  CARTETHYIA_INSTALL_ID_DIR: true,
 
   CARTETHYIA_OAUTH_CALLBACK_PORT: true,
   // Provider-specific overrides. Readers live in `src/config/providers.ts`;
