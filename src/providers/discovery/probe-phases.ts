@@ -752,12 +752,19 @@ export function computeProbeVerdict(args: {
           : status !== undefined
             ? `upstream ${status}`
             : undefined;
+    // A 429 that names a free-tier usage limit is upstream quota state, not a
+    // payload or egress defect — label it as the throttle it is instead of a
+    // generic probe failure.
+    const throttled =
+      status === 429 ||
+      providerStatus === 429 ||
+      /free usage limit|rate limit|throttl/i.test(base);
     // The toast title already names the model. Repeating `provider/model via
     // wire path` in the body made the operator read the same identity twice
     // and buried the upstream sentence. The wire family stays, because that is
     // the one fact the title does not carry; the path is noise next to it.
     const tagged = statusTag !== undefined ? `${pretty} (${statusTag})` : pretty;
-    errorMessage = `${wireFamily} — ${tagged}${upstreamReq ? ` [req ${upstreamReq}]` : ""}`;
+    errorMessage = `${wireFamily} — ${throttled ? "Upstream rate limit (HTTP 429): " : ""}${tagged}${upstreamReq ? ` [req ${upstreamReq}]` : ""}`;
 
   } else if (terminal?.type === "terminal" && terminal.state !== "complete") {
     // Read the terminal's own detail before falling back to the stop reason.
