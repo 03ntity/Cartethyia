@@ -1006,6 +1006,17 @@ export class ValidatedNetworkBindingFactory {
       }
     };
   }
+  /**
+   * Selects the egress binding for one dispatch/probe. When the provider's
+   * profile opts into the native fetch and no pool routes the request, use the
+   * native validated binding; otherwise the normal pool-or-direct binding.
+   */
+  select(preferNativeFetch: boolean, networkPoolId?: string, tenantId?: string): ValidatedFetch {
+    if (preferNativeFetch && !networkPoolId) {
+      return createValidatedFetch({ policy: this.policy, fetchFn: globalThis.fetch });
+    }
+    return this.fetch(networkPoolId, tenantId);
+  }
   webSocket(networkPoolId?: string, tenantId?: string): ValidatedOutboundWebSocket {
     return async (url, headers, signal) => {
       if (url.protocol !== "wss:") {

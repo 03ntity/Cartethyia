@@ -16,6 +16,15 @@ export interface CompatibilityProfile {
   /** Whether requests to OpenAI/Anthropic-compatible upstream should send official CLI headers. Defaults to true. */
   readonly cli_identity?: boolean;
   /**
+   * Direct egress for this provider uses the runtime-native fetch instead of
+   * the Node-stack pinned agent. Some upstreams meter per client transport
+   * fingerprint — OpenCode's anonymous free tier refuses the Node agent with
+   * 429 FreeUsageLimitError while accepting the native fetch byte-for-byte
+   * (verified live). The SSRF resolve/validate pass still runs for every hop;
+   * only the socket-level address pin is traded away.
+   */
+  readonly preferNativeFetch?: boolean;
+  /**
    * Opts this provider into the gateway identity (`user-agent:
    * `Cartethyia/<version>`) instead of official CLI cloaking. Explicit only:
    * Codex/Claude-Code-shaped traffic can never take this path, and unsetting
@@ -633,6 +642,9 @@ export const PROVIDER_COMPATIBILITY_PROFILES: Record<string, CompatibilityProfil
       chat: "/inference/openai/v1/chat/completions",
       responses: "/inference/openai/v1/responses",
     },
+    // Direct egress must use the native fetch: the anonymous free tier refuses
+    // the Node-stack agent with 429 FreeUsageLimitError (verified live).
+    preferNativeFetch: true,
     model_wire_families: [{ pattern: "^muse-spark", wire_family: "responses" }],
   },
   "opencode-zen": {
@@ -640,6 +652,7 @@ export const PROVIDER_COMPATIBILITY_PROFILES: Record<string, CompatibilityProfil
       chat: "/inference/openai/v1/chat/completions",
       responses: "/inference/openai/v1/responses",
     },
+    preferNativeFetch: true,
     model_wire_families: [{ pattern: "^muse-spark", wire_family: "responses" }],
   },
   "opencode-go": {
