@@ -107,17 +107,11 @@ which one you are looking at decides the fix.
 
 ## Completing a change
 
-The gate list is `references/verification.md`; that file is the single owner.
-Backend suites live in `test/`, dashboard suites in `dashboard/test/`, run via
-`scripts/test/run.ts`. Database suites use the disposable
-`CARTETHYIA_TEST_DATABASE_URL` from the local `.env` or shell and never the dev
-database. Typecheck never proves a behavior change: exercise the affected
-path at its real boundary and report what you observed. State the limitation
-plainly when a surface is unavailable.
-
-Report done only when the goal checks out against current evidence: acceptance
-criteria, callers, exports, docs/config, known failures. Otherwise continue with
-the next useful action, or report the exact blocker and the evidence needed.
+The gate list and what each gate proves live in `references/verification.md` —
+the single owner, not repeated here. Report done only when the goal checks out
+against current evidence: acceptance criteria, callers, exports, docs/config,
+known failures. Otherwise continue with the next useful action, or report the
+exact blocker and the evidence needed.
 
 ## Skills are discovered from `.claude/skills/`
 
