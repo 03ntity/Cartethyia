@@ -28,15 +28,10 @@ import {
   adoptFirstBuddy,
   agreeBuddyAgreement,
   BUDDY_REDEEM_TIERS,
-  claimBuddyCompensation,
-  claimBuddyGift,
   claimBuddyTravel,
-  claimBuddyTrial,
   departBuddyTravel,
-  drawBuddyLottery,
   readBuddyFirstTask,
   readBuddyInfo,
-  readBuddyLotteryChances,
   readBuddyRedemption,
   readBuddyTravelStatus,
   redeemBuddyStreakTier,
@@ -56,10 +51,8 @@ import type { FetchLike } from "../providers/quota/quota-contracts";
 export const BUDDY_TASK_NAMES = [
   "buddy-streak",
   "buddy-redeem",
-  "buddy-lottery",
   "buddy-travel",
   "buddy-adopt",
-  "buddy-trial",
   "buddy-activity-report",
 ] as const;
 export type BuddyTaskName = (typeof BUDDY_TASK_NAMES)[number];
@@ -281,22 +274,6 @@ export function buddyRedeemTask(deps: BuddyTaskDeps) {
   });
 }
 
-/** Lottery: spend every chance the redeemed tier granted. */
-export function buddyLotteryTask(deps: BuddyTaskDeps) {
-  return runTask(deps, "buddy-lottery", async (call) => {
-    const chances = await readBuddyLotteryChances(call);
-    if (chances === null || chances <= 0) return null;
-    // Bounded: a large balance is still only one task slot, and burning it in a
-    // tight loop is exactly the burst the upstream risk-gates on.
-    let last: BuddyGrowthResult | null = null;
-    for (let draw = 0; draw < Math.min(chances, 10); draw += 1) {
-      last = await drawBuddyLottery(call);
-      if (last.state !== "claimed") break;
-    }
-    return last;
-  });
-}
-
 /** Cat travel: depart an idle cat, claim an arrived one. */
 export function buddyTravelTask(deps: BuddyTaskDeps) {
   return runTask(deps, "buddy-travel", async (call) => {
@@ -333,17 +310,6 @@ export function buddyAdoptTask(deps: BuddyTaskDeps) {
   });
 }
 
-/** Trial pack, newcomer gift, and activity compensation — claim if present. */
-export function buddyTrialTask(deps: BuddyTaskDeps) {
-  return runTask(deps, "buddy-trial", async (call) => {
-    const trial = await claimBuddyTrial(call);
-    // The gift and the compensation are independent once-per-account claims;
-    // both answer a business error once taken, which is not a failure here.
-    await claimBuddyGift(call);
-    await claimBuddyCompensation(call);
-    return trial;
-  });
-}
 /**
  * Growth-activity report: the `/v2/report` batch that lights the login streak and
  * scores the daily growth event.

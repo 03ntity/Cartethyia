@@ -55,11 +55,9 @@ import { dailyCheckinEgressForPass } from "../workers/daily-checkin";
 import {
   buddyAdoptTask,
   buddyActivityReportTask,
-  buddyLotteryTask,
   buddyRedeemTask,
   buddyStreakTask,
   buddyTravelTask,
-  buddyTrialTask,
   syncBuddyUsage,
 } from "../workers/buddy-growth-tasks";
 import { createAccountSecretResolver } from "../providers/operations/provider-credential-service";
@@ -613,12 +611,6 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
     run: () => buddyRedeemTask(buddyTaskDeps),
   });
   scheduledTasks.register({
-    name: "buddy-lottery",
-    intervalMs: 24 * 60 * 60_000,
-    initialDelayMs: 11 * 60_000,
-    run: () => buddyLotteryTask(buddyTaskDeps),
-  });
-  scheduledTasks.register({
     name: "buddy-travel",
     intervalMs: 24 * 60 * 60_000,
     initialDelayMs: 14 * 60_000,
@@ -629,12 +621,6 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
     intervalMs: 24 * 60 * 60_000,
     initialDelayMs: 17 * 60_000,
     run: () => buddyAdoptTask(buddyTaskDeps),
-  });
-  scheduledTasks.register({
-    name: "buddy-trial",
-    intervalMs: 24 * 60 * 60_000,
-    initialDelayMs: 20 * 60_000,
-    run: () => buddyTrialTask(buddyTaskDeps),
   });
   // Growth-activity report: the `/v2/report` batch that lights the login streak
   // and scores the daily growth event. Once a day with its own ledger — it used

@@ -28,21 +28,16 @@ import {
   adoptFirstBuddy,
   agreeBuddyAgreement,
   claimBuddyTravel,
-  claimBuddyTrial,
-  claimBuddyGift,
   departBuddyTravel,
-  drawBuddyLottery,
   redeemBuddyStreakTier,
   useBuddyMakeupCard,
 } from "../../src/providers/integrations/buddy/buddy-growth-shared";
 import {
   buddyAdoptTask,
   buddyDayKey,
-  buddyLotteryTask,
   buddyRedeemTask,
   buddyStreakTask,
   buddyTravelTask,
-  buddyTrialTask,
   type BuddyTaskDeps,
 } from "../../src/workers/buddy-growth-tasks";
 import type { FetchLike } from "../../src/providers/quota/quota-contracts";
@@ -122,22 +117,6 @@ describe("the growth endpoints — request shape", () => {
     expect(result.error).toBeNull();
   });
 
-  test("lottery draws with its own fresh token", async () => {
-    const { fetcher, calls } = recording(() =>
-      ok({ code: 0, data: { prize_code: "p1", prize_name: "Credits", prize_type: "credit", credit_amount: 10 } }),
-    );
-    const result = await drawBuddyLottery(withFetcher(fetcher));
-    expect(result.state).toBe("claimed");
-    expect(calls[0]!.url).toContain("/activity/growth/lottery/draw");
-    expect(String(calls[0]!.body?.["client_token"])).toMatch(/^draw-[0-9a-f-]{36}$/);
-  });
-
-  test("lottery with no chances is a normal state", async () => {
-    const { fetcher } = recording(() => err(400, 0, "insufficient chances"));
-    const result = await drawBuddyLottery(withFetcher(fetcher));
-    expect(result.state).toBe("not_eligible");
-  });
-
   test("makeup posts the target date only when yesterday was missed", async () => {
     // Yesterday scored zero and a card is available → one spend.
     const { fetcher, calls } = recording((seen) => {
@@ -191,29 +170,6 @@ describe("the growth endpoints — request shape", () => {
     const result = await adoptFirstBuddy(withFetcher(fetcher));
     expect(result.state).toBe("not_eligible");
     expect(result.error).toBeNull();
-  });
-
-  test("trial business code 14051 is already claimed", async () => {
-    const { fetcher } = recording(() => ok({ code: 14051, msg: "already claimed" }));
-    const result = await claimBuddyTrial(withFetcher(fetcher));
-    expect(result.state).toBe("already");
-    expect(result.error).toBeNull();
-  });
-
-  test("a host that does not serve the trial endpoint is skipped, not failed", async () => {
-    // The international sites do not serve all of these; a 404 is a routing fact
-    // about the endpoint, and must never read as an account problem.
-    const { fetcher } = recording(() => new Response("not found", { status: 404 }));
-    const result = await claimBuddyTrial(withFetcher(fetcher));
-    expect(result.state).toBe("skipped");
-    expect(result.error).toBeNull();
-  });
-
-  test("gift and compensation claim-if-present, and a business error is not a failure", async () => {
-    const { fetcher } = recording(() => ok({ code: 14000, msg: "already claimed" }));
-    const gift = await claimBuddyGift(withFetcher(fetcher));
-    expect(gift.state).toBe("already");
-    expect(gift.error).toBeNull();
   });
 
   test("a transport failure is the only thing that reports an error", async () => {
@@ -297,21 +253,12 @@ describe("the day marker — one claim per account per task", () => {
     const deps = taskDeps(db, fetcher);
     await buddyTravelTask(deps);
     await buddyAdoptTask(deps);
-    await buddyLotteryTask(deps);
     const tasks = (
       sqlite.prepare("SELECT task FROM buddy_task_ledger ORDER BY task").all() as Array<{ task: string }>
     ).map((row) => row.task);
-    expect(tasks).toEqual(["buddy-adopt", "buddy-lottery", "buddy-travel"]);
+    expect(tasks).toEqual(["buddy-adopt", "buddy-travel"]);
     sqlite.close();
   });
 
-  test("an endpoint that errors still settles the day, so a pass cannot hammer it", async () => {
-    const { db, sqlite } = await realDb();
-    const { fetcher, calls } = recording(() => new Response("boom", { status: 500 }));
-    const deps = taskDeps(db, fetcher);
-    await buddyTrialTask(deps);
-    await buddyTrialTask(deps);
-    expect(calls).toHaveLength(3);
-    sqlite.close();
-  });
+
 });

@@ -18,10 +18,8 @@ import { ScheduledTaskRegistry } from "../../src/workers/scheduler";
 const REGISTERED = [
   "buddy-streak",
   "buddy-redeem",
-  "buddy-lottery",
   "buddy-travel",
   "buddy-adopt",
-  "buddy-trial",
 ];
 
 describe("the buddy growth tasks are individually switchable", () => {
@@ -63,8 +61,6 @@ describe("the buddy growth tasks are individually switchable", () => {
     expect(runs["buddy-streak"]).toBeUndefined();
     expect(runs["buddy-travel"]).toBeUndefined();
     expect(runs["buddy-redeem"]).toBeGreaterThan(0);
-    expect(runs["buddy-lottery"]).toBeGreaterThan(0);
     expect(runs["buddy-adopt"]).toBeGreaterThan(0);
-    expect(runs["buddy-trial"]).toBeGreaterThan(0);
   });
 });

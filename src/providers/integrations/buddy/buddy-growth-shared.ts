@@ -337,35 +337,6 @@ export async function redeemBuddyStreakTier(
 // 3. Streak lottery
 // ---------------------------------------------------------------------------
 
-const LOTTERY_CHANCES_PATH = "/activity/growth/lottery/chances";
-const LOTTERY_DRAW_PATH = "/activity/growth/lottery/draw";
-
-/** Remaining draw chances granted by a redeemed tier. */
-export async function readBuddyLotteryChances(
-  options: BuddyGrowthCall,
-): Promise<number | null> {
-  const reply = await call(options, "GET", LOTTERY_CHANCES_PATH);
-  if (!reply.ok || reply.data === null) return null;
-  const value = Number(reply.data["balance"]);
-  return Number.isFinite(value) ? value : null;
-}
-
-/**
- * Draws once. A fresh `client_token` per draw: reusing one lets the upstream
- * treat the draw as a duplicate and swallow it.
- */
-export async function drawBuddyLottery(
-  options: BuddyGrowthCall,
-): Promise<BuddyGrowthResult> {
-  const reply = await call(options, "POST", LOTTERY_DRAW_PATH, {
-    client_token: clientToken(options, "draw"),
-  });
-  if (refused(reply, 400, ["insufficient", "disabled", "no chance", "未开启"])) {
-    return { state: "not_eligible", error: null, credit: null };
-  }
-  return done(reply);
-}
-
 // ---------------------------------------------------------------------------
 // 4. Cat travel
 // ---------------------------------------------------------------------------
@@ -523,56 +494,3 @@ export async function adoptFirstBuddy(
   return done(reply);
 }
 
-// ---------------------------------------------------------------------------
-// 6. Trial gift pack + gift/compensation claims
-// ---------------------------------------------------------------------------
-
-const TRIAL_PATH = "/billing/ide/trial";
-const GIFT_PATH = "/billing/meter/claim-gift";
-const COMPENSATION_PATH = "/billing/meter/claim-compensation";
-/** "Already claimed" on the trial pack. */
-const TRIAL_ALREADY_CODE = 14051;
-
-/**
- * Claims the one-off trial credit pack.
- *
- * International only: the reference reports the CN hosts do not serve this
- * endpoint at all, and a 404 there is a `skip`, not a failure.
- */
-export async function claimBuddyTrial(
-  options: BuddyGrowthCall,
-): Promise<BuddyGrowthResult> {
-  const reply = await call(options, "POST", TRIAL_PATH, {});
-  if (coded(reply, TRIAL_ALREADY_CODE) || refused(reply, 400, ["14051"])) {
-    return { state: "already", error: null, credit: null };
-  }
-  // Not served on this host at all — a 404/405 here is a routing fact, not an
-  // account problem.
-  if (reply.status === 404 || reply.status === 405) {
-    return { state: "skipped", error: null, credit: null };
-  }
-  return done(reply);
-}
-
-/**
- * Claims the newcomer gift, if one is present.
- *
- * Once per account; a business error afterwards is the normal "already claimed"
- * answer and is never a failure.
- */
-export async function claimBuddyGift(
-  options: BuddyGrowthCall,
-): Promise<BuddyGrowthResult> {
-  const reply = await call(options, "POST", GIFT_PATH, {});
-  if (!reply.ok) return { state: "already", error: null, credit: null };
-  return done(reply);
-}
-
-/** Claims an activity compensation, if one is present. Same once-only semantics. */
-export async function claimBuddyCompensation(
-  options: BuddyGrowthCall,
-): Promise<BuddyGrowthResult> {
-  const reply = await call(options, "POST", COMPENSATION_PATH, {});
-  if (!reply.ok) return { state: "already", error: null, credit: null };
-  return done(reply);
-}
