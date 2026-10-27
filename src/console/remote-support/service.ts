@@ -186,9 +186,59 @@ async function waitForUrl(dir: string, tool: RemoteSupportTool): Promise<string 
  * live hostname comes from the daemon's own status. The JSON shape has drifted
  * across releases (`DNSName` at the root in some, nested under `Self` in
  * others), so both locations are probed and the first hit wins.
+ *
+ * `status` is probed as well as `serve status`: the latter answers `{}` until
+ * the node has actually joined the tailnet, which is exactly when the operator
+ * is staring at a "started" publisher with no link. `status` carries
+ * `Self.DNSName` and `BackendState` throughout, so it names the node while
+ * serve is still coming up.
  */
 function tailscaleUrlFromDaemon(): string | null {
-  const result = spawnSync("tailscale", ["serve", "status", "--json"], { encoding: "utf8", windowsHide: true });
+  const name = tailscaleDnsName();
+  return name === null ? null : `https://${name}`;
+}
+
+/**
+ * Why a publisher that started has not published an address.
+ *
+ * For Tailscale the answer is almost always that the node is not on the
+ * tailnet yet — still starting, or never logged in — and both are the
+ * operator's move, not the gateway's. Naming which one turns a dead end into
+ * something to do.
+ */
+function notReadyReason(tool: RemoteSupportTool): string {
+  if (tool !== "tailscale") return `${tool} started but has not published an address yet.`;
+  const state = spawnSync("tailscale", ["status", "--json"], { encoding: "utf8", windowsHide: true });
+  let backend: string | null = null;
+  let authUrl: string | null = null;
+  try {
+    const bag = JSON.parse(state.stdout) as Record<string, unknown>;
+    backend = typeof bag["BackendState"] === "string" ? (bag["BackendState"] as string) : null;
+    authUrl = typeof bag["AuthURL"] === "string" && (bag["AuthURL"] as string).length > 0 ? (bag["AuthURL"] as string) : null;
+  } catch {
+    // An unreadable status still leaves the generic message below.
+  }
+  if (authUrl !== null) return `Tailscale needs to be logged in. Open ${authUrl} once, then start the tunnel again.`;
+  if (backend !== null && backend !== "Running") {
+    return `Tailscale is not connected yet (state: ${backend}). Wait for it to finish starting, then start the tunnel again.`;
+  }
+  return "Tailscale has no tailnet address yet. Run `tailscale up` once, then start the tunnel again.";
+}
+
+/** This node's MagicDNS name, or `null` when the daemon has none yet. */
+function tailscaleDnsName(): string | null {
+  for (const args of [
+    ["serve", "status", "--json"],
+    ["status", "--json"],
+  ] as const) {
+    const name = dnsNameFromStatus(args);
+    if (name !== null) return name;
+  }
+  return null;
+}
+
+function dnsNameFromStatus(args: readonly string[]): string | null {
+  const result = spawnSync("tailscale", [...args], { encoding: "utf8", windowsHide: true });
   if (result.status !== 0) return null;
   let parsed: unknown;
   try {
@@ -198,12 +248,24 @@ function tailscaleUrlFromDaemon(): string | null {
   }
   const bag: Record<string, unknown> =
     typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  // Only `status` can prove the node is up — `serve status` carries no node
+  // state. A stopped node still reports its last DNS name, and publishing that
+  // as a live link is worse than publishing nothing: the operator opens an
+  // address that cannot resolve.
+  if (args[0] === "status") {
+    const self = selfOf(bag);
+    const online = self === null ? null : self["Online"];
+    if (online === false) return null;
+  }
   const direct = typeof bag["DNSName"] === "string" ? (bag["DNSName"] as string) : null;
-  const self =
-    typeof bag["Self"] === "object" && bag["Self"] !== null ? (bag["Self"] as Record<string, unknown>) : null;
+  const self = selfOf(bag);
   const nested = self && typeof self["DNSName"] === "string" ? (self["DNSName"] as string) : null;
-  const hostname = (direct ?? nested)?.trim().replace(/\/+$/, "");
-  return hostname && hostname.length > 0 ? `https://${hostname}` : null;
+  const hostname = (direct ?? nested)?.trim().replace(/\/+$/, "").replace(/\.$/, "");
+  return hostname && hostname.length > 0 ? hostname : null;
+}
+
+function selfOf(bag: Record<string, unknown>): Record<string, unknown> | null {
+  return typeof bag["Self"] === "object" && bag["Self"] !== null ? (bag["Self"] as Record<string, unknown>) : null;
 }
 
 /**
@@ -348,7 +410,14 @@ export function createRemoteSupportService(config: RemoteSupportServiceConfig): 
           installed: await detectInstalled(),
         };
       }
-      return await readStatus();
+      const status = await readStatus();
+      // A publisher that started but published no address is the state that
+      // used to look like a silent success: the UI showed the tool as active
+      // with no link and no reason. Say what is missing instead.
+      if (status.active !== null && status.url === null) {
+        return { ...status, blocker: "not_ready", message: notReadyReason(status.active) };
+      }
+      return status;
     },
 
     async stop(tool) {

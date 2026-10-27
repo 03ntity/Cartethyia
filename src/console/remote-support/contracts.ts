@@ -21,7 +21,9 @@ export type RemoteSupportTool = (typeof REMOTE_SUPPORT_TOOLS)[number];
 export type RemoteSupportBlocker =
   | "not_installed"
   | "unsupported_platform"
-  | "launch_failed";
+  | "launch_failed"
+  /** The publisher launched but has not published an address yet. */
+  | "not_ready";
 
 export interface RemoteSupportStatus {
   /** Which publisher is up, or `null` when neither is. */
