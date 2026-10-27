@@ -3,7 +3,7 @@ import {
   quotaRefreshSweep,
   type QuotaRefreshSweepDeps,
 } from "../../src/workers/quota-refresh-sweep";
-import type { QuotaRefreshTarget } from "../../src/console/quota/refresh";
+import type { QuotaRefreshTarget } from "../../src/providers/quota/refresh";
 import {
   attemptDailyGrowthPass,
   ledgerKey,

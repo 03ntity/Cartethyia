@@ -13,7 +13,7 @@
  * proof is exactly which values reach `.set()`.
  */
 import { describe, expect, test } from "bun:test";
-import { recordAccountCheck } from "../../src/console/quota/refresh";
+import { recordAccountCheck } from "../../src/providers/quota/refresh";
 import type { CartethyiaDatabase } from "../../src/persistence/db-handle";
 
 interface Captured {

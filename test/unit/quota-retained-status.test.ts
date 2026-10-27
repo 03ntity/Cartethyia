@@ -14,7 +14,7 @@
  * projection), so the proof is the status the dashboard renders.
  */
 import { describe, expect, test } from "bun:test";
-import { getCachedQuotaEntry, setCachedQuota } from "../../src/console/quota/cache";
+import { getCachedQuotaEntry, setCachedQuota } from "../../src/providers/quota/cache";
 import { toQuotaView } from "../../src/console/quota/quota-view";
 import type { ProviderQuotaResult } from "../../src/providers/quota/quota-contracts";
 

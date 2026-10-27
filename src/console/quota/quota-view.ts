@@ -1,14 +1,14 @@
 import { providerAccounts } from "../../persistence/schema";
 import type { ProviderQuotaResult } from "../../providers/quota/quota-contracts";
 import { log } from "../../observability/logger";
-import { GLOBAL_QUOTA_LENS } from "./cache";
+import { GLOBAL_QUOTA_LENS } from "../../providers/quota/cache";
 import {
   QUOTA_REFRESH_TIMEOUT_MS,
   refreshAccountQuota,
   signalFetch,
   type QuotaRefreshDeps,
   type QuotaRefreshTarget,
-} from "./refresh";
+} from "../../providers/quota/refresh";
 
 /** Shape returned for quota data on dashboard account responses. */
 export interface QuotaRefreshView {

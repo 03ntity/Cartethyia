@@ -19,12 +19,12 @@ import {
   type QuotaRefreshDeps,
   type QuotaRefreshOutcome,
   type QuotaRefreshTarget,
-} from "../console/quota/refresh";
+} from "../providers/quota/refresh";
 import {
   cachedQuotaAgeMs,
   getCachedQuotaEntries,
   type CachedQuotaEntry,
-} from "../console/quota/cache";
+} from "../providers/quota/cache";
 import { runSweep } from "./sweep-runner";
 import type { ValidatedFetch } from "../network/outbound-fetch";
 import type { ProviderId } from "../providers/provider-contracts";

@@ -21,7 +21,7 @@ import { dbDescribe } from "../helpers/database";
 import { EligibilityEvaluator, RoutingEngine } from "../../src/transport/routing/router";
 import { GatewayError } from "../../src/protocol/gateway-error";
 import type { RouteCandidate, RouteSnapshot } from "../../src/transport/routing/route-model";
-import { setCachedQuota, clearQuotaCacheForTests, debitCachedQuota } from "../../src/console/quota/cache";
+import { setCachedQuota, clearQuotaCacheForTests, debitCachedQuota } from "../../src/providers/quota/cache";
 const CHAT_BODY = { model: "placeholder", messages: [{ role: "user", content: "hi" }], stream: false };
 
 /** A minimal candidate; only the fields the evaluator reads are meaningful. */

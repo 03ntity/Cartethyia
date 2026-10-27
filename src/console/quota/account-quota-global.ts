@@ -3,7 +3,7 @@ import type { Elysia } from "elysia";
 import { and, eq, isNull } from "drizzle-orm";
 import { adminAuditLog, providerAccounts } from "../../persistence/schema";
 import { requireGlobalAdmin } from "../shared/errors";
-import { GLOBAL_QUOTA_LENS, invalidateQuotaCache } from "./cache";
+import { GLOBAL_QUOTA_LENS, invalidateQuotaCache } from "../../providers/quota/cache";
 import { invalidateCredentialCache } from "../../providers/operations/provider-credential-service";
 import {
   QUOTA_REFRESH_TIMEOUT_MS,
@@ -12,7 +12,7 @@ import {
   signalFetch,
   timeoutSignal,
   type QuotaRefreshDeps,
-} from "./refresh";
+} from "../../providers/quota/refresh";
 import { sanitizeGlobalAccount } from "./quota-view";
 import {
   ACCOUNT_STATUSES,

@@ -7,9 +7,9 @@ import {
 } from "../../src/workers/daily-checkin";
 import { quotaRefreshSweep } from "../../src/workers/quota-refresh-sweep";
 import type { QuotaRefreshSweepDeps } from "../../src/workers/quota-refresh-sweep";
-import type { QuotaRefreshTarget } from "../../src/console/quota/refresh";
+import type { QuotaRefreshTarget } from "../../src/providers/quota/refresh";
 import type { PendingCheckinRequest } from "../../src/workers/daily-checkin";
-import { GLOBAL_QUOTA_LENS, setCachedQuota } from "../../src/console/quota/cache";
+import { GLOBAL_QUOTA_LENS, setCachedQuota } from "../../src/providers/quota/cache";
 
 /**
  * A newly imported buddy account used to wait a full sweep cycle before it

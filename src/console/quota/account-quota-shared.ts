@@ -1,7 +1,7 @@
 import type { ConsoleAccessResolver } from "../auth/access";
 import type { AuditRecorder } from "../auth/audit-recorder";
 import { markClineApiKeyCredential } from "../../providers/integrations/cline/cline-quota";
-import { type QuotaRefreshDeps } from "./refresh";
+import { type QuotaRefreshDeps } from "../../providers/quota/refresh";
 import type { AccountTestEgressDeps } from "./account-test-egress";
 
 /**

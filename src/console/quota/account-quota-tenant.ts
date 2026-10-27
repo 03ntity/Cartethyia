@@ -14,7 +14,7 @@ import {
   getCachedQuotaEntries,
   getCachedQuotaEntry,
   invalidateQuotaCache,
-} from "./cache";
+} from "../../providers/quota/cache";
 import {
   QUOTA_REFRESH_TIMEOUT_MS,
   refreshAccountQuota,
@@ -22,7 +22,7 @@ import {
   timeoutSignal,
   type QuotaRefreshDeps,
   type QuotaRefreshFailureCode,
-} from "./refresh";
+} from "../../providers/quota/refresh";
 import { selectAccountTestEgress } from "./account-test-egress";
 import type { ValidatedFetch } from "../../network/outbound-fetch";
 import type { ProviderId } from "../../providers/provider-contracts";

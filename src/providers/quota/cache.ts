@@ -6,7 +6,7 @@
 // Reads the pre-envelope bare result and v2-v4 envelopes during upgrade;
 // writes use v5, which records attempt time, retained-refresh errors, and
 // forces a one-time refresh for required quota accounting metadata.
-import type { ProviderQuotaResult } from "../../providers/quota/quota-contracts";
+import type { ProviderQuotaResult } from "./quota-contracts";
 import type { RedisClient } from "../../persistence/redis";
 import { TtlCache } from "../../persistence/ttl-cache";
 import { log } from "../../observability/logger";

@@ -7,7 +7,7 @@ import {
   invalidateQuotaCache,
   setCachedQuota,
   debitCachedQuota,
-} from "../../src/console/quota/cache";
+} from "../../src/providers/quota/cache";
 import {
   InMemoryOAuthFlowStore,
   type DeviceFlowCorrelation,
