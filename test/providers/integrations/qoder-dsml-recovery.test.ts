@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { dsmlTailHold, parseDsmlToolCalls } from "../../../src/providers/integrations/qoder/qoder";
+import { dsmlTailHold, parseDsmlToolCalls, stripDsmlCloseTags } from "../../../src/providers/integrations/qoder/qoder";
 
 /**
  * The markup DeepSeek-family models write into the text stream instead of the
@@ -78,4 +78,30 @@ test("a complete tag is not held", () => {
 test("an unrelated angle bracket is not held", () => {
   expect(dsmlTailHold("use a < b here")).toBe("");
   expect(dsmlTailHold("no bracket at all")).toBe("");
+});
+
+test("leftover closing tags are stripped from the tail", () => {
+  // Seen in the thinking channel as `Let me verify.` followed by these two.
+  // They carry no `DSML` marker at all, so a parser keyed on that marker
+  // leaves them in place and the internal protocol shows to the user.
+  expect(stripDsmlCloseTags("Let me verify.\n</parameter>\n</invoke>")).toBe("Let me verify.");
+});
+
+test("a DSML-marked closing tag is stripped too", () => {
+  expect(stripDsmlCloseTags("done\n</｜DSML｜invoke>")).toBe("done");
+  expect(stripDsmlCloseTags("done</｜DSML｜parameter>")).toBe("done");
+});
+
+test("several trailing tags come off in one call", () => {
+  expect(stripDsmlCloseTags("prose</invoke></parameter></calls>")).toBe("prose");
+});
+
+test("a closing tag mid-text is left alone", () => {
+  // Only the tail is residue. A tag in the middle is real content, and the
+  // reference bridge anchors the same way for the same reason.
+  expect(stripDsmlCloseTags("a</invoke>b")).toBe("a</invoke>b");
+});
+
+test("prose with no tags is unchanged", () => {
+  expect(stripDsmlCloseTags("just thinking here")).toBe("just thinking here");
 });

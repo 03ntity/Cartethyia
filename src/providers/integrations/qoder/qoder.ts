@@ -804,6 +804,34 @@ export function dsmlTailHold(text: string): string {
   return "";
 }
 
+/**
+ * Removes leftover DSML closing tags from the tail of a text.
+ *
+ * The upstream sometimes leaks only the tail of a tool-call block — bare
+ * `</parameter>` / `</invoke>` / `</calls>` with no opening and, in the
+ * thinking channel, occasionally without the `DSML` marker at all. Those
+ * fragments are pure protocol residue: they are never natural prose, so
+ * dropping them is safe and keeps internal markup out of what the user sees.
+ *
+ * Anchored to the end, as in the reference bridge: a closing tag in the middle
+ * of a text is not this residue and stripping it would eat real prose. The
+ * caller loops, so several trailing tags come off one per pass.
+ *
+ * Mirrors `_strip_dsml_close_tail`, widened to the bare form because the
+ * thinking channel does not always carry the marker.
+ */
+const DSML_CLOSE_TAG_RE = /<\/(?:[^>]*DSML[^>]*|parameter|invoke|calls|tool_calls|function_calls)\s*>\s*$/i;
+
+export function stripDsmlCloseTags(text: string): string {
+  let previous: string | null = null;
+  let out = text.trimEnd();
+  while (previous !== out) {
+    previous = out;
+    out = out.replace(DSML_CLOSE_TAG_RE, "").trimEnd();
+  }
+  return out;
+}
+
 // Stream transformation — decode SSE, unwrap COSY envelope, map OpenAI chat chunks to CanonicalEvent
 
 function mapQoderFinishReason(raw: unknown): CanonicalStopReason | undefined {
@@ -829,6 +857,14 @@ async function* qoderBodyToCanonicalEvents(
   // straddles a frame boundary.
   let buf = "";
   let tail = "";
+  /** Calls recovered from the thinking channel, emitted if content had none. */
+  let reasonCalls: DsmlCall[] = [];
+  // The same recovery for the thinking channel. A model that plans its call
+  // inside `reasoning_content` writes the markup there instead of in `content`,
+  // so recovering only the content channel loses the call *and* leaves the
+  // tags visible in the user's thinking.
+  let reasonBuf = "";
+  let reasonTail = "";
 
   for await (const sse of decodeSseEvents(body, { signal })) {
     const sseData = sse.data;
@@ -884,11 +920,29 @@ async function* qoderBodyToCanonicalEvents(
           }
           const reasoningText = readReasoningText(delta);
           if (typeof reasoningText === "string" && reasoningText.length > 0) {
-            yield {
-              type: "content_delta",
-              sequence_number: seq++,
-              content: { kind: "reasoning", payload: null, summary: reasoningText },
-            } as CanonicalEvent;
+            const piece = reasonTail + reasoningText;
+            reasonTail = "";
+            if (reasonBuf.length === 0) {
+              const hold = dsmlTailHold(piece);
+              const body = hold.length > 0 ? piece.slice(0, piece.length - hold.length) : piece;
+              if (body.includes("DSML")) {
+                reasonBuf = body;
+                reasonTail = hold;
+                continue;
+              }
+              const visible = stripDsmlCloseTags(body);
+              if (visible.length > 0) {
+                yield {
+                  type: "content_delta",
+                  sequence_number: seq++,
+                  content: { kind: "reasoning", payload: null, summary: visible },
+                } as CanonicalEvent;
+              }
+              reasonTail = hold;
+              continue;
+            }
+            reasonBuf += piece;
+            continue;
           }
           const toolCalls = delta["tool_calls"] as Array<Record<string, unknown>> | undefined;
           if (toolCalls) {
@@ -914,14 +968,30 @@ async function* qoderBodyToCanonicalEvents(
     }
   }
   // End of stream: resolve whatever the DSML buffer collected.
+  if (reasonBuf.length > 0) {
+    const { calls, clean } = parseDsmlToolCalls(reasonBuf);
+    const visible = stripDsmlCloseTags(clean).trim();
+    if (visible.length > 0) {
+      yield {
+        type: "content_delta",
+        sequence_number: seq++,
+        content: { kind: "reasoning", payload: null, summary: visible },
+      } as CanonicalEvent;
+    }
+    // A call recovered here counts exactly like one recovered from the content
+    // channel — the two are deduplicated below, so a model that writes the
+    // block in one channel and its tail in the other still yields one call.
+    if (calls.length > 0) reasonCalls = calls;
+  }
   if (buf.length > 0) {
     const { calls, clean } = parseDsmlToolCalls(buf);
     if (calls.length > 0) {
-      if (clean.length > 0) {
+      const visible = stripDsmlCloseTags(clean).trim();
+      if (visible.length > 0) {
         yield {
           type: "content_delta",
           sequence_number: seq++,
-          content: { kind: "text", text: clean },
+          content: { kind: "text", text: visible },
         } as CanonicalEvent;
       }
       for (const call of calls) {
@@ -933,18 +1003,34 @@ async function* qoderBodyToCanonicalEvents(
           arguments_delta: call.arguments,
         } as CanonicalEvent;
       }
+      reasonCalls = [];
       // The turn ended by calling a tool, whatever the upstream reported.
       finishReason = finishReason ?? "tool_calls";
     } else {
       // Unparseable markup: emit as prose rather than dropping it, so nothing
       // the model said is lost.
-      yield {
-        type: "content_delta",
-        sequence_number: seq++,
-        content: { kind: "text", text: buf },
-      } as CanonicalEvent;
+      const visible = stripDsmlCloseTags(buf).trim();
+      if (visible.length > 0) {
+        yield {
+          type: "content_delta",
+          sequence_number: seq++,
+          content: { kind: "text", text: visible },
+        } as CanonicalEvent;
+      }
     }
   }
+  // Content carried no call of its own: whatever the thinking channel
+  // recovered is the turn's call.
+  for (const call of reasonCalls) {
+    yield {
+      type: "tool_call_delta",
+      sequence_number: seq++,
+      call_id: call.id,
+      name: call.name,
+      arguments_delta: call.arguments,
+    } as CanonicalEvent;
+  }
+  if (reasonCalls.length > 0) finishReason = finishReason ?? "tool_calls";
   if (tail.length > 0) {
     yield {
       type: "content_delta",
