@@ -19,11 +19,15 @@ import { Elysia } from "elysia";
 import { GatewayError } from "../../protocol/gateway-error";
 import { resolveProcessConcurrency } from "../../config/resources";
 import { resolveMemoryLimitBytes } from "../../observability/runtime-metrics";
+import { FALLBACK_MEMORY_LIMIT_BYTES } from "../../config/resources";
 import { fastPathname } from "../pathname";
 
 /** In-flight `/v1` requests one process will carry before refusing. */
 export const PROCESS_CONCURRENCY_CAP = resolveProcessConcurrency(
-  resolveMemoryLimitBytes() ?? 512 * 1024 * 1024,
+  // No local fallback: the resolver already falls back to the host's real
+  // memory, and duplicating a constant here would let the two drift and put
+  // the cap on a different number than the pressure check above it.
+  resolveMemoryLimitBytes() ?? FALLBACK_MEMORY_LIMIT_BYTES,
 );
 const PROCESS_CONCURRENCY_RETRY_MS = 3_000;
 

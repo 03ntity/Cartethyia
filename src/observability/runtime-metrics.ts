@@ -8,6 +8,7 @@
  * layers, keeping the observability boundary one-directional.
  */
 import { readFileSync } from "node:fs";
+import os from "node:os";
 import { metrics } from "./metrics";
 import { trackMemoryUsage } from "./performance-metrics";
 import { log } from "./logger";
@@ -66,12 +67,34 @@ const PRESSURE_GC_WINDOW_MS = 60_000;
 /** Fraction of the resolved limit at which memory pressure is reported. */
 const PRESSURE_THRESHOLD = 0.8;
 /**
- * Fallback limit used when neither an override nor a cgroup limit is
- * discoverable (native development, macOS, Windows). Without it the pressure
- * check bails and `Bun.gc` never runs, so an idle process holds its startup
- * peak forever. 512 MiB keeps reclaim active without assuming a container.
+ * Fallback limit when neither an override nor a cgroup limit is discoverable
+ * (native development, macOS, Windows).
+ *
+ * A fixed 512 MiB made every machine without a cgroup look like a 512 MiB
+ * container. On a desktop running the gateway natively that is far below what
+ * the machine has, so the pressure check fired against a number that described
+ * nothing — "RSS 430 MiB exceeds 80% of the 512 MiB limit" on a machine with
+ * gigabytes free — and the concurrency cap derived from it admitted a handful
+ * of requests while every tenant-level setting sat unreachable above it.
+ *
+ * The host's real memory is the honest stand-in. It is what the process can
+ * actually grow into here, and it is what "no container limit" means.
  */
-const DEFAULT_MEMORY_LIMIT_BYTES = 512 * 1024 * 1024;
+function defaultMemoryLimitBytes(): number {
+  try {
+    const total = os.totalmem();
+    if (Number.isFinite(total) && total > 0) return total;
+  } catch {
+    // Platform without totalmem; fall through to the last-resort constant.
+  }
+  return LAST_RESORT_MEMORY_LIMIT_BYTES;
+}
+
+/**
+ * Used only when the host's memory cannot be read at all. Deliberately large
+ * so an unmeasurable host is not treated as a small container.
+ */
+const LAST_RESORT_MEMORY_LIMIT_BYTES = 4 * 1024 * 1024 * 1024;
 /** Cooldown between idle full collections. */
 const IDLE_GC_WINDOW_MS = 5 * 60_000;
 /** RSS retained above the post-collection baseline before another idle collection runs. */
@@ -88,7 +111,7 @@ const IDLE_GC_MIN_GROWTH_BYTES = 32 * 1024 * 1024;
 export function resolveMemoryLimitBytes(): number | undefined {
   const override = resolveMemoryLimitOverrideBytes();
   if (override !== undefined) return override;
-  if (process.platform !== "linux") return DEFAULT_MEMORY_LIMIT_BYTES;
+  if (process.platform !== "linux") return defaultMemoryLimitBytes();
   for (const path of [
     "/sys/fs/cgroup/memory.max",
     "/sys/fs/cgroup/memory/memory.limit_in_bytes",
@@ -103,7 +126,7 @@ export function resolveMemoryLimitBytes(): number | undefined {
       // File absent (cgroup v1 vs v2) or unreadable — try the next source.
     }
   }
-  return DEFAULT_MEMORY_LIMIT_BYTES;
+  return defaultMemoryLimitBytes();
 }
 
 /** Samples process memory and bounded-collection sizes into the metric registry. */
