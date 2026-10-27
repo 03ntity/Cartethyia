@@ -118,6 +118,16 @@ function shutdown(signal: "SIGINT" | "SIGTERM", reason: "SIGINT" | "SIGTERM" | "
 }
 
 if (boot) {
+  // `bun --hot` re-runs this module against the cached boot object; stop the
+  // previous listener before rebinding so a reload does not stack two servers
+  // on the same port.
+  if (boot.server && typeof boot.server.stop === "function") {
+    try {
+      boot.server.stop();
+    } catch {
+      // Best-effort on reload; the bind below would fail loudly if it stuck.
+    }
+  }
   boot.server = app.listen(
     {
       port,

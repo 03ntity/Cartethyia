@@ -342,6 +342,10 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
   scheduledTasks.register({
     name: "account-health-sweep",
     intervalMs: 30_000,
+    // Offsets the pass from lease-sweep and runtime-metrics, which share the
+    // same cadence: under the registry's single-flight gate, aligned ticks
+    // make the 30s tasks skip each other when one runs long.
+    initialDelayMs: 5_000,
     // Recovers cooldowns deployment-wide and invalidates the shared snapshot.
     shared: true,
     run: async () => {
