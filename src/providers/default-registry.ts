@@ -555,6 +555,21 @@ export const PROVIDER_CAPABILITIES = {
       });
     },
   },
+  inception: {
+    // Chat only: Mercury 3 / 2.5 / 2 answer the OpenAI-compatible chat wire.
+    // The base is version-rooted (`/v1`), so the path is declared below it.
+    endpointPathsByWireFamily: { chat: "/chat/completions" },
+    loadAdapter: async () => createApiKeyAdapter((await import("./integrations/inception/provider")).INCEPTION_SPEC),
+    loadModels: async () => (await import("./integrations/inception/provider")).INCEPTION_MODELS,
+    // The listing is bearer-authenticated and the whole provider is pinned to
+    // its free allowance, so every fetched row is stamped free-tier.
+    loadModelDiscovery: async () => async ({ baseUrl, credential, fetcher }) =>
+      (await import("./integrations/inception/provider")).discoverInceptionFreeModels({
+        baseUrl,
+        ...(typeof credential === "string" && credential.length > 0 ? { credential } : {}),
+        ...(fetcher === undefined ? {} : { fetcher }),
+      }),
+  },
   openrouter: {
     loadAdapter: async () => createApiKeyAdapter((await import("./integrations/openrouter/provider")).OPENROUTER_SPEC),
     // One dynamic import for both halves: this registry lazy-loads every

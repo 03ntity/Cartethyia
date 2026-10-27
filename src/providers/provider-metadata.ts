@@ -332,6 +332,14 @@ const RAW_BUNDLED_PROVIDER_METADATA = [
   },
   { id: "bai", displayName: "B.AI", baseUrl: "https://api.b.ai/v1", credentialUrl: "https://b.ai" },
   {
+    id: "inception",
+    displayName: "Inception Labs",
+    // Version-rooted: the chat wire lives below the `/v1` root, so the
+    // declared path is `/chat/completions` (same rule as Groq/DeepInfra).
+    baseUrl: "https://api.inceptionlabs.ai/v1",
+    credentialUrl: "https://platform.inceptionlabs.ai/dashboard/api-keys",
+  },
+  {
     id: "larprouter",
     displayName: "LarRouter",
     baseUrl: "https://larprouter.com/v1",

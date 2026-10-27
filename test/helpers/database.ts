@@ -53,6 +53,16 @@ if (!testRedisUrl) {
 if (testDatabaseUrl) {
   process.env.CARTETHYIA_TEST_DATABASE_ISOLATED = "1";
   process.env.DATABASE_URL = testDatabaseUrl;
+  // The PostgreSQL suites exercise the real gateway handle (`getDb()`), which
+  // boots whichever backend `CARTETHYIA_DB_MODE` names. A local `.env` ships
+  // `lite`, so a bare `bun test` ran those suites with a lite-mode process
+  // while their fixtures wrote to the isolated Postgres — `getDb()` then
+  // threw "Lite database is not booted" the first time a suite touched the
+  // global handle. `scripts/test/run.ts` sets Full mode for exactly this
+  // reason; the helper mirrors it so a direct `bun test` is equivalent. A
+  // suite that deliberately wants the embedded backend overrides the mode
+  // before booting (`test/persistence/usage-flush.test.ts` does).
+  process.env.CARTETHYIA_DB_MODE = "full";
 }
 
 /** One pool per test process, migrated once. */
