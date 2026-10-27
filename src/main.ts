@@ -149,6 +149,12 @@ if (boot) {
   // the lease sweep and the health sweep should not run before the listener
   // exists to serve traffic.
   boot.deps.scheduledTasks.start();
+  // Warm the route snapshot before the first request lands: the first /v1/*
+  // request otherwise pays the full catalog build synchronously (ten+ SELECTs).
+  // A failure here is a soft miss — the next request rebuilds as before.
+  void boot.deps.snapshotService.getSnapshot().catch((error: unknown) => {
+    log.warn("[startup] initial route snapshot warm failed", error as Error);
+  });
   if (!globalThis.__cartethyiaSignalsRegistered) {
     globalThis.__cartethyiaSignalsRegistered = true;
     process.on("SIGINT", () => shutdown("SIGINT"));

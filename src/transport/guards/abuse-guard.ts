@@ -69,6 +69,16 @@ export function createIpAbuseProtectionMiddleware(deps: {
       throw peerAddressUnavailableError();
     const address = resolveClientIdentity(request, deps.trustedProxyBoundary, peer);
     const state = deps.stateStore.get(request);
+    // The identity middleware runs later in the plugin chain and resolves the
+    // same value from the same boundary; stashing it here means the request
+    // pays for one resolveClientIdentity instead of two, and the middleware can
+    // skip its own when it finds the stash.
+    if (state !== undefined) {
+      state.clientIdentity ??= {
+        address,
+        source: address === peer ? "tcp-peer" : "trusted-forwarded-header",
+      };
+    }
     try {
       await deps.ipAbuseProtection.checkBeforeAccess({
         identity: {

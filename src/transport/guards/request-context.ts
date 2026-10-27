@@ -77,17 +77,25 @@ export function createClientIdentityMiddleware(deps: {
   // pipeline position still guarantees this executes before IP-abuse checks.
   return new Elysia()
     .beforeHandle(({ request, server }) => {
-      const peer = deps.resolvePeerAddress
-        ? deps.resolvePeerAddress(request)
-        : (server?.requestIP(request)?.address ?? null);
-      if (!peer)
-        throw peerAddressUnavailableError();
-      const address = resolveClientIdentity(request, deps.trustedProxyBoundary, peer);
       const state = deps.stateStore.require(request);
-      state.clientIdentity = {
-        address,
-        source: address === peer ? "tcp-peer" : "trusted-forwarded-header",
-      };
+      // The IP-abuse root hook already resolved the same identity from the
+      // same boundary (and only for /v1/*, exactly these routes); reuse it so
+      // a request pays one resolveClientIdentity instead of two. Fall back to
+      // resolving here when running in a reduced composition without the
+      // abuse guard.
+      if (!state.clientIdentity) {
+        const peer = deps.resolvePeerAddress
+          ? deps.resolvePeerAddress(request)
+          : (server?.requestIP(request)?.address ?? null);
+        if (!peer)
+          throw peerAddressUnavailableError();
+        const address = resolveClientIdentity(request, deps.trustedProxyBoundary, peer);
+        state.clientIdentity = {
+          address,
+          source: address === peer ? "tcp-peer" : "trusted-forwarded-header",
+        };
+      }
+      const address = state.clientIdentity.address;
       const path = state.ingressPath;
       if (!isProxyDispatchRoute(path)) return;
       // The ingress policy stage already decoded the body, so the client's
