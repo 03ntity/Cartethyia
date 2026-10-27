@@ -480,6 +480,48 @@ function qoderRequestedMaxTokens(request: CanonicalRequest, modelConfig: QoderMo
 }
 
 /**
+ * Whether this model needs the prior turn's reasoning echoed back.
+ *
+ * The DeepSeek family ties multi-turn consistency to `reasoning_content`: an
+ * assistant turn that thought must be replayed with that field or the upstream
+ * refuses the whole history. The upstream reference bridge keeps it for exactly
+ * these models and drops it as noise for every other one
+ * (`keep_reasoning=is_deepseek_model(...)`, and `reasoning_content` in
+ * `NOISE_KEYS` otherwise), and notes the symptom when it is missed: occasional
+ * failures that sometimes pass on retry.
+ *
+ * Matched by the upstream key and by the display name, because a caller may
+ * name either — the reference warns that matching only the "deepseek" prefix
+ * missed every request that used the key.
+ */
+function qoderKeepsReasoning(modelId: string): boolean {
+  const key = modelId.trim().toLowerCase();
+  if (key === "dmodel" || key === "dfmodel") return true;
+  return key.startsWith("deepseek");
+}
+
+/**
+ * The `reasoning_content` field for an assistant turn, when one is needed.
+ *
+ * Presence, not length, decides: a client that already knows the rule sends
+ * `""` on a thinking turn whose text is not readable back, and dropping that
+ * empty string re-triggers the complaint it was sent to avoid. An assistant
+ * turn with no reasoning at all gains nothing, so nothing is fabricated.
+ */
+function qoderReasoningEcho(
+  message: { content: readonly ContentPart[] },
+  modelId: string,
+): { reasoning_content: string } | Record<string, never> {
+  if (!qoderKeepsReasoning(modelId)) return {};
+  const reasoning = message.content.filter((part) => part.kind === "reasoning");
+  if (reasoning.length === 0) return {};
+  const text = reasoning
+    .map((part) => (part.kind === "reasoning" ? (part.summary ?? part.payload ?? "") : ""))
+    .join("");
+  return { reasoning_content: text };
+}
+
+/**
  * The tool arguments as the object the `tool_use` block expects.
  *
  * The canonical form keeps them as the raw JSON text the caller sent, which is
@@ -575,6 +617,7 @@ export function buildQoderRequest(
     // rejected the whole transcript: "Messages with role 'tool' must be a
     // response to a preceding message with 'tool_calls'".
     const calls = m.content.filter((part) => part.kind === "toolCall");
+    const reasoningEcho = qoderReasoningEcho(m, modelId);
     if (calls.length > 0) {
       const toolUse = calls.map((part) => ({
         type: "tool_use",
@@ -591,6 +634,7 @@ export function buildQoderRequest(
         role: "assistant",
         content: flat,
         contents,
+        ...reasoningEcho,
         tool_calls: calls.map((part) => ({
           id: part.call_id,
           type: "function",
@@ -603,10 +647,12 @@ export function buildQoderRequest(
       continue;
     }
     const flat = flattenCanonicalContent(m.content);
+    const role = m.role === "assistant" ? "assistant" : "user";
     qoderMessages.push({
-      role: m.role === "assistant" ? "assistant" : "user",
+      role,
       content: flat,
       contents: [{ type: "text", text: flat }],
+      ...(role === "assistant" ? qoderReasoningEcho(m, modelId) : {}),
     });
   }
   const latestUserMessage = [...qoderMessages].reverse().find((m) => m["role"] === "user");
