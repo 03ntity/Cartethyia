@@ -479,6 +479,32 @@ function qoderRequestedMaxTokens(request: CanonicalRequest, modelConfig: QoderMo
   return typeof requested === "number" && requested > 0 ? Math.min(requested, configured) : configured;
 }
 
+/**
+ * The tool arguments as the object the `tool_use` block expects.
+ *
+ * The canonical form keeps them as the raw JSON text the caller sent, which is
+ * what a chat-completions `tool_calls` entry holds. A `tool_use` block wants
+ * structured input, so the text is parsed back.
+ *
+ * The fallbacks mirror the upstream reference bridge rather than inventing
+ * shapes: unparseable text becomes `{}` and a non-object becomes `{value}`.
+ * Smuggling the raw text through instead would emit an argument shape the
+ * upstream has never seen for this field.
+ */
+function qoderToolInput(argumentsText: string): Record<string, unknown> {
+  const trimmed = argumentsText.trim();
+  if (trimmed.length === 0) return {};
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) return { value: parsed };
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : { value: parsed };
+  } catch {
+    return {};
+  }
+}
+
 export function buildQoderRequest(
   modelId: string,
   request: CanonicalRequest,
@@ -529,13 +555,50 @@ export function buildQoderRequest(
           tool_call_id: block.call_id,
         });
       }
+      // Text that shared the turn with a result is emitted after it, minus the
+      // result itself. Re-emitting the result's own text here was doubling
+      // every tool answer: the `tool` turn above and a `user` turn with the
+      // same content, which doubled the payload for no reason.
       const remaining = m.content.filter((part) => part.kind !== "toolResult");
-      if (remaining.length === 0) continue;
       const flat = flattenCanonicalContent(remaining);
+      if (flat.length === 0) continue;
       qoderMessages.push({
         role: "user",
         content: flat,
         contents: [{ type: "text", text: flat }],
+      });
+      continue;
+    }
+    // An assistant turn that called tools must carry the calls, not just its
+    // text. Falling through to the text-only emit dropped them, so the payload
+    // arrived as a `tool` result with no preceding call and the upstream
+    // rejected the whole transcript: "Messages with role 'tool' must be a
+    // response to a preceding message with 'tool_calls'".
+    const calls = m.content.filter((part) => part.kind === "toolCall");
+    if (calls.length > 0) {
+      const toolUse = calls.map((part) => ({
+        type: "tool_use",
+        id: part.call_id,
+        name: part.name,
+        input: qoderToolInput(typeof part.arguments === "string" ? part.arguments : ""),
+      }));
+      const textParts = m.content.filter((part) => part.kind !== "toolCall");
+      const flat = flattenCanonicalContent(textParts);
+      const contents: Array<Record<string, unknown>> = [];
+      if (flat.length > 0) contents.push({ type: "text", text: flat });
+      contents.push(...toolUse);
+      qoderMessages.push({
+        role: "assistant",
+        content: flat,
+        contents,
+        tool_calls: calls.map((part) => ({
+          id: part.call_id,
+          type: "function",
+          function: {
+            name: part.name,
+            arguments: typeof part.arguments === "string" ? part.arguments : "",
+          },
+        })),
       });
       continue;
     }
