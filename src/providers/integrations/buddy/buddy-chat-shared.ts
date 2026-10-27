@@ -28,7 +28,7 @@ import { BUDDY_CN_EFFORTS, BUDDY_INTL_EFFORTS, BUDDY_SHARED_RAW } from "./buddy-
 // raised effort still answers inside a budget sized for the lower one. It is
 // read inside the function below — never at module init — so the cycle with
 // cn-provider (which imports this module) resolves before any call.
-import { CODEBUDDY_CN_RAW } from "./codebuddy/cn-provider";
+import { CODEBUDDY_CN_RAW } from "./codebuddy/cn-catalog";
 import { buddyAccountUid } from "./buddy-oauth-shared";
 import type { ProviderDispatchContext } from "../../provider-contracts";
 
