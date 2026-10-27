@@ -8,6 +8,34 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.6.7] - 2026-10-27
+
+### Fixed
+
+- **One stalled lease no longer stops every scheduled task.** `runOnce`
+  latched the process-wide `busy` gate and then awaited `lease.tryAcquire`
+  with no bound. A lease store that never answered left `busy` set forever,
+  and because the gate is shared across every task name rather than
+  per-name, every later tick of every task returned at it: the whole
+  registry stopped running. That included `inflight-backstop`, whose entire
+  job is to clean up after something that never finishes — so one stalled
+  acquisition is what let stale in-flights sit until restart.
+
+  The acquisition is bounded at 5s and treated as a skip, which is what
+  `tryAcquire` already documented without enforcing. Skipping releases the
+  gate, and every path that latches it without running the task now goes
+  through one `releaseGate`.
+
+- **A banned buddy account is disabled again.** The ban detector matched on
+  the message, but the provider's message for a ban is the same two words it
+  uses for a refused request: "request illegal". The actual verdict ("Your
+  account has been restricted due to unusual activity") lives in
+  `displayMsg`, which the message extractor never reads, so the ban was
+  never detected: no `policy_blocked_banned`, no disable, and the account
+  kept serving. The body is now read too — from `upstreamBody` or
+  `details.raw` — including each language of the `displayMsg` map and an
+  appeal-bearing `actions` entry.
+
 ## [2.6.6] - 2026-10-27
 
 ### Fixed
