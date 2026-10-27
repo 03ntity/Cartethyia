@@ -11,7 +11,14 @@ import {
   upstreamErrorIdentifier,
 } from "../../../transport/failure-policy";
 import { GatewayError } from "../../../protocol/gateway-error";
-import type { CanonicalEvent, CanonicalRequest, CanonicalStopReason, ContentPart } from "../../../protocol/canonical-model";
+import type {
+  CanonicalEvent,
+  CanonicalRequest,
+  CanonicalStopReason,
+  ContentPart,
+  ToolChoice,
+  ToolDefinition,
+} from "../../../protocol/canonical-model";
 import { toolResultParts } from "../../../protocol/canonical-model";
 import { decodeSseEvents } from "../../../protocol/sse-decoder";
 import { usageFromProvider, readReasoningText } from "../../provider-usage";
@@ -533,6 +540,55 @@ function qoderReasoningEcho(
  * Smuggling the raw text through instead would emit an argument shape the
  * upstream has never seen for this field.
  */
+/**
+ * Projects the canonical tools onto Qoder's chat-completions `tools` array.
+ *
+ * Without this the upstream is never told a tool exists, so a model that wants
+ * one improvises markup in its prose (`<Read file_path="..." />`) instead of
+ * emitting a structured call — the call is then neither runnable nor
+ * recoverable, because it never was a call on either side.
+ *
+ * Only `function` tools are representable upstream. Anything else is dropped
+ * rather than forwarded: Qoder rejects an unknown variant during
+ * deserialization and fails the whole turn, which is worse than omitting a
+ * tool the model could not have used anyway.
+ */
+function qoderTools(
+  tools: readonly ToolDefinition[] | undefined,
+): Array<Record<string, unknown>> {
+  if (!tools || tools.length === 0) return [];
+  const out: Array<Record<string, unknown>> = [];
+  for (const tool of tools) {
+    if (tool.tool_type !== undefined && tool.tool_type !== "function") continue;
+    out.push({
+      type: "function",
+      function: {
+        name: tool.name,
+        ...(tool.description === undefined ? {} : { description: tool.description }),
+        parameters: tool.jsonSchema ?? { type: "object", properties: {} },
+        ...(tool.strict === undefined ? {} : { strict: tool.strict }),
+      },
+    });
+  }
+  return out;
+}
+
+/**
+ * Projects the canonical tool choice onto the upstream's field.
+ *
+ * `allowed_tools` has no chat-completions equivalent, so it collapses to the
+ * direction it already names rather than being dropped: a caller that asked for
+ * `required` must not silently get `auto`.
+ */
+function qoderToolChoice(choice: ToolChoice | undefined): unknown {
+  if (choice === undefined) return undefined;
+  if (typeof choice === "string") return choice;
+  if (choice.type === "tool" || choice.type === "custom") {
+    return { type: "function", function: { name: choice.name } };
+  }
+  return choice.mode;
+}
+
 function qoderToolInput(argumentsText: string): Record<string, unknown> {
   const trimmed = argumentsText.trim();
   if (trimmed.length === 0) return {};
@@ -700,6 +756,18 @@ export function buildQoderRequest(
     },
     messages: qoderMessages,
     max_tokens: maxTokens,
+    ...(() => {
+      const tools = qoderTools(request.tools);
+      if (tools.length === 0) return {};
+      const choice = qoderToolChoice(request.tool_choice);
+      return {
+        tools,
+        ...(choice === undefined ? {} : { tool_choice: choice }),
+        // Parallel calls are the upstream default; say so explicitly so a
+        // caller that expected them is not served serial behaviour.
+        parallel_tool_calls: true,
+      };
+    })(),
   };
 }
 
