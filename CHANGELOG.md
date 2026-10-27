@@ -8,6 +8,27 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.6.5] - 2026-10-27
+
+### Fixed
+
+- **A synchronous GC ran while requests were in flight.** `main.ts` passed
+  every dependency to `createGatewayApp` except the runtime sampler, so the
+  app's `bindInFlight` call no-op'd on an optional dependency and the sampler
+  kept its `() => 0` placeholder. `cartethyia_process_in_flight` reported zero
+  forever while `proxy_in_flight` — the registry the placeholder was meant to
+  read — reported real flights.
+
+  `checkIdleReclaim` gates on `inFlightSource() > 0`, so a permanently-zero
+  source told the gateway nothing was in flight and let it run a synchronous
+  `Bun.gc(true)` under load. A synchronous collection stalls concurrent
+  requests: latency pinned to the request deadline and clients cancelled en
+  masse with 499.
+
+  Both classes behaved exactly as written — only the wire between them was
+  missing — so it is pinned by a composition test that reads `main.ts` and
+  requires the field.
+
 ## [2.6.4] - 2026-10-27
 
 ### Fixed
