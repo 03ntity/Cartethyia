@@ -8,6 +8,33 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.6.6] - 2026-10-27
+
+### Fixed
+
+- **Hide to tray no longer exits while the gateway is still serving.** The
+  tray polled `/health` every 10s and closed itself after 3 consecutive
+  misses, with a 2s probe budget. A gateway that is answering, but slowly,
+  misses every probe exactly like a gateway that is gone: under a large
+  prompt or a synchronous GC, `/health` cannot answer inside 2s, so three
+  polls in a row missed and the icon exited while the gateway was still
+  serving. `carte --tray` looked fine only because it starts idle and never
+  carries that load.
+
+  The miss count is now a wall-clock window: a gateway that is truly gone
+  stays unreachable and still closes the tray promptly, while a gateway that
+  is merely busy answers often enough to reset the clock. The probe budget is
+  15s — far longer than a healthy answer takes, far shorter than the poll
+  interval.
+
+### Added
+
+- **Tests for the in-flight backstop sweep, which had none.** The sweep is
+  the only thing that reaps a flight whose finalizer never ran. These pin
+  that a flight past its deadline plus the hard grace is released, that one
+  inside the window is not, that a deadline moved by a live stream is
+  followed, and that reaping is idempotent.
+
 ## [2.6.5] - 2026-10-27
 
 ### Fixed

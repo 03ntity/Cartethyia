@@ -6,7 +6,7 @@ const promptUrl = pathToFileURL(join(import.meta.dir, "../../scripts/cli/prompt.
 const wordmarkUrl = pathToFileURL(join(import.meta.dir, "../../scripts/cli/wordmark.ts")).href;
 const menuProbe = `import { chooseFromMenu } from ${JSON.stringify(promptUrl)};
 import { renderWordmark } from ${JSON.stringify(wordmarkUrl)};
-const header = [...renderWordmark(), "Console  http://127.0.0.1:12800/console", "Version  2.6.5 · up to date", ""];
+const header = [...renderWordmark(), "Console  http://127.0.0.1:12800/console", "Version  2.6.6 · up to date", ""];
 const choice = await chooseFromMenu(header, [
   { kind: "action", label: "Open Console", hint: "Open dashboard in browser" },
   { kind: "action", label: "Hide to Tray", hint: "Keep the gateway running" },
