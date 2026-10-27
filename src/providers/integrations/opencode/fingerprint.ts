@@ -1,5 +1,12 @@
-import { getOpenCodeVersion } from "../../operations/client-versions";
 import { createHash, randomBytes } from "node:crypto";
+
+/**
+ * The OpenCode client identity this gateway claims, pinned to the reference
+ * gateway's v2 identity (`opencode2api` ships `opencode/latest/2.1.1/cli`).
+ * Upstream accepts a range of releases, so this only needs bumping when it
+ * starts rejecting older ones — matching the donor's version discipline.
+ */
+export const OPENCODE_CLIENT_VERSION = "2.1.1";
 
 let lastTimestamp = 0;
 let sequenceCounter = 0;
@@ -118,11 +125,19 @@ function createTraceHeaders(): Record<string, string> {
   };
 }
 
-/** Build the observed OpenCode CLI identity headers for an upstream dispatch. */
+/**
+ * Build the observed OpenCode CLI identity headers for an upstream dispatch.
+ *
+ * The v2 lane splits root and child session ids exactly like the reference
+ * gateway: `x-opencode-session` / `x-session-affinity` / `x-session-id` carry
+ * the root session, while `x-opencode-session-id` carries the child (the
+ * client's own session id when it sent one, else the root).
+ */
 export function buildOpenCodeHeaders(
-  version = getOpenCodeVersion(),
+  version = OPENCODE_CLIENT_VERSION,
   affinity?: string,
   projectId?: string,
+  childSessionId?: string,
 ): Record<string, string> {
   let sessionId: string;
   if (isOpenCodeSessionId(affinity)) {
@@ -132,6 +147,7 @@ export function buildOpenCodeHeaders(
   } else {
     sessionId = generateOpenCodeSessionId();
   }
+  const childId = isOpenCodeSessionId(childSessionId) ? childSessionId : sessionId;
   return {
     // The gate accepts both "cli" and "desktop" (measured 2026-10-17), so this
     // is not a refusal either way. It is "cli" because that is what the client
@@ -140,7 +156,7 @@ export function buildOpenCodeHeaders(
     // client identity this adapter does not have, for no measured benefit.
     "x-opencode-client": "cli",
     "x-opencode-session": sessionId,
-    "x-opencode-session-id": sessionId,
+    "x-opencode-session-id": childId,
     "x-session-affinity": sessionId,
     "x-session-id": sessionId,
     // No `x-opencode-request`: the current client no longer sends it, and

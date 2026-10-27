@@ -32,7 +32,7 @@ describe("OpenCode free probe — backfilled tools are agent-shaped", () => {
       provider_id: "opencode",
       model_id: "big-pickle",
       wire_family: "chat",
-      endpoint_path: "/inference/v1/chat/completions",
+      endpoint_path: "/inference/openai/v1/chat/completions",
       capabilities: {},
     };
     OPENCODE_FREE_SPEC.prePayload?.(payload, request, candidate);

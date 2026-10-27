@@ -3,8 +3,8 @@
  * one.
  *
  * A neutral canary cannot answer "will this provider serve this egress": an
- * OpenCode address that is refused on `/inference/v1/chat/completions` still
- * answers `/v1/models` and the public catalog with `200` (verified live). Only
+ * OpenCode address that is refused on `/inference/openai/v1/chat/completions`
+ * still answers `/v1/models` and the public catalog with `200` (verified live). Only
  * the dispatch route tells the two apart, so the probe must send what a
  * dispatch sends — otherwise it reports a healthy proxy for a blocked one and
  * the operator learns nothing.
@@ -27,7 +27,7 @@ describe("provider probe", () => {
 
   test("the probe hits the dispatch route, not the catalog", async () => {
     const probe = await buildProviderProbeRequest("opencode");
-    expect(probe?.url).toBe("https://opencode.ai/inference/v1/chat/completions");
+    expect(probe?.url).toBe("https://opencode.ai/inference/openai/v1/chat/completions");
   });
 
   test("it carries the adapter's own identity headers", async () => {
@@ -71,15 +71,17 @@ describe("provider probe", () => {
     expect(body.stream_options?.include_usage).toBe(true);
   });
 
-  test("it sends one short turn, not an empty message list", async () => {
+  test("it sends one short turn, preceded by the official prompt system message", async () => {
     const probe = await buildProviderProbeRequest("opencode");
-    const body = probe?.body as { messages?: unknown[] };
+    const body = probe?.body as { messages?: Array<{ role?: string; content?: unknown }> };
     // An empty list was the original design, on the theory that the gate runs
     // before the body is read. It does not: an allowed address answers
     // `400 messages must not be empty` instead of serving the dispatch, so the
     // probe reported every healthy egress as unusable. One word is the cheapest
-    // body that gets past validation.
-    expect(body.messages).toHaveLength(1);
-    expect(body.messages?.[0]).toMatchObject({ role: "user" });
+    // body that gets past validation. Free-tier shaping also injects the
+    // official CLI system prompt first, exactly like a real dispatch.
+    expect(body.messages).toHaveLength(2);
+    expect(body.messages?.[0]).toMatchObject({ role: "system" });
+    expect(body.messages?.[1]).toMatchObject({ role: "user" });
   });
 });

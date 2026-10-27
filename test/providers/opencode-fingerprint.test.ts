@@ -35,7 +35,7 @@ describe("OpenCode request fingerprint", () => {
     // project identity is hashed into that shape; an already-canonical value is
     // kept as-is.
     expect(first["x-opencode-project"]).toMatch(/^[0-9a-f]{40}$/);
-    expect(first["user-agent"]).toMatch(/^opencode\/latest\/\d+\.\d+\.\d+\/cli$/);
+    expect(first["user-agent"]).toBe("opencode/latest/2.1.1/cli");
     const traceparent = first["traceparent"];
     const b3 = first["b3"];
     if (!traceparent || !b3) throw new Error("OpenCode trace headers must be present");
@@ -49,6 +49,10 @@ describe("OpenCode request fingerprint", () => {
     // break every free-tier dispatch again.
     expect(first["x-opencode-request"]).toBeUndefined();
     expect(second["x-opencode-request"]).toBeUndefined();
+    // The v2 lane splits root and child session ids like the reference gateway:
+    // the session-affinity headers carry the root, `x-opencode-session-id`
+    // carries the child (here the root, since no client session id was sent).
+    expect(first["x-opencode-session-id"]).toBe(first["x-opencode-session"]);
     // The session hex must decode to a plausible inverted-millisecond
     // timestamp: the gate rejects arbitrary hash hex. The production jitter
     // buckets to 6-hour boundaries up to 42h back, so decode and check the
@@ -64,6 +68,30 @@ describe("OpenCode request fingerprint", () => {
     expect(Date.now() - snapped).toBeGreaterThan(0);
     expect(Date.now() - snapped).toBeLessThan(49 * 3_600_000);
     expect(traceparent).not.toBe(second["traceparent"]);
+  });
+
+  test("the client's own session id becomes the child header, root stays stable", async () => {
+    const context: ProviderDispatchContext = {
+      credential: {
+        provider_id: "opencode",
+        credential_kind: "none",
+      },
+      deadline: Date.now() + 1_000,
+      abort_signal: new AbortController().signal,
+      conversation_affinity: "aff_child_split",
+      request_headers: {
+        "x-opencode-project": "stable-project-hash",
+        "x-opencode-session-id": "ses_c0ffee00000000000000000000",
+      },
+    };
+    const buildHeaders = OPENCODE_FREE_SPEC.buildExtraHeaders;
+    if (!buildHeaders) throw new Error("OpenCode Free must provide fingerprint headers");
+    const headers = await buildHeaders(context);
+    // Root stays on the affinity headers; the child is the client's own id.
+    expect(headers["x-opencode-session"]).toMatch(/^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+    expect(headers["x-session-affinity"]).toBe(headers["x-opencode-session"]);
+    expect(headers["x-session-id"]).toBe(headers["x-opencode-session"]);
+    expect(headers["x-opencode-session-id"]).toBe("ses_c0ffee00000000000000000000");
   });
 
   test("uses the captured Chat Completions token-limit field in the wire encoder", async () => {

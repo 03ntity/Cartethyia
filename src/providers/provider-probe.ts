@@ -110,13 +110,13 @@ export async function buildProviderProbeRequest(
       provider_id: providerId,
       model_id: PROBE_MODEL,
       wire_family: "chat",
-      endpoint_path: "/inference/v1/chat/completions",
+      endpoint_path: "/inference/openai/v1/chat/completions",
       capabilities: {},
     } as ProviderDispatchTarget,
   );
   const headers = (await spec.buildExtraHeaders?.(probeContext(providerId), source)) ?? {};
   return {
-    url: `${providerBaseUrl(providerId).replace(/\/+$/, "")}/inference/v1/chat/completions`,
+    url: `${providerBaseUrl(providerId).replace(/\/+$/, "")}/inference/openai/v1/chat/completions`,
     headers: { "content-type": "application/json", ...headers },
     body: payload,
   };

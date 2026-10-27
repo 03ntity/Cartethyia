@@ -1,5 +1,7 @@
 /**
- * The OpenCode Free and Zen tiers dispatch on `/inference/v1`, not `/zen/v1`.
+ * The OpenCode Free and Zen tiers dispatch on the `/inference` origin using
+ * the 2.1 family segment (`/inference/openai/v1/...`), not the flat
+ * `/inference/v1` or `/zen/v1` shapes.
  *
  * `/zen/v1/models` publishes the catalog while `/inference/v1/models` answers
  * 404, so the two bases look interchangeable — and they are not. A byte-exact
@@ -22,16 +24,16 @@ function dispatchUrl(providerId: "opencode" | "opencode-zen" | "opencode-go", en
 }
 
 describe("OpenCode dispatch base", () => {
-  test("free and zen models dispatch on /inference/v1", () => {
+  test("free and zen models dispatch on /inference/openai/v1", () => {
     for (const model of [...OPENCODE_FREE_MODELS, ...OPENCODE_ZEN_MODELS]) {
-      expect(model.endpointPath.startsWith("/inference/v1/")).toBe(true);
+      expect(model.endpointPath.startsWith("/inference/openai/v1/")).toBe(true);
     }
   });
 
-  test("a free model lands on the URL a replay proved returns 200", () => {
+  test("a free model lands on the 2.1 family-segment URL", () => {
     const free = OPENCODE_FREE_MODELS.find((model) => model.modelId === "big-pickle");
     expect(dispatchUrl("opencode", free?.endpointPath ?? "")).toBe(
-      "https://opencode.ai/inference/v1/chat/completions",
+      "https://opencode.ai/inference/openai/v1/chat/completions",
     );
   });
 
