@@ -124,10 +124,10 @@ model "opus", UA curl/8.5.0        → 404 model_not_found   (no remap)
 model "opus", UA claude-cli/1.0.0  → routed to the mapped target
 ```
 
-`test/unit/api-key-auth.test.ts` verifies that a CLI remap cannot bypass the
-key's model policy. The console lifecycle and injector tests cover local CLI
-configuration files, not the remote-mapping `User-Agent` gate or snapshot
-lookup; there is no focused checked-in test for the differential above yet.
+The interaction above — a CLI remap must not bypass the key's model policy — is
+currently guarded by this differential alone; there is no focused checked-in
+test for it since the `test/unit/` bucket was removed. Add one when that
+interaction changes.
 
 ## See also
 

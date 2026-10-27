@@ -9,7 +9,7 @@ never imports Elysia, the database, or secrets. It talks to `/console/api` and
 renders what that API returns. It does re-export a handful of *pure* values from
 `src/` — dimension and scope lists, the release comparator, a thinking-suffix
 formatter — so an enum cannot drift between the two sides; those modules are
-valueless, and nothing runtime crosses with them.
+dependency-free, and nothing runtime crosses with them.
 
 ## Process
 
