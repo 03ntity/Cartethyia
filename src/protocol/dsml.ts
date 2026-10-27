@@ -13,7 +13,8 @@
  *
  * The two share the same recovery idea, so the mechanics live here once and
  * each caller picks its dialect through options. The defaults reproduce the
- * CodeBuddy dialect exactly; Qoder passes `fuzzy: true` and its id factory.
+ * CodeBuddy dialect exactly (`app/dsml.py` in codebuddy2api); Qoder passes
+ * `fuzzy: true` and its id factory, mirroring `qoder_proxy.py`.
  */
 import { randomUUID } from "node:crypto";
 
@@ -41,10 +42,24 @@ export interface DsmlParseOptions {
   readonly id?: (call: { readonly name: string }, index: number, seq: number) => string;
   /** Non-empty allowlist makes the strict dialect reject undeclared names. */
   readonly allowedNames?: ReadonlySet<string>;
+  /**
+   * When true, JSON stringifies argument objects with recursively sorted keys,
+   * matching the reference bridge (`json.dumps(..., sort_keys=True)`). The
+   * strict dialect defaults to true; the fuzzy dialect never sorts, matching
+   * its reference's `json.dumps(params)`.
+   */
+  readonly sortKeys?: boolean;
+  /**
+   * Character cap for an unclosed strict block. Past it, the block is treated
+   * as plain text and passed through instead of buffered indefinitely — same
+   * fail-open as `MAX_BLOCK_BYTES` in the reference bridge (256 KB).
+   */
+  readonly maxBlockBytes?: number;
 }
 
 const DEFAULT_SEPARATORS = ["｜｜", "｜", "|"] as const;
 const DEFAULT_BLOCK_NAMES = ["calls", "function_calls"] as const;
+const DEFAULT_MAX_BLOCK_BYTES = 256 * 1024;
 const TOOL_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,63}$/;
 
 /** Escapes regex metacharacters so a `|` separator is literal, not alternation. */
@@ -72,8 +87,11 @@ export interface DsmlParseResult {
 /**
  * Streaming strict-prefix parser (CodeBuddy dialect). Buffers text until a
  * complete block is seen, emits clean prose as it settles, and recovers calls
- * from complete declared blocks only. Incomplete and undeclared blocks stay
- * text. The caller feeds chunks with `push` and drains the tail with `flush`.
+ * from complete blocks only. Incomplete blocks stay text; an unclosed block
+ * past `maxBlockBytes` passes through as text instead of buffering forever.
+ * With no allowlist the generic name rule applies; with one, undeclared names
+ * reject the whole block. The caller feeds chunks with `push` and drains the
+ * tail with `flush`.
  */
 export class DsmlStreamParser {
   readonly #separators: readonly string[];
@@ -81,6 +99,8 @@ export class DsmlStreamParser {
   readonly #openers: readonly string[];
   readonly #allowedNames: ReadonlySet<string>;
   readonly #params: "json" | "string";
+  readonly #sortKeys: boolean;
+  readonly #maxBlockBytes: number;
   readonly #id: (call: { readonly name: string }, index: number, seq: number) => string;
   #pending = "";
   #callSequence = 0;
@@ -91,6 +111,8 @@ export class DsmlStreamParser {
     this.#openers = openers(this.#separators, this.#blockNames);
     this.#allowedNames = options.allowedNames ?? new Set();
     this.#params = options.params ?? "json";
+    this.#sortKeys = options.sortKeys ?? true;
+    this.#maxBlockBytes = options.maxBlockBytes ?? DEFAULT_MAX_BLOCK_BYTES;
     this.#id = options.id ?? sequentialId;
   }
 
@@ -126,12 +148,20 @@ export class DsmlStreamParser {
       const close = `</${separator}DSML${separator} ${blockName}>`;
       const closeIndex = this.#pending.indexOf(close, openIndex + opener.length);
       if (closeIndex < 0) {
+        // An unclosed block past the cap is not markup — pass it through as
+        // text instead of buffering it indefinitely. Same fail-open as
+        // `feed()` in the reference bridge's `MAX_BLOCK_BYTES` guard.
+        if (this.#pending.length - openIndex > this.#maxBlockBytes) {
+          visible += this.#pending.slice(openIndex);
+          cursor = this.#pending.length;
+          break;
+        }
         cursor = openIndex;
         break;
       }
       const end = closeIndex + close.length;
       const block = this.#pending.slice(openIndex, end);
-      const parsed = parseStrictBlock(block, opener, close, separator, this.#allowedNames, this.#params);
+      const parsed = parseStrictBlock(block, opener, close, separator, this.#allowedNames, this.#params, this.#sortKeys);
       if (parsed === undefined) visible += block;
       else {
         parsed.forEach((call, index) => {
@@ -168,6 +198,7 @@ function parseStrictBlock(
   separator: string,
   allowedNames: ReadonlySet<string>,
   params: "json" | "string",
+  sortKeys: boolean,
 ): Omit<DsmlToolCall, "id">[] | undefined {
   const inner = block.slice(opener.length, -close.length);
   const pipe = escapeRegExp(separator);
@@ -207,10 +238,23 @@ function parseStrictBlock(
       parameterCursor = valueEnd + parameterClose.length;
     }
     if (body.slice(parameterCursor).trim().length > 0) return undefined;
-    calls.push({ name, arguments: JSON.stringify(args) });
+    calls.push({ name, arguments: JSON.stringify(sortKeys ? normalizeForSort(args) : args) });
     cursor = invokeEnd + invokeClose.length;
   }
   return calls.length > 0 && inner.slice(cursor).trim().length === 0 ? calls : undefined;
+}
+
+/**
+ * Returns `value` with plain-object keys recursively sorted, mirroring the
+ * reference bridge's `json.dumps(..., sort_keys=True)`. Arrays keep their
+ * order — sorting applies to object keys only.
+ */
+function normalizeForSort(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(record).sort()) out[key] = normalizeForSort(record[key]);
+  return out;
 }
 
 /** The Qoder fuzzy block scanner, mirroring the reference bridge's regexes. */
@@ -233,12 +277,14 @@ function parseFuzzyDsml(text: string, options: DsmlParseOptions): DsmlRecovery {
     clean = (before + " " + after).trim();
   } else {
     // No <calls> wrapper (issue #51): find bare <invoke> blocks in the whole
-    // text, then cut the prose off at the last `<` before the first invoke.
+    // text, then cut the prose off at the last `<` before the first invoke —
+    // exclusive of the invoke's own tag start, exactly like the reference's
+    // `text.rfind("<", 0, first_index)`.
     FUZZY_INVOKE_RE.lastIndex = 0;
     const first = FUZZY_INVOKE_RE.exec(text);
     if (!first) return { calls: [], clean: text };
     block = text;
-    const cut = text.lastIndexOf("<", first.index);
+    const cut = text.lastIndexOf("<", first.index - 1);
     clean = text.slice(0, cut >= 0 ? cut : first.index).trim();
   }
 

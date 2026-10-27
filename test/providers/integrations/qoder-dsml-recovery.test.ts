@@ -63,6 +63,34 @@ test("no calls and no invoke means nothing is recovered or cut", () => {
   expect(clean).toBe("text mentioning DSML with no tags");
 });
 
+test("parameter values keep their wire order, matching the reference", () => {
+  // The fuzzy dialect mirrors `json.dumps(params)` — no key sorting, unlike the
+  // strict dialect's `sort_keys=True`. The block names `b` before `a`; the
+  // serialized arguments must preserve that order.
+  const block =
+    '<｜DSML｜tool_calls>' +
+    '<｜DSML｜invoke name="Grep">' +
+    '<｜DSML｜parameter name="b" string="true">1</｜DSML｜parameter>' +
+    '<｜DSML｜parameter name="a" string="true">2</｜DSML｜parameter>' +
+    '</｜DSML｜invoke>' +
+    '</｜DSML｜tool_calls>';
+  const { calls } = parseDsmlToolCalls(block);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]?.arguments).toBe('{"b":"1","a":"2"}');
+});
+
+test("bare-invoke prose is cut at the last angle bracket before the call", () => {
+  // Same rule as the reference: the cut lands on the last `<` before the first
+  // invoke, so markup-looking prose earlier in the text still ends the cut.
+  const text =
+    "See <b>bold</b> here\n" +
+    '<｜DSML｜invoke name="Bash"><｜DSML｜parameter name="command" string="true">ls</｜DSML｜parameter></｜DSML｜invoke>';
+  const { calls, clean } = parseDsmlToolCalls(text);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]?.name).toBe("Bash");
+  expect(clean).toBe("See <b>bold");
+});
+
 test("a half-open DSML tag at a frame edge is held, not emitted", () => {
   // The tag may straddle two chunks, so the partial must wait for the rest.
   expect(dsmlTailHold("prose <｜DSML")).toBe("<｜DSML");
