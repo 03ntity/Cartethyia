@@ -98,9 +98,7 @@ export function createSystemoneHandler(deps: SystemoneHandlerDeps) {
               provider_id: candidate.provider_id as ProviderAdapter["provider_id"],
               credential_kind: "none" as const,
             };
-        const adapter = (deps.resolveProviderAdapter
-          ? await deps.resolveProviderAdapter(candidate.provider_id)
-          : deps.providerAdapters.get(candidate.provider_id)) as SystemoneAdapter | undefined;
+        const adapter = (await deps.resolveProviderAdapter?.(candidate.provider_id)) as SystemoneAdapter | undefined;
         if (!adapter || typeof adapter.systemone !== "function")
           throw new GatewayError(
             "capability_unsupported",

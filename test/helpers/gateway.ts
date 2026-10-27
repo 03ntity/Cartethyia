@@ -403,7 +403,6 @@ export async function createTestGateway(
     db,
     proxyPreparer,
     resolveProviderAdapter: async (providerId) => adapters.get(providerId),
-    providerAdapters: adapters as unknown as ReadonlyMap<string, ProviderAdapter>,
     // A fixture provider id (`tp-<runId>`) is by construction not bundled, so
     // the dispatch path treats it as a configurable upstream and requires an
     // SSRF-validated host before it will dispatch — it resolves the hostname

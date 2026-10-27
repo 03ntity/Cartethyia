@@ -19,8 +19,7 @@ import type { RouteSnapshotService } from "../routing/route-model";
 
 export interface GatewayHandlerDeps {
   readonly db: CartethyiaDatabase;
-  readonly providerAdapters: ReadonlyMap<string, ProviderAdapter>;
-  /** Preferred over `providerAdapters`: resolves an adapter on demand and caches it. */
+  /** Preferred over a static map: resolves an adapter on demand and caches it. */
   readonly resolveProviderAdapter?: (providerId: string) => Promise<ProviderAdapter | undefined>;
   readonly proxyPreparer: ProxyRequestPreparer;
   readonly stateStore: ProxyRequestStateStore;

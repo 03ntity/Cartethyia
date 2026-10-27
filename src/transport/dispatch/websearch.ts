@@ -104,9 +104,7 @@ export function createWebsearchHandler(deps: WebsearchHandlerDeps) {
               provider_id: candidate.provider_id as ProviderAdapter["provider_id"],
               credential_kind: "none" as const,
             };
-        const adapter = (deps.resolveProviderAdapter
-          ? await deps.resolveProviderAdapter(candidate.provider_id)
-          : deps.providerAdapters.get(candidate.provider_id)) as WebsearchAdapter | undefined;
+        const adapter = (await deps.resolveProviderAdapter?.(candidate.provider_id)) as WebsearchAdapter | undefined;
         if (!adapter || typeof adapter.websearch !== "function")
           throw new GatewayError(
             "capability_unsupported",

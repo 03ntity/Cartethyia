@@ -234,9 +234,7 @@ export function createNativeSurfaceHandler(
               provider_id: candidate.provider_id as ProviderAdapter["provider_id"],
               credential_kind: "none" as const,
             };
-        const adapter = deps.resolveProviderAdapter
-          ? await deps.resolveProviderAdapter(candidate.provider_id)
-          : deps.providerAdapters.get(candidate.provider_id);
+        const adapter = await deps.resolveProviderAdapter?.(candidate.provider_id);
         if (!adapter) {
           throw new GatewayError(
             "capability_unsupported",

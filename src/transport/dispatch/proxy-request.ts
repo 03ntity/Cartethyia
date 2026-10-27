@@ -181,9 +181,7 @@ export async function handleProviderProxyRequest(
             provider_id: candidate.provider_id as ProviderId,
             credential_kind: "none" as const,
           };
-      const adapter = deps.resolveProviderAdapter
-        ? await deps.resolveProviderAdapter(candidate.provider_id)
-        : deps.providerAdapters.get(candidate.provider_id);
+      const adapter = await deps.resolveProviderAdapter?.(candidate.provider_id);
       if (!adapter)
         throw new GatewayError("admission_unavailable", 503, "provider adapter not registered");
       if (!isBundledProviderId(candidate.provider_id)) {

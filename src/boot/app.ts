@@ -110,7 +110,6 @@ export interface ProductionAppDeps {
   readonly db: CartethyiaDatabase;
   readonly proxyPreparer: ProxyRequestPreparer;
   readonly resolveProviderAdapter: (providerId: string) => Promise<ProviderAdapter | undefined>;
-  readonly providerAdapters?: ReadonlyMap<string, ProviderAdapter>;
   /** Live lookup of a provider's SSRF-validated upstream host. */
   readonly byokUpstreamHosts: { readonly get: (providerId: string) => ByokUpstreamHost | undefined };
   readonly networkBindingFactory: ValidatedNetworkBindingFactory;
@@ -275,6 +274,9 @@ export function createGatewayApp(deps: GatewayAppDeps) {
   backstopTasks?.register({
     name: "inflight-backstop",
     intervalMs: INFLIGHT_BACKSTOP_INTERVAL_MS,
+    // Same stagger rationale as account-health-sweep: keep the 30s cluster
+    // from aligning under the single-flight gate.
+    initialDelayMs: 15_000,
     run: () => {
       requestStateStore.sweepOverdueInFlight(
         Date.now(),
@@ -404,7 +406,6 @@ export function createGatewayApp(deps: GatewayAppDeps) {
     // literals.
     const gatewayDeps: GatewayHandlerDeps = {
       db: deps.db,
-      providerAdapters: deps.providerAdapters ?? new Map(),
       resolveProviderAdapter: deps.resolveProviderAdapter,
       stateStore: requestStateStore,
       proxyPreparer: deps.proxyPreparer,

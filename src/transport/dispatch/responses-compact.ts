@@ -52,9 +52,7 @@ export function createResponsesCompactHandler(deps: ResponsesCompactHandlerDeps)
         400,
         "Responses compact does not support streaming",
       );
-    const adapter = (deps.resolveProviderAdapter
-      ? await deps.resolveProviderAdapter("codex")
-      : deps.providerAdapters.get("codex")) as CodexCompactAdapter | undefined;
+    const adapter = (await deps.resolveProviderAdapter?.("codex")) as CodexCompactAdapter | undefined;
     if (!adapter || typeof adapter.compact !== "function")
       throw new GatewayError("admission_unavailable", 503, "Codex compact transport unavailable");
     const prepared = await deps.proxyPreparer.prepareNativeCompact({
