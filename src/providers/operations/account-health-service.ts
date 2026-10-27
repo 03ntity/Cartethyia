@@ -378,14 +378,57 @@ function accountDeadlineMs(
  * Matched on the code *and* the account-restriction wording, so an unrelated
  * upstream that happens to say "restricted" in prose cannot disable accounts.
  */
-function isBuddyAccountBanned(lower: string, providerCode: string): boolean {
+function isBuddyAccountBanned(
+  lower: string,
+  providerCode: string,
+  upstreamBody: unknown,
+): boolean {
   if (providerCode !== "11140") return false;
+  if (banWording(lower)) return true;
+  // The message alone is not enough, and this is the case that proved it: the
+  // provider's message for a ban is the same two words it uses for a refused
+  // request — "request illegal" — while the actual verdict ("Your account has
+  // been restricted due to unusual activity") lives in `displayMsg`, which the
+  // message extractor never reads. Matching only the message therefore read
+  // every ban as a mere request refusal: no category, no disable, and the
+  // account kept serving.
+  const body = isRecord(upstreamBody) ? upstreamBody : undefined;
+  if (body === undefined) return false;
+  for (const field of ["displayMsg", "displayTips", "msg", "message"]) {
+    const value = body[field];
+    if (typeof value === "string" && banWording(value.toLowerCase())) return true;
+    // `displayMsg` is a per-language map: `{ en: "…", zh: "…" }`. Any
+    // language states the same verdict, so all of them are read.
+    if (!isRecord(value)) continue;
+    for (const nested of Object.values(value)) {
+      if (typeof nested === "string" && banWording(nested.toLowerCase())) return true;
+    }
+  }
+  // `actions` names the remedy: an appeal can only be offered for a verdict
+  // about the account, and "edit input" only ever describes a request.
+  const actions = body["actions"];
+  if (Array.isArray(actions)) {
+    for (const action of actions) {
+      if (typeof action !== "string") continue;
+      if (action.toLowerCase().includes("appeal") || action.toLowerCase().includes("feedback")) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** The wording an upstream uses when it restricted the account, not the request. */
+function banWording(lower: string): boolean {
   return (
     lower.includes("restricted") ||
     lower.includes("has been banned") ||
     lower.includes("unusual activity") ||
     lower.includes("appeal this restriction") ||
-    lower.includes("submit feedback to appeal")
+    lower.includes("submit feedback to appeal") ||
+    lower.includes("account has been") ||
+    lower.includes("账号存在异常行为") ||
+    lower.includes("帳號存在異常行為")
   );
 }
 
@@ -619,6 +662,12 @@ function accountErrorContext(error: unknown, options?: AccountFailureEvidence): 
   const bodyCooldown =
     parseUpstreamBodyReset(options?.upstreamBody) ??
     (rawUpstreamResponse === undefined ? null : parseUpstreamBodyReset(tryParseUpstreamBody(rawUpstreamResponse)));
+  // The body the ban is named in. The caller's parsed body when there is one,
+  // and the raw response text otherwise — the dispatch path stores the
+  // upstream's JSON there, and that is where `displayMsg` lives.
+  const banBody =
+    options?.upstreamBody ??
+    (rawUpstreamResponse === undefined ? undefined : tryParseUpstreamBody(rawUpstreamResponse));
   // Whether the provider itself named a window. Decided once, from the
   // evidence, so every branch of this classification agrees about it.
   const providerStated =
@@ -665,7 +714,7 @@ function accountErrorContext(error: unknown, options?: AccountFailureEvidence): 
     canMutate,
     providerCode,
     statedCooldownMs,
-    buddyBanned: isBuddyAccountBanned(lower, providerCode),
+    buddyBanned: isBuddyAccountBanned(lower, providerCode, banBody),
     reason,
     result,
   };
