@@ -22,8 +22,8 @@ export const queryClient = new QueryClient({
  *   and response payload bodies.
  * - `apiKeys.*` and `sharedKeys` hold credential material and share links.
  * - `audit.*` is the operator's own activity log.
- * - `providers.accounts` carries credentials, `quota.*` and `modelBans.*` are
- *   per-tenant enforcement state, and `healthEvents` is failure detail.
+ * - `providers.accounts` carries credentials, `quota.*` is per-tenant
+ *   enforcement state, and `healthEvents` is failure detail.
  * - `network.pools` carries egress addresses.
  *
  * `providers.models(id)` is included because it is the largest catalog read on

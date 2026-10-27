@@ -6,7 +6,6 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpFromLine,
-  Ban,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -39,8 +38,6 @@ import {
   YAxis,
 } from "recharts";
 import { Button } from "../../components/ui/button";
-import { BAN_DURATION_CHOICES, DEFAULT_BAN_CHOICE, type BanDurationChoice } from "../../lib/ban-durations";
-import { useBanIp } from "../../hooks/model-bans";
 import { downloadTextFile } from "../../lib/download";
 import { toast } from "../../lib/toast";
 import { consoleRequest, getErrorMessage } from "../../data/api";
@@ -956,8 +953,6 @@ function RequestDetailDrawer({
   const [copiedRequestId, setCopiedRequestId] = useState(false);
   const [copiedPayload, setCopiedPayload] = useState<PayloadKind | null>(null);
   const [downloading, setDownloading] = useState(false);
-  const [banMenuOpen, setBanMenuOpen] = useState(false);
-  const banIp = useBanIp();
   const scheduleReset = useTrackedTimeout();
   const copyRequestId = () => {
     void navigator.clipboard?.writeText(detail?.requestId ?? "");
@@ -988,25 +983,7 @@ function RequestDetailDrawer({
       setDownloading(false);
     }
   };
-  const banThisUser = async (choice: BanDurationChoice = DEFAULT_BAN_CHOICE) => {
-    if (!detail?.clientIp) return;
-    setBanMenuOpen(false);
-    // Scoped to this request's key by default: a shared address or a share link
-    // means other callers are behind the same IP, and banning the address for
-    // what one caller did takes them down too.
-    try {
-      const ban = await banIp.mutateAsync({
-        ip: detail.clientIp,
-        apiKeyId: detail.apiKeyId ?? null,
-        minutes: choice.minutes,
-      });
-      toast.success(
-        `Banned ${detail.clientIp}${ban.ban.apiKeyId ? " for this key" : " for every key"} — ${choice.label}.`,
-      );
-    } catch (error) {
-      toast.error(getErrorMessage(error, "Could not ban the address."));
-    }
-  };
+
   const payloadViews = useMemo(
     () =>
       (["request", "clientResponse", "providerRequest", "providerResponse"] as const).map((kind) => {
@@ -1062,70 +1039,6 @@ function RequestDetailDrawer({
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
-            {/*
-              * A split control: the click bans for one hour, which is the
-              * reversible default, and the caret opens the longer choices.
-              * A bare button could only offer one duration, and "Permanent"
-              * as that one duration is a ban an operator then has to remember
-              * to lift.
-              */}
-            <div className="relative w-full">
-              <div className="flex w-full">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon={<Ban size={13} />}
-                  disabled={!detail.clientIp || banIp.isPending}
-                  title={
-                    detail.clientIp
-                      ? `Ban ${detail.clientIp} for this API key for ${DEFAULT_BAN_CHOICE.label}`
-                      : "No client IP recorded for this request"
-                  }
-                  onClick={() => void banThisUser()}
-                  className="min-w-0 flex-1 rounded-r-none"
-                >
-                  Banned User
-                </Button>
-                <button
-                  type="button"
-                  disabled={!detail.clientIp || banIp.isPending}
-                  aria-haspopup="menu"
-                  aria-expanded={banMenuOpen}
-                  aria-label="Choose how long to ban this user"
-                  title="Choose how long to ban this user"
-                  onClick={() => setBanMenuOpen((value) => !value)}
-                  className="grid place-items-center px-2 border border-l-0 border-inner-border rounded-r-control bg-surface-1 text-text-secondary hover:bg-surface-muted hover:text-text-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronDown size={12} aria-hidden="true" />
-                </button>
-              </div>
-              {banMenuOpen ? (
-                <div
-                  role="menu"
-                  aria-label="Ban duration"
-                  // Opens downward. `bottom-full` placed it above the button,
-                  // which reads as a menu belonging to whatever sits above the
-                  // split control rather than to the caret that opened it.
-                  className="absolute top-full left-0 z-50 mt-1 min-w-36 flex flex-col gap-0.5 border border-inner-border rounded-control bg-popover-bg shadow-popout p-1.5"
-                >
-                  {BAN_DURATION_CHOICES.map((choice) => (
-                    <button
-                      key={choice.label}
-                      type="button"
-                      role="menuitem"
-                      onClick={() => void banThisUser(choice)}
-                      className="px-2.5 py-1.5 text-left text-caption text-text-secondary rounded-inset hover:bg-hover-bg hover:text-text-primary cursor-pointer whitespace-nowrap"
-                    >
-                      {choice.label}
-                    </button>
-                  ))}
-                  <p className="px-2.5 pb-0.5 pt-1.5 text-micro leading-snug text-text-tertiary">
-                    Scoped to this request's API key. Other keys from this IP
-                    are unaffected.
-                  </p>
-                </div>
-              ) : null}
-            </div>
             <Button
               variant="secondary"
               size="sm"

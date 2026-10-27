@@ -5,7 +5,6 @@ import {
   Plus,
   RotateCw,
   Share2,
-  ShieldOff,
   Trash2,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -18,13 +17,11 @@ import { Switch } from "./ui/switch";
 import { ApiKeyForm, oneTimeSecretForMode, type KeyFormInput } from "./ApiKeyForm";
 import { ApiKeySecretDialog } from "./ApiKeySecretDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { ModelBansDialog } from "./ModelBansDialog";
 import { regenerateWarning, ShareManagementDialog } from "./ShareManagementDialog";
 import { SortableList } from "./SortableList";
 import { toast } from "../lib/toast";
 import { getErrorMessage } from "../data/api";
 import { compactTokens, limitLabel } from "../lib/format/tokens";
-import { useSessionUser } from "../hooks/system";
 import { useClipboard } from "../hooks/use-clipboard";
 import type { ApiKeyResponse } from "../data/contracts";
 import {
@@ -45,7 +42,6 @@ import {
  */
 export function ApiKeysPanel(): ReactNode {
   const keysQuery = useApiKeys();
-  const sessionQuery = useSessionUser();
   const createKey = useCreateApiKey();
   const updateKey = useUpdateApiKey();
   const revokeKey = useRevokeApiKey();
@@ -59,7 +55,6 @@ export function ApiKeysPanel(): ReactNode {
   const [rotateTarget, setRotateTarget] = useState<ApiKeyResponse | null>(null);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
   const [shareTarget, setShareTarget] = useState<ApiKeyResponse | null>(null);
-  const [bansOpen, setBansOpen] = useState(false);
   const [createActions, setCreateActions] = useState<ReactNode>(null);
   const [editActions, setEditActions] = useState<ReactNode>(null);
 
@@ -67,7 +62,6 @@ export function ApiKeysPanel(): ReactNode {
   // Bans are keyed on the client address, so they are cross-tenant: only a
   // platform admin may see or lift one, and the entry point is hidden for
   // everyone else. The endpoint enforces this too — the gate here is UX.
-  const isPlatformAdmin = sessionQuery.data?.isPlatformAdmin ?? false;
 
   const openShare = (key: ApiKeyResponse) => {
     setRevealedSecret(null);
@@ -100,16 +94,6 @@ export function ApiKeysPanel(): ReactNode {
         icon={<KeyRound size={16} />}
         action={
           <div className="flex items-center gap-4">
-            {isPlatformAdmin ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setBansOpen(true)}
-                icon={<ShieldOff size={13} />}
-              >
-                Banned Users
-              </Button>
-            ) : null}
             <Button
               variant="primary"
               size="sm"
@@ -395,7 +379,6 @@ export function ApiKeysPanel(): ReactNode {
         danger
       />
 
-      {bansOpen ? <ModelBansDialog onClose={() => setBansOpen(false)} /> : null}
 
       <ApiKeySecretDialog secret={revealedSecret} onClose={() => setRevealedSecret(null)} />
 

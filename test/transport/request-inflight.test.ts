@@ -34,7 +34,9 @@ test("a snapshot reports how long the oldest flight has been tracked", () => {
   state.clientIdentity = { address: "192.0.2.1", source: "tcp-peer" };
   state.startProviderFlight();
 
-  expect(store.inFlightSnapshot().oldestAgeMs).toBe(0);
+  // A bound, not zero: the age is wall-clock, so a loaded machine can already
+  // have advanced it before the first read.
+  expect(store.inFlightSnapshot().oldestAgeMs).toBeLessThan(1_000);
   state.extendDeadline(60_000);
   // Still zero: an extension moves the deadline, not the start time, so the
   // age keeps measuring how long the flight has been open.
