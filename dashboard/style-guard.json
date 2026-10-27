@@ -39,16 +39,36 @@
     "staticInline": 0,
     "arbitrary": 7
   },
-  "src/features/proxy/ProxyPage.tsx": {
+  "src/features/proxy/sections/poolDialogs.tsx": {
     "staticInline": 0,
-    "arbitrary": 2
+    "arbitrary": 1
+  },
+  "src/features/proxy/sections/poolHealthDialog.tsx": {
+    "staticInline": 0,
+    "arbitrary": 1
   },
   "src/features/quota/QuotaPage.tsx": {
     "staticInline": 0,
     "arbitrary": 1
   },
-  "src/features/usage/UsagePage.tsx": {
+  "src/features/usage/sections/breakdown-snapshot.tsx": {
     "staticInline": 0,
-    "arbitrary": 6
+    "arbitrary": 1
+  },
+  "src/features/usage/sections/in-flight.tsx": {
+    "staticInline": 0,
+    "arbitrary": 1
+  },
+  "src/features/usage/sections/request-detail-drawer.tsx": {
+    "staticInline": 0,
+    "arbitrary": 1
+  },
+  "src/features/usage/sections/requests-table.tsx": {
+    "staticInline": 0,
+    "arbitrary": 1
+  },
+  "src/features/usage/sections/token-scale-switch.tsx": {
+    "staticInline": 0,
+    "arbitrary": 2
   }
 }

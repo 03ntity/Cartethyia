@@ -1,0 +1,118 @@
+import { type ReactNode } from "react";
+import { Badge } from "../../../components/ui/badge";
+import { Inline } from "../../../components/ui/inline";
+import { activeModelCooldowns } from "../../../components/AccountCooldown";
+import { formatResetDistance } from "../../../lib/format/quota";
+import { accountErrorLabel, authInvalidatedLabel, showsErrorPill } from "../../../lib/format/labels";
+import type { ProviderAccountResponse } from "../../../data/contracts";
+
+/**
+ * The per-model backoff chip, shared by every status arm of the badge.
+ *
+ * A model-scoped throttle excludes only the (account, model) pair in the
+ * routing catalog, so it is independent of the account-wide status: it can be
+ * in force while the account reads `active`, `cooldown`, or `disabled`, so it
+ * is shared by every arm — including `disabled`, where it is the operator's
+ * last known health of the account.
+ */
+function ModelCooldownChip({
+  cooldowns,
+  reason,
+}: {
+  readonly cooldowns: { count: number; modelId: string; until: string } | undefined;
+  readonly reason?: string;
+}): ReactNode {
+  if (!cooldowns) return null;
+  const distance = formatResetDistance(cooldowns.until);
+  const soonest = `Soonest: ${cooldowns.modelId} — ${distance}`;
+  return (
+    <Badge tone="warn" dot title={reason ? `${reason} — ${soonest}` : soonest}>
+      {cooldowns.count} model{cooldowns.count === 1 ? "" : "s"} cooling · {distance}
+    </Badge>
+  );
+}
+
+function credentialFamily(account: ProviderAccountResponse): string | undefined {
+  if (account.credentialKind === "oauth") return "OAuth";
+  if (account.credentialMode === "jwt") return "JWT";
+  return undefined;
+}
+
+function activeCredentialTone(account: ProviderAccountResponse): "blue" | "ok" {
+  return account.credentialKind === "oauth" ? "blue" : "ok";
+}
+
+export function AccountStatusBadge({
+  account,
+}: {
+  readonly account: ProviderAccountResponse;
+}): ReactNode {
+  const cooldownUntilMs = account.cooldownUntil ? new Date(account.cooldownUntil).getTime() : NaN;
+  const hasActiveCooldown = Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now();
+  const modelCooldowns = activeModelCooldowns(account);
+  // `disabled` is the terminal state, so it is checked first: a disabled row
+  // can still carry a stale `cooldownUntil`, and showing "Cooldown" there hid
+  // the fact that the account is actually parked. The category/reason are
+  // surfaced too, so a disabled account is as diagnosable as a cooldown.
+  if (account.status === "disabled") {
+    // A rejected credential is not a cooldown: it cannot clear on its own, so
+    // the row says what the operator must actually do. The raw category is kept
+    // in the tooltip so the reason is still inspectable.
+    const family = credentialFamily(account);
+    const revoked = account.lastErrorCategory === "auth_invalidated";
+    return (
+      <Inline gap="4px">
+        <Badge tone="disabled" dot title={account.lastError}>
+          Disabled{family ? ` - ${family}` : ""}
+        </Badge>
+        {revoked ? (
+          <Badge tone="warn" title={account.lastError}>
+            {authInvalidatedLabel(account.credentialKind)}
+          </Badge>
+        ) : showsErrorPill(account.lastErrorCategory) && !(account.lastErrorCategory === "quota_exhausted" && modelCooldowns) ? (
+          <Badge tone="warn" title={account.lastError ?? account.lastErrorCategory}>
+            {accountErrorLabel(account.lastErrorCategory, account.credentialKind)}
+          </Badge>
+        ) : null}
+        <ModelCooldownChip cooldowns={modelCooldowns} reason={account.lastErrorCategory === "quota_exhausted" ? account.lastError : undefined} />
+      </Inline>
+    );
+  }
+  if (account.status === "active") {
+    // An account can be `active` and still have per-model backoffs: the router
+    // skips those (account, model) pairs while the account stays usable for
+    // every other model. Showing a bare "Active" hid that entirely.
+    //
+    // The badge stays "Active" even for a static token. Static is a property
+    // of the credential, shown in the chip beside this badge, not a status.
+    return (
+      <Inline gap="4px">
+        <Badge tone={activeCredentialTone(account)} dot>
+          Active{credentialFamily(account) ? ` - ${credentialFamily(account)}` : ""}
+        </Badge>
+        {showsErrorPill(account.lastErrorCategory) && !(account.lastErrorCategory === "quota_exhausted" && modelCooldowns) ? (
+          <Badge tone="warn" title={account.lastError ?? account.lastErrorCategory}>
+            {accountErrorLabel(account.lastErrorCategory, account.credentialKind)}
+          </Badge>
+        ) : null}
+        <ModelCooldownChip cooldowns={modelCooldowns} reason={account.lastErrorCategory === "quota_exhausted" ? account.lastError : undefined} />
+      </Inline>
+    );
+  }
+  if (account.status === "cooldown" || hasActiveCooldown)
+    return (
+      <Inline gap="4px">
+        <Badge tone="warn" dot>
+          Cooldown{credentialFamily(account) ? ` - ${credentialFamily(account)}` : ""}{" "}
+          {account.cooldownUntil ? `(${formatResetDistance(account.cooldownUntil)})` : ""}
+        </Badge>
+        {showsErrorPill(account.lastErrorCategory) && !(account.lastErrorCategory === "quota_exhausted" && modelCooldowns) ? (
+          <Badge tone="warn" title={account.lastError ?? account.lastErrorCategory}>
+            {accountErrorLabel(account.lastErrorCategory, account.credentialKind)}
+          </Badge>
+        ) : null}
+        <ModelCooldownChip cooldowns={modelCooldowns} reason={account.lastErrorCategory === "quota_exhausted" ? account.lastError : undefined} />
+      </Inline>
+    );
+  return <Badge tone="disabled">Disabled</Badge>;
+}
