@@ -1,4 +1,6 @@
 import { GatewayError } from "../protocol/gateway-error";
+import { log } from "../observability/logger";
+import { metrics } from "../observability/metrics";
 import { redisEvalTuple, type RedisClient } from "../persistence/redis";
 
 export interface ClientIdentity {
@@ -419,7 +421,21 @@ export class IpAbuseProtectionService {
         banDurationMs: this.banDurationMs,
       });
 
+      // Logged once, at the transition. A ban is the one state here the
+      // operator cannot see from a metric and cannot wait out by guessing:
+      // every request afterwards answers 429 with the same message, whether
+      // the address is banned or merely over the window. Naming the address,
+      // the count that tripped it, and how long it lasts is what turns
+      // "429, sometimes" into something to act on.
+      if (outcome.bannedNow) {
+        log.warn(
+          `ip abuse: banned ${ip} for ${Math.round(this.banDurationMs / 60_000)}min` +
+            ` (route ${input.route}, ceiling ${this.banThreshold})`,
+        );
+      }
+
       if (outcome.banned) {
+        metrics.cartethyia_ip_abuse_refusals_total.inc(1, { reason: "ip-banned" });
         throw new GatewayError("quota_exceeded", 429, "This address is temporarily banned for too many failed requests. Wait for the ban to lift, then slow down.", {
           // Distinguishes this from the rate-limited 429 below and from an API
           // key's own budget. It used to be "admission-unavailable", which is
@@ -437,6 +453,7 @@ export class IpAbuseProtectionService {
       }
 
       if (outcome.count > this.maxRequestsPerWindow) {
+        metrics.cartethyia_ip_abuse_refusals_total.inc(1, { reason: "ip-rate-limited" });
         throw new GatewayError("quota_exceeded", 429, "This address is sending requests faster than the abuse limit allows. Back off and retry after the window rolls over.", {
           reason: "ip-rate-limited",
           ip,

@@ -267,6 +267,16 @@ export class PrometheusRegistry {
   readonly cartethyia_redis_up: GaugeMetric;
   readonly proxy_requests_total: CounterMetric;
   readonly proxy_admission_total: CounterMetric;
+  /**
+   * Refusals from the per-IP abuse layer, by reason.
+   *
+   * These are the only 429s this process produces before dispatch, and they
+   * were invisible: a client-facing 429 could come from here, from admission,
+   * or from the upstream, and nothing recorded which. `ip-rate-limited` is the
+   * sliding window and `ip-banned` the escalation — different remedies, so
+   * they must not share a number.
+   */
+  readonly cartethyia_ip_abuse_refusals_total: CounterMetric;
   readonly proxy_in_flight: GaugeMetric;
   readonly proxy_request_latency_ms: HistogramMetric;
   readonly cartethyia_telemetry_buffered: GaugeMetric;
@@ -319,6 +329,11 @@ export class PrometheusRegistry {
     this.proxy_admission_total = this.counter(
       "proxy_admission_total",
       "Admission decisions by reason",
+      ["reason"],
+    );
+    this.cartethyia_ip_abuse_refusals_total = this.counter(
+      "cartethyia_ip_abuse_refusals_total",
+      "Requests refused by the per-IP abuse limit, by reason",
       ["reason"],
     );
     this.proxy_in_flight = this.gauge(
