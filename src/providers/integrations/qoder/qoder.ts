@@ -814,76 +814,22 @@ export function buildQoderRequest(
 // `tool_calls` field. Left alone, the markup reaches the caller as visible
 // prose and the tool never runs — which is exactly the symptom reported.
 //
-// The reference bridge (`qoder_proxy.py`, `parse_dsml_tool_calls`) recovers
-// these at end of stream. This is the same rule: buffer once DSML appears,
-// parse at the end, emit the clean prose then the real tool calls.
-//
-// Patterns mirror the Python originals (`re.DOTALL` becomes the `s` flag):
-//   TAG_START      = r"<[^>]*DSML[^>]*"
-//   DSML_CALLS_RE  = TAG_START + r"calls>(.*?)</[^>]*DSML[^>]*calls>"
-//   DSML_INVOKE_RE = TAG_START + r"invoke\s+name=["']([^"']+)["']>(.*?)</[^>]*invoke>"
-//   DSML_PARAM_RE  = TAG_START + r"parameter\s+name=["']([^"']+)["'][^>]*>(.*?)</[^>]*parameter>"
+// The parser lives in `src/protocol/dsml.ts`, shared with the CodeBuddy
+// family; Qoder selects the fuzzy dialect, which mirrors the reference bridge's
+// Python regexes (`qoder_proxy.py`, `parse_dsml_tool_calls`).
+import {
+  parseFuzzyDsmlToolCalls,
+  dsmlTailHold,
+  stripDsmlCloseTags,
+  type DsmlToolCall,
+} from "../../../protocol/dsml";
 
-const DSML_CALLS_RE = /<[^>]*DSML[^>]*calls>([\s\S]*?)<\/[^>]*DSML[^>]*calls>/;
-const DSML_INVOKE_RE = /<[^>]*DSML[^>]*invoke\s+name=["']([^"']+)["']>([\s\S]*?)<\/[^>]*invoke>/g;
-const DSML_PARAM_RE = /<[^>]*DSML[^>]*parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/[^>]*parameter>/g;
+/** Qoder's dialect bounds the shared parser to the fuzzy (non-strict) form. */
+export const parseDsmlToolCalls = (text: string) => parseFuzzyDsmlToolCalls(text);
+export { dsmlTailHold, stripDsmlCloseTags } from "../../../protocol/dsml";
 
 /** One recovered call, in the shape the canonical events want. */
-export interface DsmlCall {
-  readonly id: string;
-  readonly name: string;
-  readonly arguments: string;
-}
-
-/**
- * Recovers DSML tool calls out of a plain-text string.
- *
- * `clean` is the text with the markup removed. With no DSML present, `calls`
- * is empty and `clean` is the original text unchanged — so this is safe to run
- * over every stream, not just suspected ones.
- */
-export function parseDsmlToolCalls(text: string): { calls: DsmlCall[]; clean: string } {
-  if (text.length === 0 || !text.includes("DSML")) return { calls: [], clean: text };
-
-  const callsMatch = DSML_CALLS_RE.exec(text);
-  let block: string;
-  let clean: string;
-
-  if (callsMatch) {
-    block = callsMatch[1] ?? "";
-    const before = text.slice(0, callsMatch.index).trimEnd();
-    const after = text.slice(callsMatch.index + callsMatch[0].length).trimStart();
-    clean = (before + " " + after).trim();
-  } else {
-    // No <calls> wrapper (issue #51): find bare <invoke> blocks in the whole
-    // text, then cut the prose off at the last `<` before the first invoke.
-    DSML_INVOKE_RE.lastIndex = 0;
-    const first = DSML_INVOKE_RE.exec(text);
-    if (!first) return { calls: [], clean: text };
-    block = text;
-    const cut = text.lastIndexOf("<", first.index);
-    clean = text.slice(0, cut >= 0 ? cut : first.index).trim();
-  }
-
-  const calls: DsmlCall[] = [];
-  DSML_INVOKE_RE.lastIndex = 0;
-  let inv: RegExpExecArray | null;
-  while ((inv = DSML_INVOKE_RE.exec(block)) !== null) {
-    const params: Record<string, string> = {};
-    DSML_PARAM_RE.lastIndex = 0;
-    let par: RegExpExecArray | null;
-    while ((par = DSML_PARAM_RE.exec(inv[2] ?? "")) !== null) {
-      params[par[1] ?? ""] = (par[2] ?? "").trim();
-    }
-    calls.push({
-      id: `call_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
-      name: inv[1] ?? "",
-      arguments: JSON.stringify(params),
-    });
-  }
-
-  return { calls, clean };
-}
+export type DsmlCall = DsmlToolCall;
 
 /**
  * Escapes the bare quotes that belong inside a JSON string value.
@@ -984,56 +930,6 @@ export function parseLeakedToolCalls(
   return { calls, clean: head };
 }
 
-/**
- * The holdable tail of a content chunk: a short suffix that looks like the
- * start of a DSML tag and may finish in the next frame. Empty when there is
- * nothing worth holding.
- *
- * Mirrors `_dsml_tail_hold` in the reference bridge.
- */
-export function dsmlTailHold(text: string): string {
-  const at = text.lastIndexOf("<");
-  if (at < 0 || text.length - at > 24) return "";
-  const tail = text.slice(at);
-  // A complete tag already — nothing to wait for.
-  if (tail.includes(">")) return "";
-  const body = tail.replace(/\uFF5C/g, "|").toUpperCase().slice(1).replace(/^\//, "");
-  if (body.length === 0) return tail; // bare "<" or "</"
-  if (!body.startsWith("|")) return "";
-  const rest = body.slice(1);
-  if (rest.length === 0) return tail;
-  if ("DSML".startsWith(rest) || rest.startsWith("DSML")) return tail;
-  return "";
-}
-
-/**
- * Removes leftover DSML closing tags from the tail of a text.
- *
- * The upstream sometimes leaks only the tail of a tool-call block — bare
- * `</parameter>` / `</invoke>` / `</calls>` with no opening and, in the
- * thinking channel, occasionally without the `DSML` marker at all. Those
- * fragments are pure protocol residue: they are never natural prose, so
- * dropping them is safe and keeps internal markup out of what the user sees.
- *
- * Anchored to the end, as in the reference bridge: a closing tag in the middle
- * of a text is not this residue and stripping it would eat real prose. The
- * caller loops, so several trailing tags come off one per pass.
- *
- * Mirrors `_strip_dsml_close_tail`, widened to the bare form because the
- * thinking channel does not always carry the marker.
- */
-const DSML_CLOSE_TAG_RE = /<\/(?:[^>]*DSML[^>]*|parameter|invoke|calls|tool_calls|function_calls)\s*>\s*$/i;
-
-export function stripDsmlCloseTags(text: string): string {
-  let previous: string | null = null;
-  let out = text.trimEnd();
-  while (previous !== out) {
-    previous = out;
-    out = out.replace(DSML_CLOSE_TAG_RE, "").trimEnd();
-  }
-  return out;
-}
-
 // Stream transformation — decode SSE, unwrap COSY envelope, map OpenAI chat chunks to CanonicalEvent
 
 function mapQoderFinishReason(raw: unknown): CanonicalStopReason | undefined {
@@ -1060,7 +956,7 @@ export async function* qoderBodyToCanonicalEvents(
   let buf = "";
   let tail = "";
   /** Calls recovered from the thinking channel, emitted if content had none. */
-  let reasonCalls: DsmlCall[] = [];
+  let reasonCalls: readonly DsmlCall[] = [];
   // The same recovery for the thinking channel. A model that plans its call
   // inside `reasoning_content` writes the markup there instead of in `content`,
   // so recovering only the content channel loses the call *and* leaves the
