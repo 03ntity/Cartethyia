@@ -221,7 +221,7 @@ export type PoolStatus = (typeof POOL_STATUSES)[number];
  * direct callers against the same list (mirrors `POOL_STATUSES`). Values must
  * stay aligned with the `pool_routing_strategy` enum in `schema.ts`.
  */
-export const POOL_ROUTING_STRATEGIES = ["least_loaded", "round_robin"] as const;
+export const POOL_ROUTING_STRATEGIES = ["least_loaded", "round_robin", "random"] as const;
 export type PoolRoutingStrategyValue = (typeof POOL_ROUTING_STRATEGIES)[number];
 
 export interface PoolStrategySetting {

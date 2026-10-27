@@ -68,6 +68,21 @@ export function effectiveConcurrency(limit: number): number {
   return limit;
 }
 
+/**
+ * In-place Fisher–Yates shuffle. The `random` pool strategy uses it to scatter
+ * each selection across the eligible pools instead of always scanning from a
+ * fixed (or cursor-driven) order, so a burst does not clump onto the first
+ * pool and burn it while siblings sit idle.
+ */
+function shuffleArray<T>(items: T[]): void {
+  for (let i = items.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const swap = items[i]!;
+    items[i] = items[j]!;
+    items[j] = swap;
+  }
+}
+
 function normalizedWeight(weight: number | undefined): number {
   if (weight === undefined) return DEFAULT_PROXY_WEIGHT;
   if (!Number.isInteger(weight) || weight < 1 || weight > MAX_PROXY_WEIGHT) return 0;
@@ -631,6 +646,26 @@ export class NetworkPoolSelector {
     if (scored.length === 0) return undefined;
 
     if (!this.redis) {
+      if (rotation?.strategy === "random") {
+        // Random scatter: shuffle the eligible pools and take the first one
+        // with a free slot, falling through like the ordered scans do.
+        shuffleArray(scored);
+        for (const candidate of scored) {
+          if (this.getInflight(candidate.poolId) >= candidate.capacity) continue;
+          const slot =
+            providerCapacity === undefined
+              ? this.acquire(candidate.poolId, candidate.capacity)
+              : this.acquireProvider(
+                  candidate.poolId,
+                  providerId,
+                  candidate.capacity,
+                  providerCapacity,
+                );
+          if (!slot.acquired) continue;
+          return { poolId: candidate.poolId, release: slot.release };
+        }
+        return undefined;
+      }
       if (rotation) {
         // Round robin: scan from the tenant cursor; a pool that is full falls
         // through to the next offset (failover). Only a successful admission
@@ -729,7 +764,13 @@ export class NetworkPoolSelector {
     // Original (pre-sort) index = absolute rotation position and
     // deterministic tie-breaking.
     const absoluteIndex = new Map(withCounts.map((candidate, index) => [candidate.poolId, index]));
-    if (rotation) {
+    if (rotation?.strategy === "random") {
+      // Random scatter: shuffle before the admit loop, which still enforces
+      // capacity and fails over to the next pool exactly like the ordered
+      // scans — but the order each request tries is fresh, so a burst does
+      // not gang up on the first pools in a fixed order.
+      shuffleArray(withCounts);
+    } else if (rotation) {
       // Round robin orders strictly by the tenant cursor; the CAS admit below
       // still enforces capacity, so a full pool falls through to the next
       // offset exactly like account failover.
@@ -782,7 +823,7 @@ export class NetworkPoolSelector {
       // to the next pool, which is the whole point of the ceiling: the request
       // moves to an egress that still has room for this provider.
       if (result !== 1) continue;
-      if (rotation) {
+      if (rotation && rotation.strategy !== "random") {
         advanceRotation(
           this.state.rotationCursors,
           rotation.key,

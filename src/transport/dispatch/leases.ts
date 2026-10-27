@@ -124,11 +124,16 @@ async function acquirePoolSlot(
     }
   }
   // Round-robin rotation rides the strategy the snapshot attached to the
-  // candidate (the pool-owning tenant scopes the cursor); absent strategy or
-  // `least_loaded` keeps the default weighted least-loaded scan.
+  // candidate (the pool-owning tenant scopes the cursor); `random` scatters
+  // each selection across eligible pools. Absent strategy or `least_loaded`
+  // keeps the default weighted least-loaded scan.
   const rotation: PoolRotation | undefined =
-    routing?.strategy === "round_robin"
-      ? { key: routing.tenantId, rotateCount: routing.rotateCount }
+    routing?.strategy === "round_robin" || routing?.strategy === "random"
+      ? {
+          key: routing.tenantId,
+          rotateCount: routing.rotateCount,
+          strategy: routing.strategy,
+        }
       : undefined;
 
   if (!poolIds?.length || !poolSelector) {

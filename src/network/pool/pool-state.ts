@@ -28,6 +28,13 @@ export interface ProxyCooldownEntry {
 export interface PoolRotation {
   readonly key: string;
   readonly rotateCount: number;
+  /**
+   * The strategy that produced this rotation request. `round_robin` serves
+   * `rotateCount` requests per pool before advancing; `random` scatters each
+   * selection across the eligible pools in a fresh random order. Absent means
+   * the default weighted least-loaded scan.
+   */
+  readonly strategy?: "round_robin" | "random";
 }
 
 export interface PoolUsageSnapshot {

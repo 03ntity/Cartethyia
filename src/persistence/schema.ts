@@ -694,6 +694,7 @@ export const providerRoutingSettings = pgTable(
 export const poolRoutingStrategy = pgEnum("pool_routing_strategy", [
   "least_loaded",
   "round_robin",
+  "random",
 ]);
 export type PoolRoutingStrategy = (typeof poolRoutingStrategy.enumValues)[number];
 
