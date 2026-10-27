@@ -8,6 +8,36 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.6.8] - 2026-10-27
+
+### Fixed
+
+- **CommandCode generates on the CLI surface.** Every completion was posted
+  to `https://api.commandcode.ai/provider/v1/<wire>` — the catalog surface,
+  which answers `GET /models`. The reference client generates on
+  `/alpha/generate` for every model and does not vary the path by the wire a
+  row declares, so requests were reaching a surface the CLI never calls to
+  generate. All catalog and discovered rows now dispatch there; the wire
+  family still decides how the body is shaped, so no body translation
+  changed. Each request also sends `x-session-id`, which the upstream
+  expects on every generate call.
+
+- **Qoder sends assistant tool calls.** A request with tools failed
+  upstream with "Messages with role 'tool' must be a response to a preceding
+  message with 'tool_calls'": the translator emitted every assistant turn as
+  text only, so the calls were dropped while their results were still sent.
+  Replaying the recorded request showed 862 calls in and 0 out; they are now
+  sent as `tool_calls` and as `tool_use` blocks, using the block shape the
+  upstream reference bridge produces.
+
+- **Qoder replays `reasoning_content` for the DeepSeek family.** Those models
+  tie multi-turn consistency to the field: an assistant turn that thought has
+  to be replayed with it or the upstream refuses the whole history, showing
+  up as occasional failures that sometimes pass on retry. The translator
+  flattened assistant turns to text only, dropping it from all 919. Matched
+  on the upstream key as well as the display name, and kept it only for these
+  models, as the reference bridge does.
+
 ## [2.6.7] - 2026-10-27
 
 ### Fixed
