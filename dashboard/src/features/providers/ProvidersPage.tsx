@@ -675,6 +675,10 @@ const FREE_LIMITED_IDS = new Set([
   // alongside its paid rows, so its free allowance is metered against that
   // one reseller rather than a standing free tier.
   "kilo",
+  // Inception Labs ships a standing free tier — mercury-3 at zero price —
+  // rather than a daily allowance, but it belongs in the same section as the
+  // other free-limited providers an operator reaches for first.
+  "inception",
 ]);
 /**
  * The providers an operator reaches for first: household names with a
