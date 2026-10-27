@@ -5,20 +5,13 @@
  * assertions possible offline. They pin the parts that fail silently: an SSRF
  * check that only runs on the first hop would let a redirect walk a request
  * into private address space, and a non-http scheme reaching the dial is a
- * TypeError from deep inside node rather than a typed refusal.
+ * TypeError from deep inside the stack rather than a typed refusal.
+ *
+ * `fetchFn` is the seam for every dial now, so these assertions cover the real
+ * chokepoint rather than a path that only ran without an injected dialer.
  */
 import { describe, expect, test } from "bun:test";
 import { createValidatedFetch } from "../../src/network/outbound-fetch";
-
-/**
- * Scope note for anyone refactoring this egress: injecting `fetchFn` bypasses
- * `pinnedFetch` entirely (`outbound-fetch.ts:347`), so header stripping and
- * `content-encoding` decoding — both applied inside `pinnedFetch` — do NOT run
- * on that path. Everything asserted below therefore sticks to behaviour that
- * happens *around* the dial: scheme and SSRF gating, redirect revalidation, and
- * body pass-through. The pinned-dial half needs a real socket and is not
- * covered here.
- */
 
 /** Resolver that answers every hostname with one fixed address. */
 function resolver(address: string): (hostname: string) => Promise<readonly string[]> {
@@ -102,8 +95,8 @@ describe("createValidatedFetch", () => {
   });
 
   test("a GET carrying a body reaches the wire", async () => {
-    // `fetch` itself refuses GET + body; this egress is the node:http path
-    // that allows it, which Qoder's model list requires.
+    // A GET with a body must survive the chokepoint unchanged: some model
+    // listings send one. The egress adds `content-length` and forwards it.
     let body: string | undefined;
     const fetcher = createValidatedFetch({
       policy: {},
