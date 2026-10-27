@@ -746,13 +746,21 @@ export function buildQoderRequest(
     chat_context: {
       chatPrompt: MODERN_PROFILE.mirrorTopLevelSystem ? systemPrompt : "",
       imageUrls: null,
-      extra: { context: [], modelConfig: { key: modelId, is_reasoning: reasoning }, originalContent: latestUserText },
+      extra: { context: [], modelConfig: { key: modelId, is_reasoning: reasoning }, originalContent: { text: latestUserText } },
       features: [],
-      text: latestUserText,
+      // An object, as the reference sends it: `cc["text"]["text"] = prompt`.
+      text: { text: latestUserText },
     },
     model_config: {
       key: modelId,
       display_name: modelConfig.display_name,
+      // Declares the wire dialect for the tool calls. Without it the upstream
+      // does not read the OpenAI-shaped `tools` array the same way, and the
+      // model then emits a call with no arguments filled in.
+      format: "openai",
+      model: "",
+      api_key: "",
+      url: "",
       is_vl: modelConfig.is_vl,
       is_reasoning: modelConfig.is_reasoning,
       max_input_tokens: modelConfig.max_input_tokens,
