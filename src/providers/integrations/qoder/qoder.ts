@@ -886,6 +886,43 @@ export function parseDsmlToolCalls(text: string): { calls: DsmlCall[]; clean: st
 }
 
 /**
+ * Escapes the bare quotes that belong inside a JSON string value.
+ *
+ * Escaped quotes are parked first so they are not escaped twice, then every
+ * remaining quote is escaped, then the parked ones are restored.
+ */
+function repairJsonQuotes(text: string): string {
+  const ph = "\u0000";
+  return text.replace(/\\"/g, ph).replace(/"/g, '\\"').replaceAll(ph, '\\"');
+}
+
+/** `[{"name":"…","arguments":"<unescaped JSON>"}]`, one call only. */
+const ECHO_LOOSE_RE = /^\[\s*\{\s*"name"\s*:\s*"([^"]{1,200})"\s*,\s*"arguments"\s*:\s*"(.*)"\s*\}\s*\]$/s;
+
+/**
+ * Rebuilds the single-call echo shape when strict parsing fails.
+ *
+ * Returns `null` when the text is not that shape at all, so a caller can fall
+ * back rather than accepting a guess. The result still goes through the same
+ * strict checks as a normally-parsed array.
+ */
+function salvageEchoArray(rest: string): unknown {
+  const m = ECHO_LOOSE_RE.exec(rest.trim());
+  if (!m) return null;
+  const name = m[1] ?? "";
+  const raw = m[2] ?? "";
+  for (const candidate of [raw, repairJsonQuotes(raw)]) {
+    try {
+      JSON.parse(candidate);
+      return [{ name, arguments: candidate }];
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
  * Recovers a tool call the model echoed back as text.
  *
  * On INTL the upstream reads tool calls as prose, so a turn that called a tool
@@ -913,7 +950,14 @@ export function parseLeakedToolCalls(
   try {
     parsed = JSON.parse(rest);
   } catch {
-    return { calls: [], clean: text };
+    // A model echoing the call writes the inner quotes unescaped:
+    // `[{"name":"Read","arguments":"{"file_path":"a.ts"}"}]`. That is not
+    // valid JSON at either level, so the array has to be rebuilt before it can
+    // be trusted. Only the single-call shape is salvaged, which is what an echo
+    // almost always is.
+    const salvaged = salvageEchoArray(rest);
+    if (salvaged === null) return { calls: [], clean: text };
+    parsed = salvaged;
   }
   if (!Array.isArray(parsed) || parsed.length === 0) return { calls: [], clean: text };
 
