@@ -126,7 +126,7 @@ export interface ConsoleDomainContext {
 import { and, eq, isNull, or } from "drizzle-orm";
 import { networkPools, providerRoutingSettings } from "../persistence/schema";
 import { resolveTenantOverride } from "../persistence/tenant-scope";
-import { DEFAULT_PROXY_SKIP_PROVIDER_IDS, PROVIDER_COMPATIBILITY_PROFILES } from "../providers/provider-metadata";
+import { DEFAULT_PROXY_SKIP_PROVIDER_IDS } from "../providers/provider-metadata";
 import type { ProbeOutboundBinding } from "../providers/discovery/probing-service";
 
 
@@ -221,13 +221,7 @@ export function registerConsoleDomains(
       }
 
       return {
-        fetch: ctx.networkBindingFactory.select(
-          (providerId !== undefined &&
-            PROVIDER_COMPATIBILITY_PROFILES[providerId]?.preferNativeFetch === true) ||
-            false,
-          undefined,
-          tenantId,
-        ),
+        fetch: ctx.networkBindingFactory.fetch(undefined, tenantId),
         http2Bidi: ctx.networkBindingFactory.http2Bidi(undefined, tenantId),
       };
     },

@@ -1,5 +1,4 @@
 import { isBundledProviderId } from "../../providers/provider-contracts";
-import { PROVIDER_COMPATIBILITY_PROFILES } from "../../providers/provider-metadata";
 import type { ProviderDispatchContext, ProviderId, ProviderAdapter } from "../../providers/provider-contracts";
 import { GatewayError } from "../../protocol/gateway-error";
 import type { CanonicalEvent } from "../../protocol/canonical-model";
@@ -236,8 +235,7 @@ export async function handleProviderProxyRequest(
         ...(deps.networkBindingFactory
           ? {
               outboundFetch: captureProviderExchange(
-                deps.networkBindingFactory.select(
-                  PROVIDER_COMPATIBILITY_PROFILES[candidate.provider_id]?.preferNativeFetch === true,
+                deps.networkBindingFactory.fetch(
                   networkPoolId,
                   prepared.authorization.snapshot.tenant_id,
                 ),
@@ -259,8 +257,7 @@ export async function handleProviderProxyRequest(
           : {}),
         ...(deps.networkBindingFactory
           ? {
-              outboundAttachmentFetch: deps.networkBindingFactory.select(
-                PROVIDER_COMPATIBILITY_PROFILES[candidate.provider_id]?.preferNativeFetch === true,
+              outboundAttachmentFetch: deps.networkBindingFactory.fetch(
                 networkPoolId,
                 prepared.authorization.snapshot.tenant_id,
               ),

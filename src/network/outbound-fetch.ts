@@ -17,6 +17,18 @@ export interface ValidatedFetchOptions {
   readonly maxRedirects?: number;
   readonly resolveFn?: (hostname: string, signal: AbortSignal) => Promise<readonly string[]>;
   readonly agent?: HttpAgent | HttpsAgent | ProxyAgentPair;
+  /**
+   * Use the runtime-native fetch for direct (non-pool) egress. Defaults to
+   * `true`: the native transport is used by the real clients these gateways
+   * impersonate, and some upstreams meter per client transport fingerprint
+   * (OpenCode's anonymous free tier refuses the Node-stack agent with 429
+   * FreeUsageLimitError while accepting the native fetch byte-for-byte). The
+   * SSRF resolve/validate pass still runs for every hop before dialing; only
+   * the socket-level address pin is traded away, which the native fetch cannot
+   * express. Set `false` to keep the pinned Node-stack agent (e.g. when a
+   * pool/agent requires it or a strict pin is required).
+   */
+  readonly preferNativeFetch?: boolean;
 }
 export type ValidatedFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -324,6 +336,8 @@ export function createValidatedFetch(options: ValidatedFetchOptions = {}): Valid
           : await pinnedFetch(relay.url, relay.init, relayResolvedAddress!);
       } else if (options.fetchFn) {
         response = await options.fetchFn(url, requestInit);
+      } else if (options.preferNativeFetch !== false) {
+        response = await globalThis.fetch(url, requestInit);
       } else {
         const agent = agentForTarget(configuredAgent, url.protocol);
         response = await pinnedFetch(url, requestInit, resolvedAddress!, agent);
