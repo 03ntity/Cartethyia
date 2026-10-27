@@ -96,7 +96,7 @@ succeed from another egress. Treat it per-pool, never as a code bug.
 
 ## How it was reverse-engineered
 
-1. **Donor diff** — compare against `opencode2api` (Go reference): endpoints,
+1. **Donor diff** — compare against the Go reference gateway: endpoints,
    headers, tool assets, prompt text, session derivation.
 2. **Raw probes without the gateway** — Bun native `fetch` with the `proxy`
    option, exact adapter shapes, no gateway layers in between.
@@ -126,11 +126,46 @@ status 200
 data: {"id":"mai-api-…","object":"chat.completion.chunk","model":"big-pickle",…}
 ```
 
+## Measured limits (research)
+
+How many consecutive hits a fresh egress tolerates before `429 FreeUsageLimitError`
+appears — measured 2026-10-28 with this exact payload:
+
+- **System prompt:** `<env>Working directory:x</env>` (30 chars)
+- **Tools:** the 13 verbatim agent definitions (see `tool-definitions.ts`)
+- **Body:** `stream: true`, `stream_options.include_usage: true`,
+  `max_completion_tokens: 32000`, `Authorization: Bearer public`
+- **Protocol:** sequential hits, ~400 ms apart, stop after 3× 429 in a row
+
+| Model | Fresh egress | OK hits before 429 |
+| --- | --- | --- |
+| `mimo-v2.6-flash-free` | `egress-a` | 38 |
+| `glm-5.3-flash-free` | `egress-b` | 40 |
+| `deepseek-v4.1-flash-free` | `egress-c` | 39 |
+| `beam-free` | `egress-d` | 40 |
+
+A second fresh batch measured the same 4 models with a **100K-character system
+prompt** (gate-required `<env>` kept at the end):
+
+| Model | Fresh egress | OK hits before 429 |
+| --- | --- | --- |
+| `mimo-v2.6-flash-free` | `egress-e` | 39 |
+| `glm-5.3-flash-free` | `egress-f` | 38 |
+| `deepseek-v4.1-flash-free` | `egress-g` | 38 |
+| `beam-free` | `egress-h` | 37 |
+
+**The limit is by request count, not by tokens:** expanding the prompt from
+30 to 100K characters did not change the ceiling. Observed ceiling is **40
+hits** (range 37–40) per (model, egress) on a fresh egress — never more.
+Egresses that already carried traffic measured lower (≈15–19), so 40 is the
+clean maximum with a rolling window, not a hard guarantee across reused
+egresses. The 429 is transient and clears on the upstream's own schedule.
+
 ## Why native egress matters — the TLS fingerprint
 
 The gate does not only read headers. The official OpenCode clients run on Bun,
 and their TLS ClientHello is part of the transport fingerprint. The reference
-gateway (`opencode2api`) went to the trouble of replaying Bun's hello with
+gateway went to the trouble of replaying Bun's hello with
 uTLS in Go; we are on Bun, so `fetch()` already emits the exact hello:
 
 | | Node `node:https` | Bun `fetch()` | Reference target |
@@ -153,7 +188,7 @@ On 2026-10-16 the deployed gateway got 403s from a datacenter egress. Every
 permutation of the client fingerprint (`cli`/`desktop` marker, user-agent
 1.18–2.0.32, with/without headers) still produced 403, including the official
 CLI after a successful OAuth login. The **same byte-identical request** then
-returned 200 through an HTTP proxy with exit IP `193.202.12.2`:
+returned 200 through an HTTP proxy with exit IP `203.0.113.10`:
 
 ```
 big-pickle /inference/v1/chat/completions   200  (8.1 s)
@@ -170,7 +205,7 @@ Conclusions that came out of that:
 - A datacenter egress (Railway and similar) is blocked outright — opencode
   needs an egress proxy, which is why pools matter.
 
-## Reference comparison highlights (`opencode2api`)
+## Reference comparison highlights (Go reference)
 
 | Aspect | Ours | Reference |
 | --- | --- | --- |

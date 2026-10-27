@@ -41,40 +41,31 @@ export function carriesOpenCodePrompt(value: unknown): boolean {
 }
 
 /**
- * Folds every system/developer message into one leading system message and
- * prepends the prompt. Client instructions keep their order and are separated
- * by a blank line.
+ * Appends the `<env>` block to the first existing system/developer message
+ * instead of prepending a new leading system message. The tool's own system
+ * content (Claude Code, DSH, …) keeps its place; the gate-required env block
+ * is tacked on at the end of it.
  */
 export function injectChatPrompt(payload: Record<string, unknown>, prompt: string): boolean {
   const messages = payload["messages"];
   if (!Array.isArray(messages)) return false;
-  const kept: unknown[] = [];
-  const instructions: string[] = [];
-  for (const raw of messages) {
-    if (typeof raw !== "object" || raw === null) {
-      kept.push(raw);
-      continue;
-    }
-    const message = raw as Record<string, unknown>;
-    const role = message["role"];
-    if (role !== "system" && role !== "developer") {
-      kept.push(raw);
-      continue;
-    }
-    if (carriesOpenCodePrompt(message["content"])) return false;
-    for (const part of textFragments(message["content"])) {
-      const trimmed = part.trim();
-      if (trimmed !== "") instructions.push(trimmed);
-    }
+  const firstSystem = messages.findIndex((raw) => {
+    if (typeof raw !== "object" || raw === null) return false;
+    const role = (raw as Record<string, unknown>)["role"];
+    return role === "system" || role === "developer";
+  });
+  if (firstSystem === -1) {
+    payload["messages"] = [{ role: "system", content: prompt }, ...messages];
+    return true;
   }
-  let system = prompt;
-  const joined = instructions.join("\n");
-  if (joined !== "") system += "\n\n" + joined;
-  payload["messages"] = [{ role: "system", content: system }, ...kept];
+  const message = messages[firstSystem] as Record<string, unknown>;
+  if (carriesOpenCodePrompt(message["content"])) return false;
+  const existing = textFragments(message["content"]).join("\n");
+  message["content"] = existing === "" ? prompt : `${existing}\n\n${prompt}`;
   return true;
 }
 
-/** Prepends the prompt to the top-level Anthropic `system` value. */
+/** Appends the prompt to the top-level Anthropic `system` value. */
 export function injectAnthropicPrompt(payload: Record<string, unknown>, prompt: string): boolean {
   const system = payload["system"];
   if (system !== undefined && carriesOpenCodePrompt(system)) return false;
@@ -83,21 +74,21 @@ export function injectAnthropicPrompt(payload: Record<string, unknown>, prompt: 
     return true;
   }
   if (typeof system === "string") {
-    payload["system"] = system.trim() === "" ? prompt : prompt + "\n\n" + system;
+    payload["system"] = system.trim() === "" ? prompt : system + "\n\n" + prompt;
   } else if (Array.isArray(system)) {
-    payload["system"] = [{ type: "text", text: prompt }, ...system];
+    payload["system"] = [...system, { type: "text", text: prompt }];
   } else {
     payload["system"] = prompt;
   }
   return true;
 }
 
-/** Prepends the prompt to the Responses `instructions` value. */
+/** Appends the prompt to the Responses `instructions` value. */
 export function injectResponsesPrompt(payload: Record<string, unknown>, prompt: string): boolean {
   const instructions = payload["instructions"];
   if (instructions !== undefined && carriesOpenCodePrompt(instructions)) return false;
   if (typeof instructions === "string") {
-    payload["instructions"] = instructions.trim() === "" ? prompt : prompt + "\n\n" + instructions;
+    payload["instructions"] = instructions.trim() === "" ? prompt : instructions + "\n\n" + prompt;
   } else {
     payload["instructions"] = prompt;
   }

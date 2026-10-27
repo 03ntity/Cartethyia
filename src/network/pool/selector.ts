@@ -10,6 +10,7 @@
 import { redisEvalNumber, type RedisClient } from "../../persistence/redis";
 import { resolveInflightTtlSeconds } from "../../config/timeouts";
 import { log } from "../../observability/logger";
+import { providerRateLimitIsIpScoped } from "../../providers/provider-metadata";
 import {
   COOLDOWN_CLEAR_SCRIPT,
   COOLDOWN_FLAG_SCRIPT,
@@ -308,12 +309,32 @@ export class NetworkPoolSelector {
    * The entry uses the same storage as a cooldown so every reader that already
    * skips a cooling pool skips this one too; `reason` is what the console
    * renders to tell an operator-blocked proxy from a throttled one.
+   *
+   * Refuses to retire an egress for a provider whose limits belong to a
+   * credential. An address-scoped verdict only exists for providers that count
+   * requests by egress (`ipScopedRateLimit` — opencode); for everyone else a
+   * refusal belongs to the account that was dialed, so retiring the pool would
+   * sideline an address that is still serving every sibling account. Callers
+   * keep their own guard, and this one is the backstop that makes the rule
+   * impossible to route around from a new call site.
    */
   async flagProviderBlocked(
     poolId: string,
     providerId: string,
     reason = "Upstream refused this egress address",
   ): Promise<ProxyCooldownEntry> {
+    if (!providerRateLimitIsIpScoped(providerId)) {
+      log.warn("[pool-selector] refused to block an egress for a non-IP-scoped provider", {
+        networkPoolId: poolId,
+        providerId,
+      });
+      return {
+        poolId,
+        providerId: providerId.toLowerCase(),
+        until: Date.now(),
+        reason,
+      };
+    }
     const entry = await this.flagProviderCooldown(poolId, providerId, PROVIDER_BLOCK_MS, reason);
     const blocked: ProxyCooldownEntry = { ...entry, blocked: true };
     // Rewrite both copies with the flag: the cooldown write above is shared
@@ -453,6 +474,38 @@ export class NetworkPoolSelector {
     this.state.cooldowns.delete(this.cooldownKey(poolId, providerId));
     if (!this.redis) return;
     await this.clearRedisCooldown(poolId, providerId);
+  }
+
+  /**
+   * Releases a *retired* egress only, leaving a cooldown intact.
+   *
+   * The two are one key, so `clearProviderCooldown` cannot be reused: it would
+   * also drop a live 429 cooldown and hand a spent address back to dispatch.
+   * This is the correction a 429 probe is entitled to make — the address is
+   * answering its own rate limiter, so it was never retired — and nothing more.
+   *
+   * No-op when the marker is a cooldown, and no-op when there is no marker.
+   */
+  async clearProviderBlockedOnly(poolId: string, providerId: string): Promise<void> {
+    const key = this.cooldownKey(poolId, providerId);
+    const local = this.state.cooldowns.get(key);
+    if (local !== undefined) {
+      if (local.blocked !== true) return;
+      this.state.cooldowns.delete(key);
+    }
+    if (!this.redis) return;
+    try {
+      const raw = await this.redis.get(proxyCooldownKey(poolId, providerId));
+      const entry = raw ? parseCooldownEntry(raw) : undefined;
+      // A missing or unparseable marker says nothing about the address, and
+      // deleting a key we cannot read would drop a cooldown this is forbidden
+      // from touching. Only a marker that names itself a block is released.
+      if (entry?.blocked !== true) return;
+      await this.clearRedisCooldown(poolId, providerId);
+    } catch {
+      // The local copy is already corrected; the Redis mirror stays until its
+      // TTL or the next write.
+    }
   }
 
   /**

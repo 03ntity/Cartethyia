@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { OPENCODE_FREE_SPEC, isFreeTierZenModel } from "../../src/providers/integrations/opencode/provider";
-import { OPENCODE_PROMPT_MARKER } from "../../src/providers/integrations/opencode/prompt";
+import { OPENCODE_PROMPT_MARKER, injectResponsesPrompt } from "../../src/providers/integrations/opencode/prompt";
 import { OPENCODE_CLIENT_VERSION } from "../../src/providers/integrations/opencode/fingerprint";
 import { encodeWireRequest } from "../../src/protocol/registry";
 import type { CanonicalRequest } from "../../src/protocol/canonical-model";
@@ -102,7 +102,56 @@ describe("OpenCode donor parity", () => {
     expect(payload["max_completion_tokens"]).toBe(8000);
   });
 
-  test("the official CLI prompt is injected and system/developer messages fold into one leading system", async () => {
+  test("tool-owned system content is preserved; the env block is appended", async () => {
+    const source = baseRequest({
+      messages: [textMessage("system", "You are Claude Code. Keep answers short."), textMessage("user", "hi")],
+    });
+    const payload = await encodeChat(source);
+    OPENCODE_FREE_SPEC.prePayload?.(payload, source, FREE_CHAT);
+    const messages = payload["messages"] as Array<{ role: string; content: string }>;
+    // The tool's system message stays in place; only the env block is appended.
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.role).toBe("system");
+    expect(messages[0]?.content).toContain("You are Claude Code. Keep answers short.");
+    expect(messages[0]?.content).toContain("<env>");
+    expect(messages[0]?.content).toContain("Working directory:");
+    expect(messages[0]!.content.indexOf("You are Claude Code.")).toBeLessThan(
+      messages[0]!.content.indexOf("<env>"),
+    );
+    expect(messages[1]?.role).toBe("user");
+  });
+
+  test("anthropic and responses systems also append rather than replace", async () => {
+    const anthropicSource = baseRequest({
+      messages: [textMessage("system", "claude system text"), textMessage("user", "hi")],
+    });
+    const anthropicPayload = await encodeWireRequest("messages", anthropicSource);
+    OPENCODE_FREE_SPEC.prePayload?.(anthropicPayload, anthropicSource, FREE_MESSAGES);
+    const flatten = (value: unknown): string =>
+      Array.isArray(value)
+        ? value
+            .map((part) =>
+              typeof part === "object" && part !== null && typeof (part as Record<string, unknown>)["text"] === "string"
+                ? ((part as Record<string, unknown>)["text"] as string)
+                : String(part),
+            )
+            .join("\n")
+        : String(value);
+    const systemText = flatten(anthropicPayload["system"]);
+    expect(systemText).toContain("claude system text");
+    expect(systemText).toContain("<env>");
+    expect(systemText.indexOf("claude system text")).toBeLessThan(systemText.indexOf("<env>"));
+
+    const responsesPayload: Record<string, unknown> = { instructions: "client instructions" };
+    const env = "<env>  Working directory: /workspace</env>";
+    expect(injectResponsesPrompt(responsesPayload, env)).toBe(true);
+    const instructionsText = String(responsesPayload["instructions"]);
+    expect(instructionsText).toContain("client instructions");
+    expect(instructionsText).toContain("<env>");
+    expect(instructionsText.indexOf("client instructions")).toBeLessThan(instructionsText.indexOf("<env>"));
+  });
+
+  test("the official CLI prompt is appended to the first system message; others stay", async () => {
     const source = baseRequest({
       messages: [
         textMessage("system", "system instructions"),
@@ -113,12 +162,15 @@ describe("OpenCode donor parity", () => {
     const payload = await encodeWireRequest("chat", source);
     OPENCODE_FREE_SPEC.prePayload?.(payload, source, FREE_CHAT);
     const messages = payload["messages"] as Array<{ role: string; content: string }>;
-    expect(messages).toHaveLength(2);
+    // The tool's own messages are preserved in place; the env block is
+    // appended to the existing system message, not folded into one new one.
+    expect(messages).toHaveLength(3);
     expect(messages[0]?.role).toBe("system");
     expect(messages[0]?.content).toContain(OPENCODE_PROMPT_MARKER);
     expect(messages[0]?.content).toContain("system instructions");
-    expect(messages[0]?.content).toContain("dev instructions");
-    expect(messages[1]?.role).toBe("user");
+    expect(messages[1]?.role).toBe("developer");
+    expect(messages[1]?.content).toContain("dev instructions");
+    expect(messages[2]?.role).toBe("user");
   });
 
   test("a body that already carries the official prompt is not double-injected", async () => {

@@ -505,18 +505,35 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
       // still picked a red one": the red was a colour, not a decision.
       //
       // `blocked` retires the egress for this provider, so the next dispatch
-      // skips it. Anything else clears a previous block, because the address is
+      // skips it. `allowed` clears a previous block, because the address is
       // serving again — an operator who replaced a proxy must not have to find
       // a separate button to un-retire it.
+      //
+      // `blocked` retires the egress — but only for a provider whose limits
+      // follow the address. `flagProviderBlocked` refuses everyone else, so the
+      // verdict reported back is what actually happened, not what was asked.
       if (result.status === "blocked") {
-        await config.poolSelector.flagProviderBlocked(
+        const entry = await config.poolSelector.flagProviderBlocked(
           poolId,
           providerId,
           "Upstream refused this egress address",
         );
-        return { ...result, blockedPool: true };
+        return { ...result, blockedPool: entry.blocked === true };
       }
-      await config.poolSelector.clearProviderCooldown(poolId, providerId);
+      // A measured success releases the address.
+      if (result.status === "allowed") {
+        await config.poolSelector.clearProviderCooldown(poolId, providerId);
+        return { ...result, blockedPool: false };
+      }
+      // `throttled` (429) proves the address is *serving* again — its rate
+      // limiter answered — so a stale "retired" claim is corrected. It does
+      // **not** release a cooldown: that is the same fact it just re-measured,
+      // and clearing it there put a spent egress back into rotation to be
+      // refused again ("already cooling, but still taking hits").
+      if (result.status === "throttled") {
+        await config.poolSelector.clearProviderBlockedOnly(poolId, providerId);
+      }
+      // `unreachable` learned nothing about the address, so nothing changes.
       return { ...result, blockedPool: false };
     },
     /**

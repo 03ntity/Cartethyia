@@ -85,12 +85,52 @@ describe("a probe enforces its own verdict", () => {
     slot?.release();
   });
 
-  test("a throttled verdict also clears a stale block", async () => {
-    // The address works; only the rate is spent. It recovers, so it must not
-    // stay retired.
+  test("a throttled verdict clears a stale block", async () => {
+    // The address works; only the rate is spent. A *retired* address is the
+    // wrong claim once the upstream is answering again, so the block goes.
     const selector = new NetworkPoolSelector();
     await operations(selector, "blocked").providerProbe(ACCESS, POOL, PROVIDER);
     await operations(selector, "throttled").providerProbe(ACCESS, POOL, PROVIDER);
     expect((await selector.isProviderCooldown(POOL, PROVIDER)).inCooldown).toBe(false);
+  });
+
+  test("a throttled verdict does not clear a cooldown the dispatch flagged", async () => {
+    // The regression: clearing on `throttled` put a spent egress straight back
+    // into rotation, so the pool kept taking hits while the console showed it
+    // as already cooling. A 429 says the allowance is spent — the same fact the
+    // cooldown records — so the flag must survive the probe.
+    const selector = new NetworkPoolSelector();
+    await selector.flagProviderCooldown(POOL, PROVIDER, 15 * 60 * 1000, "Provider opencode rate limit");
+
+    await operations(selector, "throttled").providerProbe(ACCESS, POOL, PROVIDER);
+
+    const after = await selector.isProviderCooldown(POOL, PROVIDER);
+    expect(after.inCooldown).toBe(true);
+    expect(after.blocked).toBe(false);
+    // And the pool stays out of rotation for the provider that spent it.
+    expect(await selector.tryAcquireAvailablePool([POOL], PROVIDER, { [POOL]: 10 })).toBeUndefined();
+  });
+
+  test("an unreachable probe leaves a cooldown alone", async () => {
+    // A probe that never reached the upstream learned nothing about the
+    // address, so it must not release it either way.
+    const selector = new NetworkPoolSelector();
+    await selector.flagProviderCooldown(POOL, PROVIDER, 15 * 60 * 1000, "Provider opencode rate limit");
+    await operations(selector, "unreachable").providerProbe(ACCESS, POOL, PROVIDER);
+    expect((await selector.isProviderCooldown(POOL, PROVIDER)).inCooldown).toBe(true);
+  });
+});
+
+describe("an egress is only retired for a provider whose limits follow it", () => {
+  test("a probe block on a credential-keyed provider is refused", async () => {
+    // `anthropic` counts requests by credential, not by address, so a refusal
+    // is the account's problem. Retiring the pool would take a healthy address
+    // away from every sibling account on it.
+    const selector = new NetworkPoolSelector();
+    const result = await operations(selector, "blocked").providerProbe(ACCESS, POOL, "anthropic");
+
+    expect(result.blockedPool).toBe(false);
+    expect((await selector.isProviderCooldown(POOL, "anthropic")).inCooldown).toBe(false);
+    expect(await selector.tryAcquireAvailablePool([POOL], "anthropic", { [POOL]: 10 })).toBeDefined();
   });
 });
