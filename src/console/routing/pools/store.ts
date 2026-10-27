@@ -1,5 +1,5 @@
 // Drizzle-backed console persistence for network pools.
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { CartethyiaDatabase } from "../../../persistence/db-handle";
 import { networkPools, poolRoutingSettings } from "../../../persistence/schema";
 import {
@@ -403,12 +403,24 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
   }
 
   async create(record: NetworkPoolRecord): Promise<void> {
-    const kind = record.kind === "https" ? "http" : record.kind;
-    await this.db.insert(networkPools).values({
+    await this.createMany([record]).then(() => undefined);
+  }
+
+  /**
+   * Inserts every record in one statement.
+   *
+   * A batch import used to be one round trip per proxy, so a long paste took
+   * minutes and the dialog sat there while the operator waited. Drizzle emits a
+   * single multi-row INSERT, which makes the cost independent of the paste
+   * length.
+   */
+  async createMany(records: readonly NetworkPoolRecord[]): Promise<number> {
+    if (records.length === 0) return 0;
+    const values = records.map((record) => ({
       id: record.id,
       tenantId: record.tenantId,
       createdAt: new Date(record.createdAt),
-      kind,
+      kind: record.kind === "https" ? "http" : record.kind,
       endpointConfig: {
         endpoint: record.endpoint,
         ...(record.label ? { label: record.label } : {}),
@@ -423,7 +435,50 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
       consecutiveFailures: 0,
       ...(record.quotaBytes !== undefined ? { quotaBytes: record.quotaBytes } : {}),
       ...(record.family !== undefined ? { family: record.family } : {}),
-    });
+    }));
+    await this.db.insert(networkPools).values(values);
+    return values.length;
+  }
+
+  /**
+   * Sets one status on every named pool in a single statement.
+   *
+   * Bulk enable/disable was a loop of per-row updates — one round trip each,
+   * and one snapshot invalidation each. A tenant-wide selection is exactly the
+   * case where that is felt.
+   */
+  async updateManyStatus(
+    tenantId: string,
+    poolIds: readonly string[],
+    status: NetworkPoolRecord["status"],
+  ): Promise<number> {
+    if (poolIds.length === 0) return 0;
+    const rows = await this.db
+      .update(networkPools)
+      .set({ status })
+      .where(
+        and(
+          eq(networkPools.tenantId, tenantId),
+          inArray(networkPools.id, [...poolIds]),
+        ),
+      )
+      .returning({ id: networkPools.id });
+    return rows.length;
+  }
+
+  /** Deletes every named pool in one statement. */
+  async deleteMany(tenantId: string, poolIds: readonly string[]): Promise<number> {
+    if (poolIds.length === 0) return 0;
+    const rows = await this.db
+      .delete(networkPools)
+      .where(
+        and(
+          eq(networkPools.tenantId, tenantId),
+          inArray(networkPools.id, [...poolIds]),
+        ),
+      )
+      .returning({ id: networkPools.id });
+    return rows.length;
   }
 
   async update(

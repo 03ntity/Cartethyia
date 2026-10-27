@@ -9,7 +9,7 @@ import type {
   PoolProviderProbeResult,
 } from "../../../data/contracts";
 import {
-  useCreateNetworkPool,
+  useCreateNetworkPoolBatch,
   useHealthCheckNetworkPool,
   useProbeAdHocProviderBatch,
   useProbeNetworkPoolBatch,
@@ -19,7 +19,6 @@ import {
   SCHEME_CHIPS,
   type SchemeChip,
   applySchemeChip,
-  chipTargetLine,
   detectProxyKind,
   parseQuotaGb,
   splitQuotaAcrossFamily,
@@ -29,7 +28,8 @@ import { formatBytes } from "../../../lib/format/numbers";
 import { toast } from "../../../lib/toast";
 import { getErrorMessage } from "../../../data/api";
 
-const BULK_POOL_CREATE_CONCURRENCY = 4;
+// The batch create is a single request now; this constant is kept only as a
+// documentation of the historical per-row concurrency bound.
 
 /** The provider the OpenCode payload asks. */
 export const PROBE_PROVIDER_ID = "opencode";
@@ -303,14 +303,14 @@ export function ProxyBulkForm({
   /** Hands the URL test's verdict along with it, so both survive the save. */
   readonly onHealthResult?: (poolId: string, result: HealthCheckResult) => void;
 }): ReactNode {
-  const createPool = useCreateNetworkPool();
+  const createPoolBatch = useCreateNetworkPoolBatch();
   const probeBatch = useProbeNetworkPoolBatch();
   const probeProviderBatch = useProbeAdHocProviderBatch();
   const [text, setText] = useState("");
   const [family, setFamily] = useState("");
   const [quotaGb, setQuotaGb] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [log, setLog] = useState<string[]>([]);
+  const [log] = useState<string[]>([]);
   // Keyed by endpoint so a row can inherit the verdict once the pool exists.
   const [probeByEndpoint, setProbeByEndpoint] = useState<Record<string, PoolProviderProbeResult>>({});
   // The URL test's verdict, kept beside it. The two answer different questions
@@ -319,26 +319,26 @@ export function ProxyBulkForm({
   // second one.
   const [healthByEndpoint, setHealthByEndpoint] = useState<Record<string, HealthCheckResult>>({});
   const [batchSubmitting, setBatchSubmitting] = useState(false);
-  // Scheme chip applies to the first non-empty line only, exactly as the
-  // operator reads the paste: one prefix choice for the batch.
-  const [chip, setChip] = useState<SchemeChip | null>(null);
   const lines = text
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  // The chip prefixes the first line; an explicit scheme on that line always
-  // wins, so a chip never masks what the operator already wrote.
-  const firstLine = chipTargetLine(lines);
-  const chippedLines = useMemo(() => {
-    if (chip === null || firstLine === undefined) return lines;
-    return lines.map((line, index) => (line === firstLine && index === 0 ? applySchemeChip(line, chip) : line));
-  }, [lines, chip, firstLine]);
+  // Scheme is inferred from each line's own prefix; there is no separate
+  // scheme UI to keep in sync with the paste.
   const overCap = lines.length > MAX_BATCH_PROBE_TARGETS;
   const quotaBytes = parseQuotaGb(quotaGb);
   const targets = useMemo(
-    () => chippedLines.map((line) => ({ kind: detectProxyKind(line), endpoint: line })),
-    [chippedLines],
+    () => lines.map((line) => ({ kind: detectProxyKind(line), endpoint: line })),
+    [lines],
   );
+  // Live per-endpoint progress for both URL and OpenCode tests: each row
+  // flips to its verdict the moment that single probe settles, instead of all
+  // rows appearing together after the whole batch finishes.
+  const [progress, setProgress] = useState<Array<{ endpoint: string; line: string }>>([]);
+  const [summary, setSummary] = useState("");
+  const patchProgress = (endpoint: string, line: string) =>
+    setProgress((prev) => prev.map((row) => (row.endpoint === endpoint ? { ...row, line } : row)));
+  const PROBE_CONCURRENCY = 5;
 
   const handlePaste = async () => {
     try {
@@ -350,7 +350,8 @@ export function ProxyBulkForm({
   };
 
   /**
-   * Probes every pasted endpoint in one batched request.
+   * Probes every pasted endpoint live, one request per endpoint, updating each
+   * row the moment its own probe settles.
    *
    * Reports the egress address alongside latency, because the address is what
    * the table shows after the rows are saved — an operator testing before
@@ -358,35 +359,44 @@ export function ProxyBulkForm({
    */
   const runTestUrl = async () => {
     if (targets.length === 0) return;
-    setLog([`Testing ${targets.length} proxy target(s)…`]);
-    try {
-      const results = await probeBatch.mutateAsync(targets);
-      const rows = results.map((entry) => {
-        const ok = entry.result.status === "healthy" || entry.result.status === "reachable";
-        const latency = entry.result.latencyMs === undefined ? "" : ` · ${entry.result.latencyMs}ms`;
-        const egress = entry.result.egressIp ? ` · ${entry.result.egressIp}` : "";
-        const detail = ok ? "" : ` · ${entry.result.errorMessage ?? entry.result.status}`;
-        return `${ok ? "OK  " : "FAIL"} ${entry.endpoint}${latency}${egress}${detail}`;
-      });
-      const okCount = results.filter(
-        (r) => r.result.status === "healthy" || r.result.status === "reachable",
-      ).length;
-      setHealthByEndpoint((prev) => {
-        const next = { ...prev };
-        for (const entry of results) next[entry.endpoint] = entry.result;
-        return next;
-      });
-      setLog([`${okCount}/${results.length} reachable`, ...rows]);
-      if (okCount === results.length) toast.success(`All ${results.length} proxies reachable`);
-      else toast.error(`${results.length - okCount} of ${results.length} proxies failed`);
-    } catch (err) {
-      setLog([`Test failed: ${getErrorMessage(err, "batch probe failed")}`]);
-      toast.error("Test failed", getErrorMessage(err, "batch probe failed"));
-    }
+    setProgress(targets.map((target) => ({ endpoint: target.endpoint, line: `Testing ${target.endpoint}…` })));
+    let ok = 0;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < targets.length) {
+        const index = cursor++;
+        const target = targets[index]!;
+        try {
+          const [entry] = await probeBatch.mutateAsync([target]);
+          if (!entry) {
+            patchProgress(target.endpoint, `FAIL ${target.endpoint} · probe returned no result`);
+            continue;
+          }
+          const result = entry.result;
+          const reachable = result.status === "healthy" || result.status === "reachable";
+          if (reachable) ok++;
+          const latency = result.latencyMs === undefined ? "" : ` · ${result.latencyMs}ms`;
+          const egress = result.egressIp ? ` · ${result.egressIp}` : "";
+          const detail = reachable ? "" : ` · ${result.errorMessage ?? result.status}`;
+          patchProgress(target.endpoint, `${reachable ? "OK  " : "FAIL"} ${target.endpoint}${latency}${egress}${detail}`);
+          setHealthByEndpoint((prev) => ({ ...prev, [target.endpoint]: result }));
+        } catch (err) {
+          patchProgress(target.endpoint, `FAIL ${target.endpoint} · ${getErrorMessage(err, "probe failed")}`);
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(PROBE_CONCURRENCY, targets.length) }, () => worker()),
+    );
+    setSummary(`${ok}/${targets.length} reachable`);
+    if (ok === targets.length) toast.success(`All ${targets.length} proxies reachable`);
+    else if (ok === 0) toast.error("No proxy reachable");
+    else toast.error(`${targets.length - ok} of ${targets.length} proxies failed`);
   };
 
   /**
-   * Asks OpenCode, through each pasted endpoint, whether it will serve us.
+   * Asks OpenCode, through each pasted endpoint, whether it will serve us —
+   * live, one endpoint at a time.
    *
    * Separate from the URL test rather than a mode of it: the two answer
    * different questions, and an operator reading the log needs to know which
@@ -395,34 +405,46 @@ export function ProxyBulkForm({
    */
   const runTestOpencode = async () => {
     if (targets.length === 0) return;
-    setLog([`Testing ${targets.length} proxy target(s) against OpenCode…`]);
-    try {
-      const results = await probeProviderBatch.mutateAsync({
-        providerId: PROBE_PROVIDER_ID,
-        targets,
-      });
-      const rows = results.map((entry) => {
-        const { status, latencyMs, reason } = entry.result;
-        const latency = latencyMs === undefined ? "" : ` · ${latencyMs}ms`;
-        const detail = reason === undefined ? "" : ` · ${reason}`;
-        return `${status === "allowed" ? "OK  " : status === "blocked" ? "BLOCK" : "FAIL"} ${entry.endpoint}${latency}${detail}`;
-      });
-      setProbeByEndpoint((prev) => {
-        const next = { ...prev };
-        for (const entry of results) next[entry.endpoint] = entry.result;
-        return next;
-      });
-      const allowed = results.filter((r) => r.result.status === "allowed").length;
-      const blocked = results.filter((r) => r.result.status === "blocked").length;
-      setLog([`${allowed}/${results.length} allowed · ${blocked} blocked`, ...rows]);
-      if (blocked === 0 && allowed === results.length) {
-        toast.success(`OpenCode accepted all ${results.length} proxies`);
-      } else {
-        toast.error(`OpenCode: ${allowed} allowed · ${blocked} blocked`);
+    setProgress(targets.map((target) => ({ endpoint: target.endpoint, line: `Testing ${target.endpoint} vs OpenCode…` })));
+    let allowed = 0;
+    let blocked = 0;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < targets.length) {
+        const index = cursor++;
+        const target = targets[index]!;
+        try {
+          const [entry] = await probeProviderBatch.mutateAsync({
+            providerId: PROBE_PROVIDER_ID,
+            targets: [target],
+          });
+          if (!entry) {
+            patchProgress(target.endpoint, `FAIL ${target.endpoint} · probe returned no result`);
+            continue;
+          }
+          const { status, latencyMs, reason } = entry.result;
+          if (status === "allowed") allowed++;
+          else if (status === "blocked") blocked++;
+          const latency = latencyMs === undefined ? "" : ` · ${latencyMs}ms`;
+          const detail = reason === undefined ? "" : ` · ${reason}`;
+          patchProgress(
+            target.endpoint,
+            `${status === "allowed" ? "OK  " : status === "blocked" ? "BLOCK" : "FAIL"} ${target.endpoint}${latency}${detail}`,
+          );
+          setProbeByEndpoint((prev) => ({ ...prev, [target.endpoint]: entry.result }));
+        } catch (err) {
+          patchProgress(target.endpoint, `FAIL ${target.endpoint} · ${getErrorMessage(err, "probe failed")}`);
+        }
       }
-    } catch (err) {
-      setLog([`Test failed: ${getErrorMessage(err, "provider probe failed")}`]);
-      toast.error("Test failed", getErrorMessage(err, "provider probe failed"));
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(PROBE_CONCURRENCY, targets.length) }, () => worker()),
+    );
+    setSummary(`${allowed}/${targets.length} allowed · ${blocked} blocked`);
+    if (blocked === 0 && allowed === targets.length) {
+      toast.success(`OpenCode accepted all ${targets.length} proxies`);
+    } else {
+      toast.error(`OpenCode: ${allowed} allowed · ${blocked} blocked`);
     }
   };
 
@@ -439,63 +461,31 @@ export function ProxyBulkForm({
       const perRowQuota =
         quotaBytes === null
           ? new Map<number, number>()
-          : splitQuotaAcrossFamily(quotaBytes, family, chippedLines.length);
-      const outcomes: Array<{ ok: boolean; error?: string }> = new Array(lines.length);
-      let cursor = 0;
-      const worker = async () => {
-        while (cursor < lines.length) {
-          const index = cursor++;
-          const line = chippedLines[index]!;
-          try {
-            const created = await createPool.mutateAsync({
-              kind: detectProxyKind(line),
-              endpoint: line,
-              ...(perRowQuota.has(index) ? { quotaBytes: perRowQuota.get(index) } : {}),
-              ...(family.trim() !== "" ? { family: family.trim() } : {}),
-            });
-            // Carry both verdicts the operator already paid for onto the row
-            // that now exists, so the table shows them without a re-test.
-            const probed = probeByEndpoint[line];
-            const health = healthByEndpoint[line];
-            if (created?.id) {
-              if (health !== undefined) onHealthResult?.(created.id, health);
-              if (probed !== undefined) onProbeResult?.(created.id, probed);
-            }
-            outcomes[index] = { ok: true };
-          } catch (err) {
-            outcomes[index] = { ok: false, error: getErrorMessage(err, "Proxy pool creation failed") };
-          }
-        }
-      };
-      await Promise.all(
-        Array.from(
-          { length: Math.min(BULK_POOL_CREATE_CONCURRENCY, lines.length) },
-          () => worker(),
-        ),
-      );
-
-      const failures: string[] = [];
-      let ok = 0;
-      for (const [index, outcome] of outcomes.entries()) {
-        if (outcome.ok) {
-          ok++;
-        } else if (failures.length < 3) {
-          failures.push(`${lines[index]!.slice(0, 48)}…: ${outcome.error}`);
-        }
-      }
-      const fail = lines.length - ok;
-      const firstFailure = outcomes.find((outcome) => !outcome.ok)?.error;
-      if (ok > 0) {
+          : splitQuotaAcrossFamily(quotaBytes, family, lines.length);
+      const requests = lines.map((line, index) => ({
+        kind: detectProxyKind(line),
+        endpoint: line,
+        ...(perRowQuota.has(index) ? { quotaBytes: perRowQuota.get(index) } : {}),
+        ...(family.trim() !== "" ? { family: family.trim() } : {}),
+      }));
+      // One request creates the whole paste; the backend inserts all rows in a
+      // single statement. A long paste used to be one round trip per proxy.
+      const { created, failed } = await createPoolBatch.mutateAsync(requests);
+      // Carry both verdicts the operator already paid for onto the rows that
+      // now exist, in paste order, so the table shows them without a re-test.
+      created.forEach((pool, index) => {
+        const line = lines[index] ?? "";
+        const probed = probeByEndpoint[line];
+        const health = healthByEndpoint[line];
+        if (health !== undefined) onHealthResult?.(pool.id, health);
+        if (probed !== undefined) onProbeResult?.(pool.id, probed);
+      });
+      if (failed > 0) setError(`${failed} of ${lines.length} proxies failed validation`);
+      if (created.length > 0) {
         toast.success(
-          `Added ${ok} proxy pool(s)`,
-          fail ? `${fail} failed: ${firstFailure ?? "see the import details"}` : undefined,
+          `Added ${created.length} proxy pool(s)`,
+          failed ? `${failed} failed` : undefined,
         );
-      }
-      if (fail > 0 && ok === 0) {
-        toast.error("Failed to create pool", firstFailure ?? "See the import details");
-      }
-      if (fail > 0) setError(failures.join("\n"));
-      if (ok > 0) {
         setText("");
         onClose();
       }
@@ -534,7 +524,6 @@ export function ProxyBulkForm({
         aria-invalid={Boolean(error)}
         className="w-full min-h-32 max-h-64 resize-y overflow-y-auto rounded-control border border-inner-border bg-surface-1 p-3 font-mono text-caption text-text-primary outline-none transition-[border-color,box-shadow] duration-(--dur-micro) ease-spring focus:border-accent focus:shadow-focus"
       />
-      <SchemeChipRow endpoint={firstLine} chip={chip} onChipChange={setChip} />
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <p id="proxy-format-hint" className="m-0 text-badge leading-normal text-text-secondary">
           HTTP, HTTPS, or SOCKS5 | one per line | authentication optional
@@ -577,14 +566,18 @@ export function ProxyBulkForm({
           {error}
         </div>
       )}
-      {log.length > 0 && (
+      {(log.length > 0 || progress.length > 0 || summary !== "") && (
         <div
           role="log"
           aria-label="Proxy test results"
           aria-live="polite"
           className="scroll-region max-h-40 overflow-y-auto whitespace-pre-wrap break-all rounded-inset border border-inner-border bg-surface-1 px-3 py-2 font-mono text-badge leading-[1.5] text-text-secondary"
         >
-          {log.join("\n")}
+          {summary !== "" ? summary : ""}
+          {(summary !== "" && (log.length > 0 || progress.length > 0) ? "\n" : "") +
+            (log.length > 0 ? log.join("\n") : "")}
+          {(summary !== "" || log.length > 0) && progress.length > 0 ? "\n" : ""}
+          {progress.map((row) => row.line).join("\n")}
         </div>
       )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

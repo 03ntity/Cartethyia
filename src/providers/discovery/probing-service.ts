@@ -192,7 +192,7 @@ export class ProviderProbingService {
     const providerWireRow = await this.loadProviderWireRow(providerId);
     const requiresAccount = providerWireRow?.requiresAccount ?? true;
 
-    const { wireFamily, serviceKind, endpointPath, sourceSurface, capabilityProfile } = await resolveProbeTarget({
+    const { wireFamily, serviceKind, endpointPath, sourceSurface, capabilityProfile, outputLimit } = await resolveProbeTarget({
       db: this.db,
       bundledModelCatalog: this.bundledModelCatalog,
       defaultEndpoints: this.defaultEndpoints,
@@ -253,6 +253,9 @@ export class ProviderProbingService {
       // over capabilities the route actually has (`prompt_caching`, `tools`,
       // `reasoning`), reporting a healthy provider as broken.
       capabilities: capabilityProfile,
+      // The model row's own output ceiling, so a probe with a max-output
+      // ceiling (OpenCode free) shapes with the model's limit, not a guess.
+      ...(outputLimit == null ? {} : { output_limit: outputLimit }),
     };
 
     const probeSignal = AbortSignal.timeout(30_000);

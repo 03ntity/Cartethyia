@@ -168,6 +168,8 @@ export interface ProbeTarget {
    * so the probe tests the route, not an empty stand-in.
    */
   readonly capabilityProfile: Readonly<Record<string, boolean>>;
+  /** The model row's output ceiling, when it declares one. */
+  readonly outputLimit?: number | null;
 }
 
 /**
@@ -217,10 +219,11 @@ export async function resolveProbeTarget(args: {
   let serviceKind: ServiceKind = requestedServiceKind;
   // Capability columns for the row the probe lands on. Resolved alongside the
   // wire so the profile describes the same row the probe dispatches to.
-  let capabilitySource: { modalities: unknown; reasoning: boolean; toolCall: boolean } = {
+  let capabilitySource: { modalities: unknown; reasoning: boolean; toolCall: boolean; outputLimit: number | null } = {
     modalities: null,
     reasoning: false,
     toolCall: false,
+    outputLimit: null,
   };
   if (request.wireFamily) {
     wireFamily = request.wireFamily as WireFamily;
@@ -242,6 +245,7 @@ export async function resolveProbeTarget(args: {
         modalities: staticDef.modalities,
         reasoning: staticDef.reasoning,
         toolCall: staticDef.toolCall,
+        outputLimit: staticDef.outputLimit ?? null,
       };
     } else {
       const existing = await db
@@ -252,6 +256,7 @@ export async function resolveProbeTarget(args: {
           modalities: models.modalities,
           reasoning: models.reasoning,
           toolCall: models.toolCall,
+          outputLimit: models.outputLimit,
         })
         .from(models)
         .where(
@@ -277,6 +282,7 @@ export async function resolveProbeTarget(args: {
           modalities: existing[0].modalities,
           reasoning: existing[0].reasoning,
           toolCall: existing[0].toolCall,
+          outputLimit: existing[0].outputLimit ?? null,
         };
       } else {
         if (requestedServiceKind !== "llm") {
@@ -334,7 +340,7 @@ export async function resolveProbeTarget(args: {
     toolCall: capabilitySource.toolCall,
     providerId,
   });
-  return { wireFamily, serviceKind, endpointPath, sourceSurface, capabilityProfile };
+  return { wireFamily, serviceKind, endpointPath, sourceSurface, capabilityProfile, outputLimit: capabilitySource.outputLimit };
 }
 
 /** The account a probe selected, or the operator-facing reason it could not. */

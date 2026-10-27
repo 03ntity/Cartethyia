@@ -14,6 +14,12 @@ export interface ValidatedFetchOptions {
   readonly maxRedirects?: number;
   readonly resolveFn?: (hostname: string, signal: AbortSignal) => Promise<readonly string[]>;
   readonly agent?: HttpAgent | HttpsAgent | ProxyAgentPair;
+  /**
+   * Proxy URL to route the dial through, forwarded to the runtime-native fetch
+   * (`proxy` option). Pool egress passes the pool's endpoint here; without it
+   * a request that should leave through a proxy leaves directly.
+   */
+  readonly proxyUrl?: string;
 }
 export type ValidatedFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -90,6 +96,7 @@ async function dial(
   url: URL,
   init: RequestInit,
   fetchFn: typeof fetch,
+  proxyUrl: string | undefined,
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   const rawBody = init.body;
@@ -102,7 +109,11 @@ async function dial(
           : (await new Response(rawBody).arrayBuffer()).byteLength;
     headers.set("content-length", String(bytes));
   }
-  return await fetchFn(url, { ...init, headers });
+  return await fetchFn(url, {
+    ...init,
+    headers,
+    ...(proxyUrl === undefined ? {} : { proxy: proxyUrl }),
+  });
 }
 
 export function createValidatedFetch(options: ValidatedFetchOptions = {}): ValidatedFetch {
@@ -114,6 +125,8 @@ export function createValidatedFetch(options: ValidatedFetchOptions = {}): Valid
   const relayEndpoint = isProxyAgentPair(configuredAgent)
     ? configuredAgent.relayEndpoint
     : undefined;
+  const proxyUrl =
+    options.proxyUrl ?? (isProxyAgentPair(configuredAgent) ? configuredAgent.proxyUrl : undefined);
   return async (input, init = {}) => {
     const startedAt = performance.now();
     let url = input instanceof Request ? new URL(input.url) : new URL(input.toString());
@@ -167,9 +180,9 @@ export function createValidatedFetch(options: ValidatedFetchOptions = {}): Valid
       let response: Response;
       if (relayEndpoint) {
         const relay = relayRequest(relayEndpoint, url, requestInit);
-        response = await dial(relay.url, relay.init, fetchFn);
+        response = await dial(relay.url, relay.init, fetchFn, proxyUrl);
       } else {
-        response = await dial(url, requestInit, fetchFn);
+        response = await dial(url, requestInit, fetchFn, proxyUrl);
       }
       if (response.status < 300 || response.status >= 400) {
         trackNetworkCall(url.hostname, performance.now() - startedAt);

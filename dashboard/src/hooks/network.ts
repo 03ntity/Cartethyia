@@ -122,6 +122,70 @@ export function useUpdateNetworkPool() {
   });
 }
 
+/** Creates the whole paste in one request; the backend inserts every row in a
+ * single statement. Returns the created rows in paste order so verdicts can be
+ * mapped onto them without a re-test. */
+export function useCreateNetworkPoolBatch() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { created: NetworkPoolResponse[]; failed: number },
+    ApiErrorShape,
+    CreateNetworkPoolRequest[]
+  >({
+    mutationFn: (targets) =>
+      consoleRequest<{ created: NetworkPoolResponse[]; failed: number }>("/network/pools/bulk/create", {
+        method: "POST",
+        body: JSON.stringify({ targets }),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.network.pools });
+    },
+    onError: (error) => {
+      toast.error("Could not create the proxy pools.", getErrorMessage(error));
+    },
+  });
+}
+
+/** Deletes many pools in one request. */
+export function useDeleteNetworkPoolBatch() {
+  const queryClient = useQueryClient();
+  return useMutation<{ deleted: number; failed: number }, ApiErrorShape, readonly string[]>({
+    mutationFn: (ids) =>
+      consoleRequest<{ deleted: number; failed: number }>("/network/pools/bulk/delete", {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.network.pools });
+    },
+    onError: (error) => {
+      toast.error("Could not delete the proxy pools.", getErrorMessage(error));
+    },
+  });
+}
+
+/** Enables/disables many pools in one request. */
+export function useSetNetworkPoolStatusBatch() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { updated: number },
+    ApiErrorShape,
+    { ids: readonly string[]; status: "active" | "disabled" }
+  >({
+    mutationFn: ({ ids, status }) =>
+      consoleRequest<{ updated: number }>("/network/pools/bulk/status", {
+        method: "POST",
+        body: JSON.stringify({ ids, status }),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.network.pools });
+    },
+    onError: (error) => {
+      toast.error("Could not update the proxy pools.", getErrorMessage(error));
+    },
+  });
+}
+
 /** Loads recent health and recovery activity for a pool. */
 export function useNetworkPoolHealthEvents(poolId: string | undefined) {
   return useQuery<readonly PoolHealthEvent[], ApiErrorShape>({

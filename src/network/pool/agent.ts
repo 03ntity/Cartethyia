@@ -309,6 +309,12 @@ export interface ProxyAgentPair {
    * validated fetcher sends `x-relay-target`/`x-relay-path` to this URL.
    */
   readonly relayEndpoint?: URL;
+  /**
+   * The proxy URL this pool dials through, forwarded to the runtime-native
+   * fetch (`proxy` option). The native transport has no agent concept, so
+   * the URL is what carries the pool egress.
+   */
+  readonly proxyUrl?: string;
 }
 
 export function isProxyAgentPair(value: unknown): value is ProxyAgentPair {
@@ -407,6 +413,7 @@ export function createHttpProxyAgent(
   return {
     http: new HttpProxyAgent(proxy, policy, config, poolId),
     https: new HttpsProxyAgent(proxy, policy, config, poolId),
+    proxyUrl: proxy.toString(),
     ...(isRelayHost(proxy.hostname) ? { relayEndpoint: proxy } : {}),
   };
 }
@@ -472,6 +479,7 @@ export function createSocks5Agent(
   return {
     http: http as unknown as HttpAgent,
     https: https as unknown as HttpsAgent,
+    proxyUrl: withCredential(url, credential).toString(),
   };
 }
 

@@ -87,6 +87,36 @@ export function createNetworkPoolRoutes(config: NetworkPoolConfig): Elysia {
     .delete("/:poolId", async ({ request, params }) => {
       return await factory.deletePool(config.accessResolver(request), params.poolId);
 })
+    .post(
+      "/bulk/create",
+      { body: t.Object({ targets: t.Array(createPoolBody, { minItems: 1, maxItems: MAX_BATCH_PROBE_TARGETS }) }) },
+      async ({ request, body, set }) => {
+        set.status = 200;
+        return await factory.createPoolBatch(
+          config.accessResolver(request),
+          body.targets as CreateNetworkPoolRequest[],
+        );
+      },
+    )
+    .post(
+      "/bulk/delete",
+      { body: t.Object({ ids: t.Array(t.String(), { minItems: 1 }) }) },
+      async ({ request, body }) => {
+        return await factory.deletePoolBatch(config.accessResolver(request), body.ids);
+      },
+    )
+    .post(
+      "/bulk/status",
+      {
+        body: t.Object({
+          ids: t.Array(t.String(), { minItems: 1 }),
+          status: literalUnion(POOL_STATUSES),
+        }),
+      },
+      async ({ request, body }) => {
+        return await factory.setPoolStatusBatch(config.accessResolver(request), body.ids, body.status);
+      },
+    )
     .get("/:poolId/health-events", async ({ request, params }) => {
       return await factory.listPoolHealthEvents(config.accessResolver(request), params.poolId);
 })

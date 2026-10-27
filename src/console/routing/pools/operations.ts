@@ -28,6 +28,7 @@ import {
   type NetworkPoolConfig,
   type NetworkPoolRecord,
   type NetworkPoolResponse,
+  type PoolStatus,
   type PoolBatchProbeResult,
   type PoolSpeedTestResult,
   type PoolStrategySetting,
@@ -193,6 +194,130 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
         }
       }
       return { created, skipped };
+    },
+    async createPoolBatch(
+      access: AccessDecision | undefined,
+      requests: readonly CreateNetworkPoolRequest[],
+    ): Promise<{ created: NetworkPoolResponse[]; failed: number }> {
+      const a = requireTenantScope(access, "dashboard:write");
+      let failed = 0;
+      const records: NetworkPoolRecord[] = [];
+      for (const request of requests) {
+        try {
+          const normalizedConfig = normalizePoolConfig(request.config);
+          const endpoint = request.endpoint;
+          validateEndpoint(request.kind, endpoint, config.ssrfPolicy);
+          validateTransportConfig(request.kind, normalizedConfig);
+          validatePoolLimits(request.maxInflight, request.weight);
+          records.push({
+            id: crypto.randomUUID(),
+            kind: request.kind,
+            endpoint,
+            maxInflight: request.maxInflight ?? 10,
+            weight: request.weight ?? 100,
+            status: "active",
+            inflight: 0,
+            consecutiveFailures: 0,
+            tenantId: a.tenantId,
+            createdAt: new Date().toISOString(),
+            ...(request.label === undefined ? {} : { label: request.label }),
+            ...(Object.keys(normalizedConfig).length > 0 ? { config: normalizedConfig } : {}),
+            ...(request.credential === undefined ? {} : { credential: request.credential }),
+            ...(request.credential !== undefined ? { hasCredential: true } : {}),
+            ...(typeof request.quotaBytes === "number" ? { quotaBytes: request.quotaBytes } : {}),
+            ...(request.family === undefined ? {} : { family: request.family }),
+          });
+        } catch {
+          failed += 1;
+        }
+      }
+      // All rows land in one statement: a long paste was one round trip per
+      // proxy, which made a 40-line import take minutes.
+      let created: NetworkPoolResponse[] = [];
+      if (records.length > 0) {
+        if (config.store.createMany) {
+          await config.store.createMany(records);
+        } else {
+          for (const record of records) await config.store.create(record);
+        }
+        created = records.map((record) => sanitizePoolResponse(record));
+        await config.auditSink?.record({
+          access: a,
+          action: "network_pool.created",
+          target: created[0]!.id,
+          detail: { count: created.length, failed },
+        });
+        await config.snapshotInvalidator?.invalidate();
+      }
+      return { created, failed };
+    },
+    async deletePoolBatch(
+      access: AccessDecision | undefined,
+      poolIds: readonly string[],
+    ): Promise<{ deleted: number; failed: number }> {
+      const a = requireTenantScope(access, "dashboard:write");
+      let ok = 0;
+      if (config.store.deleteMany) {
+        ok = await config.store.deleteMany(a.tenantId, poolIds);
+      } else {
+        for (const poolId of poolIds) {
+          try {
+            if (await config.store.delete(a.tenantId, poolId)) ok += 1;
+          } catch {
+            // Missing rows are not failures for a bulk delete.
+          }
+        }
+      }
+      // Cooldown markers and cached agents are best-effort here: the rows are
+      // already gone, so a failed cleanup must not report a failed delete.
+      await Promise.all(
+        poolIds.map(async (poolId) => {
+          await config.poolAgentReleaser?.releasePool(poolId, a.tenantId).catch(() => undefined);
+          await config.poolSelector?.clearPoolCooldowns(poolId).catch(() => undefined);
+        }),
+      );
+      await config.auditSink?.record({
+        access: a,
+        action: "network_pool.deleted",
+        target: poolIds[0] ?? "",
+        detail: { count: ok, failed: poolIds.length - ok },
+      });
+      if (ok > 0) await config.snapshotInvalidator?.invalidate();
+      return { deleted: ok, failed: poolIds.length - ok };
+    },
+    async setPoolStatusBatch(
+      access: AccessDecision | undefined,
+      poolIds: readonly string[],
+      status: PoolStatus,
+    ): Promise<{ updated: number }> {
+      const a = requireTenantScope(access, "dashboard:write");
+      let updated = 0;
+      if (config.store.updateManyStatus) {
+        updated = await config.store.updateManyStatus(a.tenantId, poolIds, status);
+      } else {
+        for (const poolId of poolIds) {
+          try {
+            if (await config.store.update(a.tenantId, poolId, { status })) updated += 1;
+          } catch {
+            // Missing rows are not failures for a bulk status change.
+          }
+        }
+      }
+      // Any mutation can invalidate the cached dial agent; the batch releases
+      // each selected pool's agent so the next dispatch rebuilds fresh.
+      await Promise.all(
+        poolIds.map(async (poolId) => {
+          await config.poolAgentReleaser?.releasePool(poolId, a.tenantId).catch(() => undefined);
+        }),
+      );
+      await config.auditSink?.record({
+        access: a,
+        action: "network_pool.updated",
+        target: poolIds[0] ?? "",
+        detail: { status, count: updated },
+      });
+      if (updated > 0) await config.snapshotInvalidator?.invalidate();
+      return { updated };
     },
     async createPool(
         access: AccessDecision | undefined,

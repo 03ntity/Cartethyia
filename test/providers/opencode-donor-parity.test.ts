@@ -1,6 +1,6 @@
 /**
- * Donor-alignment tests: OpenCode free-tier dispatch shaped 1:1 with the
- * opencode2api reference gateway (v2 only). These pin the things the previous
+ * Reference-alignment tests: OpenCode free-tier dispatch shaped 1:1 with the
+ * reference gateway (v2 only). These pin the things the previous
  * implementation did not do: the 2.1 family-segment upstream paths, the
  * official CLI system-prompt injection, the v2 completion ceiling, the always-on
  * `include_usage`, the client key-order byte layout, the pinned client version,
@@ -96,6 +96,12 @@ describe("OpenCode donor parity", () => {
     expect(explicit["max_tokens"]).toBeUndefined();
   });
 
+  test("the completion ceiling follows the model's declared output limit", async () => {
+    const payload = await encodeChat(baseRequest());
+    OPENCODE_FREE_SPEC.prePayload?.(payload, baseRequest(), { ...FREE_CHAT, output_limit: 8000 });
+    expect(payload["max_completion_tokens"]).toBe(8000);
+  });
+
   test("the official CLI prompt is injected and system/developer messages fold into one leading system", async () => {
     const source = baseRequest({
       messages: [
@@ -153,7 +159,8 @@ describe("OpenCode donor parity", () => {
     expect(keys.slice(skeleton.length)).toEqual(["extra"]);
   });
 
-  test("the client version is pinned to the reference identity", () => {
+  test("the client version falls back to the reference identity until discovery", () => {
+    // The live feed wins once resolved; the fallback is the known-good 2.1.1.
     expect(OPENCODE_CLIENT_VERSION).toBe("2.1.1");
   });
 });

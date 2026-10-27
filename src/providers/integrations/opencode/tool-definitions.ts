@@ -6,10 +6,10 @@
  * even one carrying the right name — is refused with `403 FreeTierError`.
  * That is why these are verbatim rather than minimal.
  *
- * Source: the client's own tool registry as embedded by the `opencode2api`
- * gateway (`internal/gateway/opencode_tools.json`), captured from a real
- * dispatch. `patch` is absent from that capture; its description and single
- * `patchText` parameter come from the 2.0.32 CLI binary's own registration.
+ * Source: the client's own tool registry as embedded by the reference
+ * gateway's tool asset, captured from a real dispatch. `patch` is absent from
+ * that capture; its description and single `patchText` parameter come from the
+ * 2.0.32 CLI binary's own registration.
  *
  * Thirteen entries, matching the CLI's internal tool-name set.
  */

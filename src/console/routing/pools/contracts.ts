@@ -351,12 +351,22 @@ export interface NetworkPoolStore {
   list(tenantId: string): Promise<readonly NetworkPoolRecord[]>;
   get(tenantId: string, poolId: string): Promise<NetworkPoolRecord | undefined>;
   create(record: NetworkPoolRecord): Promise<void>;
+  /** Inserts many rows in one statement; returns how many landed. */
+  createMany?(records: readonly NetworkPoolRecord[]): Promise<number>;
   update(
     tenantId: string,
     poolId: string,
     patch: Partial<NetworkPoolRecord>,
   ): Promise<NetworkPoolRecord | undefined>;
+  /** Marks many rows `deleted`; returns how many matched. */
+  updateManyStatus?(
+    tenantId: string,
+    poolIds: readonly string[],
+    status: NetworkPoolRecord["status"],
+  ): Promise<number>;
   delete(tenantId: string, poolId: string): Promise<boolean>;
+  /** Deletes many rows in one statement; returns how many matched. */
+  deleteMany?(tenantId: string, poolIds: readonly string[]): Promise<number>;
   healthCheck(tenantId: string, poolId: string): Promise<HealthCheckResult>;
   /** Measures download throughput through the pool; never throws for a slow
    * or refused transfer — a failed measurement is itself the result. */

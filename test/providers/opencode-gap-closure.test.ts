@@ -12,7 +12,7 @@ import { fetchOpenCodeGoQuota } from "../../src/providers/integrations/opencode/
 
 describe("free-tier Accept advertises what a real client sends", () => {
   test("a free dispatch carries the AI SDK's Accept value", async () => {
-    // `opencode2api` sends `application/json, text/event-stream`
+    // The reference gateway sends `application/json, text/event-stream`
     // (upstream.go:1293); we used to claim the narrower
     // `text/event-stream`. Both work today — this pins the one a real
     // OpenCode 2.x client produces.

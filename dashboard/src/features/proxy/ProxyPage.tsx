@@ -35,8 +35,10 @@ import {
 import type { HealthCheckResult, NetworkPoolResponse } from "../../data/contracts";
 import {
   useDeleteNetworkPool,
+  useDeleteNetworkPoolBatch,
   useHealthCheckNetworkPool,
   useNetworkPools,
+  useSetNetworkPoolStatusBatch,
   useSpeedTestNetworkPool,
   useUpdateNetworkPool,
 } from "../../hooks/network";
@@ -99,6 +101,8 @@ const SPEED_TEST_SIZES = [
 export default function Proxy(): ReactNode {
   const poolsQuery = useNetworkPools();
   const deletePool = useDeleteNetworkPool();
+  const deletePoolBatch = useDeleteNetworkPoolBatch();
+  const setPoolStatusBatch = useSetNetworkPoolStatusBatch();
   const updatePool = useUpdateNetworkPool();
   const healthCheck = useHealthCheckNetworkPool();
   const [showProxyForm, setShowProxyForm] = useState(false);
@@ -456,9 +460,10 @@ export default function Proxy(): ReactNode {
   const enableSelected = async () => {
     const targets = pools.filter((p) => selectedIds.has(p.id));
     if (targets.length === 0) return;
-    await Promise.all(
-      targets.map((p) => updatePool.mutateAsync({ poolId: p.id, request: { status: "active" } })),
-    );
+    await setPoolStatusBatch.mutateAsync({
+      ids: targets.map((p) => p.id),
+      status: "active",
+    });
     setSelectedIds(new Set());
     toast.success(`Enabled ${targets.length} pool(s)`);
   };
@@ -466,9 +471,10 @@ export default function Proxy(): ReactNode {
   const disableSelected = async () => {
     const targets = pools.filter((p) => selectedIds.has(p.id));
     if (targets.length === 0) return;
-    await Promise.all(
-      targets.map((p) => updatePool.mutateAsync({ poolId: p.id, request: { status: "disabled" } })),
-    );
+    await setPoolStatusBatch.mutateAsync({
+      ids: targets.map((p) => p.id),
+      status: "disabled",
+    });
     setSelectedIds(new Set());
     toast.success(`Disabled ${targets.length} pool(s)`);
   };
@@ -497,7 +503,7 @@ export default function Proxy(): ReactNode {
 
   const confirmDelete = async () => {
     if (!deleteTargets) return;
-    await Promise.all(deleteTargets.map((p) => deletePool.mutateAsync(p.id)));
+    await deletePoolBatch.mutateAsync(deleteTargets.map((p) => p.id));
     setSelectedIds(new Set());
     toast.success(`Deleted ${deleteTargets.length} pool(s)`);
     setDeleteTargets(null);

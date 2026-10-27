@@ -1,10 +1,11 @@
+import { getOpenCodeVersion } from "../../operations/client-versions";
 import { createHash, randomBytes } from "node:crypto";
 
 /**
- * The OpenCode client identity this gateway claims, pinned to the reference
- * gateway's v2 identity (`opencode2api` ships `opencode/latest/2.1.1/cli`).
- * Upstream accepts a range of releases, so this only needs bumping when it
- * starts rejecting older ones — matching the donor's version discipline.
+ * The OpenCode fallback client identity, used only while version discovery has
+ * not resolved yet. The live feed (`opencode/latest/<version>/cli`) wins once
+ * it is available; upstream accepts a range of releases, so the fallback does
+ * not need chasing.
  */
 export const OPENCODE_CLIENT_VERSION = "2.1.1";
 
@@ -134,7 +135,7 @@ function createTraceHeaders(): Record<string, string> {
  * client's own session id when it sent one, else the root).
  */
 export function buildOpenCodeHeaders(
-  version = OPENCODE_CLIENT_VERSION,
+  version = getOpenCodeVersion(),
   affinity?: string,
   projectId?: string,
   childSessionId?: string,

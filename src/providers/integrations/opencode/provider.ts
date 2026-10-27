@@ -35,7 +35,7 @@ import { injectOpenCodePrompt } from "./prompt";
  */
 /**
  * The v2 upstream path for a wire family on the `/inference` origin, matching
- * the reference gateway's `v2EndpointPath` (`opencode2api`): the 2.1 client
+ * the reference implementation's `v2EndpointPath`: the 2.1 client
  * groups `/inference` routes by provider family, so chat/responses sit under
  * `/openai/v1/...` and Anthropic under `/anthropic/v1/messages?beta=true`.
  * Go keeps the flat `/zen/go/v1/...` shape.
@@ -415,8 +415,19 @@ function opencodeSpec(providerId: "opencode" | "opencode-zen" | "opencode-go"): 
       // client-visible stream contract.
       if (isFreeTierZenModel(candidate.model_id)) {
         if (candidate.wire_family === "chat") {
-          if (payload["max_completion_tokens"] === undefined && payload["max_tokens"] === undefined) {
-            payload["max_completion_tokens"] = OPENCODE_V2_COMPLETION_LIMIT;
+          // The wire encoder injects the v2 ceiling (32000) as the default
+          // max_completion_tokens when the caller set no limit. Treat that
+          // sentinel as "unset" so the model's own declared output ceiling can
+          // take its place; an explicit user limit is never touched.
+          const isV2Default =
+            payload["max_completion_tokens"] === OPENCODE_V2_COMPLETION_LIMIT &&
+            payload["max_tokens"] === undefined;
+          if (isV2Default || (payload["max_completion_tokens"] === undefined && payload["max_tokens"] === undefined)) {
+            const ceiling =
+              typeof candidate.output_limit === "number" && candidate.output_limit > 0
+                ? candidate.output_limit
+                : OPENCODE_V2_COMPLETION_LIMIT;
+            payload["max_completion_tokens"] = ceiling;
           }
           payload.stream_options = {
             ...(typeof payload.stream_options === "object" && payload.stream_options !== null
@@ -427,7 +438,7 @@ function opencodeSpec(providerId: "opencode" | "opencode-zen" | "opencode-go"): 
         }
         const family = candidate.wire_family;
         if (family === "chat" || family === "responses" || family === "messages") {
-          injectOpenCodePrompt(payload, family, candidate.model_id);
+          injectOpenCodePrompt(payload, family);
         }
         payload.stream = true;
         if (candidate.wire_family === "chat") reorderV2ChatKeys(payload);

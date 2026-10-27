@@ -35,7 +35,7 @@ describe("OpenCode request fingerprint", () => {
     // project identity is hashed into that shape; an already-canonical value is
     // kept as-is.
     expect(first["x-opencode-project"]).toMatch(/^[0-9a-f]{40}$/);
-    expect(first["user-agent"]).toBe("opencode/latest/2.1.1/cli");
+    expect(first["user-agent"]).toMatch(/^opencode\/latest\/\d+\.\d+\.\d+\/cli$/);
     const traceparent = first["traceparent"];
     const b3 = first["b3"];
     if (!traceparent || !b3) throw new Error("OpenCode trace headers must be present");
