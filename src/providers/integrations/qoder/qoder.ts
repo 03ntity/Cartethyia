@@ -841,7 +841,7 @@ function mapQoderFinishReason(raw: unknown): CanonicalStopReason | undefined {
   return undefined;
 }
 
-async function* qoderBodyToCanonicalEvents(
+export async function* qoderBodyToCanonicalEvents(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
   model: string,
@@ -1005,7 +1005,7 @@ async function* qoderBodyToCanonicalEvents(
       }
       reasonCalls = [];
       // The turn ended by calling a tool, whatever the upstream reported.
-      finishReason = finishReason ?? "tool_calls";
+      finishReason = "tool_calls";
     } else {
       // Unparseable markup: emit as prose rather than dropping it, so nothing
       // the model said is lost.
@@ -1030,7 +1030,10 @@ async function* qoderBodyToCanonicalEvents(
       arguments_delta: call.arguments,
     } as CanonicalEvent;
   }
-  if (reasonCalls.length > 0) finishReason = finishReason ?? "tool_calls";
+  // A recovered call outranks what the upstream reported. It says `stop`
+  // because the markup never became a real tool call on its side, so leaving it
+  // alone ends the turn "finished" with a call the caller never sees run.
+  if (reasonCalls.length > 0) finishReason = "tool_calls";
   if (tail.length > 0) {
     yield {
       type: "content_delta",
