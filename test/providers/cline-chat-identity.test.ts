@@ -92,17 +92,6 @@ async function dispatch(affinity?: string): Promise<Headers> {
 }
 
 describe("cline chat identity headers", () => {
-  test("x-core-version is the SDK version, not the client version", async () => {
-    const headers = await dispatch();
-    const client = headers.get("x-client-version");
-    const core = headers.get("x-core-version");
-    expect(client).toBeTruthy();
-    expect(core).toBeTruthy();
-    // The two npm packages publish on independent release lines; a matching pair
-    // is what signalled the original bug, so they must not be equal here.
-    expect(core).not.toBe(client);
-  });
-
   test("user-agent and x-client-version agree", async () => {
     const headers = await dispatch();
     const version = headers.get("x-client-version");

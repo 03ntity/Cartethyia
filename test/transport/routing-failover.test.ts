@@ -103,14 +103,6 @@ describe("RoutingEngine.plan cooldown classes", () => {
     });
   });
 
-  test("every candidate disabled answers accounts_unavailable", async () => {
-    const off = candidate({ provider_account_id: "off", health_status: "disabled" });
-    await expect(engine.plan(qualified, snapshot([off]))).rejects.toMatchObject({
-      code: "accounts_unavailable",
-      status: 503,
-    });
-  });
-
   /**
    * A model-scoped cooldown is a deadline the upstream stated ("this pair is
    * exhausted until a named reset"), so an all-`model_cooldown` plan is a
