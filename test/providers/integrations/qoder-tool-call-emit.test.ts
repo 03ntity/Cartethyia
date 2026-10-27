@@ -27,7 +27,7 @@ function build(messages: Array<{ role: "user" | "assistant" | "tool"; content: C
     messages,
     generation_controls: { max_tokens: 1024 },
   } as unknown as CanonicalRequest;
-  const built = buildQoderRequest("deepseek-v4.1-flash", request, CONFIG, AUTH);
+  const built = buildQoderRequest("deepseek-v4.1-flash", request, CONFIG, AUTH, "cn");
   return (built["messages"] ?? []) as Array<Record<string, unknown>>;
 }
 
@@ -150,7 +150,7 @@ test("a non-DeepSeek model gets no reasoning field", () => {
     generation_controls: { max_tokens: 1024 },
   } as unknown as CanonicalRequest;
   const out = (
-    buildQoderRequest("qmodel", request, CONFIG, AUTH)["messages"] ?? []
+    buildQoderRequest("qmodel", request, CONFIG, AUTH, "cn")["messages"] ?? []
   ) as Array<Record<string, unknown>>;
   expect(out[0]?.["reasoning_content"]).toBeUndefined();
 });

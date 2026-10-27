@@ -611,11 +611,24 @@ function qoderToolInput(argumentsText: string): Record<string, unknown> {
   }
 }
 
+/**
+ * Whether this request sends its tool history as structured turns.
+ *
+ * The upstream honours the structured form on its CN realm only. On INTL it is
+ * not enabled, and sending it anyway yields tool calls that come back right in
+ * name but with no arguments filled in — a call that cannot run. So the shape
+ * follows the realm rather than being assumed everywhere.
+ */
+function qoderStructuredTools(realm: QoderRealm): boolean {
+  return realm === "cn";
+}
+
 export function buildQoderRequest(
   modelId: string,
   request: CanonicalRequest,
   modelConfig: QoderModelConfig,
   auth: QoderAuth,
+  realm: QoderRealm = "intl",
 ): Record<string, unknown> {
   const allMessages = request.messages;
   const systemParts: string[] = [];
@@ -633,6 +646,7 @@ export function buildQoderRequest(
   }
   const systemPrompt = systemParts.join("\n\n").trim();
   const qoderMessages: Array<Record<string, unknown>> = [];
+  const structuredTools = qoderStructuredTools(realm);
   if (MODERN_PROFILE.mirrorTopLevelSystem && systemPrompt.length > 0) {
     qoderMessages.push({
       role: "system",
@@ -646,7 +660,7 @@ export function buildQoderRequest(
     // so the result scan is role-agnostic. Each result becomes its own `tool`
     // turn carrying its `tool_call_id`; any non-result content on the same turn
     // is emitted after, so nothing is duplicated or lost.
-    const results = toolResultParts(m);
+    const results = structuredTools ? toolResultParts(m) : [];
     if (results.length > 0) {
       for (const block of results) {
         const text = flattenCanonicalContent(
@@ -680,7 +694,7 @@ export function buildQoderRequest(
     // arrived as a `tool` result with no preceding call and the upstream
     // rejected the whole transcript: "Messages with role 'tool' must be a
     // response to a preceding message with 'tool_calls'".
-    const calls = m.content.filter((part) => part.kind === "toolCall");
+    const calls = structuredTools ? m.content.filter((part) => part.kind === "toolCall") : [];
     const reasoningEcho = qoderReasoningEcho(m, modelId);
     if (calls.length > 0) {
       const toolUse = calls.map((part) => ({
@@ -1240,7 +1254,7 @@ class QoderAdapter implements ProviderAdapter {
       const auth = isQoderPat(secret)
         ? await exchangeQoderPat(secret, lifecycle.signal, fetcher, version, this.realm)
         : qoderOAuthAuth(secret, context.credential.auth_state, context.credential.account_id);
-      const qoderBody = buildQoderRequest(modelId, request, modelConfig, auth);
+      const qoderBody = buildQoderRequest(modelId, request, modelConfig, auth, this.realm);
       // A full URL from the route wins, but the fallback is this realm's
       // gateway — not the intl host hardcoded into `MODERN_PROFILE`. Dispatching
       // a CN credential to `*.qoder.sh` is refused outright.
