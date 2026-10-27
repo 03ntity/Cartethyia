@@ -463,6 +463,13 @@ export function estimatedUsage(inputTokens: number, outputTokens: number): Usage
 export interface AttemptCompletion extends ProxyRequestOutcome {
   readonly modelId?: string;
   readonly error?: unknown;
+  /**
+   * The HTTP status the terminal classifier derived for a raw (non-GatewayError)
+   * failure — an upstream socket drop is 502, not the 500 the fallback implied.
+   * Only consulted when the error carries no status of its own and no wire
+   * response named one.
+   */
+  readonly terminalHttpStatus?: number;
   readonly lease?: AdmissionLease;
   /** Usage to reconcile, or undefined when this attempt consumed nothing billable. */
   readonly commitUsage?: UsageRecord;
@@ -639,13 +646,14 @@ export async function completeAttempt(
       completion.httpStatus ??
       (completion.error instanceof GatewayError
         ? completion.error.status
-        : completion.status === "completed"
-          ? 200
-          : completion.status === "cancelled"
-            ? 499
-            : completion.status === "truncated"
-              ? 502
-              : 500),
+        : completion.terminalHttpStatus ??
+          (completion.status === "completed"
+            ? 200
+            : completion.status === "cancelled"
+              ? 499
+              : completion.status === "truncated"
+                ? 502
+                : 500)),
     ...(completion.providerId === undefined ? {} : { providerId: completion.providerId }),
     ...(completion.accountId === undefined ? {} : { accountId: completion.accountId }),
     ...(completion.accountLabel === undefined ? {} : { accountLabel: completion.accountLabel }),

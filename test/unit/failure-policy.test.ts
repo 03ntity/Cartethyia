@@ -1809,6 +1809,7 @@ describe("classifyTerminalOutcome", () => {
       status: "cancelled",
       errorCategory: "transport_closed",
       errorOrigin: "cartethyia",
+      httpStatus: 499,
     });
   });
 
@@ -1823,6 +1824,7 @@ describe("classifyTerminalOutcome", () => {
       status: "failed",
       errorCategory: "transport_unavailable",
       errorOrigin: "upstream",
+      httpStatus: 502,
     });
   });
 
@@ -1833,6 +1835,7 @@ describe("classifyTerminalOutcome", () => {
       status: "failed",
       errorCategory: "deadline_exceeded",
       errorOrigin: "cartethyia",
+      httpStatus: 504,
     });
     expect(
       classifyTerminalOutcome(
@@ -1843,6 +1846,7 @@ describe("classifyTerminalOutcome", () => {
       status: "failed",
       errorCategory: "deadline_exceeded",
       errorOrigin: "cartethyia",
+      httpStatus: 504,
     });
   });
 

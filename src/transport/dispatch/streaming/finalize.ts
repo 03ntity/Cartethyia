@@ -558,6 +558,9 @@ export class StreamFinalizer {
       // never an upstream-reported error — the upstream path is already
       // covered by the `GatewayError` branch keeping its own origin.
       errorOrigin: terminalOutcome.errorOrigin,
+      ...(terminalOutcome.httpStatus === undefined
+        ? {}
+        : { terminalHttpStatus: terminalOutcome.httpStatus }),
       ...(!cancelled ? { error: streamError } : {}),
       ...(!cancelled
         ? {

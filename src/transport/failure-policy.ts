@@ -544,7 +544,27 @@ export interface TerminalOutcome {
   readonly status: "cancelled" | "failed";
   readonly errorCategory: GatewayErrorCode | "unknown_error";
   readonly errorOrigin: GatewayErrorOrigin;
+  /**
+   * The HTTP status the row should carry. `undefined` means the caller has a
+   * better one (the wire status of an actual response) and should keep it;
+   * a raw error has none, and the caller's own fallback was 500 — which
+   * read as a gateway fault for what was an upstream transport drop.
+   */
+  readonly httpStatus?: number;
 }
+
+/** The HTTP status each classifier-derived category carries when no wire response named one. */
+const CATEGORY_HTTP_STATUS: Partial<Record<GatewayErrorCode | "unknown_error", number>> = {
+  // The upstream's transport died mid-response: a bad gateway, not a fault
+  // in this process.
+  transport_unavailable: 502,
+  platform_unavailable: 502,
+  deadline_exceeded: 504,
+  transport_closed: 499,
+  shutting_down: 503,
+  overloaded: 529,
+  unknown_error: 500,
+};
 
 /**
  * Derives a failed attempt's status, error category, and error origin **from
@@ -559,11 +579,24 @@ export interface TerminalOutcome {
  * outcome carries the real code and origin.
  */
 export function classifyTerminalOutcome(error: unknown, signal: AbortSignal): TerminalOutcome {
+  const category = classifyTerminalCategory(error, signal);
+  const gateway = error instanceof GatewayError ? error : signal.reason instanceof GatewayError ? signal.reason : undefined;
   return {
     status: isClientCancellation(error, signal) ? "cancelled" : "failed",
-    errorCategory: classifyTerminalCategory(error, signal),
-    // A non-GatewayError outcome has no upstream origin to claim: it is ours.
-    errorOrigin: error instanceof GatewayError ? error.origin : "cartethyia",
+    errorCategory: category,
+    // The classifier owns the blame. An upstream socket drop arrives as a
+    // raw runtime error — no `GatewayError` wraps it — and calling that ours
+    // made the row accuse the gateway for an upstream failure.
+    errorOrigin: gateway
+      ? gateway.origin
+      : category === "transport_unavailable"
+        ? "upstream"
+        : "cartethyia",
+    // A `GatewayError` carries its own status; a raw error takes the
+    // category's, so an upstream drop is 502 rather than the 500 fallback.
+    ...(gateway || CATEGORY_HTTP_STATUS[category] !== undefined
+      ? { httpStatus: gateway ? gateway.status : CATEGORY_HTTP_STATUS[category] }
+      : {}),
   };
 }
 
