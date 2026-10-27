@@ -81,10 +81,22 @@ test("a tool kind the upstream cannot express is dropped, not forwarded", () => 
   expect((tools[0]?.["function"] as Record<string, unknown>)["name"]).toBe("Read");
 });
 
-test("no tools means no tools field", () => {
+test("no tools still declares an empty array", () => {
+  // Omitting the field makes Qoder fall back to the desktop agent's own
+  // toolset, which then leaks to a caller that declared none. Sending an
+  // empty array is what keeps that from happening.
   const body = bodyOf(request());
-  expect(body["tools"]).toBeUndefined();
+  expect(body["tools"]).toEqual([]);
   expect(body["tool_choice"]).toBeUndefined();
+});
+
+test("a declaration always carries a function object", () => {
+  // A flat name at the top level is rejected with "'function' is a required
+  // property", failing the whole request rather than just one tool.
+  const body = bodyOf(request({ tools: [{ name: "Flat", jsonSchema: {} }] }));
+  const first = (body["tools"] as Array<Record<string, unknown>>)[0];
+  expect(first?.["type"]).toBe("function");
+  expect(typeof first?.["function"]).toBe("object");
 });
 
 test("tool_choice required survives as required", () => {

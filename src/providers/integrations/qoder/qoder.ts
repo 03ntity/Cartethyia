@@ -556,15 +556,18 @@ function qoderReasoningEcho(
 function qoderTools(
   tools: readonly ToolDefinition[] | undefined,
 ): Array<Record<string, unknown>> {
-  if (!tools || tools.length === 0) return [];
   const out: Array<Record<string, unknown>> = [];
-  for (const tool of tools) {
+  for (const tool of tools ?? []) {
     if (tool.tool_type !== undefined && tool.tool_type !== "function") continue;
+    // The upstream requires `tools[].function` to be an object. A flat
+    // declaration naming the tool at the top level is rejected outright with
+    // "'function' is a required property, expected an object", which fails the
+    // whole request rather than just this tool.
     out.push({
       type: "function",
       function: {
         name: tool.name,
-        ...(tool.description === undefined ? {} : { description: tool.description }),
+        ...(tool.description === undefined ? { description: "" } : { description: tool.description }),
         parameters: tool.jsonSchema ?? { type: "object", properties: {} },
         ...(tool.strict === undefined ? {} : { strict: tool.strict }),
       },
@@ -756,17 +759,17 @@ export function buildQoderRequest(
     },
     messages: qoderMessages,
     max_tokens: maxTokens,
+    // Always present, even when empty. Omitting the field makes Qoder fall back
+    // to the desktop agent's own toolset (Bash/Edit/...), which then leaks to a
+    // caller that declared none — the reference bridge sends `[]` for exactly
+    // that reason. Parallel calls are stated explicitly rather than left to the
+    // upstream default, so a caller expecting them is not served serial
+    // behaviour.
+    tools: qoderTools(request.tools),
+    parallel_tool_calls: true,
     ...(() => {
-      const tools = qoderTools(request.tools);
-      if (tools.length === 0) return {};
       const choice = qoderToolChoice(request.tool_choice);
-      return {
-        tools,
-        ...(choice === undefined ? {} : { tool_choice: choice }),
-        // Parallel calls are the upstream default; say so explicitly so a
-        // caller that expected them is not served serial behaviour.
-        parallel_tool_calls: true,
-      };
+      return choice === undefined ? {} : { tool_choice: choice };
     })(),
   };
 }
