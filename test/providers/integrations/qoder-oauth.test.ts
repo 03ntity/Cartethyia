@@ -4,12 +4,12 @@ import {
   parseQoderOAuthState,
   QoderOAuthClient,
   readQoderUserInfo,
-} from "../../src/providers/integrations/qoder/qoder-oauth";
+} from "../../../src/providers/integrations/qoder/qoder-oauth";
 import {
   isQoderPat,
   qoderMachineIdForAccount,
   qoderOAuthAuth,
-} from "../../src/providers/integrations/qoder/qoder";
+} from "../../../src/providers/integrations/qoder/qoder";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
