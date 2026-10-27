@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import { completeRequiredSchema } from "../../../protocol/codecs";
 import type { CanonicalRequest } from "../../../protocol/canonical-model";
 import { isRecord } from "../../../protocol/codecs";
-import { applyDeepSeekReasoning, applyOpenAIReasoning, backfillDeepSeekReasoningContent, clampedEffortOutputFloor } from "../../provider-reasoning";
+import { applyDeepSeekReasoning, applyOpenAIReasoning, backfillDeepSeekReasoningContent, clampedEffortOutputFloor } from "../../../protocol/reasoning";
 import { BUDDY_CN_EFFORTS, BUDDY_INTL_EFFORTS, BUDDY_SHARED_RAW } from "./buddy-catalog-shared";
 // Imported for the CN roster only: a CN-only id has no row in the shared
 // table, and without one `raiseOutputForRaisedEffort` silently no-ops, so a

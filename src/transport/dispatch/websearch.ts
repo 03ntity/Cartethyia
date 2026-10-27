@@ -17,32 +17,14 @@
 import type { ProviderAdapter, ProviderDispatchTarget } from "../../providers/provider-contracts";
 import { GatewayError } from "../../protocol/gateway-error";
 import { resolveCredentialForAccount } from "../../providers/operations/provider-credential-service";
-import type { OAuthTokenRefresher, OAuthRefreshService } from "../../providers/authentication/oauth-refresh-service";
-import type { ValidatedNetworkBindingFactory } from "../../network/pool/resolver";
-import type { CartethyiaDatabase } from "../../persistence/db-handle";
-import type { RouteSnapshotService } from "../routing/route-model";
 import { metrics } from "../../observability/metrics";
-import type { NetworkPoolSelector } from "../../network/pool/selector";
-import type { TelemetryBatchBuffer } from "../../observability/telemetry-buffer";
-import { ProxyRequestStateStore } from "../request/state";
-import { ProxyRequestPreparer } from "../request/preparer";
-import { parseThinkingSuffix } from "../translation/thinking";
-import { completeAttempt, estimatedUsage } from "./attempt-finalize";
+import { parseThinkingSuffix } from "../../protocol/translation/thinking";
+import { completeAttempt, estimatedUsage, nativeCompletionBase } from "./attempt-finalize";
 import { runAttemptLoop } from "./attempt-loop";
 
-export interface WebsearchHandlerDeps {
-  readonly db: CartethyiaDatabase;
-  readonly providerAdapters: ReadonlyMap<string, ProviderAdapter>;
-  readonly resolveProviderAdapter?: (providerId: string) => Promise<ProviderAdapter | undefined>;
-  readonly proxyPreparer: ProxyRequestPreparer;
-  readonly stateStore: ProxyRequestStateStore;
-  readonly poolSelector?: NetworkPoolSelector;
-  readonly networkBindingFactory?: ValidatedNetworkBindingFactory;
-  readonly snapshotService?: RouteSnapshotService;
-  readonly telemetryBuffer?: TelemetryBatchBuffer;
-  readonly resolveOAuthRefresher?: (providerId: string) => Promise<OAuthTokenRefresher | undefined>;
-  readonly oauthRefreshService?: OAuthRefreshService;
-}
+import type { GatewayHandlerDeps } from "./handler-deps";
+
+export type WebsearchHandlerDeps = GatewayHandlerDeps;
 
 
 
@@ -174,22 +156,23 @@ export function createWebsearchHandler(deps: WebsearchHandlerDeps) {
         const usage = estimatedUsage(0, 0);
         await completeAttempt(state, {
           status: "completed",
-          providerId: candidate.provider_id,
-          ...(candidate.provider_account_id ? { accountId: candidate.provider_account_id } : {}),
-          ...(candidate.provider_account_label ? { accountLabel: candidate.provider_account_label } : {}),
-          ...(leases.proxySlot ? { networkPoolId: leases.proxySlot.poolId } : {}),
-          usage,
-          modelId: candidate.model_id,
-          lease: leases.lease,
-          commitUsage: usage,
-          terminal: true,
-          tenantId: prepared.authorization.tenantId,
-          ingressBody: state.ingressBody,
+          ...nativeCompletionBase({
+            providerId: candidate.provider_id,
+            ...(candidate.provider_account_id ? { accountId: candidate.provider_account_id } : {}),
+            ...(candidate.provider_account_label ? { accountLabel: candidate.provider_account_label } : {}),
+            ...(leases.proxySlot ? { networkPoolId: leases.proxySlot.poolId } : {}),
+            usage,
+            modelId: candidate.model_id,
+            lease: leases.lease,
+            commitUsage: usage,
+            tenantId: prepared.authorization.tenantId,
+            ingressBody: state.ingressBody,
+            providerCapture,
+            db: deps.db,
+            ...(deps.telemetryBuffer ? { telemetryBuffer: deps.telemetryBuffer } : {}),
+            ...(deps.snapshotService ? { snapshotService: deps.snapshotService } : {}),
+          }),
           responseBody: payload,
-          providerCapture,
-          db: deps.db,
-          ...(deps.telemetryBuffer ? { telemetryBuffer: deps.telemetryBuffer } : {}),
-          ...(deps.snapshotService ? { snapshotService: deps.snapshotService } : {}),
         });
         metrics.proxy_requests_total.inc(1, { status: "completed" });
         return jsonResponse(payload, 200, state.requestId);

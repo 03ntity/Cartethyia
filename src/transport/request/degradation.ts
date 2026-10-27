@@ -7,7 +7,7 @@
  * the planner warns (throttled here) when a request was dispatched degraded.
  */
 import type { CanonicalRequest, ContentPart } from "../../protocol/canonical-model";
-import { deriveRequiredCapabilities, type RequiredCapability } from "../translation/capabilities";
+import { deriveRequiredCapabilities, type RequiredCapability } from "../../protocol/translation/capabilities";
 
 // Degradation is often sustained — a client that always asks for tools against
 // a tools-less route degrades every single request. An unthrottled warn would

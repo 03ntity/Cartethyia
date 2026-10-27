@@ -2,15 +2,15 @@
  * Canonical → Claude Messages request builder.
  */
 import { allParts, type CanonicalRequest, type ContentPart } from "../canonical-model";
-import { buildAnthropicThinkingPayload } from "../../providers/provider-reasoning";
-import { anthropicCacheControl } from "../../transport/translation/cache-controls";
+import { buildAnthropicThinkingPayload } from "../../protocol/reasoning";
+import { anthropicCacheControl } from "../../protocol/translation/cache-controls";
 import {
   THINKING_STRIPPED_SAMPLING_CONTROLS,
   ensureMaxTokensForThinking,
   isThinkingEnabled,
-} from "../../transport/translation/capabilities";
-import { normalizeWireMaxTokens } from "../../transport/translation/normalize";
-import { resolveWireMaxTokens, WIRE_TOKEN_BOUNDS } from "../../transport/translation/quirks";
+} from "../../protocol/translation/capabilities";
+import { normalizeWireMaxTokens } from "../../protocol/translation/normalize";
+import { resolveWireMaxTokens, WIRE_TOKEN_BOUNDS } from "../../protocol/translation/quirks";
 import {
   isClaudeBillingHeaderText,
   normalizeAnthropicToolCallId,
@@ -28,7 +28,7 @@ import {
 } from "../codecs";
 import { log } from "../../observability/logger";
 import { base64DecodedByteLength, clampImage } from "../image-clamp";
-import { clampReasoningEffort, claudeUsesAdaptiveThinking, LEVEL_TO_BUDGET, resolveSupportedReasoningEfforts } from "../../transport/translation/thinking";
+import { clampReasoningEffort, claudeUsesAdaptiveThinking, LEVEL_TO_BUDGET, resolveSupportedReasoningEfforts } from "../../protocol/translation/thinking";
 import { claudeResponseToEvents, parseClaudeSseStream } from "../response/messages";
 
 /**

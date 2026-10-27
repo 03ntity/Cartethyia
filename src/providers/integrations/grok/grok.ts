@@ -20,7 +20,7 @@ import { providerBaseUrl } from "../../provider-metadata";
 import { boundedUpstreamArray, boundedUpstreamNumber, sanitizeUpstreamLabel } from "../../provider-sanitize";
 import { isRecord } from "../../../protocol/codecs";
 import { modelsDevCatalog } from "../../discovery/models-dev-catalog";
-import type { ReasoningEffortLevel } from "../../../transport/translation/thinking";
+import type { ReasoningEffortLevel } from "../../../protocol/translation/thinking";
 import type { FetchLike } from "../../quota/quota-contracts";
 import { resolveInboundSessionId, resolvePromptCacheKey } from "../../operations/session-resolution";
 import {

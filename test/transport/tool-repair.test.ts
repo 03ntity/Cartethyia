@@ -15,7 +15,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import type { CanonicalMessage, ContentPart } from "../../src/protocol/canonical-model";
-import { repairMissingToolResponses } from "../../src/transport/translation/tool-repair";
+import { repairMissingToolResponses } from "../../src/protocol/translation/tool-repair";
 
 function assistantTurn(callIds: readonly string[]): CanonicalMessage {
   return {

@@ -1,5 +1,5 @@
 // Hosted web-search tool identity.
-import type { ToolDefinition } from "../../protocol/canonical-model";
+import type { ToolDefinition } from "../canonical-model";
 
 /**
  * Returns whether a declaration is a provider-hosted search tool.

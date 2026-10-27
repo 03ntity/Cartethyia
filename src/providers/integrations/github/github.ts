@@ -25,7 +25,7 @@ import { postUpstreamJson } from "../../../protocol/upstream/post-json";
 import { providerBaseUrl } from "../../provider-metadata";
 import { getOrCreateInstallId } from "../shared/install-id";
 import { resolveRedisClient } from "../../../persistence/redis";
-import { applyParamQuirks } from "../../../transport/translation/quirks";
+import { applyParamQuirks } from "../../../protocol/translation/quirks";
 import { resolveInboundSessionId } from "../../operations/session-resolution";
 import {
   GITHUB_REQUEST_HEADERS,

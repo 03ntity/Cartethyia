@@ -9,8 +9,8 @@
  */
 import type { CanonicalMessage, CanonicalRequest, ContentPart } from "../canonical-model";
 import { canContainToolResult, toolResultParts } from "../canonical-model";
-import { isWebSearchTool } from "../../transport/translation/search";
-import { reasoningEffortFromIntent } from "../../providers/provider-reasoning";
+import { isWebSearchTool } from "../../protocol/translation/search";
+import { reasoningEffortFromIntent } from "../../protocol/reasoning";
 import {
   decodeCodexToolCallId,
   encodeCodexToolCallId,

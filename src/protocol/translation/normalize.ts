@@ -1,6 +1,6 @@
 // Provider-neutral generation-controls normalization, used only after
 // capability preflight.
-import type { GenerationControls } from "../../protocol/canonical-model";
+import type { GenerationControls } from "../canonical-model";
 
 /** Normalizes the output-token control family onto `max_output_tokens`. */
 export function normalizeGenerationControls(controls: GenerationControls): GenerationControls {

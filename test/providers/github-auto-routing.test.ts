@@ -8,7 +8,7 @@ import {
   githubAdapter,
 } from "../../src/providers/integrations/github/github";
 import type { CanonicalEvent, CanonicalRequest } from "../../src/protocol/canonical-model";
-import { applyParamQuirks } from "../../src/transport/translation/quirks";
+import { applyParamQuirks } from "../../src/protocol/translation/quirks";
 import { chatAdapter } from "../../src/transport/surface/chat/adapter";
 
 const credential = JSON.stringify({

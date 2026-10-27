@@ -17,7 +17,7 @@ import type { CanonicalEvent, CanonicalRequest } from "../../protocol/canonical-
 import { GatewayError } from "../../protocol/gateway-error";
 import { buildClaudeMessagesRequest, filterClaudeCustomHeaders } from "./shared/claude-messages";
 import { sendClaudeMessagesRequest } from "../../protocol/upstream/send-claude-messages";
-import { applyParamQuirks } from "../../transport/translation/quirks";
+import { applyParamQuirks } from "../../protocol/translation/quirks";
 import type { ProviderDispatchTarget, ProviderAdapter, ProviderDispatchContext, ProviderId } from "../provider-contracts";
 import { providerBaseUrl } from "../provider-metadata";
 

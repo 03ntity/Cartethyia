@@ -1,12 +1,12 @@
 // Capability contracts, wire-family matrices, projection, and preflight.
-import { capabilityUnsupported, GatewayError } from "../../protocol/gateway-error";
+import { capabilityUnsupported, GatewayError } from "../gateway-error";
 import {
   summarizeParts,
   type CacheHint,
   type CanonicalRequest,
   type GenerationControls,
   type WireFamily,
-} from "../../protocol/canonical-model";
+} from "../canonical-model";
 
 /** Capabilities declared by one resolved provider/model/route candidate. */
 export interface RouteCapabilities {

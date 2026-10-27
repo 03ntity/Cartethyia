@@ -14,7 +14,7 @@ import {
   splitDataUrl,
   type RewriteWalk,
 } from "../codecs";
-import { geminiThinkingOutputFloor } from "../../providers/provider-reasoning";
+import { geminiThinkingOutputFloor } from "../../protocol/reasoning";
 import { base64DecodedByteLength, clampImage } from "../image-clamp";
 
 export function geminiModelUrl(base: string, model: string, action: string): string {

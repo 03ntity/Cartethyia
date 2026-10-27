@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { canonicalToChatPayload } from "../../src/protocol/request/chat";
 import { canonicalToResponsesPayload } from "../../src/protocol/request/responses";
 import { canonicalToClaudeMessagesPayload } from "../../src/protocol/request/messages";
-import { WIRE_TOKEN_BOUNDS } from "../../src/transport/translation/quirks";
+import { WIRE_TOKEN_BOUNDS } from "../../src/protocol/translation/quirks";
 import type { CanonicalRequest } from "../../src/protocol/canonical-model";
 
 function request(controls: Record<string, unknown>): CanonicalRequest {

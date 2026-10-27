@@ -1,4 +1,4 @@
-import type { CacheHint } from "../../protocol/canonical-model";
+import type { CacheHint } from "../canonical-model";
 
 /**
  * Provider-specific cache control translation from canonical cache hints.

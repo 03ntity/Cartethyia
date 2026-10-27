@@ -3,18 +3,18 @@
  */
 import type { CanonicalRequest, ResponseFormat } from "../canonical-model";
 import { isRecord } from "../codecs";
-import { markLatestBreakpoint } from "../../transport/translation/cache-controls";
-import { isWebSearchTool } from "../../transport/translation/search";
-import { pickWireSupportedControls } from "../../transport/translation/capabilities";
-import { normalizeWireMaxTokens } from "../../transport/translation/normalize";
-import { resolveWireMaxTokens } from "../../transport/translation/quirks";
+import { markLatestBreakpoint } from "../../protocol/translation/cache-controls";
+import { isWebSearchTool } from "../../protocol/translation/search";
+import { pickWireSupportedControls } from "../../protocol/translation/capabilities";
+import { normalizeWireMaxTokens } from "../../protocol/translation/normalize";
+import { resolveWireMaxTokens } from "../../protocol/translation/quirks";
 import {
   clampReasoningEffort,
   resolveSupportedReasoningEfforts,
-} from "../../transport/translation/thinking";
+} from "../../protocol/translation/thinking";
 import { isClaudeBillingHeaderText, resolveImageSource } from "../codecs";
 import { resolvePromptCacheKey } from "../../providers/operations/session-resolution";
-import { reasoningEffortFromIntent } from "../../providers/provider-reasoning";
+import { reasoningEffortFromIntent } from "../../protocol/reasoning";
 import { parseChatResponseToEvents, decodeChatSseStream } from "../response/chat";
 
 /**

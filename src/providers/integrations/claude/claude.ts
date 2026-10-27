@@ -49,7 +49,7 @@ import { getClaudeCliVersion, adoptClaudeCliVersion, getClaudeSdkVersion } from 
 import { adoptRequiredVersion } from "../../operations/client-version-resolver";
 import { getOrCreateInstallId } from "../shared/install-id";
 import { canonicalToClaudeMessagesPayload } from "../../../protocol/request/messages";
-import { applyParamQuirks } from "../../../transport/translation/quirks";
+import { applyParamQuirks } from "../../../protocol/translation/quirks";
 import { CLAUDE_BILLING_HEADER_PREFIX, endpointUrl } from "../../../protocol/codecs";
 import { sendClaudeMessagesRequest } from "../../../protocol/upstream/send-claude-messages";
 import {

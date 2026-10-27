@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { dropCorruptAttachments } from "../../src/transport/translation/attachment-integrity";
+import { dropCorruptAttachments } from "../../src/protocol/translation/attachment-integrity";
 import type { CanonicalRequest, ContentPart } from "../../src/protocol/canonical-model";
 
 function crc32(bytes: Uint8Array): number {

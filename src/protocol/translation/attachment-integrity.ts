@@ -1,5 +1,5 @@
-import { resolveImageSource, splitDataUrl } from "../../protocol/codecs";
-import type { CanonicalRequest, ContentPart } from "../../protocol/canonical-model";
+import { resolveImageSource, splitDataUrl } from "../codecs";
+import type { CanonicalRequest, ContentPart } from "../canonical-model";
 import { log } from "../../observability/logger";
 
 /**

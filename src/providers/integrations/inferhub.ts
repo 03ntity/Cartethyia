@@ -11,7 +11,7 @@ import type { FetchLike, ProviderQuotaResult } from "../quota/quota-contracts";
 import { probeApiKeyConnectivity } from "../quota/quota-support";
 import type { CanonicalEvent, CanonicalRequest, ContentPart } from "../../protocol/canonical-model";
 import { GatewayError } from "../../protocol/gateway-error";
-import { applyParamQuirks } from "../../transport/translation/quirks";
+import { applyParamQuirks } from "../../protocol/translation/quirks";
 import { buildClaudeMessagesRequest, filterClaudeCustomHeaders } from "./shared/claude-messages";
 import { resolveInboundSessionId } from "../operations/session-resolution";
 import { isRecord } from "../../protocol/codecs";

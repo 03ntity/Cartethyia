@@ -21,7 +21,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { CanonicalMessage, CanonicalRequest, ContentPart, ToolDefinition } from "../../../protocol/canonical-model";
 import { resolveImageSource, splitDataUrl } from "../../../protocol/codecs";
-import type { ReasoningEffortLevel } from "../../../transport/translation/thinking";
+import type { ReasoningEffortLevel } from "../../../protocol/translation/thinking";
 
 /** Longest tool name the upstream accepts, counted in code points. */
 export const KIRO_TOOL_NAME_MAX_LENGTH = 64;

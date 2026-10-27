@@ -25,7 +25,7 @@ import type { CanonicalEvent, CanonicalRequest } from "../../../protocol/canonic
 import { GatewayError } from "../../../protocol/gateway-error";
 import { buildClaudeMessagesRequest, filterClaudeCustomHeaders } from "../shared/claude-messages";
 import { sendClaudeMessagesRequest } from "../../../protocol/upstream/send-claude-messages";
-import { applyParamQuirks } from "../../../transport/translation/quirks";
+import { applyParamQuirks } from "../../../protocol/translation/quirks";
 import { decodeCloudflareAiGatewayCredential } from "../../../security/credential-codec";
 
 export const CLOUDFLAREAI_PROVIDER_ID = "cloudflareai" as const;

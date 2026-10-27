@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { clampedEffortOutputFloor } from "../../src/providers/provider-reasoning";
+import { clampedEffortOutputFloor } from "../../src/protocol/reasoning";
 
 describe("clamped effort output floor", () => {
   test("an effort clamped upward earns a bigger budget", () => {

@@ -21,7 +21,7 @@ import {
 import {
   candidateSupportsRequest,
   type RequiredCapability,
-} from "../translation/capabilities";
+} from "../../protocol/translation/capabilities";
 import { planAllowsCandidate } from "./plan-gate";
 import { InMemoryAdmissionController, admissionKey } from "./admission";
 import { ReservationManager } from "./reservations";
@@ -32,7 +32,7 @@ import {
   routeCandidateIndex,
 } from "./candidate-index";
 import { totalRemainingCredit, totalRemainingPercent, type ProviderQuotaWindow } from "../../providers/quota/quota-contracts";
-import { getCachedQuotaEntry, quotaLens } from "../../console/quota/cache";
+import { getCachedQuotaEntry, quotaLens } from "../../providers/quota/cache";
 import type { RedisClient } from "../../persistence/redis";
 import { sharedClaudeSlowLanes } from "../../providers/integrations/claude/claude-slow-lane";
 

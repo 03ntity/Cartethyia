@@ -7,7 +7,7 @@ import type { TelemetryBatchBuffer, TelemetryEventInput } from "../../observabil
 import type { TelemetryPayloadCapture } from "../../observability/payload-capture";
 import { captureEarlyRejectionPayload } from "./early-rejection-capture";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
-import { reasoningEffortFromIntent } from "../../providers/provider-reasoning";
+import { reasoningEffortFromIntent } from "../../protocol/reasoning";
 import { metrics } from "../../observability/metrics";
 import { computeTokensPerSec } from "../../observability/token-speed";
 import { pushStructuredConsoleLog } from "../../observability/log-ring";

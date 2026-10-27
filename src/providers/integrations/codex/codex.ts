@@ -33,9 +33,9 @@ import { isRecord, joinUrl } from "../../../protocol/codecs";
 import { postUpstreamJson } from "../../../protocol/upstream/post-json";
 import {
   MIN_RETRY_BUDGET_MS,
-  parseUpstreamBackoff,
   sleep as defaultSleep,
 } from "../../../transport/failure-policy";
+import { parseUpstreamBackoff } from "../../../protocol/upstream-parsing";
 
 /**
  * Sleep used by the 429 capacity-wait loop, overridable in tests.

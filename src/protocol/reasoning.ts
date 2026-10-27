@@ -1,6 +1,6 @@
-import type { CanonicalRequest, ReasoningEffort, ReasoningIntent } from "../protocol/canonical-model";
-import { budgetToLevel } from "../transport/translation/thinking";
-import { isRecord } from "../protocol/codecs";
+import type { CanonicalRequest, ReasoningEffort, ReasoningIntent } from "./canonical-model";
+import { budgetToLevel } from "./translation/thinking";
+import { isRecord } from "./codecs";
 
 /**
  * The effective reasoning effort for a canonical intent, deriving one from an

@@ -7,11 +7,11 @@
 import { GatewayError } from "../../../protocol/gateway-error";
 import {
   classifyUpstreamError,
-  parseRetryAfter,
   extractUpstreamMessage,
   upstreamErrorIdentifier,
   upstreamRequestId,
 } from "../../../transport/failure-policy";
+import { parseRetryAfter } from "../../../protocol/upstream-parsing";
 import { tryParseJsonObject } from "../../../protocol/codecs";
 
 function toNumberOrUndefined(value: string | null): number | undefined {

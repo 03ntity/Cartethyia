@@ -10,7 +10,7 @@
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import type { CanonicalRequest } from "../../protocol/canonical-model";
 import type { PreparedProxyRequest } from "./preparer";
-import { normalizeThinkingConfig } from "../translation/thinking";
+import { normalizeThinkingConfig } from "../../protocol/translation/thinking";
 import { compressRequest } from "./rtk/compress-request";
 import { preferencesReaderFor } from "../../persistence/tenant-preferences";
 import { resolveUpstreamTimeoutMs } from "../../config/timeouts";

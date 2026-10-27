@@ -49,7 +49,7 @@ import { createUpstreamDeadlineLifecycle, abortGatewayError } from "../../operat
 import { mapUpstreamHttpError } from "../../../transport/failure-policy";
 import { buildClaudeMessagesRequest, filterClaudeCustomHeaders } from "../shared/claude-messages";
 import { sendClaudeMessagesRequest } from "../../../protocol/upstream/send-claude-messages";
-import { applyParamQuirks } from "../../../transport/translation/quirks";
+import { applyParamQuirks } from "../../../protocol/translation/quirks";
 import { createApiKeyAdapter } from "../../configured-provider";
 import type { ApiKeyProviderSpec } from "../../configured-provider";
 import { decodeFactoryDroidCredential } from "../../../security/credential-codec";
