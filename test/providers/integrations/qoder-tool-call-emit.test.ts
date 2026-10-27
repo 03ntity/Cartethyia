@@ -52,18 +52,19 @@ test("an assistant turn that called a tool carries the call", () => {
   expect((calls?.[0]?.["function"] as Record<string, unknown>)?.["name"]).toBe("read_file");
 });
 
-test("the call also appears as a tool_use content block", () => {
+test("the message carries only the fields the upstream knows", () => {
+  // `contents` is not a field the upstream reads. Sending it alongside
+  // `content` gave it two descriptions of the same turn, and the tool call it
+  // returned came back with no arguments filled in.
   const out = build([
     { role: "assistant", content: [CALL] },
     { role: "tool", content: [RESULT] },
   ]);
   const assistant = out.find((m) => m["role"] === "assistant");
-  const contents = (assistant?.["contents"] ?? []) as Array<Record<string, unknown>>;
-  const block = contents.find((c) => c["type"] === "tool_use");
-  expect(block).toBeDefined();
-  expect(block?.["id"]).toBe("call_1");
-  expect(block?.["name"]).toBe("read_file");
-  expect(block?.["input"]).toEqual({ path: "a.txt" });
+  expect(assistant?.["contents"]).toBeUndefined();
+  const calls = assistant?.["tool_calls"] as Array<Record<string, unknown>>;
+  expect(calls).toHaveLength(1);
+  expect((calls[0]?.["function"] as Record<string, unknown>)["name"]).toBe("read_file");
 });
 
 test("a tool result is not duplicated as a user turn", () => {
@@ -81,15 +82,16 @@ test("a tool result is not duplicated as a user turn", () => {
   expect(echoed.length).toBe(0);
 });
 
-test("unparseable arguments become an empty object, as upstream does", () => {
+test("arguments are passed through verbatim", () => {
+  // The upstream parses them itself. Rewriting an unparseable blob to `{}`
+  // would silently replace what the model actually asked for.
   const out = build([
     { role: "assistant", content: [{ ...CALL, arguments: "not json" } as ContentPart] },
     { role: "tool", content: [RESULT] },
   ]);
   const assistant = out.find((m) => m["role"] === "assistant");
-  const contents = (assistant?.["contents"] ?? []) as Array<Record<string, unknown>>;
-  const block = contents.find((c) => c["type"] === "tool_use");
-  expect(block?.["input"]).toEqual({});
+  const calls = assistant?.["tool_calls"] as Array<Record<string, unknown>>;
+  expect((calls[0]?.["function"] as Record<string, unknown>)["arguments"]).toBe("not json");
 });
 
 test("a plain assistant turn is unaffected", () => {

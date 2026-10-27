@@ -576,8 +576,13 @@ function qoderTools(
   return out;
 }
 
+
 /**
  * Projects the canonical tool choice onto the upstream's field.
+ *
+ * The upstream only accepts a string here. Given the object form
+ * `{type:"function",function:{name}}` it ignores the field, and the model then
+ * calls the tool with no arguments filled in.
  *
  * `allowed_tools` has no chat-completions equivalent, so it collapses to the
  * direction it already names rather than being dropped: a caller that asked for
@@ -587,28 +592,10 @@ function qoderToolChoice(choice: ToolChoice | undefined): unknown {
   if (choice === undefined) return undefined;
   if (typeof choice === "string") return choice;
   if (choice.type === "tool" || choice.type === "custom") {
-    // Sent as the bare name, not an object. The upstream only accepts a string
-    // here: given `{type:"function",function:{name}}` it ignores the field
-    // entirely, and the model then calls the tool with no arguments filled in —
-    // a call that arrives with an empty `arguments` and cannot run.
     const name = choice.name.trim();
     return name.length > 0 ? name : "auto";
   }
   return choice.mode;
-}
-
-function qoderToolInput(argumentsText: string): Record<string, unknown> {
-  const trimmed = argumentsText.trim();
-  if (trimmed.length === 0) return {};
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    if (Array.isArray(parsed)) return { value: parsed };
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : { value: parsed };
-  } catch {
-    return {};
-  }
 }
 
 /**
@@ -651,7 +638,6 @@ export function buildQoderRequest(
     qoderMessages.push({
       role: "system",
       content: systemPrompt,
-      contents: [{ type: "text", text: systemPrompt }],
     });
   }
   for (const m of allMessages) {
@@ -671,7 +657,6 @@ export function buildQoderRequest(
         qoderMessages.push({
           role: "tool",
           content: text,
-          contents: [{ type: "text", text }],
           tool_call_id: block.call_id,
         });
       }
@@ -685,7 +670,6 @@ export function buildQoderRequest(
       qoderMessages.push({
         role: "user",
         content: flat,
-        contents: [{ type: "text", text: flat }],
       });
       continue;
     }
@@ -697,21 +681,11 @@ export function buildQoderRequest(
     const calls = structuredTools ? m.content.filter((part) => part.kind === "toolCall") : [];
     const reasoningEcho = qoderReasoningEcho(m, modelId);
     if (calls.length > 0) {
-      const toolUse = calls.map((part) => ({
-        type: "tool_use",
-        id: part.call_id,
-        name: part.name,
-        input: qoderToolInput(typeof part.arguments === "string" ? part.arguments : ""),
-      }));
       const textParts = m.content.filter((part) => part.kind !== "toolCall");
       const flat = flattenCanonicalContent(textParts);
-      const contents: Array<Record<string, unknown>> = [];
-      if (flat.length > 0) contents.push({ type: "text", text: flat });
-      contents.push(...toolUse);
       qoderMessages.push({
         role: "assistant",
         content: flat,
-        contents,
         ...reasoningEcho,
         tool_calls: calls.map((part) => ({
           id: part.call_id,
@@ -729,7 +703,6 @@ export function buildQoderRequest(
     qoderMessages.push({
       role,
       content: flat,
-      contents: [{ type: "text", text: flat }],
       ...(role === "assistant" ? qoderReasoningEcho(m, modelId) : {}),
     });
   }
