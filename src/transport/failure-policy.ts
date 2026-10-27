@@ -2,7 +2,16 @@ import { GatewayError, type GatewayErrorCode, type GatewayErrorOrigin } from "..
 import { isRecord } from "../protocol/codecs";
 import { resolveFallbackRetryBaseMs, resolveFallbackRetryCapMs } from "../config/timeouts";
 
-const MAX_UPSTREAM_ERROR_BYTES = 500;
+/**
+ * How much of the upstream's error body is kept and surfaced.
+ *
+ * 500 bytes cut the CodeBuddy envelope mid-`extError`: the operator saw
+ * "request illegal" with none of the `displayMsg` prose that names the actual
+ * condition — "prompt is too long: 1048788 tokens > 1048576 maximum" — so a
+ * context overflow was indistinguishable from a policy refusal. The envelope
+ * runs a few KB; 4000 keeps the whole thing while bounding a hostile body.
+ */
+const MAX_UPSTREAM_ERROR_BYTES = 4000;
 const MAX_COOLDOWN_MS = 24 * 3600 * 1000;
 
 /** Parses Retry-After seconds or an HTTP date, bounded to one day. */

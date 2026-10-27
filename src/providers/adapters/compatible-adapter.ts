@@ -3,6 +3,7 @@ import type { CanonicalEvent, CanonicalRequest, WireFamily } from "../../protoco
 import { isRecord } from "../../protocol/codecs";
 import {
   classifyUpstreamError,
+  isContextLengthFailure,
   throwIfHtmlResponse,
   mapUpstreamHttpError,
   extractUpstreamMessage,
@@ -408,12 +409,20 @@ export class OpenAICompatibleAdapter extends BaseProviderAdapter {
             value >= 400 &&
             value < 600,
         );
-        const classification = classifyUpstreamError(providerStatus, identifier);
+        // A context-window overflow arrives here on the streaming path with a
+        // numeric code that says nothing (`11115`) and the real cause in
+        // `extError.message`. The status table alone classifies it as a generic
+        // refusal, so the one thing a client acts on — the measured prompt size
+        // against the window — never reached it. The prose/identifier check
+        // mirrors the non-streaming path's pre-table branch.
+        const classification = isContextLengthFailure(json)
+          ? { code: "context_length_exceeded" as const, status: 413, origin: "upstream" as const, credentialEvidence: false, rateLimitScope: undefined }
+          : classifyUpstreamError(providerStatus, identifier);
         const message = extractUpstreamMessage(json) || "Upstream reported an error";
         throw new GatewayError(
           classification.code,
           classification.status,
-          message.slice(0, 300),
+          message,
           {
             providerId: this.provider_id,
             ...(providerStatus === undefined ? {} : { providerStatus }),

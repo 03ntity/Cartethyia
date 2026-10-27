@@ -472,9 +472,9 @@ describe("mapClaudeHttpError", () => {
     expect(error.details).not.toHaveProperty("upstreamRequestId");
   });
 
-  test("a long message is truncated to 500 characters", () => {
+  test("a long message is truncated to the upstream message cap", () => {
     const error = mapClaudeHttpError(500, JSON.stringify({ error: { message: "m".repeat(2000) } }));
-    expect(error.message).toHaveLength(500);
+    expect(error.message).toHaveLength(2000);
   });
 
   test("a 407 is a network-origin proxy failure here too", () => {

@@ -671,12 +671,13 @@ describe("extractUpstreamMessage", () => {
     expect(extractUpstreamMessage({ error: { code: 500 }, msg: "human" })).toBe("human");
   });
 
-  test("bounds the result to 500 characters", () => {
+  test("bounds the result to the upstream message cap", () => {
     // The cap keeps an HTML error page or a huge echo out of telemetry rows and
-    // public envelopes.
-    expect(extractUpstreamMessage({ error: { message: "x".repeat(600) } })).toHaveLength(500);
-    expect(extractUpstreamMessage("y".repeat(500))).toHaveLength(500);
-    expect(extractUpstreamMessage("y".repeat(501))).toHaveLength(500);
+    // public envelopes, while still fitting a full CodeBuddy envelope whose
+    // extError and displayMsg prose name the real condition.
+    expect(extractUpstreamMessage({ error: { message: "x".repeat(5000) } })).toHaveLength(4000);
+    expect(extractUpstreamMessage("y".repeat(4000))).toHaveLength(4000);
+    expect(extractUpstreamMessage("y".repeat(4001))).toHaveLength(4000);
   });
 
   test("treats a JSON key named like an instruction as inert text", () => {
