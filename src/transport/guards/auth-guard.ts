@@ -12,7 +12,6 @@ import {
   detectClientRouter,
 } from "../../security/client-router-fingerprint";
 import { createAccessDecision } from "../../security/access-control";
-import { modelAbuseBannedError, type ModelStrikeService } from "../../security/model-abuse";
 
 /**
  * Stateless Elysia `beforeHandle` gateway check: API-key authentication,
@@ -27,7 +26,6 @@ export function createApiKeyAuthenticationMiddleware(deps: {
    * assigned — so a banned caller's attempts produce no telemetry row and no
    * console error, which is exactly the noise this layer exists to stop.
    */
-  readonly modelStrikes?: Pick<ModelStrikeService, "check">;
   /**
    * Tenant invoke kill switch. Checked after the key resolves, because the
    * tenant is a property of the key: the same gateway serves several tenants
@@ -105,22 +103,6 @@ export function createApiKeyAuthenticationMiddleware(deps: {
           "No API invocation access for this client.",
           { reason: "client_router_denied", clientRouter: denied },
         );
-      // Abuse ban: refuse before parse/prepare and before authorization is
-      // recorded, so a banned caller cannot keep producing failed rows. The ban
-      // is keyed on the client address *and* the API key: one key can be shared
-      // by every recipient of a share link, so refusing the address alone would
-      // punish callers that did nothing, while refusing the key alone would let
-      // the caller that probed mint a fresh one.
-      if (deps.modelStrikes) {
-        const state = deps.stateStore.get(request);
-        const ip = state?.clientIdentity?.address;
-        if (ip !== undefined) {
-          const banned = await deps.modelStrikes
-            .check({ ip, apiKeyId: authorization.id })
-            .catch(() => false);
-          if (banned) throw modelAbuseBannedError();
-        }
-      }
       deps.stateStore.require(request).authorization = authorization;
     })
     .as("plugin");

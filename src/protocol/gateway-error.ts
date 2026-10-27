@@ -52,7 +52,6 @@ export type GatewayErrorCode =
   | "proxy_unreachable"
   | "tool_call_loop_detected"
   | "client_router_denied"
-  | "model_abuse_banned"
   | "shutting_down"
   | "restart_for_update";
 

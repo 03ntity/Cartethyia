@@ -49,7 +49,6 @@ const app = boot
       telemetryBuffer: boot.deps.telemetryBuffer,
       resolveOAuthRefresher: boot.deps.resolveOAuthRefresher,
       oauthRefreshService: boot.deps.oauthRefreshService,
-      modelStrikes: boot.deps.modelStrikes,
       maxBodyBytes: resolveMaxBodyBytes(),
       scheduledTasks: boot.deps.scheduledTasks,
       // The sampler is constructed in the dependency graph and already
@@ -78,7 +77,6 @@ const app = boot
         redis: boot.deps.redis,
         oauthRefreshService: boot.deps.oauthRefreshService,
         admissionService: boot.deps.admissionService,
-        modelStrikes: boot.deps.modelStrikes,
         readRoutingAccountInflight: boot.deps.readRoutingAccountInflight,
         // The same three writers the shutdown coordinator drains, so a manual
         // flush from the console does exactly what a graceful stop would do

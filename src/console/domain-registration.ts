@@ -34,7 +34,6 @@ import { DrizzleObservabilityStore } from "./observability/store";
 import { createLiveRoutes } from "./observability/live";
 import { createLogRoutes } from "./observability/logs";
 import { createAuditRoutes } from "./audit/routes";
-import { createModelAbuseRoutes } from "./admin/model-abuse/routes";
 import { DrizzleAuditReadStore } from "./audit/store";
 import { createPerformanceRoutes } from "./observability/performance";
 import { createUpdateRoutes } from "./updates/routes";
@@ -65,7 +64,6 @@ import type { CliToolService } from "./cli-tools/service";
 import type { NetworkPoolSelector } from "../network/pool/selector";
 import type { LiveInFlightSource } from "./observability/live";
 import type { ApiKeyAdmissionService } from "../security/admission/service";
-import type { ModelStrikeService } from "../security/model-abuse";
 import type { TelemetryBatchBuffer } from "../observability/telemetry-buffer";
 import type { OAuthRefreshService } from "../providers/authentication/oauth-refresh-service";
 import { resolveRedisBackend } from "../persistence/redis";
@@ -102,8 +100,6 @@ export interface ConsoleDomainContext {
   /** Owns the live in-flight gauge the console surfaces. */
   readonly stateStore?: LiveInFlightSource;
   readonly admissionService: Pick<ApiKeyAdmissionService, "purgeKey">;
-  /** Graduated model-abuse strikes: list and lift bans from the console. */
-  readonly modelStrikes?: Pick<ModelStrikeService, "listBans" | "unban" | "ban">;
   readonly readRoutingAccountInflight?:
     | ((
         providerId: string,
@@ -259,12 +255,6 @@ export function registerConsoleDomains(
     resolveConfigKey: () => inferhubKeys.read(),
     keyStore: inferhubKeys,
   }));
-  if (ctx.modelStrikes) {
-    console.use(createModelAbuseRoutes({
-      strikes: ctx.modelStrikes,
-      accessResolver: ctx.accessResolver,
-    }));
-  }
   console.use(createProviderCatalogRoutes({
     store: providerCatalogStore,
     accessResolver: ctx.accessResolver,

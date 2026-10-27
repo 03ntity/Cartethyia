@@ -1,6 +1,6 @@
 /**
- * Security resolvers: the application encryption key, the abuse-protection
- * ceiling, and model-abuse strike/ban windows.
+ * Security resolvers: the application encryption key and the abuse-protection
+ * ceiling.
  */
 
 import { CONFIG_SPEC, readInt, readRequired } from "./spec";
@@ -14,42 +14,6 @@ const ENCRYPTION_KEY_LENGTH = 32;
  */
 export function resolveIpRateLimit(): number {
   return readInt("IP_RATE_MAX_PER_WINDOW", CONFIG_SPEC.IP_RATE_MAX_PER_WINDOW);
-}
-
-/** Invalid-model attempts inside the window that ban a client address. */
-export function resolveModelStrikeThreshold(): number {
-  return readInt(
-    "CARTETHYIA_MODEL_STRIKE_THRESHOLD",
-    CONFIG_SPEC.CARTETHYIA_MODEL_STRIKE_THRESHOLD,
-  );
-}
-
-/** Sliding window (ms) that keeps an invalid-model attempt countable. */
-export function resolveModelStrikeWindowMs(): number {
-  return readInt(
-    "CARTETHYIA_MODEL_STRIKE_WINDOW_MS",
-    CONFIG_SPEC.CARTETHYIA_MODEL_STRIKE_WINDOW_MS,
-  );
-}
-
-/** How long (ms) a model-abuse ban lasts before it lapses on its own. */
-export function resolveModelBanTtlMs(): number {
-  return readInt("CARTETHYIA_MODEL_BAN_TTL_MS", CONFIG_SPEC.CARTETHYIA_MODEL_BAN_TTL_MS);
-}
-
-/**
- * The longest model-abuse ban the console will record, however long a request
- * asks for.
- *
- * A separate knob from the ban TTL because the two are different decisions:
- * the TTL is what a graduated ban gets, this is the ceiling on what an
- * operator may ask for by hand. Raising one was never meant to raise the other.
- */
-export function resolveModelBanMaxTtlMs(): number {
-  return readInt(
-    "CARTETHYIA_MODEL_BAN_MAX_TTL_MS",
-    CONFIG_SPEC.CARTETHYIA_MODEL_BAN_MAX_TTL_MS,
-  );
 }
 
 /** Reads the application encryption key without caching it. */

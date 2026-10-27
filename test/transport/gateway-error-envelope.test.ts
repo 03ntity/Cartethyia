@@ -58,7 +58,6 @@ const EXPECTED_STATUS: Readonly<Record<string, readonly number[]>> = {
   accounts_rate_limited: [429],
   accounts_unavailable: [503],
   admission_unavailable: [503],
-  model_abuse_banned: [403],
   policy_rejected: [403],
   model_not_found: [404],
   ambiguous_model: [400],
@@ -619,7 +618,6 @@ describe("the error code vocabulary", () => {
       "proxy_unreachable",
       "tool_call_loop_detected",
       "client_router_denied",
-      "model_abuse_banned",
       "shutting_down",
       "restart_for_update",
     ];

@@ -40,11 +40,6 @@ import { HealthEventFlushBuffer, setHealthEventBuffer } from "../persistence/hea
 import { subscribePeerSettingsRevisions } from "../persistence/settings-revision";
 import { deleteExpiredSessions } from "../console/auth/session-service";
 import { InMemoryIpAbuseStore, IpAbuseProtectionService, RedisIpAbuseStore } from "../security/abuse";
-import {
-  InMemoryModelAbuseStore,
-  ModelStrikeService,
-  RedisModelAbuseStore,
-} from "../security/model-abuse";
 import { checkReadiness } from "../persistence/readiness";
 import { ProxyRequestPreparer } from "../transport/request/preparer";
 import { DrizzleNetworkPoolLoader } from "../network/pool/loader";
@@ -79,10 +74,6 @@ import { TelemetryBatchBuffer } from "../observability/telemetry-buffer";
 import { RuntimeMetricsSampler } from "../observability/runtime-metrics";
 import {
   resolveIpRateLimit,
-  resolveModelBanMaxTtlMs,
-  resolveModelBanTtlMs,
-  resolveModelStrikeThreshold,
-  resolveModelStrikeWindowMs,
 } from "../config/security";
 import { resolveSsrfPolicy, resolveTrustedProxyBoundary } from "../config/network";
 import type { TrustedProxyBoundary } from "../config/network";
@@ -127,7 +118,6 @@ export interface ProductionDeps {
   oauthRefreshService: OAuthRefreshService;
   admissionService: ApiKeyAdmissionService;
   /** Graduated strikes for repeated invalid-model requests. */
-  modelStrikes: ModelStrikeService;
   /** Memory sampler; in-flight source is bound once the request store exists. */
   runtimeMetricsSampler: RuntimeMetricsSampler;
 }
@@ -365,17 +355,7 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
   const ipAbuseProtection = new IpAbuseProtectionService(ipStore, undefined, {
     maxRequestsPerWindow: resolveIpRateLimit(),
   });
-  // Graduated model-abuse strikes: a client that keeps requesting models
-  // outside its access is warned, then banned. Redis-backed when available so
-  // the ban survives a restart and is shared across instances; in-memory
-  // otherwise, where a restart clears it.
-  const modelAbuseStore = redis ? new RedisModelAbuseStore(redis) : new InMemoryModelAbuseStore();
-  const modelStrikes = new ModelStrikeService(modelAbuseStore, {
-    threshold: resolveModelStrikeThreshold(),
-    windowMs: resolveModelStrikeWindowMs(),
-    banTtlMs: resolveModelBanTtlMs(),
-    maxBanTtlMs: resolveModelBanMaxTtlMs(),
-  });
+
   const readiness = () => checkReadiness(db, redis, resolveRedisBackend(redis));
   // One list covers every periodic task: a small deployment can cut the
   // heaviest sweeps (quota refresh, OAuth refresh, client-version polling)
@@ -694,7 +674,6 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
     }),
     networkBindingFactory,
     ipAbuseProtection,
-    modelStrikes,
     readiness,
     scheduledTasks,
     poolAgentResolver,

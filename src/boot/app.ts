@@ -60,7 +60,6 @@ import type { ValidatedNetworkBindingFactory } from "../network/pool/resolver";
 import { metrics } from "../observability/metrics";
 import type { RuntimeMetricsSampler } from "../observability/runtime-metrics";
 import { API_CONTENT_SECURITY_POLICY, X_FRAME_OPTIONS } from "../security/outbound-headers";
-import type { ModelStrikeService } from "../security/model-abuse";
 
 
 import type { TelemetryBatchBuffer } from "../observability/telemetry-buffer";
@@ -124,7 +123,6 @@ export interface ProductionAppDeps {
   readonly resolveOAuthRefresher: (providerId: string) => Promise<OAuthTokenRefresher | undefined>;
   readonly oauthRefreshService: OAuthRefreshService;
   /** Graduated strikes for repeated invalid-model requests. */
-  readonly modelStrikes?: ModelStrikeService;
   /**
    * The console control plane. Optional so reduced compositions (route-only
    * shell, console stubs) stay valid; production always mounts it. Without
@@ -387,7 +385,6 @@ export function createGatewayApp(deps: GatewayAppDeps) {
       ...(deps.verifiedHttps ? { verifiedHttps: true } : {}),
       shutdownCoordinator: deps.shutdownCoordinator,
       telemetry: deps.telemetryBuffer,
-      ...(deps.modelStrikes ? { modelStrikes: deps.modelStrikes } : {}),
       ...(deps.consoleApi?.redis ? { redis: deps.consoleApi.redis } : {}),
       // Bound at construction so the guard holds the sampler's live snapshot
       // rather than a value captured at boot.
