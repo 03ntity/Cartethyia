@@ -73,6 +73,37 @@ export async function runGrowingWaves<T>(
 export const DEFAULT_INITIAL_BATCH_SIZE = 2;
 
 /**
+ * How long a tick may wait for the maintenance lease.
+ *
+ * `tryAcquire` is documented as one attempt that skips rather than waits, but
+ * nothing bounded it: a Redis call that never answered held the tick open
+ * indefinitely. This restores the documented behaviour by force-skipping, so a
+ * stalled lease store costs one interval instead of every future one.
+ */
+const LEASE_ACQUIRE_TIMEOUT_MS = 5_000;
+
+/** Resolves with the value, or rejects if `promise` has not settled in time. */
+async function withDeadline<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  // `clearTimeout` no-ops for an absent handle, so it needs no guard. A live
+  // timer would hold the process open, hence the unref.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`lease acquisition did not settle within ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Tasks may be registered at any time: before `start()`, they are scheduled
  * when `start()` runs; after `start()`, each `register()` immediately schedules
  * that task. Registration order never decides whether a task runs.
@@ -180,6 +211,18 @@ export class ScheduledTaskRegistry {
     return this.running.has(name);
   }
 
+  /**
+   * Clears the shared gate so other names may run.
+   *
+   * Every path that latches the gate and then does not run the task must reach
+   * this: a latch that is never cleared stops every later tick of every task,
+   * because the gate is process-wide rather than per-name.
+   */
+  private releaseGate(name: string): void {
+    this.running.delete(name);
+    if (this.busy === name) this.busy = undefined;
+  }
+
   /** Runs one named task immediately, bypassing its interval — for tests and manual triggers. */
   async runNow(name: string): Promise<boolean> {
     const task = this.tasks.find((t) => t.name === name);
@@ -220,13 +263,37 @@ export class ScheduledTaskRegistry {
     if (this.busy !== undefined) return;
     this.running.add(task.name);
     this.busy = task.name;
-    const lease =
-      this.lease !== undefined && task.shared === true
-        ? await this.lease.tryAcquire(task.name, leaseTtlMs(task.intervalMs))
-        : undefined;
+    let lease: Awaited<ReturnType<MaintenanceLeaseStore["tryAcquire"]>> | undefined;
+    try {
+      // The gate above is latched before this await so a concurrent tick cannot
+      // slip past while the lease is in flight. It is bounded: a lease store
+      // that never answers used to latch `busy` forever, and since the gate is
+      // shared across every task name, one stalled acquisition stopped the
+      // whole registry — including the sweep whose job is to clean up after
+      // something that never finishes.
+      lease =
+        this.lease !== undefined && task.shared === true
+          ? await withDeadline(
+              this.lease.tryAcquire(task.name, leaseTtlMs(task.intervalMs)),
+              LEASE_ACQUIRE_TIMEOUT_MS,
+            )
+          : undefined;
+    } catch (error) {
+      // A lease store that cannot answer is not this task's failure to run;
+      // without this the error propagated out of `runOnce` and the tick was
+      // lost with it.
+      log.error(`[scheduled-task:${task.name}] lease acquisition failed`, error as Error);
+    }
+    if (lease === undefined && this.lease !== undefined && task.shared === true) {
+      // Could not establish a lease: skip this tick rather than run the task
+      // unguarded, which is what sharing the lease was for.
+      this.skippedByLease.set(task.name, (this.skippedByLease.get(task.name) ?? 0) + 1);
+      this.lastSkipAt.set(task.name, this.now());
+      this.releaseGate(task.name);
+      return;
+    }
     if (lease !== undefined && !lease.held) {
-      this.running.delete(task.name);
-      this.busy = undefined;
+      this.releaseGate(task.name);
       this.skippedByLease.set(task.name, (this.skippedByLease.get(task.name) ?? 0) + 1);
       this.lastSkipAt.set(task.name, this.now());
       return;
