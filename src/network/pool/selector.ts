@@ -258,6 +258,20 @@ export class NetworkPoolSelector {
     return `${poolId}::${providerId.toLowerCase()}`;
   }
 
+  /**
+   * Seeds one cooldown entry into the local map without touching Redis.
+   *
+   * Boot restore is the only writer: it replays the durable markers the
+   * previous process recorded (`network_pools.provider_cooldowns`, see
+   * `pool-cooldown-store.ts`) so dispatch starts remembering the egresses the
+   * upstream is still refusing. Anything whose window already passed is
+   * dropped by `restore…` before this is reached.
+   */
+  hydrateProviderCooldown(entry: ProxyCooldownEntry): void {
+    enforceCooldownLimit(this.state.cooldowns);
+    this.state.cooldowns.set(this.cooldownKey(entry.poolId, entry.providerId), entry);
+  }
+
   async flagProviderCooldown(
     poolId: string,
     providerId: string,

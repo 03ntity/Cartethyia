@@ -48,6 +48,7 @@ import {
   ValidatedNetworkBindingFactory,
 } from "../network/pool/resolver";
 import { NetworkPoolSelector } from "../network/pool/selector";
+import { restoreProviderCooldownMarkers } from "../network/pool-cooldown-store";
 import { ScheduledTaskRegistry } from "../workers/scheduler";
 import { quotaRefreshSweep } from "../workers/quota-refresh-sweep";
 import { markProviderApiKeyCredential } from "../console/quota/account-quota-shared";
@@ -387,6 +388,19 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
   });
   const telemetryBuffer = new TelemetryBatchBuffer(db);
   const poolSelector = new NetworkPoolSelector(redis);
+  // Replay the provider cooldown markers the previous process recorded
+  // (`network_pools.provider_cooldowns`). Without this a restart made dispatch
+  // forget every egress the upstream was still refusing: the flags are
+  // process-local otherwise, so the pool re-entered rotation and took 429s the
+  // first request after boot re-discovered. Expired entries are dropped by the
+  // restore itself. Best-effort: a failed read leaves selection matching what
+  // a fresh deployment would do.
+  try {
+    const restored = await restoreProviderCooldownMarkers(poolSelector, db);
+    if (restored > 0) log.info("[pool-selector] restored provider cooldown markers", { restored });
+  } catch (error) {
+    log.warn("[pool-selector] provider cooldown restore failed", { error: String(error) });
+  }
   const poolAgentResolver = new PoolAgentResolver(
     new DrizzleNetworkPoolLoader(db),
     { ssrfPolicy, db },

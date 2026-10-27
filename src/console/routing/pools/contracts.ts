@@ -389,6 +389,23 @@ export interface NetworkPoolStore {
   ): Promise<PoolProviderProbeResult>;
   listHealthEvents(tenantId: string, poolId: string): Promise<readonly PoolHealthEvent[]>;
   recover(tenantId: string, poolId: string): Promise<boolean>;
+  /**
+   * Drops the durable provider-cooldown markers on one pool row — the mirror
+   * the selector restores from at boot. The in-memory/Redis state is cleared
+   * separately by the selector; this keeps the two from drifting after a
+   * restart. `onlyBlocked` limits the drop to retired-egress markers, mirroring
+   * `clearProviderBlockedOnly`: a 429 probe may prove an address was never
+   * retired but must not release its live cooldown. Optional (and a no-op in
+   * tests without a backing row store).
+   */
+  dropProviderCooldownMarker?(
+    tenantId: string,
+    poolId: string,
+    providerId: string,
+    onlyBlocked: boolean,
+  ): Promise<void>;
+  /** Drops every provider's marker on one row (disable/replace paths). */
+  dropAllProviderCooldownMarkers?(tenantId: string, poolId: string): Promise<void>;
   /** Per-tenant pool-group selection strategy; an absent row reads as
    * `DEFAULT_POOL_STRATEGY`. */
   getStrategy(tenantId: string): Promise<PoolStrategySetting>;

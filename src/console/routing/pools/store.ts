@@ -34,6 +34,7 @@ import {
   recoverNetworkPool,
 } from "../../../network/pool-health-machine";
 import { drainPoolByteDelta, recordPoolBytes } from "../../../network/pool/byte-accounting";
+import * as poolCooldownStore from "../../../network/pool-cooldown-store";
 // Cloudflare's trace endpoint answers with plain `key=value` lines including
 // `ip=`, the address the request egressed from. Dialing it THROUGH the pool
 // therefore reports the pool's public address — which is what an operator
@@ -566,6 +567,24 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
 
   async listHealthEvents(tenantId: string, poolId: string) {
     return listNetworkPoolHealthEvents(this.db, tenantId, poolId);
+  }
+
+  async dropProviderCooldownMarker(
+    tenantId: string,
+    poolId: string,
+    providerId: string,
+    onlyBlocked: boolean,
+  ): Promise<void> {
+    if ((await this.get(tenantId, poolId)) === undefined) return;
+    await poolCooldownStore.dropProviderCooldownMarker(this.db, poolId, providerId, onlyBlocked);
+  }
+
+  async dropAllProviderCooldownMarkers(
+    tenantId: string,
+    poolId: string,
+  ): Promise<void> {
+    if ((await this.get(tenantId, poolId)) === undefined) return;
+    await poolCooldownStore.dropAllProviderCooldownMarkers(this.db, poolId);
   }
 
   async recover(tenantId: string, poolId: string): Promise<boolean> {

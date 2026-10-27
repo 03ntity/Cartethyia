@@ -77,7 +77,7 @@ export function filterLogLines(
   return lines.filter((line) => {
     if (level !== "all" && line.level !== level) return false;
     if (!normalized) return true;
-    const haystack = `${line.msg} ${line.endpoint ?? ""} ${line.model ?? ""} ${line.routedModel ?? ""} ${line.providerId ?? ""} ${line.errorCode ?? ""} ${line.userAgent ?? ""} ${line.clientIp ?? ""} ${line.accountLabel ?? ""}`.toLowerCase();
+    const haystack = `${line.msg} ${line.endpoint ?? ""} ${line.model ?? ""} ${line.routedModel ?? ""} ${line.providerId ?? ""} ${line.errorCode ?? ""} ${line.userAgent ?? ""} ${line.clientIp ?? ""} ${line.accountLabel ?? ""} ${line.networkPoolId ?? ""}`.toLowerCase();
     return haystack.includes(normalized);
   });
 }
@@ -255,6 +255,17 @@ function RequestFields({ line }: { readonly line: ConsoleLogEntry }): ReactNode 
         <>
           {"  "}
           <span className="text-purple" data-log-field="account" title={line.accountId ?? undefined}>{line.accountLabel}</span>
+        </>
+      ) : null}
+      {line.networkPoolId ? (
+        <>
+          {"  "}
+          {/* The egress that served (or was flagged by) this request, so a
+              429 line names the pool that earned it — the same id the Proxy
+              page lists cooldowns under. */}
+          <span className="text-text-tertiary" data-log-field="pool" title={`pool ${line.networkPoolId}`}>
+            {line.networkPoolId.slice(0, 8)}
+          </span>
         </>
       ) : null}
       {line.clientIp ? (

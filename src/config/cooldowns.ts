@@ -168,6 +168,21 @@ export function resolveAccountDisabledRecoveryMs(): number {
   return _disabledRecovery;
 }
 
+let _poolProviderRateLimitCooldown: number | undefined;
+/**
+ * Fallback cooldown for a provider-scoped egress 429 when the upstream named no
+ * window (default 1h). See `CARTETHYIA_POOL_PROVIDER_RATE_LIMIT_COOLDOWN_MS`.
+ * An upstream `retryAfterMs` always wins over this.
+ */
+export function resolvePoolProviderRateLimitCooldownMs(): number {
+  if (_poolProviderRateLimitCooldown === undefined)
+    _poolProviderRateLimitCooldown = readInt(
+    "CARTETHYIA_POOL_PROVIDER_RATE_LIMIT_COOLDOWN_MS",
+    CONFIG_SPEC.CARTETHYIA_POOL_PROVIDER_RATE_LIMIT_COOLDOWN_MS,
+  );
+  return _poolProviderRateLimitCooldown;
+}
+
 /**
  * Resets all cached cooldown values. Call this in tests that override
  * cooldown env-vars between test cases.
@@ -180,6 +195,7 @@ export function resetCooldownCacheForTests(): void {
   _unclassifiedCooldown = undefined;
   _escalationMaxCooldown = undefined;
   _poolCooldown = undefined;
+  _poolProviderRateLimitCooldown = undefined;
   _authRejectedCooldown = undefined;
   _policyBlockCooldown = undefined;
   _disabledRecovery = undefined;

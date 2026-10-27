@@ -380,6 +380,15 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
           validateEndpoint(effectiveKind, effectiveEndpoint, config.ssrfPolicy);
           validateTransportConfig(effectiveKind, normalizedConfig);
           request = { ...request, endpoint: effectiveEndpoint, config: normalizedConfig };
+          // A changed endpoint is a different egress address, so its cooldowns
+          // — like its probe verdict — no longer describe this pool. Drop the
+          // durable markers with the volatile ones, or a replaced proxy would
+          // come back online and immediately be skipped because the previous
+          // address's flags were restored at boot.
+          if (request.endpoint !== undefined && request.endpoint !== existing.endpoint) {
+            await config.poolSelector?.clearPoolCooldowns(poolId).catch(() => undefined);
+            await config.store.dropAllProviderCooldownMarkers?.(a.tenantId, poolId);
+          }
         }
         const updated = await config.store.update(
           a.tenantId,
@@ -520,9 +529,11 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
         );
         return { ...result, blockedPool: entry.blocked === true };
       }
-      // A measured success releases the address.
+      // A measured success releases the address — in rotation and in the
+      // durable mirror the next boot restores from.
       if (result.status === "allowed") {
         await config.poolSelector.clearProviderCooldown(poolId, providerId);
+        await config.store.dropProviderCooldownMarker?.(a.tenantId, poolId, providerId, false);
         return { ...result, blockedPool: false };
       }
       // `throttled` (429) proves the address is *serving* again — its rate
@@ -532,6 +543,7 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
       // refused again ("already cooling, but still taking hits").
       if (result.status === "throttled") {
         await config.poolSelector.clearProviderBlockedOnly(poolId, providerId);
+        await config.store.dropProviderCooldownMarker?.(a.tenantId, poolId, providerId, true);
       }
       // `unreachable` learned nothing about the address, so nothing changes.
       return { ...result, blockedPool: false };

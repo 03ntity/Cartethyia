@@ -142,7 +142,11 @@ describe("flagPoolCooldown", () => {
     const h = harness();
     flagPoolCooldown(h.selector as never, h.db as never, poolId(), "openai", rateLimited());
     await h.settled(1);
-    expect(h.calls[0]?.args[2]).toBe(15 * 60 * 1000);
+    // `CARTETHYIA_POOL_PROVIDER_RATE_LIMIT_COOLDOWN_MS` (default 1h): a
+    // request-counted allowance stays refused for hours, and the 15-minute
+    // guess put the pool back into rotation to be refused again. An upstream
+    // `retryAfterMs` always wins; the other test covers that branch.
+    expect(h.calls[0]?.args[2]).toBe(60 * 60 * 1000);
   });
 
   test("coalesces repeated cooldowns for the same pair", async () => {

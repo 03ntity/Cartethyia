@@ -490,6 +490,24 @@ export const networkPools = pgTable("network_pools", {
   /** The endpoint the verdict was measured against. Compared on read, so an
    * edited endpoint reports "never probed" instead of a stale verdict. */
   providerProbeEndpoint: text("provider_probe_endpoint"),
+  /**
+   * The database mirror of the pool selector's provider cooldown state, one
+   * entry per cooling provider keyed by its lowercased id:
+   * `{ "opencode": { "until": <epoch ms>, "reason": "...", "blocked": false } }`.
+   *
+   * The selector's own map is process-local (mirrored to Redis when present),
+   * so a restart dropped every flag while the upstream kept refusing the
+   * egress — dispatch re-picked a spent pool and the console showed nothing.
+   * The dispatch-side flaggers write each marker here, and boot reads this
+   * column back into the selector, so the state survives a restart the way the
+   * upstream's memory of the address does.
+   *
+   * `null` means no provider was ever flagged. Expired entries are left inert
+   * until the next write for the pool rather than swept eagerly: a marker with
+   * `until` in the past is skipped by every reader.
+   */
+  providerCooldowns: jsonb("provider_cooldowns")
+    .$type<Record<string, { until: number; reason: string; blocked?: boolean }>>(),
   /** Metered egress totals, flushed from the in-memory socket counters on
    * every pool-touching write so the quota bar survives a restart. */
   bytesSentTotal: bigint("bytes_sent_total", { mode: "number" }).notNull().default(0),

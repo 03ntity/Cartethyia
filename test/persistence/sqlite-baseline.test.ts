@@ -69,6 +69,7 @@ test("each backend has matching baseline and incremental migrations", () => {
     "0021_add_api_key_concurrency_tolerance.sql",
     "0022_add_inferhub_config_key.sql",
     "0023_drop_api_key_concurrency_tolerance.sql",
+    "0024_add_pool_provider_cooldowns.sql",
   ];
   expect(postgres).toEqual(expected);
   expect(sqlite).toEqual(expected);

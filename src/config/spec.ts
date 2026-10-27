@@ -241,6 +241,18 @@ export const CONFIG_SPEC = {
   },
   CARTETHYIA_ACCOUNT_COOLDOWN_ESCALATION_MAX_MS: { kind: "int", default: 3_600_000, min: 0, max: 86_400_000 },
   CARTETHYIA_POOL_COOLDOWN_MS: { kind: "int", default: 120_000, min: 0, max: 86_400_000 },
+  /**
+   * A provider-scoped egress cooldown (a 429 the pool itself earned) when the
+   * upstream named no window. Default 1h: an egress that exhausted a
+   * request-counted allowance stays refused long past minute 15, and a short
+   * default sent the pool back into rotation to be refused again.
+   */
+  CARTETHYIA_POOL_PROVIDER_RATE_LIMIT_COOLDOWN_MS: {
+    kind: "int",
+    default: 3_600_000,
+    min: 0,
+    max: 86_400_000,
+  },
   CARTETHYIA_ACCOUNT_AUTH_REJECTED_COOLDOWN_MS: { kind: "int", default: 300_000, min: 0, max: 86_400_000 },
   CARTETHYIA_ACCOUNT_POLICY_BLOCK_COOLDOWN_MS: { kind: "int", default: 300_000, min: 0, max: 86_400_000 },
   CARTETHYIA_ACCOUNT_DISABLED_RECOVERY_MS: { kind: "int", default: 86_400_000, min: 0, max: 604_800_000 },

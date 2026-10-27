@@ -65,14 +65,31 @@ flagged `blocked` for that provider for ten years
 address has been retired upstream, and the only fix is replacing the proxy.
 The console distinguishes the two because the fix differs — wait, or replace —
 and the audit row records `egress_blocked` rather than
-`rate_limit_transient`. A probe that answers anything other than `blocked`
-clears a previous block, which is how "the operator replaced the proxy"
-recovers without manual intervention.
+`rate_limit_transient`. A probe enforces its own verdict, and differs by what
+it measured: `allowed` releases both a block and a cooldown; `throttled` (a
+429) corrects a stale block — the address is answering — but leaves a live
+cooldown in place, because the throttle is the same fact the cooldown records;
+`unreachable` changes nothing, having learned nothing about the address.
 
 Block markers are keyed `(poolId, providerId)`, so one provider's block is
 never visible to another: a marker written for `opencode` does not stop
 `anthropic` from using the same egress. `opencode` is currently the only
 bundled provider declaring `ipScopedRateLimit`.
+
+**Cooldown state survives a restart through the row, not just memory.** The
+selector's per-`(pool, provider)` map is process-local (mirrored to Redis when
+Redis exists), so dispatch-side flagging (`flagPoolCooldown`, `flagPoolBlocked`
+in `pool-health.ts`) also writes each marker into
+`network_pools.provider_cooldowns`, keyed by lowercased provider id. Boot
+(`restoreProviderCooldownMarkers` in `pool-cooldown-store.ts`) reads that column
+back into the selector and drops whatever already expired, so the gateway
+keeps remembering an egress the upstream is still refusing. Probe clears flow
+to the same mirror through the store's `dropProviderCooldownMarker` (and a
+changed endpoint drops all of the row's markers, because the cooldown belonged
+to the address, not the row). A 429 with no `retryAfterMs` from the upstream
+cools for `CARTETHYIA_POOL_PROVIDER_RATE_LIMIT_COOLDOWN_MS` (default 1h) —
+one hour because a request-counted free-tier allowance stays refused long past
+the 15-minute guess this fallback used before.
 
 A proxy's `CONNECT` refusal with `402` or `407` is attributed to the pool,
 not the account dialed through it: the typed `ProxyConnectRefusalError` is
