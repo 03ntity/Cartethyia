@@ -20,17 +20,29 @@ const LISTING = {
       object: "model",
       created: 1,
       owned_by: "inception",
-      context_window: 1_000_000,
-      max_completion_tokens: 131_072,
-      reasoning: true,
+      // The real upstream shape: `max_output_length` (not
+      // `max_completion_tokens`) and no `reasoning` key — the roster must win
+      // over both gaps.
+      context_length: 1_000_000,
+      max_output_length: 131_072,
     },
     {
       id: "mercury-2.5",
       object: "model",
       created: 1,
       owned_by: "inception",
-      context_window: 260_000,
-      max_completion_tokens: 65_536,
+      context_length: 260_000,
+      max_output_length: 65_536,
+    },
+    {
+      // A model the static roster does not know: discovery must still stamp it
+      // free-tier so it never lands in the billed tail.
+      id: "mercury-4",
+      object: "model",
+      created: 1,
+      owned_by: "inception",
+      context_length: 2_000_000,
+      max_output_length: 200_000,
     },
   ],
 };
@@ -78,7 +90,7 @@ describe("Inception free discovery", () => {
       fetcher: stubFetcher(),
     });
     expect(rows).not.toBeNull();
-    expect(rows?.length).toBe(2);
+    expect(rows?.length).toBe(3);
     for (const row of rows ?? []) {
       expect(row.freeTier).toBe(true);
       expect(row.cost?.input).toBe(0);
@@ -87,7 +99,7 @@ describe("Inception free discovery", () => {
     }
   });
 
-  test("the listing read the upstream's own window fields", async () => {
+  test("a known id keeps the roster metadata even when the listing omits it", async () => {
     const rows = await discoverInceptionFreeModels({
       baseUrl: "https://api.inceptionlabs.ai/v1",
       fetcher: stubFetcher(),
@@ -96,6 +108,18 @@ describe("Inception free discovery", () => {
     expect(mercury3?.contextLimit).toBe(1_000_000);
     expect(mercury3?.outputLimit).toBe(131_072);
     expect(mercury3?.reasoning).toBe(true);
+    expect(mercury3?.toolCall).toBe(true);
+  });
+
+  test("an unknown id is stamped free-tier with the listing's window", async () => {
+    const rows = await discoverInceptionFreeModels({
+      baseUrl: "https://api.inceptionlabs.ai/v1",
+      fetcher: stubFetcher(),
+    });
+    const mercury4 = rows?.find((row) => row.modelId === "mercury-4");
+    expect(mercury4?.freeTier).toBe(true);
+    expect(mercury4?.contextLimit).toBe(2_000_000);
+    expect(mercury4?.cost?.input).toBe(0);
   });
 
   test("the credential is forwarded as the bearer", async () => {

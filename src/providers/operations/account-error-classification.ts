@@ -23,6 +23,16 @@ import {
   resolveAccountUnclassifiedCooldownMs,
 } from "../../config/cooldowns";
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = resolveAccountRateLimitCooldownMs;
+/**
+ * Inception's per-minute limit window (1 minute).
+ *
+ * Inception's Free tier throttles per minute (1 000 requests / 1M input
+ * tokens / 100K output tokens) and the window resets every minute. The generic
+ * 15-minute rate-limit fallback would park a healthy key long after the window
+ * refilled; 1 minute is the provider's own cadence, hardcoded because it is a
+ * fact about the upstream, not a deployment knob.
+ */
+const INCEPTION_RATE_LIMIT_COOLDOWN_MS = 60_000;
 // Fallback when the error states no usable duration: deliberately short (1h,
 // not 24h) — quota state is re-probed on the next failure, so an unknown
 // reset cadence self-corrects instead of parking the account for a day.
@@ -504,6 +514,8 @@ interface AccountErrorContext {
   readonly canMutate: boolean;
   readonly providerCode: string;
   readonly statedCooldownMs: number | null;
+  /** Echo of the caller's evidence; read only by the arms that need it. */
+  readonly providerId: string | undefined;
   /**
    * The upstream named a restriction on the account, not a refusal of the
    * request. Read by the policy arm to pick between disabling the account and
@@ -559,6 +571,7 @@ interface AccountErrorSignals {
   readonly accountEvidence: boolean;
   readonly revocationNamed: boolean;
   /** Echo of the caller's evidence; read only by the arms that need it. */
+  readonly providerId: string | undefined;
   readonly modelId: string | undefined;
   readonly modelBlockHits: number;
   readonly staticToken: boolean;
@@ -702,6 +715,7 @@ function accountErrorContext(error: unknown, options?: AccountFailureEvidence): 
     accountEvidence,
     canMutate,
     providerCode,
+    providerId: options?.providerId,
     statedCooldownMs,
     buddyBanned: isBuddyAccountBanned(lower, providerCode, banBody),
     reason,
@@ -1049,6 +1063,7 @@ export function classifyAccountError(
     canMutate,
     accountEvidence,
     revocationNamed,
+    providerId: options?.providerId,
     modelId,
     modelBlockHits,
     staticToken,
@@ -1362,6 +1377,37 @@ const ACCOUNT_ERROR_RULES: readonly AccountErrorRule[] = [
         cooldownMs,
         new Date(Date.now() + cooldownMs),
         s.reason("Provider quota exhausted"),
+        s.origin === "upstream",
+      );
+    },
+  },
+  {
+    // Inception's Free tier throttles per minute (1 000 requests / 1M input
+    // tokens / 100K output tokens) and the window resets every minute. A
+    // generic 429 would cool the account for the 15-minute default, leaving a
+    // healthy key parked long after the window refilled — the source of
+    // "limitasiya lumayan keras". This arm must run before `rate-limit`: it
+    // matches the same signals and shortens the window to 1 minute so routing
+    // moves to the next account and the flagged one returns almost at once.
+    name: "inception-per-minute-limit",
+    match: (s) =>
+      s.providerId === "inception" &&
+      (s.statusCode === 429 ||
+        s.providerCode === "rate_limit_reached" ||
+        s.providerCode === "rate_limit_exceeded" ||
+        s.lower.includes("rate_limit") ||
+        s.lower.includes("rate limit") ||
+        s.lower.includes("too many requests") ||
+        s.lower.includes("tokens per minute") ||
+        s.lower.includes("input token")),
+    decide: (s) => {
+      const cooldownMs = s.statedCooldownMs ?? INCEPTION_RATE_LIMIT_COOLDOWN_MS;
+      return s.result(
+        "rate_limit_transient",
+        "cooldown",
+        cooldownMs,
+        new Date(Date.now() + cooldownMs),
+        s.reason("Inception per-minute input-token limit"),
         s.origin === "upstream",
       );
     },

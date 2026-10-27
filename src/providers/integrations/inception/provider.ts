@@ -55,9 +55,14 @@ export const INCEPTION_MODELS: readonly ModelDefinition[] = [
  *
  * Every fetched row is stamped `freeTier` and zero-priced, the same rule the
  * static roster declares: this provider is pinned to its free allowance, so a
- * model upstream adds must not land in the billed tail. Limits/capabilities
- * come from the shared OpenAI-compatible reader, which reads the upstream's
- * own context/output/modal fields.
+ * model upstream adds must not land in the billed tail.
+ *
+ * A fetched id that the static roster already knows keeps the roster row
+ * whole, not the listing's fields: upstream publishes `max_output_length` and
+ * no `reasoning`/`tool_call` keys, so the shared OpenAI-compatible reader
+ * would otherwise overwrite mercury-3's advertised 131072 output and reasoning
+ * flag with its 64k/not-reasoning defaults. The roster is the canonical
+ * metadata for the models we know; the listing only adds genuinely new ids.
  */
 export async function discoverInceptionFreeModels(options: {
   readonly baseUrl: string;
@@ -73,9 +78,14 @@ export async function discoverInceptionFreeModels(options: {
     ...(options.fetcher === undefined ? {} : { fetcher: options.fetcher }),
   });
   if (listed === null) return null;
-  return listed.map((model) => ({
-    ...model,
-    freeTier: true,
-    cost: { input: 0, output: 0, pricing_model: "pay-per-use" },
-  }));
+  const known = new Map(INCEPTION_MODELS.map((model) => [model.modelId, model]));
+  return listed.map((model) => {
+    const roster = known.get(model.modelId);
+    if (roster !== undefined) return roster;
+    return {
+      ...model,
+      freeTier: true,
+      cost: { input: 0, output: 0, pricing_model: "pay-per-use" },
+    };
+  });
 }
