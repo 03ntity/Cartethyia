@@ -599,6 +599,16 @@ function qoderToolChoice(choice: ToolChoice | undefined): unknown {
 }
 
 /**
+ * Marks a tool call recorded into the text of an assistant turn.
+ *
+ * The upstream only reads structured turns on its CN realm, so on INTL a past
+ * call has to be described in prose or the model loses the record of what it
+ * asked for. The wording matches the reference bridge, which is what the
+ * upstream has been trained to read back.
+ */
+const QODER_TOOL_MARKER = "[assistant 请求调用工具]";
+
+/**
  * Whether this request sends its tool history as structured turns.
  *
  * The upstream honours the structured form on its CN realm only. On INTL it is
@@ -678,8 +688,30 @@ export function buildQoderRequest(
     // arrived as a `tool` result with no preceding call and the upstream
     // rejected the whole transcript: "Messages with role 'tool' must be a
     // response to a preceding message with 'tool_calls'".
-    const calls = structuredTools ? m.content.filter((part) => part.kind === "toolCall") : [];
+    const allCalls = m.content.filter((part) => part.kind === "toolCall");
     const reasoningEcho = qoderReasoningEcho(m, modelId);
+    if (!structuredTools && allCalls.length > 0) {
+      // INTL does not read structured turns, so the call is written into the
+      // text instead of being dropped. Dropping it left the next `tool` turn
+      // answering a call that was never made, and the model had no record of
+      // what it had asked for — so it re-emitted a call with no arguments.
+      //
+      // The marker and the JSON shape mirror the reference bridge, which is
+      // what the upstream has actually been trained to read back.
+      const textParts = m.content.filter((part) => part.kind !== "toolCall");
+      const prose = flattenCanonicalContent(textParts);
+      const recorded = allCalls.map((part) => ({
+        name: part.name,
+        arguments: typeof part.arguments === "string" ? part.arguments : "",
+      }));
+      qoderMessages.push({
+        role: "assistant",
+        content: (prose.length > 0 ? prose + "\n\n" : "") + QODER_TOOL_MARKER + "\n" + JSON.stringify(recorded),
+        ...reasoningEcho,
+      });
+      continue;
+    }
+    const calls = structuredTools ? allCalls : [];
     if (calls.length > 0) {
       const textParts = m.content.filter((part) => part.kind !== "toolCall");
       const flat = flattenCanonicalContent(textParts);
@@ -851,6 +883,61 @@ export function parseDsmlToolCalls(text: string): { calls: DsmlCall[]; clean: st
   }
 
   return { calls, clean };
+}
+
+/**
+ * Recovers a tool call the model echoed back as text.
+ *
+ * On INTL the upstream reads tool calls as prose, so a turn that called a tool
+ * is described with `QODER_TOOL_MARKER` followed by a JSON array of
+ * `{name, arguments}`. The model occasionally reproduces that shape verbatim as
+ * its answer instead of calling again, and left alone the client shows the JSON
+ * as content while the tool never runs.
+ *
+ * Only a well-formed array whose every entry names a tool and carries parseable
+ * arguments is accepted. Anything else returns no calls and the original text,
+ * so a model merely talking about the format is never mistaken for a call.
+ */
+export function parseLeakedToolCalls(
+  text: string,
+  allowedNames?: ReadonlySet<string>,
+): { calls: DsmlCall[]; clean: string } {
+  if (text.length === 0 || !text.includes(QODER_TOOL_MARKER)) {
+    return { calls: [], clean: text };
+  }
+  const at = text.indexOf(QODER_TOOL_MARKER);
+  const head = text.slice(0, at).trim();
+  const rest = text.slice(at + QODER_TOOL_MARKER.length).trim();
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rest);
+  } catch {
+    return { calls: [], clean: text };
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return { calls: [], clean: text };
+
+  const calls: DsmlCall[] = [];
+  for (const item of parsed) {
+    if (typeof item !== "object" || item === null) return { calls: [], clean: text };
+    const rec = item as Record<string, unknown>;
+    const name = typeof rec["name"] === "string" ? rec["name"].trim() : "";
+    if (name.length === 0) return { calls: [], clean: text };
+    if (allowedNames && !allowedNames.has(name)) return { calls: [], clean: text };
+    let args = rec["arguments"];
+    if (typeof args === "object" && args !== null) args = JSON.stringify(args);
+    if (typeof args !== "string") return { calls: [], clean: text };
+    // Arguments that do not parse are not a call this can trust.
+    if (args.trim().length > 0) {
+      try {
+        JSON.parse(args);
+      } catch {
+        return { calls: [], clean: text };
+      }
+    }
+    calls.push({ id: `call_${randomUUID().replace(/-/g, "").slice(0, 16)}`, name, arguments: args });
+  }
+  return { calls, clean: head };
 }
 
 /**
@@ -1055,7 +1142,17 @@ export async function* qoderBodyToCanonicalEvents(
     if (calls.length > 0) reasonCalls = calls;
   }
   if (buf.length > 0) {
-    const { calls, clean } = parseDsmlToolCalls(buf);
+    // Two ways a call can arrive as text: DSML markup, and the marker + JSON
+    // array the upstream itself uses on INTL. The second is tried only when the
+    // first finds nothing, so a DSML stream is never re-read as an echo.
+    let { calls, clean } = parseDsmlToolCalls(buf);
+    if (calls.length === 0) {
+      const leaked = parseLeakedToolCalls(buf);
+      if (leaked.calls.length > 0) {
+        calls = leaked.calls;
+        clean = leaked.clean;
+      }
+    }
     if (calls.length > 0) {
       const visible = stripDsmlCloseTags(clean).trim();
       if (visible.length > 0) {
