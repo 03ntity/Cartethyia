@@ -942,6 +942,37 @@ export function classifyAccountError(
  */
 const ACCOUNT_ERROR_RULES: readonly AccountErrorRule[] = [
   {
+    // Must precede "rate-limit": this rejection is a 429 whose own text says
+    // "rate limit", so the broader arm claimed it and cooled the account for
+    // the full 15-minute rate-limit window.
+    //
+    // A full max-inflight is a statement about the gateway's own routing, not
+    // about the credential: every account serving the model is busy right now.
+    // Cooling them marks healthy accounts as `cooldown` for a limit their
+    // provider never applied, which is what made every account read busy while
+    // incoming requests piled up — the accounts were never the problem, the
+    // ceiling was.
+    name: "gateway-capacity-exhausted",
+    match: (s) =>
+      s.lower.includes("at its concurrency limit") ||
+      s.lower.includes("every proxy pool for this provider is at its concurrency limit") ||
+      s.lower.includes("the gateway is at its concurrency limit"),
+    decide: (s) =>
+      s.result(
+        "model_capacity",
+        // `status` is the status the account would move to; it is never
+        // applied because `mutatesAccount` is false below, so this names the
+        // shape rather than a transition. Zero cooldown is the point: no wait
+        // is attached to the account, so the next request may use it at once.
+        "cooldown",
+        0,
+        null,
+        s.reason("Gateway concurrency ceiling reached; no account was at fault"),
+        // Never mutates: there is nothing wrong with the account to record.
+        false,
+      ),
+  },
+  {
     name: "deployment-infrastructure",
     match: (s) => s.deploymentInfraError,
     decide: (s) =>
