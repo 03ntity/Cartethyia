@@ -32,13 +32,33 @@ import { restoreControllerAfterFailedHandoff } from "./controller";
 const TRAY_HEALTH_POLL_MS = 10_000;
 
 /**
- * Consecutive misses to forgive before a dead gateway closes the tray.
+ * How long the gateway must be unreachable before the tray closes.
  *
- * One refusal is not a stopped gateway — a probe can lose a race with startup
- * or a slow request — and closing the icon on one would make startup feel
- * random.
+ * A count of consecutive misses was the wrong shape: a gateway that is
+ * answering, but slowly, misses every probe exactly like a gateway that is
+ * gone. Under load — a large prompt, a synchronous GC — `/health` cannot
+ * answer inside the probe timeout, so three polls in a row missed and the tray
+ * closed itself while the gateway was still serving. `carte --tray` looked
+ * fine only because it starts idle and never carries that load.
+ *
+ * Bounded by wall-clock instead: a gateway that is truly gone stops being
+ * reachable immediately and stays that way, so it still closes the tray
+ * promptly, while a gateway that is merely busy keeps answering often enough
+ * to reset the clock. The window is long enough to span a request that runs
+ * to the deadline.
  */
-const TRAY_HEALTH_MISSES_BEFORE_CLOSE = 3;
+const TRAY_HEALTH_UNREACHABLE_BEFORE_CLOSE_MS = 120_000;
+
+/**
+ * How long one health probe waits before counting as a miss.
+ *
+ * Short probes are the other half of the same bug: `/health` is served by the
+ * same process that is busy streaming a response, so a 2 s budget failed on a
+ * busy gateway that was perfectly healthy. This is far longer than a healthy
+ * answer takes and far shorter than the poll interval, so it cannot overlap
+ * the next probe.
+ */
+const TRAY_HEALTH_PROBE_TIMEOUT_MS = 15_000;
 
 export async function startTray(): Promise<void> {
   const handoff = inheritedControllerHandoff();
@@ -162,7 +182,10 @@ async function runTray(): Promise<void> {
     reportTrayStartup({ status: "ready", url: dashboardUrl });
     console.log(`Cartethyia is running at ${dashboardUrl}`);
 
-    let misses = 0;
+    // The timestamp of the last probe the gateway actually answered, not a
+    // miss counter: a busy gateway answers sometimes, and that must reset the
+    // clock rather than being averaged away with its own silences.
+    let lastSeenAliveAt = Date.now();
     // A detached child's `exited` never settles on Windows, so the old
     // `await current.exited` would have parked here forever and the tray would
     // never notice the gateway going away. Poll its health endpoint instead:
@@ -173,14 +196,15 @@ async function runTray(): Promise<void> {
       await Bun.sleep(TRAY_HEALTH_POLL_MS);
       if (closing || gateway === null && adoptedGateway === null) continue;
       const alive = await fetch(`http://127.0.0.1:${port}/health`, {
-        signal: AbortSignal.timeout(2_000),
+        signal: AbortSignal.timeout(TRAY_HEALTH_PROBE_TIMEOUT_MS),
       }).then((response) => response.ok).catch(() => false);
       if (alive) {
-        misses = 0;
+        lastSeenAliveAt = Date.now();
         continue;
       }
-      misses += 1;
-      if (misses < TRAY_HEALTH_MISSES_BEFORE_CLOSE) continue;
+      // Only a gateway that has been unreachable for the whole window is
+      // treated as gone. One slow answer inside it is enough to start over.
+      if (Date.now() - lastSeenAliveAt < TRAY_HEALTH_UNREACHABLE_BEFORE_CLOSE_MS) continue;
       gateway = null;
       console.error("Cartethyia stopped answering; the tray is closing.");
       await close(1);
