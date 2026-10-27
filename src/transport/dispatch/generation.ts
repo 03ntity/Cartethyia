@@ -21,34 +21,16 @@
 import type { ImageGenerationOutcome, ProviderAdapter, ProviderDispatchTarget } from "../../providers/provider-contracts";
 import { GatewayError } from "../../protocol/gateway-error";
 import { resolveCredentialForAccount } from "../../providers/operations/provider-credential-service";
-import type { OAuthTokenRefresher, OAuthRefreshService } from "../../providers/authentication/oauth-refresh-service";
-import type { ValidatedNetworkBindingFactory } from "../../network/pool/resolver";
-import type { CartethyiaDatabase } from "../../persistence/db-handle";
-import type { RouteSnapshotService } from "../routing/route-model";
 import type { ServiceKind } from "../../protocol/canonical-model";
 import { metrics } from "../../observability/metrics";
-import type { NetworkPoolSelector } from "../../network/pool/selector";
-import type { TelemetryBatchBuffer } from "../../observability/telemetry-buffer";
 import type { ProxyRequestState } from "../request/state";
-import { ProxyRequestStateStore } from "../request/state";
-import { ProxyRequestPreparer } from "../request/preparer";
-import { completeAttempt, estimatedUsage } from "./attempt-finalize";
+import { completeAttempt, estimatedUsage, nativeCompletionBase } from "./attempt-finalize";
 import { runAttemptLoop } from "./attempt-loop";
 import { captureProviderRateLimit } from "./ratelimit-capture";
 
-export interface GenerationHandlerDeps {
-  readonly db: CartethyiaDatabase;
-  readonly providerAdapters: ReadonlyMap<string, ProviderAdapter>;
-  readonly resolveProviderAdapter?: (providerId: string) => Promise<ProviderAdapter | undefined>;
-  readonly proxyPreparer: ProxyRequestPreparer;
-  readonly stateStore: ProxyRequestStateStore;
-  readonly poolSelector?: NetworkPoolSelector;
-  readonly networkBindingFactory?: ValidatedNetworkBindingFactory;
-  readonly snapshotService?: RouteSnapshotService;
-  readonly telemetryBuffer?: TelemetryBatchBuffer;
-  readonly resolveOAuthRefresher?: (providerId: string) => Promise<OAuthTokenRefresher | undefined>;
-  readonly oauthRefreshService?: OAuthRefreshService;
-}
+import type { GatewayHandlerDeps } from "./handler-deps";
+
+export type GenerationHandlerDeps = GatewayHandlerDeps;
 
 /** Which surface a handler serves. Drives candidate filtering and error copy. */
 export type GenerationKind = Extract<ServiceKind, "imageGeneration" | "videoGeneration">;
@@ -133,22 +115,23 @@ async function passThrough(
   captureProviderRateLimit(args.candidate.provider_id, args.candidate.provider_account_id, upstream.headers);
   await completeAttempt(state, {
     status: "completed",
-    providerId: args.candidate.provider_id,
-    ...(args.candidate.provider_account_id ? { accountId: args.candidate.provider_account_id } : {}),
-    ...(args.candidate.provider_account_label ? { accountLabel: args.candidate.provider_account_label } : {}),
-    ...(args.networkPoolId ? { networkPoolId: args.networkPoolId } : {}),
-    usage,
-    modelId: args.candidate.model_id,
-    lease: args.lease as never,
-    commitUsage: usage,
-    terminal: true,
-    tenantId: args.tenantId,
-    ingressBody: state.ingressBody,
+    ...nativeCompletionBase({
+      providerId: args.candidate.provider_id,
+      ...(args.candidate.provider_account_id ? { accountId: args.candidate.provider_account_id } : {}),
+      ...(args.candidate.provider_account_label ? { accountLabel: args.candidate.provider_account_label } : {}),
+      ...(args.networkPoolId ? { networkPoolId: args.networkPoolId } : {}),
+      usage,
+      modelId: args.candidate.model_id,
+      lease: args.lease as never,
+      commitUsage: usage,
+      tenantId: args.tenantId,
+      ingressBody: state.ingressBody,
+      providerCapture: args.providerCapture as never,
+      db: args.deps.db,
+      ...(args.deps.telemetryBuffer ? { telemetryBuffer: args.deps.telemetryBuffer } : {}),
+      ...(args.deps.snapshotService ? { snapshotService: args.deps.snapshotService } : {}),
+    }),
     responseBody: null,
-    providerCapture: args.providerCapture as never,
-    db: args.deps.db,
-    ...(args.deps.telemetryBuffer ? { telemetryBuffer: args.deps.telemetryBuffer } : {}),
-    ...(args.deps.snapshotService ? { snapshotService: args.deps.snapshotService } : {}),
   });
   metrics.proxy_requests_total.inc(1, { status: "completed" });
   return new Response(upstream.body, {
@@ -292,22 +275,23 @@ export function createNativeSurfaceHandler(
           const usage = estimatedUsage(0, 0);
           await completeAttempt(state, {
             status: "completed",
-            providerId: candidate.provider_id,
-            ...(candidate.provider_account_id ? { accountId: candidate.provider_account_id } : {}),
-            ...(candidate.provider_account_label ? { accountLabel: candidate.provider_account_label } : {}),
-            ...(leases.proxySlot ? { networkPoolId: leases.proxySlot.poolId } : {}),
-            usage,
-            modelId: candidate.model_id,
-            lease: leases.lease,
-            commitUsage: usage,
-            terminal: true,
-            tenantId: prepared.authorization.tenantId,
-            ingressBody: state.ingressBody,
+            ...nativeCompletionBase({
+              providerId: candidate.provider_id,
+              ...(candidate.provider_account_id ? { accountId: candidate.provider_account_id } : {}),
+              ...(candidate.provider_account_label ? { accountLabel: candidate.provider_account_label } : {}),
+              ...(leases.proxySlot ? { networkPoolId: leases.proxySlot.poolId } : {}),
+              usage,
+              modelId: candidate.model_id,
+              lease: leases.lease,
+              commitUsage: usage,
+              tenantId: prepared.authorization.tenantId,
+              ingressBody: state.ingressBody,
+              providerCapture,
+              db: deps.db,
+              ...(deps.telemetryBuffer ? { telemetryBuffer: deps.telemetryBuffer } : {}),
+              ...(deps.snapshotService ? { snapshotService: deps.snapshotService } : {}),
+            }),
             responseBody: payload,
-            providerCapture,
-            db: deps.db,
-            ...(deps.telemetryBuffer ? { telemetryBuffer: deps.telemetryBuffer } : {}),
-            ...(deps.snapshotService ? { snapshotService: deps.snapshotService } : {}),
           });
           metrics.proxy_requests_total.inc(1, { status: "completed" });
           return jsonResponse(payload, 200, state.requestId);

@@ -29,7 +29,6 @@ export interface RequestContextDeps {
   readonly clock?: () => number;
   /** Explicit deadline override; defaults to `CARTETHYIA_UPSTREAM_TIMEOUT_MS` (120s). */
   readonly requestDeadlineMs?: number;
-  readonly maxBodyBytes?: number;
 }
 
 /**

@@ -222,14 +222,6 @@ export async function dispatchStreamingAttempt(input: StreamingDispatchInput): P
     ...(outboundFetch ? { outboundAttachmentFetch: outboundFetch } : {}),
     ...(deps.networkBindingFactory
       ? {
-          outboundWebSocket: deps.networkBindingFactory.webSocket(
-            networkPoolId,
-            prepared.authorization.snapshot.tenant_id,
-          ),
-        }
-      : {}),
-    ...(deps.networkBindingFactory
-      ? {
           outboundHttp2: deps.networkBindingFactory.http2Bidi(
             networkPoolId,
             prepared.authorization.snapshot.tenant_id,

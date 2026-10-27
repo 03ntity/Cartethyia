@@ -13,7 +13,7 @@ import type { TelemetryBatchBuffer } from "../../observability/telemetry-buffer"
 import type { ProxyRequestOutcome, ProxyRequestState } from "../request/state";
 import type { PayloadCaptureState } from "../../observability/payload-capture";
 import { finalizeRequestTelemetry } from "../guards/error-lifecycle";
-import { debitCachedQuota, quotaLens } from "../../console/quota/cache";
+import { debitCachedQuota, quotaLens } from "../../providers/quota/cache";
 import { BUDDY_PROVIDER_IDS } from "../../providers/provider-metadata";
 import { log } from "../../observability/logger";
 import {
@@ -542,6 +542,63 @@ export function completionContext(input: {
     ...(input.lease === undefined ? {} : { lease: input.lease }),
     ...(input.telemetryBuffer === undefined ? {} : { telemetryBuffer: input.telemetryBuffer }),
     ...(input.snapshotService === undefined ? {} : { snapshotService: input.snapshotService }),
+  };
+}
+
+/**
+ * The terminal-completion base the native routes (generation, responses
+ * compact, system one, web search, token count) all assemble. The proxy and
+ * streaming paths use `completionContext`; these routes previously spelled
+ * the same twelve fields by hand in six places. Callers spread this and add
+ * only what differs: status, response body, error classification.
+ */
+export function nativeCompletionBase(input: {
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly tenantId: string | null;
+  readonly ingressBody: unknown;
+  readonly accountId?: string;
+  readonly accountLabel?: string;
+  readonly networkPoolId?: string;
+  readonly lease?: AdmissionLease;
+  readonly db: CartethyiaDatabase;
+  readonly telemetryBuffer?: TelemetryBatchBuffer;
+  readonly snapshotService?: { invalidate(): unknown };
+  readonly providerCapture?: ProviderExchangeCapture;
+  readonly usage?: AttemptCompletion["usage"];
+  readonly commitUsage?: AttemptCompletion["commitUsage"];
+}): Omit<
+  AttemptCompletion,
+  | "status"
+  | "responseBody"
+  | "httpStatus"
+  | "terminalHttpStatus"
+  | "error"
+  | "clientResponseText"
+  | "firstContentDeltaAtMs"
+  | "lastEventAtMs"
+  | "reportedModel"
+  | "errorCategory"
+  | "errorOrigin"
+  | "ttfbMs"
+  | "tokensPerSec"
+> {
+  return {
+    providerId: input.providerId,
+    modelId: input.modelId,
+    tenantId: input.tenantId,
+    ingressBody: input.ingressBody,
+    terminal: true,
+    ...(input.accountId === undefined ? {} : { accountId: input.accountId }),
+    ...(input.accountLabel === undefined ? {} : { accountLabel: input.accountLabel }),
+    ...(input.networkPoolId === undefined ? {} : { networkPoolId: input.networkPoolId }),
+    ...(input.lease === undefined ? {} : { lease: input.lease }),
+    db: input.db,
+    ...(input.telemetryBuffer === undefined ? {} : { telemetryBuffer: input.telemetryBuffer }),
+    ...(input.snapshotService === undefined ? {} : { snapshotService: input.snapshotService }),
+    ...(input.providerCapture === undefined ? {} : { providerCapture: input.providerCapture }),
+    ...(input.usage === undefined ? {} : { usage: input.usage }),
+    ...(input.commitUsage === undefined ? {} : { commitUsage: input.commitUsage }),
   };
 }
 

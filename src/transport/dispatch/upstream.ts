@@ -1,5 +1,5 @@
 import type { CanonicalEvent } from "../../protocol/canonical-model";
-import type { AttemptLeaseOwnership, ValidatedOutboundFetch, ValidatedOutboundHttp2Bidi, ValidatedOutboundWebSocket } from "../../providers/provider-contracts";
+import type { AttemptLeaseOwnership, ValidatedOutboundFetch, ValidatedOutboundHttp2Bidi } from "../../providers/provider-contracts";
 import type { ProviderContinuationScope } from "../../providers/provider-contracts";
 import { GATEWAY_SECURITY_HEADERS } from "../../security/outbound-headers";
 
@@ -44,7 +44,6 @@ export function buildUpstreamDispatchContext(input: {
   readonly outboundFetch?: ValidatedOutboundFetch;
   /** Validated attachment egress that must not be wrapped by provider payload capture. */
   readonly outboundAttachmentFetch?: ValidatedOutboundFetch;
-  readonly outboundWebSocket?: ValidatedOutboundWebSocket;
   /** Validated bidirectional HTTP/2 egress bound to the same selected pool. */
   readonly outboundHttp2?: ValidatedOutboundHttp2Bidi;
   /**
@@ -95,7 +94,6 @@ export function buildUpstreamDispatchContext(input: {
     ...(input.outboundAttachmentFetch
       ? { outbound_attachment_fetch: input.outboundAttachmentFetch }
       : {}),
-    ...(input.outboundWebSocket ? { outbound_websocket: input.outboundWebSocket } : {}),
     ...(input.outboundHttp2 ? { outbound_http2: input.outboundHttp2 } : {}),
     ...(input.leaseOwnership ? { lease_ownership: input.leaseOwnership } : {}),
     ...(input.continuationScope ? { continuation_scope: input.continuationScope } : {}),

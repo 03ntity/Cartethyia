@@ -30,8 +30,8 @@ import { ProxyRequestStateStore } from "../transport/request/state";
 import { fastPathname } from "../transport/pathname";
 import {
   handleProviderProxyRequest,
-  type ProviderProxyHandlerDeps,
 } from "../transport/dispatch/proxy-request";
+import type { GatewayHandlerDeps } from "../transport/dispatch/handler-deps";
 import { createResponsesCompactHandler } from "../transport/dispatch/responses-compact";
 import { createSystemoneHandler } from "../transport/dispatch/systemone";
 import { createWebsearchHandler } from "../transport/dispatch/websearch";
@@ -398,7 +398,11 @@ export function createGatewayApp(deps: GatewayAppDeps) {
         (await deps.snapshotService.getSnapshot())?.invokeDisabledTenants?.has(tenantId),
     });
     transportPipeline.mountRoot(app);
-    const proxyDeps: ProviderProxyHandlerDeps = {
+    // One dependency bundle for every gateway handler. Proxy, generation,
+    // responses-compact, system one, web search, and token count all receive
+    // the same wiring — a handler dep is added once, here, not in five
+    // literals.
+    const gatewayDeps: GatewayHandlerDeps = {
       db: deps.db,
       providerAdapters: deps.providerAdapters ?? new Map(),
       resolveProviderAdapter: deps.resolveProviderAdapter,
@@ -406,14 +410,16 @@ export function createGatewayApp(deps: GatewayAppDeps) {
       proxyPreparer: deps.proxyPreparer,
       snapshotService: deps.snapshotService,
       networkBindingFactory: deps.networkBindingFactory,
-      byokUpstreamHosts: deps.byokUpstreamHosts,
       poolSelector: deps.poolSelector,
       telemetryBuffer: deps.telemetryBuffer,
       resolveOAuthRefresher: deps.resolveOAuthRefresher,
       oauthRefreshService: deps.oauthRefreshService,
     };
     const proxyHandler = ({ request }: { request: Request }) =>
-      handleProviderProxyRequest(request, proxyDeps);
+      handleProviderProxyRequest(request, {
+        ...gatewayDeps,
+        byokUpstreamHosts: deps.byokUpstreamHosts,
+      });
 
     const publicModelStore = new PublicModelCatalogStore(deps.db);
     const queryAllowedModels = (auth: {
@@ -475,16 +481,7 @@ export function createGatewayApp(deps: GatewayAppDeps) {
     };
 
     const handleResponsesCompact = createResponsesCompactHandler({
-      db: deps.db,
-      providerAdapters: deps.providerAdapters ?? new Map(),
-      resolveProviderAdapter: deps.resolveProviderAdapter,
-      proxyPreparer: deps.proxyPreparer,
-      stateStore: requestStateStore,
-      poolSelector: deps.poolSelector,
-      networkBindingFactory: deps.networkBindingFactory,
-      snapshotService: deps.snapshotService,
-      resolveOAuthRefresher: deps.resolveOAuthRefresher,
-      oauthRefreshService: deps.oauthRefreshService,
+      ...gatewayDeps,
       // The compact handler completes its attempt through `completeAttempt`,
       // which marks the request completed and finalizes telemetry itself —
       // so the afterResponse lifecycle skips it. Without the buffer here the
@@ -493,48 +490,14 @@ export function createGatewayApp(deps: GatewayAppDeps) {
     });
 
     const handleSystemone = createSystemoneHandler({
-      db: deps.db,
-      providerAdapters: deps.providerAdapters ?? new Map(),
-      resolveProviderAdapter: deps.resolveProviderAdapter,
-      proxyPreparer: deps.proxyPreparer,
-      stateStore: requestStateStore,
-      poolSelector: deps.poolSelector,
-      networkBindingFactory: deps.networkBindingFactory,
-      snapshotService: deps.snapshotService,
-      resolveOAuthRefresher: deps.resolveOAuthRefresher,
-      oauthRefreshService: deps.oauthRefreshService,
+      ...gatewayDeps,
       // Same reasoning as compact: the handler finalizes telemetry itself, so
       // the buffer must be threaded here or the route emits no row.
       telemetryBuffer: deps.telemetryBuffer,
     });
 
-    const handleWebsearch = createWebsearchHandler({
-      db: deps.db,
-      providerAdapters: deps.providerAdapters ?? new Map(),
-      resolveProviderAdapter: deps.resolveProviderAdapter,
-      proxyPreparer: deps.proxyPreparer,
-      stateStore: requestStateStore,
-      poolSelector: deps.poolSelector,
-      networkBindingFactory: deps.networkBindingFactory,
-      snapshotService: deps.snapshotService,
-      resolveOAuthRefresher: deps.resolveOAuthRefresher,
-      oauthRefreshService: deps.oauthRefreshService,
-      telemetryBuffer: deps.telemetryBuffer,
-    });
-
-    const generationDeps = {
-      db: deps.db,
-      providerAdapters: deps.providerAdapters ?? new Map(),
-      resolveProviderAdapter: deps.resolveProviderAdapter,
-      proxyPreparer: deps.proxyPreparer,
-      stateStore: requestStateStore,
-      poolSelector: deps.poolSelector,
-      networkBindingFactory: deps.networkBindingFactory,
-      snapshotService: deps.snapshotService,
-      resolveOAuthRefresher: deps.resolveOAuthRefresher,
-      oauthRefreshService: deps.oauthRefreshService,
-      telemetryBuffer: deps.telemetryBuffer,
-    };
+    const handleWebsearch = createWebsearchHandler(gatewayDeps);
+    const generationDeps = gatewayDeps;
     const handleImageGeneration = createImageGenerationHandler(generationDeps);
     // Mounted with no model behind it on purpose: the surface exists so it can
     // be finished when an upstream is known, rather than 404ing like a typo.
@@ -652,6 +615,11 @@ export function createGatewayApp(deps: GatewayAppDeps) {
       });
     }
 
+    // One share-link store for both surfaces: the public share router and the
+    // console's API-key/share domain wrap the same table, and one instance
+    // keeps the "one owner per store" convention.
+    const shareStore = new DrizzleShareLinkStore(deps.db);
+
     // `peerAddresses` is populated by the root `beforeHandle` above from
     // `server.requestIP`. The console login route needs it to key its lockout
     // bucket, and the trusted-proxy boundary decides whether an
@@ -661,6 +629,7 @@ export function createGatewayApp(deps: GatewayAppDeps) {
       app.use(
         createConsoleRouter({
           ...deps.consoleApi,
+          ...(shareStore ? { shareStore } : {}),
           stateStore: requestStateStore,
           resolvePeerAddress: (request) => peerAddresses.get(request) ?? null,
           trustedProxyBoundary: deps.trustedProxyBoundary,
@@ -673,7 +642,7 @@ export function createGatewayApp(deps: GatewayAppDeps) {
     app.use(
       createShareRouter({
         db: deps.db,
-        shareStore: new DrizzleShareLinkStore(deps.db),
+        shareStore,
         stats: createShareStatsPort({ db: deps.db, redis: deps.consoleApi?.redis }),
         resolveClientIp: (request) => {
           const peer = peerAddresses.get(request);

@@ -134,8 +134,6 @@ export interface ProviderDispatchContext {
   readonly outbound_fetch?: ValidatedOutboundFetch | undefined;
   /** Validated image/attachment egress; deliberately excluded from payload capture. */
   readonly outbound_attachment_fetch?: ValidatedOutboundFetch | undefined;
-  /** Validated WSS egress bound to the same selected network pool as HTTP. */
-  readonly outbound_websocket?: ValidatedOutboundWebSocket | undefined;
   /** Validated bidirectional HTTP/2 egress bound to the same selected network pool. */
   readonly outbound_http2?: ValidatedOutboundHttp2Bidi | undefined;
   /** Built-in API-key route-selected fallback User-Agent; custom providers leave this unset. */
