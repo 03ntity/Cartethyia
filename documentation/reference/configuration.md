@@ -112,7 +112,6 @@ Variables read outside the spec are therefore **not** listed below:
 | `CARTETHYIA_API_KEY` | string, optional | unset | — |
 | `CARTETHYIA_SERVER_MAX_BODY_BYTES` | integer | 4194304 | 1024 – 9007199254740991 |
 | `CARTETHYIA_SERVER_IDLE_TIMEOUT` | integer | 60 | 0 – 86400 |
-| `CARTETHYIA_PROCESS_CONCURRENCY_LIMIT` | integer, optional | unset | 1 – 1024 when set |
 | `CARTETHYIA_CONCURRENCY_TOLERANCE` | integer, optional | unset | 0 – 1024 when set |
 | `CARTETHYIA_PROCESS_COUNT` | integer | 1 | 1 – 16 |
 | `CARTETHYIA_PROCESS_INDEX` | integer | 0 | 0 – 15 |

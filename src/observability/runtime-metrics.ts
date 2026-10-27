@@ -143,8 +143,6 @@ export class RuntimeMetricsSampler {
    * first sample runs; consumers must treat that as "unknown", not as zero.
    */
   private snapshot: RuntimeMemorySnapshot | undefined;
-  /** The effective concurrency ceiling, published alongside the gauges. */
-  private concurrencyLimit: number | undefined;
 
   /**
    * Binds the live in-flight count after the request state store exists. The
@@ -172,9 +170,6 @@ export class RuntimeMetricsSampler {
    * limit, which is known here, but the guard that owns it is constructed in
    * the transport layer.
    */
-  bindConcurrencyLimit(limit: number): void {
-    this.concurrencyLimit = limit;
-  }
 
   constructor(
     private readonly sources: RuntimeMetricSources,
@@ -220,9 +215,6 @@ export class RuntimeMetricsSampler {
     if (backlog !== undefined) {
       metrics.cartethyia_telemetry_backlog_items.set(backlog.items);
       metrics.cartethyia_telemetry_backlog_bytes.set(backlog.bytes);
-    }
-    if (this.concurrencyLimit !== undefined) {
-      metrics.cartethyia_process_concurrency_limit.set(this.concurrencyLimit);
     }
 
     this.checkPressure(memory.rss);

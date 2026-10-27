@@ -10,7 +10,6 @@ import type { CanonicalAdapter, ShutdownDrainSource } from "../contracts";
 import { createApiKeyAuthenticationMiddleware } from "./auth-guard";
 import { createDependencyReadinessMiddleware } from "./readiness-guard";
 import { createIpAbuseProtectionMiddleware } from "./abuse-guard";
-import { createProcessConcurrencyMiddleware } from "./concurrency-guard";
 import { createHeadroomGuard } from "./headroom-guard";
 import {
   createErrorNormalizationMiddleware,
@@ -96,7 +95,6 @@ export interface TransportPipeline {
  */
 export function createTransportPipeline(context: TransportPipelineContext): TransportPipeline {
   const stages: Elysia[] = [
-    createProcessConcurrencyMiddleware(),
     createHeadroomGuard({
       store: context.stateStore,
       ...(context.memorySnapshot === undefined ? {} : { memorySnapshot: context.memorySnapshot }),

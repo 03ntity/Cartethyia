@@ -90,10 +90,9 @@ export const CONFIG_SPEC = {
   CARTETHYIA_SERVER_MAX_BODY_BYTES: {
     kind: "int",
     // A 500K-token context is roughly 2 MB of text, so 4 MB admits every real
-    // request while halving the worst-case hold. Worst-case retained bytes
-    // across the process is `PROCESS_CONCURRENCY_CAP × this`, so on a 1 GB box
-    // the product should stay within about 40% of the limit; an operator with
-    // larger payloads raises this.
+    // request while halving the worst-case hold. How many may be in flight is
+    // admission's job, so an operator with larger payloads raises this and
+    // sets the ceiling in Settings.
     default: 4 * 1024 * 1024,
     min: 1024,
     max: Number.MAX_SAFE_INTEGER,
@@ -119,14 +118,6 @@ export const CONFIG_SPEC = {
   // Optional-int, not int-with-a-zero-default: "unset" and "explicitly zero"
   // must not be the same thing. Zero is not a valid ceiling, so a default of 0
   // would need a second sentinel to mean "derive".
-  // Ceiling matches MAX_PROCESS_CONCURRENCY. It used to clamp at 64, below the
-  // tenant limit an operator can set, so raising this never reached the number
-  // configured in Settings.
-  CARTETHYIA_PROCESS_CONCURRENCY_LIMIT: {
-    kind: "optional-int",
-    min: 1,
-    max: 1024,
-  },
   // Slack above each key's concurrency limit. Effective ceiling is
   // limit + tolerance; only requests past it are refused.
   CARTETHYIA_CONCURRENCY_TOLERANCE: { kind: "optional-int", min: 0, max: 1024 },
