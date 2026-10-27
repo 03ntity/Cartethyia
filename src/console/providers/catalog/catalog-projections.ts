@@ -9,6 +9,7 @@
  * segment. `mapProviderRow` is the single `providers` row projection.
  */
 import { isBundledProviderId } from "../../../providers/provider-contracts";
+import { BUILTIN_DEFAULT_ENDPOINTS } from "../../../protocol/codecs";
 
 import { providerDisplayName, providerServiceKinds } from "../../../providers/provider-metadata";
 import type { CompatibilityProfile } from "../../../providers/provider-metadata";
@@ -26,12 +27,7 @@ export interface ProviderDiscoveryLookup {
   hasModelDiscovery(providerId: string): boolean;
 }
 
-export const DEFAULT_ENDPOINT_BY_WIRE_FAMILY: Record<WireFamily, string> = {
-  chat: "/v1/chat/completions",
-  responses: "/v1/responses",
-  messages: "/v1/messages",
-  gemini: "/api/llm/g/v1/generate",
-};
+export const DEFAULT_ENDPOINT_BY_WIRE_FAMILY: Record<WireFamily, string> = BUILTIN_DEFAULT_ENDPOINTS;
 export function endpointPathForProviderModel(
   wireFamily: WireFamily,
   compatibilityProfile: unknown,
