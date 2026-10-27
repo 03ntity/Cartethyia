@@ -106,9 +106,18 @@ test("tool_choice required survives as required", () => {
   expect(body["tool_choice"]).toBe("required");
 });
 
-test("a named tool_choice becomes a function choice", () => {
+test("a named tool_choice is sent as a bare name", () => {
+  // The upstream only accepts a string. Given the object form it ignores the
+  // field, and the model then calls the tool with no arguments filled in.
   const body = bodyOf(request({ tools: [READ], tool_choice: { type: "tool", name: "Read" } }));
-  expect(body["tool_choice"]).toEqual({ type: "function", function: { name: "Read" } });
+  expect(body["tool_choice"]).toBe("Read");
+});
+
+test("an unnamed tool_choice falls back to auto", () => {
+  // An empty name is not a name the upstream can match, so it becomes `auto`
+  // rather than being sent as a blank string.
+  const body = bodyOf(request({ tools: [READ], tool_choice: { type: "tool", name: "  " } }));
+  expect(body["tool_choice"]).toBe("auto");
 });
 
 test("allowed_tools collapses to its direction", () => {

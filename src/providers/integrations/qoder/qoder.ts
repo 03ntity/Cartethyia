@@ -587,7 +587,12 @@ function qoderToolChoice(choice: ToolChoice | undefined): unknown {
   if (choice === undefined) return undefined;
   if (typeof choice === "string") return choice;
   if (choice.type === "tool" || choice.type === "custom") {
-    return { type: "function", function: { name: choice.name } };
+    // Sent as the bare name, not an object. The upstream only accepts a string
+    // here: given `{type:"function",function:{name}}` it ignores the field
+    // entirely, and the model then calls the tool with no arguments filled in —
+    // a call that arrives with an empty `arguments` and cannot run.
+    const name = choice.name.trim();
+    return name.length > 0 ? name : "auto";
   }
   return choice.mode;
 }
