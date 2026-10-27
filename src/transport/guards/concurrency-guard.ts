@@ -56,7 +56,11 @@ export interface ProcessConcurrencyController {
 export function createProcessConcurrencyController(
   limit: number = PROCESS_CONCURRENCY_CAP,
 ): ProcessConcurrencyController {
-  const effective = Math.min(64, Math.max(1, Math.trunc(limit)));
+  // Clamps to one, not to some constant: the caller's limit is already the
+  // derivation's answer, and a second, private ceiling here sat below the
+  // tenant limit an operator can set, so the process refused at 64 no matter
+  // what Settings said.
+  const effective = Math.max(1, Math.trunc(limit));
   let active = 0;
   return {
     tryAcquire() {
