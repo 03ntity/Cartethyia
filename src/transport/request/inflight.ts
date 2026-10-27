@@ -22,12 +22,23 @@ import { metrics } from "../../observability/metrics";
 export interface InFlightSnapshot {
   readonly inFlight: number;
   readonly uniqueIps: number;
+  /**
+   * How long the longest-lived flight has been tracked, in milliseconds.
+   *
+   * The count alone cannot tell a healthy queue from a leak: six flights
+   * could be six requests in progress or six that never finished. The age
+   * separates them — a flight far past its own deadline is the backstop's
+   * job, so a growing age with a flat count means the sweep is not running.
+   */
+  readonly oldestAgeMs: number;
 }
 
 interface Flight {
   readonly clientIp: string;
   /** Hard deadline after which the backstop sweep releases this flight. */
   expiresAtMs: number;
+  /** When this flight was tracked, for the age reported in a snapshot. */
+  readonly startedAtMs: number;
 }
 
 export interface InFlightRegistry {
@@ -50,14 +61,18 @@ export function createInFlightRegistry(): InFlightRegistry {
 
   const snapshot = (): InFlightSnapshot => {
     let uniqueIps = 0;
+    let oldest = 0;
+    const now = Date.now();
     const seen = new Set<string>();
     for (const flight of flights.values()) {
       if (!seen.has(flight.clientIp)) {
         seen.add(flight.clientIp);
         uniqueIps += 1;
       }
+      const age = now - flight.startedAtMs;
+      if (age > oldest) oldest = age;
     }
-    return { inFlight: flights.size, uniqueIps };
+    return { inFlight: flights.size, uniqueIps, oldestAgeMs: oldest };
   };
 
   const publish = (): void => {
@@ -68,7 +83,11 @@ export function createInFlightRegistry(): InFlightRegistry {
 
   return {
     track(requestId, clientIp, expiresAtMs) {
-      flights.set(requestId, { clientIp: clientIp.length > 0 ? clientIp : "unknown", expiresAtMs });
+      flights.set(requestId, {
+        clientIp: clientIp.length > 0 ? clientIp : "unknown",
+        expiresAtMs,
+        startedAtMs: Date.now(),
+      });
       publish();
     },
     untrack(requestId) {
