@@ -46,9 +46,14 @@ function zenEndpoint(wireFamily: string): string {
   return `/inference/openai/v1/${protocol}`;
 }
 
-/** The System One decision endpoint on the `/inference` origin. */
+/**
+ * The System One decision endpoint on the `/inference` origin. Verified live:
+ * System One does NOT take the v2 family segment — `/inference/openai/v1/systemone`
+ * answers 404 while the flat `/inference/v1/systemone` answers 200 with a valid
+ * `{state, questions}` body.
+ */
 function zenSystemoneEndpoint(): string {
-  return "/inference/openai/v1/systemone";
+  return "/inference/v1/systemone";
 }
 const GO_PATH_PREFIX = "/zen/go/v1";
 

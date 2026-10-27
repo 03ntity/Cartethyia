@@ -38,7 +38,7 @@ describe("OpenCode free discovery limits", () => {
     });
     const systemone = rows?.find((row) => row.modelId === "jev-1.13-free");
     expect(systemone?.serviceKind).toBe("systemone");
-    expect(systemone?.endpointPath).toBe("/inference/openai/v1/systemone");
+    expect(systemone?.endpointPath).toBe("/inference/v1/systemone");
     expect(systemone?.contextLimit).toBe(200_000);
     expect(systemone?.outputLimit).toBe(8_192);
   });

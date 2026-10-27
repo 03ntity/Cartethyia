@@ -24,9 +24,13 @@ function dispatchUrl(providerId: "opencode" | "opencode-zen" | "opencode-go", en
 }
 
 describe("OpenCode dispatch base", () => {
-  test("free and zen models dispatch on /inference/openai/v1", () => {
+  test("free and zen models dispatch on the v2 family segment; system one stays flat", () => {
     for (const model of [...OPENCODE_FREE_MODELS, ...OPENCODE_ZEN_MODELS]) {
-      expect(model.endpointPath.startsWith("/inference/openai/v1/")).toBe(true);
+      if (model.serviceKind === "systemone") {
+        expect(model.endpointPath).toBe("/inference/v1/systemone");
+      } else {
+        expect(model.endpointPath.startsWith("/inference/openai/v1/")).toBe(true);
+      }
     }
   });
 
