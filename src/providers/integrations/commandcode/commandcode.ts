@@ -1,5 +1,6 @@
 // Factory-blocked (Phase C4): proprietary `{threadId, config, params}`
 // envelope with NDJSON stream transform — non-OpenAI wire; stays bespoke.
+import { randomUUID } from "node:crypto";
 import { GatewayError } from "../../../protocol/gateway-error";
 import { canContainToolResult, joinTextParts, toolCallParts, toolResultParts } from "../../../protocol/canonical-model";
 import {
@@ -21,6 +22,21 @@ import {
 import { MimoThinkSplitter } from "../xiaomi-mimo/think-stream";
 export const COMMANDCODE_PROVIDER_ID = "commandcode" as const;
 export const COMMANDCODE_BASE_URL = providerBaseUrl("commandcode");
+/**
+ * The host alone. `/provider/v1` (the catalog base) is a sibling of the
+ * generate surface, so dispatch resolves paths against the host instead:
+ * appending `/alpha/generate` to `/provider/v1` produced a URL that is
+ * neither surface.
+ */
+export const COMMANDCODE_HOST = "https://api.commandcode.ai" as const;
+/**
+ * The CLI's generate surface, and the one the reference client calls for every
+ * model — it does not vary the path by the wire family a model row declares.
+ * A completion dispatched to `/provider/v1/<wire>` was reaching the catalog
+ * surface, which serves `GET /models` and is not what the CLI calls to
+ * generate.
+ */
+export const COMMANDCODE_GENERATE_PATH = "/alpha/generate" as const;
 /** The three routes the Provider API serves, one per wire family. */
 export const COMMANDCODE_CHAT_PATH = "/chat/completions" as const;
 export const COMMANDCODE_RESPONSES_PATH = "/responses" as const;
@@ -43,101 +59,101 @@ export const COMMANDCODE_MESSAGES_PATH = "/messages" as const;
  * rather than lingering as a card that can only ever fail.
  */
 export const COMMANDCODE_MODELS: readonly ModelDefinition[] = [
-  defineModel({ id: "MiniMaxAI/MiniMax-M2.5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 200000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "MiniMaxAI/MiniMax-M2.7", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 200000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "MiniMaxAI/MiniMax-M3", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "Qwen/Qwen3.6-Max-Preview", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 200000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "Qwen/Qwen3.6-Plus", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 200000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "Qwen/Qwen3.7-Flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "Qwen/Qwen3.7-Max", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "Qwen/Qwen3.7-Plus", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "Qwen/Qwen3.8-27B", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 262144, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "Qwen/Qwen3.8-Flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: "/chat/completions", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "Qwen/Qwen3.8-Max", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "Qwen/Qwen3.8-Max-0902", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: "/chat/completions", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "Qwen/Qwen3.8-Max-Prime", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "Qwen/Qwen3.8-Omni-Flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "claude-fable-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: "/messages", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "claude-fable-5-1", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: "/messages", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "claude-haiku-4-5-20251001", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: "/messages", ctx: 200000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "claude-haiku-5-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: "/messages", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "claude-opus-4-7", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: "/messages", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "claude-opus-4-8", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: "/messages", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "claude-opus-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: "/messages", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "claude-opus-5-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: "/messages", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "claude-sonnet-4-6", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: "/messages", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "claude-sonnet-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: "/messages", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "claude-sonnet-5-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: "/messages", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "deepseek/deepseek-v4-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "deepseek/deepseek-v4-flash-fast", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: "/chat/completions", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "deepseek/deepseek-v4-flash-vision-exp", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "deepseek/deepseek-v4-pro", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "deepseek/deepseek-v4.1-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "deepseek/deepseek-v4.1-flash-fast", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "google/gemini-3.1-flash-lite", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "google/gemini-3.5-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "google/gemini-3.5-flash-lite", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "google/gemini-3.6-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "google/gemini-3.7-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: "/chat/completions", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "google/gemini-3.8-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "google/gemini-4-argon", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "gpt-5.3-codex", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 400000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "gpt-5.4", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 400000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "gpt-5.4-mini", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 400000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "gpt-5.5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 400000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "gpt-5.6-luna", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "gpt-5.6-sol", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "gpt-5.6-terra", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "gpt-6-astra", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "gpt-6-luna", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "gpt-6-sol", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "gpt-6.1-sol", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "inclusionai/ling-3.1-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: "/chat/completions", ctx: 262144, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "meituan/LongCat-2.0", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: "/chat/completions", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "meta/muse-spark-1.1", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "meta/muse-spark-1.2", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "meta/muse-spark-1.2-contributor", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "meta/muse-spark-1.3", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "meta/muse-spark-1.3-contributor", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "meta/muse-spark-open", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "meta/muse-wonder-1.0", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "minimax/minimax-m3.1-flash-preview", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "minimax/minimax-m3.1-flash-preview:free", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "mistral/mistral-large-4", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 524288, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "moonshotai/Kimi-K2.5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 256000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "moonshotai/Kimi-K2.6", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 256000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "moonshotai/Kimi-K2.7-Code", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 256000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "moonshotai/Kimi-K2.7-Code-Highspeed", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 262000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "moonshotai/Kimi-K3", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "nvidia/nemotron-3-ultra-550b-a55b", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "nvidia/nemotron-3.5-super-vl", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 262144, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "poolside/laguna-s-2.1-free", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 256000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "reflection/beam:free", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "sakana/fugu-ultra", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "stealth/cat-jam:free", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "stealth/glyph-cluster:free", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 256000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "stepfun/Step-3.5-Flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 262144, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "stepfun/Step-3.7-Flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 256000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "stepfun/Step-5-Preview", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "tencent/hy3-paid", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 262144, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "tencent/hy4-preview", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: "/chat/completions", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "thinkingmachines/inkling", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 256000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "thinkingmachines/inkling-small", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "xai/grok-4.5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 500000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "xai/grok-4.6", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 500000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "xai/grok-4.7", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 500000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "xiaomi/mimo-v2.5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "xiaomi/mimo-v2.5-pro", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "xiaomi/mimo-v2.6-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "xiaomi/mimo-v2.6-pro", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "xiaomi/mimo-v2.6-pro-ultraspeed", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "z-ai/glm-5.3-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: "/chat/completions", ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "z-ai/glm-5.3-flashx", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "zai-org/GLM-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 200000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "zai-org/GLM-5.1", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 200000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "zai-org/GLM-5.2", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "zai-org/GLM-5.2-Fast", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
-  defineModel({ id: "zai-org/GLM-5.3", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: "/responses", ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "MiniMaxAI/MiniMax-M2.5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 200000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "MiniMaxAI/MiniMax-M2.7", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 200000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "MiniMaxAI/MiniMax-M3", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "Qwen/Qwen3.6-Max-Preview", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 200000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "Qwen/Qwen3.6-Plus", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 200000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "Qwen/Qwen3.7-Flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "Qwen/Qwen3.7-Max", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "Qwen/Qwen3.7-Plus", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "Qwen/Qwen3.8-27B", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 262144, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "Qwen/Qwen3.8-Flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "Qwen/Qwen3.8-Max", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "Qwen/Qwen3.8-Max-0902", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "Qwen/Qwen3.8-Max-Prime", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "Qwen/Qwen3.8-Omni-Flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "claude-fable-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "claude-fable-5-1", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "claude-haiku-4-5-20251001", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 200000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "claude-haiku-5-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "claude-opus-4-7", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "claude-opus-4-8", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "claude-opus-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "claude-opus-5-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "claude-sonnet-4-6", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "claude-sonnet-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "claude-sonnet-5-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "messages", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "deepseek/deepseek-v4-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "deepseek/deepseek-v4-flash-fast", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "deepseek/deepseek-v4-flash-vision-exp", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "deepseek/deepseek-v4-pro", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "deepseek/deepseek-v4.1-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "deepseek/deepseek-v4.1-flash-fast", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "google/gemini-3.1-flash-lite", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "google/gemini-3.5-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "google/gemini-3.5-flash-lite", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "google/gemini-3.6-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "google/gemini-3.7-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "google/gemini-3.8-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "google/gemini-4-argon", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "gpt-5.3-codex", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 400000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "gpt-5.4", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 400000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "gpt-5.4-mini", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 400000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "gpt-5.5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 400000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "gpt-5.6-luna", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "gpt-5.6-sol", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "gpt-5.6-terra", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "gpt-6-astra", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "gpt-6-luna", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "gpt-6-sol", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "gpt-6.1-sol", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1050000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "inclusionai/ling-3.1-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 262144, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "meituan/LongCat-2.0", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "meta/muse-spark-1.1", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "meta/muse-spark-1.2", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "meta/muse-spark-1.2-contributor", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "meta/muse-spark-1.3", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "meta/muse-spark-1.3-contributor", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "meta/muse-spark-open", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "meta/muse-wonder-1.0", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "minimax/minimax-m3.1-flash-preview", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "minimax/minimax-m3.1-flash-preview:free", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "mistral/mistral-large-4", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 524288, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "moonshotai/Kimi-K2.5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 256000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "moonshotai/Kimi-K2.6", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 256000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "moonshotai/Kimi-K2.7-Code", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 256000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "moonshotai/Kimi-K2.7-Code-Highspeed", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 262000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "moonshotai/Kimi-K3", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "nvidia/nemotron-3-ultra-550b-a55b", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "nvidia/nemotron-3.5-super-vl", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 262144, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "poolside/laguna-s-2.1-free", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 256000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "reflection/beam:free", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "sakana/fugu-ultra", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "stealth/cat-jam:free", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "stealth/glyph-cluster:free", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 256000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "stepfun/Step-3.5-Flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 262144, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "stepfun/Step-3.7-Flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 256000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "stepfun/Step-5-Preview", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "tencent/hy3-paid", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 262144, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "tencent/hy4-preview", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "thinkingmachines/inkling", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 256000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "thinkingmachines/inkling-small", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "xai/grok-4.5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 500000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "xai/grok-4.6", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 500000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "xai/grok-4.7", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 500000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "xiaomi/mimo-v2.5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "xiaomi/mimo-v2.5-pro", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "xiaomi/mimo-v2.6-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "xiaomi/mimo-v2.6-pro", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "xiaomi/mimo-v2.6-pro-ultraspeed", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "z-ai/glm-5.3-flash", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "chat", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1048576, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "z-ai/glm-5.3-flashx", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "zai-org/GLM-5", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 200000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "zai-org/GLM-5.1", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 200000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "zai-org/GLM-5.2", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "zai-org/GLM-5.2-Fast", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
+  defineModel({ id: "zai-org/GLM-5.3", providerId: COMMANDCODE_PROVIDER_ID, wireFamily: "responses", endpoint: COMMANDCODE_GENERATE_PATH, ctx: 1000000, reasoning: true, toolCall: true, vision: true }),
 ];
 
 
@@ -615,11 +631,13 @@ export async function* transformNdjson(body: ReadableStream<Uint8Array>, signal:
 // ProviderAdapter — the Provider API serves three wires, so dispatch is the
 // shared OpenAI-compatible adapter rather than one bespoke NDJSON reader.
 //
-// `/provider/v1` answers `/chat/completions`, `/responses` and `/messages`, and
-// the model row states which one serves it. The bespoke `/alpha/generate`
-// envelope is the CLI's own surface and stays reachable through
-// `buildRequest` for callers that still speak it, while routing follows the
-// wire each model row declares rather than forcing every model onto it.
+// Generation goes to `/alpha/generate` for every model: that is the CLI's own
+// surface and the one the reference client calls, and it does not vary the path
+// by the wire a model row declares. `/provider/v1` is the catalog surface — it
+// answers `GET /models`, which discovery still uses — so a completion posted to
+// `/provider/v1/<wire>` was reaching a surface the CLI never calls to
+// generate. The wire family still decides how the body is shaped; only the
+// endpoint is shared.
 
 interface CommandCodeAdapterOptions {
   readonly fetch?: typeof fetch;
@@ -632,6 +650,11 @@ function commandCodeIdentityHeaders(_token: string): Record<string, string> {
     "x-taste-learning": "true",
     "x-project-slug": "cartethyia",
     "user-agent": "cli",
+    // Per-request, as the CLI client sends it. The upstream expects a session
+    // id on every generate call and the reference client mints a fresh UUID
+    // for each one; sending a constant correlated requests that had nothing
+    // to do with each other.
+    "x-session-id": randomUUID(),
   };
 }
 
@@ -639,11 +662,18 @@ function providerApiAdapter(options: CommandCodeAdapterOptions): ProviderAdapter
   return createApiKeyAdapter(
     {
       provider_id: COMMANDCODE_PROVIDER_ID,
-      base_url: COMMANDCODE_BASE_URL,
+      // The host, not the `/provider/v1` base: generation is a sibling
+      // surface, so every wire resolves under the host and the path below
+      // supplies the CLI endpoint. Nesting it under `/provider/v1` produced a
+      // URL that is neither surface.
+      base_url: COMMANDCODE_HOST,
       endpoint_paths_by_wire_family: {
-        chat: COMMANDCODE_CHAT_PATH,
-        responses: COMMANDCODE_RESPONSES_PATH,
-        messages: COMMANDCODE_MESSAGES_PATH,
+        // Every wire, not one per family: the reference client sends all
+        // generation to `/alpha/generate` regardless of the row's declared
+        // wire, so dispatch must not fan out across three paths.
+        chat: COMMANDCODE_GENERATE_PATH,
+        responses: COMMANDCODE_GENERATE_PATH,
+        messages: COMMANDCODE_GENERATE_PATH,
       },
       buildExtraHeaders: async (context: ProviderDispatchContext) =>
         commandCodeIdentityHeaders(await readCredentialSecret(context.credential, "Command Code bearer token is required")),

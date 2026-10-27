@@ -30,14 +30,13 @@ import { isRecord } from "../../../protocol/codecs";
 import { boundedUpstreamNumber, sanitizeUpstreamLabel } from "../../provider-sanitize";
 import type { ProviderModelDiscovery } from "../../discovery/discovery-types";
 import { defineModel } from "../../provider-model-definition";
-import { COMMANDCODE_PROVIDER_ID } from "./commandcode";
+import { COMMANDCODE_GENERATE_PATH, COMMANDCODE_PROVIDER_ID } from "./commandcode";
 
 /** The Provider API's OpenAI-shaped model listing. */
 export const COMMANDCODE_MODELS_PATH = "/models" as const;
 
 /** The route that selects the OpenAI Responses wire when a model lists it. */
 const RESPONSES_ENDPOINT = "/responses" as const;
-const ANTHROPIC_MESSAGES_ENDPOINT = "/messages" as const;
 
 const MAX_CONTEXT = 1_000_000_000;
 
@@ -54,12 +53,14 @@ export function commandCodeWireFor(
   supportedEndpoints?: readonly string[],
 ): { readonly wireFamily: "messages" | "responses" | "chat"; readonly endpointPath: string } {
   if (modelId.startsWith("claude-")) {
-    return { wireFamily: "messages", endpointPath: ANTHROPIC_MESSAGES_ENDPOINT };
+    // The wire family still decides how the body is shaped; only the endpoint
+    // is the CLI's, for every row. See `COMMANDCODE_GENERATE_PATH`.
+    return { wireFamily: "messages", endpointPath: COMMANDCODE_GENERATE_PATH };
   }
   if (supportedEndpoints?.includes(RESPONSES_ENDPOINT)) {
-    return { wireFamily: "responses", endpointPath: RESPONSES_ENDPOINT };
+    return { wireFamily: "responses", endpointPath: COMMANDCODE_GENERATE_PATH };
   }
-  return { wireFamily: "chat", endpointPath: "/chat/completions" };
+  return { wireFamily: "chat", endpointPath: COMMANDCODE_GENERATE_PATH };
 }
 
 /** Reads `supported_endpoints` tolerantly — unknown rows keep the chat wire. */

@@ -20,10 +20,8 @@
 import { describe, expect, test } from "bun:test";
 import { commandCodeWireFor, discoverCommandCodeModels } from "../../src/providers/integrations/commandcode/discovery";
 import {
-  COMMANDCODE_CHAT_PATH,
-  COMMANDCODE_MESSAGES_PATH,
+  COMMANDCODE_GENERATE_PATH,
   COMMANDCODE_MODELS,
-  COMMANDCODE_RESPONSES_PATH,
 } from "../../src/providers/integrations/commandcode/commandcode";
 
 describe("commandCodeWireFor", () => {
@@ -31,14 +29,14 @@ describe("commandCodeWireFor", () => {
     // This is the whole gap: filed as chat, these were unroutable.
     expect(commandCodeWireFor("claude-sonnet-5-5")).toEqual({
       wireFamily: "messages",
-      endpointPath: "/messages",
+      endpointPath: "/alpha/generate",
     });
   });
 
   test("a model advertising /responses is served on the responses wire", () => {
     expect(commandCodeWireFor("gpt-5.4-mini", ["/chat/completions", "/responses"])).toEqual({
       wireFamily: "responses",
-      endpointPath: "/responses",
+      endpointPath: "/alpha/generate",
     });
   });
 
@@ -47,11 +45,11 @@ describe("commandCodeWireFor", () => {
     // field never breaks.
     expect(commandCodeWireFor("stepfun/Step-3.5-Flash", ["/chat/completions"])).toEqual({
       wireFamily: "chat",
-      endpointPath: "/chat/completions",
+      endpointPath: "/alpha/generate",
     });
     expect(commandCodeWireFor("stepfun/Step-3.5-Flash")).toEqual({
       wireFamily: "chat",
-      endpointPath: "/chat/completions",
+      endpointPath: "/alpha/generate",
     });
   });
 
@@ -60,7 +58,7 @@ describe("commandCodeWireFor", () => {
     // an advertised /responses must not move it.
     expect(commandCodeWireFor("claude-opus-5", ["/responses"])).toEqual({
       wireFamily: "messages",
-      endpointPath: "/messages",
+      endpointPath: "/alpha/generate",
     });
   });
 });
@@ -86,7 +84,7 @@ describe("commandcode discovery", () => {
     expect(models).not.toBeNull();
     const byId = new Map((models ?? []).map((m) => [m.modelId, m]));
     expect(byId.get("claude-sonnet-5-5")?.wireFamily).toBe("messages");
-    expect(byId.get("claude-sonnet-5-5")?.endpointPath).toBe("/messages");
+    expect(byId.get("claude-sonnet-5-5")?.endpointPath).toBe("/alpha/generate");
     expect(byId.get("gpt-5.4-mini")?.wireFamily).toBe("responses");
     expect(byId.get("stepfun/Step-3.5-Flash")?.wireFamily).toBe("chat");
     // The listing's context_length is carried, not the generic default.
@@ -143,7 +141,7 @@ describe("commandcode static catalog", () => {
     expect(claude.length).toBeGreaterThan(0);
     for (const model of claude) {
       expect(model.wireFamily).toBe("messages");
-      expect(model.endpointPath).toBe(COMMANDCODE_MESSAGES_PATH);
+      expect(model.endpointPath).toBe("/alpha/generate");
     }
   });
 
@@ -154,11 +152,13 @@ describe("commandcode static catalog", () => {
     }
   });
 
-  test("endpoints are the Provider API routes, not the CLI envelope", () => {
+  test("every row dispatches to the CLI generate surface", () => {
+    // The reference client sends all generation to `/alpha/generate` and does
+    // not vary the path by the wire a model row declares, so no row may point
+    // at a `/provider/v1/<wire>` route. The wire family still decides how the
+    // body is shaped — only the endpoint is shared.
     const paths = new Set(COMMANDCODE_MODELS.map((m) => m.endpointPath));
-    expect(paths).toEqual(
-      new Set([COMMANDCODE_CHAT_PATH, COMMANDCODE_RESPONSES_PATH, COMMANDCODE_MESSAGES_PATH]),
-    );
+    expect(paths).toEqual(new Set([COMMANDCODE_GENERATE_PATH]));
   });
 
   test("no row is marked a free tier", () => {
