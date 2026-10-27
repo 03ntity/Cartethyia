@@ -509,6 +509,13 @@ export interface ProviderAccountResponse {
   credentialKind: CredentialKind;
   credentialMode?: CredentialMode;
   tokenExpiresAt?: string;
+  /**
+   * Who issued this credential, read from the JWT `iss` claim at registration
+   * time. Present only for static JWTs, and only when the payload carried the
+   * claim: the secret is never readable after registration, so this is the one
+   * record of where the token came from.
+   */
+  jwtIssuer?: string;
   status: string;
   /** Live routing admission count for this request path; absent when unavailable. */
   inflight?: number;

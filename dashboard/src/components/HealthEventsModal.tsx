@@ -28,6 +28,8 @@ export interface AccountHealthSummary {
   readonly staticToken?: boolean;
   readonly credentialKind?: CredentialKind;
   readonly credentialMode?: CredentialMode;
+  /** Who issued a static JWT, when the token's `iss` claim was readable. */
+  readonly jwtIssuer?: string | undefined;
 }
 
 /** Recovery is offered for the one transient state the backend can recover. */
@@ -65,7 +67,15 @@ export function HealthEventsModal({
   readonly summary: AccountHealthSummary;
   readonly onClose: () => void;
 }): ReactNode {
-  const { providerId, accountId, title, status, errorCategory, errorMessage } = summary;
+  const {
+    providerId,
+    accountId,
+    title,
+    status,
+    errorCategory,
+    errorMessage,
+    jwtIssuer,
+  } = summary;
   const query = useAccountHealthEvents(providerId, accountId);
   const recover = useRecoverAccount();
   const events = query.data ?? [];
@@ -122,6 +132,19 @@ export function HealthEventsModal({
               <div className="text-badge text-text-tertiary">
                 {staticMode ? "Static mode: no refresh request will be sent." : "OAuth refresh is enabled for this account."}
               </div>
+              {/* The issuer is the only record of where a static token came
+                  from — the secret is unreadable after registration — so it is
+                  shown next to the mode rather than left for the operator to
+                  guess from the label. */}
+              {jwtIssuer ? (
+                <div className="text-badge text-text-tertiary mt-1 wrap-anywhere">
+                  {/* Expiry is omitted on purpose — the account card already
+                      shows it, and repeating it here pushes the issuer, the
+                      one thing this row adds, off the line. */}
+                  Static · no refresh · issuer{" "}
+                  <span className="font-mono text-text-secondary">{jwtIssuer}</span>
+                </div>
+              ) : null}
             </div>
             <Button
               size="sm"

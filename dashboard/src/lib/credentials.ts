@@ -153,6 +153,7 @@ export function jwtExpiresAt(raw: string): string | undefined {
   return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
 }
 
+
 function parseKeyValueLines(text: string): Record<string, unknown> | undefined {
   const result: Record<string, unknown> = {};
   let matches = 0;

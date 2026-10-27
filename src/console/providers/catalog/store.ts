@@ -59,11 +59,26 @@ function parseExpiry(value: unknown): Date | undefined {
   }
   return undefined;
 }
-function parseJwtCredential(raw: string): { readonly expiresAt?: Date } | undefined {
+/**
+ * Reads the two claims a static token's own payload can answer: when it stops
+ * working, and who issued it.
+ *
+ * The issuer is kept because a static JWT carries no other hint of its origin:
+ * an operator who pasted one from the wrong surface has nothing in the console
+ * to check it against, and several issuers accept the same token shape.
+ */
+function parseJwtCredential(
+  raw: string,
+): { readonly expiresAt?: Date; readonly issuer?: string } | undefined {
   const payload = decodeJwtPayload(raw.trim());
   if (payload === undefined) return undefined;
   const expiresAt = parseExpiry(payload["exp"]);
-  return expiresAt === undefined ? {} : { expiresAt };
+  const iss = payload["iss"];
+  const issuer = typeof iss === "string" && iss.trim().length > 0 ? iss.trim() : undefined;
+  return {
+    ...(expiresAt === undefined ? {} : { expiresAt }),
+    ...(issuer === undefined ? {} : { issuer }),
+  };
 }
 
 /**
@@ -1124,6 +1139,7 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
         const requestedCredentialMode: CredentialMode = request.credentialMode ?? "auto";
         let effectiveCredentialMode: CredentialMode = requestedCredentialMode;
         let tokenExpiresAt: Date | undefined;
+        let jwtIssuer: string | undefined;
         let oauthRefreshCiphertext: Buffer | undefined;
         let oauthExpiresAt: Date | undefined;
         let oauthHasRefreshToken = false;
@@ -1160,6 +1176,9 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
             effectiveCredentialKind = "api_key";
             effectiveCredentialMode = "jwt";
             tokenExpiresAt = parsedJwt.expiresAt;
+            // Kept alongside the expiry: the console shows who issued a static
+            // token, and the secret itself is never readable after this point.
+            jwtIssuer = parsedJwt.issuer;
           } else if (request.credentialKind === "oauth" || hasRefreshToken) {
             effectiveSecret = parts.accessToken;
             effectiveCredentialKind = hasRefreshToken ? "oauth" : "api_key";
@@ -1185,6 +1204,7 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
           ...(request.authState ?? {}),
           credentialMode: effectiveCredentialMode,
           ...(tokenExpiresAt === undefined ? {} : { tokenExpiresAt: tokenExpiresAt.toISOString() }),
+          ...(jwtIssuer === undefined ? {} : { jwtIssuer }),
         };
         const nextSortIndex =
           sortIndexOverride ?? (await this.nextAccountSortIndex(tx, providerId, tenantId));
@@ -1409,6 +1429,8 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
         : undefined;
     const tokenExpiresAt =
       typeof authState?.["tokenExpiresAt"] === "string" ? authState["tokenExpiresAt"] : undefined;
+    const jwtIssuer =
+      typeof authState?.["jwtIssuer"] === "string" ? authState["jwtIssuer"] : undefined;
     return {
       id: row.id,
       providerId: row.providerId,
@@ -1417,6 +1439,7 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
       credentialKind: row.credentialKind,
       ...(credentialMode === undefined ? {} : { credentialMode }),
       ...(tokenExpiresAt === undefined ? {} : { tokenExpiresAt }),
+      ...(jwtIssuer === undefined ? {} : { jwtIssuer }),
       status: row.status,
       ...(usage.inflight === undefined ? {} : { inflight: usage.inflight }),
       usageToday: usage.today,

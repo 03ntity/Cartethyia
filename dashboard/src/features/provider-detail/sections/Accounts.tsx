@@ -602,6 +602,7 @@ function AccountRow({
             staticToken: account.staticToken === true,
             credentialKind: account.credentialKind,
             credentialMode: account.credentialMode,
+            jwtIssuer: account.jwtIssuer,
           }}
           onClose={() => setShowHistory(false)}
         />
