@@ -14,7 +14,7 @@
  */
 import { eq } from "drizzle-orm";
 import type { CartethyiaDatabase } from "../persistence/db-handle";
-import { networkPools } from "../persistence/schema";
+import { networkPools, healthEvents } from "../persistence/schema";
 import { log } from "../observability/logger";
 import type { ProxyCooldownEntry } from "./pool/selector";
 
@@ -115,6 +115,39 @@ export async function dropAllProviderCooldownMarkers(
     await writeMarkerMap(db, poolId, {});
   } catch (error) {
     log.warn("pool provider cooldown mirror purge failed", { networkPoolId: poolId, error: String(error) });
+  }
+}
+
+/**
+ * Writes a probe-measured 429 the same way a dispatch-side 429 would be
+ * recorded: one mirror marker and one `rate_limit_transient` audit row.
+ *
+ * The probe's 429 is a fresh measurement of "this egress is out of allowance"
+ * — without this, an operator who tested a rate-limited pool saw "rate
+ * limited" once, refreshing lost it, and the activity panel showed nothing:
+ * the fact existed only in the remembered HTTP response.
+ *
+ * Not coalesced: a probe is operator-initiated and one row per click is the
+ * visible history the panel exists for.
+ */
+export async function recordProbeCooldown(
+  db: CartethyiaDatabase,
+  poolId: string,
+  providerId: string,
+  marker: { until: number; reason: string },
+): Promise<void> {
+  await upsertProviderCooldownMarker(db, poolId, providerId, marker);
+  try {
+    await db.insert(healthEvents).values({
+      entityKind: "pool",
+      networkPoolId: poolId,
+      fromStatus: null,
+      toStatus: "cooldown",
+      reason: `provider ${providerId}: ${marker.reason}`,
+      errorCategory: "rate_limit_transient",
+    });
+  } catch (error) {
+    log.warn("pool probe cooldown event failed", { networkPoolId: poolId, providerId, error: String(error) });
   }
 }
 

@@ -406,6 +406,19 @@ export interface NetworkPoolStore {
   ): Promise<void>;
   /** Drops every provider's marker on one row (disable/replace paths). */
   dropAllProviderCooldownMarkers?(tenantId: string, poolId: string): Promise<void>;
+  /**
+   * Writes a probe-measured 429 into the durable mirror and the pool's health
+   * history. The probe is the only writer that can *flag* a cooldown from the
+   * control plane — its 429 is a fresh measurement of the same condition a
+   * dispatch-side 429 records, so it lands in both stores and appears as
+   * activity. Optional; absent in tests without a backing row store.
+   */
+  recordProviderProbeCooldown?(
+    tenantId: string,
+    poolId: string,
+    providerId: string,
+    marker: { until: number; reason: string },
+  ): Promise<void>;
   /** Per-tenant pool-group selection strategy; an absent row reads as
    * `DEFAULT_POOL_STRATEGY`. */
   getStrategy(tenantId: string): Promise<PoolStrategySetting>;

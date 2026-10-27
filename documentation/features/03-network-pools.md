@@ -67,9 +67,14 @@ The console distinguishes the two because the fix differs — wait, or replace �
 and the audit row records `egress_blocked` rather than
 `rate_limit_transient`. A probe enforces its own verdict, and differs by what
 it measured: `allowed` releases both a block and a cooldown; `throttled` (a
-429) corrects a stale block — the address is answering — but leaves a live
-cooldown in place, because the throttle is the same fact the cooldown records;
-`unreachable` changes nothing, having learned nothing about the address.
+429) corrects a stale block — the address is answering — **and flags a fresh
+cooldown** for the configured provider window in both the selector and the
+durable mirror, plus a `rate_limit_transient` health-event row, because the
+probe just measured the egress out of allowance; `unreachable` changes
+nothing, having learned nothing about the address. A probe against a saved
+pool banks its verdict beside the pool's *current endpoint* (not the pool id),
+so the stored verdict survives a page refresh instead of failing the endpoint
+comparison and reading as "never probed".
 
 Block markers are keyed `(poolId, providerId)`, so one provider's block is
 never visible to another: a marker written for `opencode` does not stop

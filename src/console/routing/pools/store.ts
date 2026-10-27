@@ -256,7 +256,7 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
         reason: error instanceof Error ? error.message : "Failed to build pool agent",
       };
     }
-    return await this.dialProviderProbe(agent, poolId, providerId, poolId);
+    return await this.dialProviderProbe(agent, poolId, providerId, poolId, rec.endpoint);
   }
 
   /**
@@ -296,13 +296,19 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
    *
    * `label` is what the result reports (a pool id, or a pasted endpoint that
    * has no row yet). `poolId` is the row to bank the verdict on — omitted for
-   * an ad-hoc probe, because there is nothing to attach it to.
+   * an ad-hoc probe, because there is nothing to attach it to. `endpoint` is
+   * the address the verdict describes, recorded beside it so
+   * `storedProviderProbe` can verify it later — it must be the pool's *current
+   * endpoint*, never the label: a verdict banked against the pool id fails the
+   * endpoint comparison on read and is hidden as "never probed", which is
+   * exactly the disappearing-verdict report.
    */
   private async dialProviderProbe(
     agent: PoolAgent,
     label: string,
     providerId: string,
     poolId?: string,
+    endpoint?: string,
   ): Promise<PoolProviderProbeResult> {
     const spec = await buildProviderProbeRequest(providerId);
     if (!spec) {
@@ -344,7 +350,7 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
       latencyMs,
       ...(verdict.reason === undefined ? {} : { reason: verdict.reason }),
     };
-    if (poolId !== undefined) await this.persistProviderProbe(poolId, label, result);
+    if (poolId !== undefined) await this.persistProviderProbe(poolId, endpoint ?? label, result);
     return result;
   }
 
@@ -585,6 +591,16 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
   ): Promise<void> {
     if ((await this.get(tenantId, poolId)) === undefined) return;
     await poolCooldownStore.dropAllProviderCooldownMarkers(this.db, poolId);
+  }
+
+  async recordProviderProbeCooldown(
+    tenantId: string,
+    poolId: string,
+    providerId: string,
+    marker: { until: number; reason: string },
+  ): Promise<void> {
+    if ((await this.get(tenantId, poolId)) === undefined) return;
+    await poolCooldownStore.recordProbeCooldown(this.db, poolId, providerId, marker);
   }
 
   async recover(tenantId: string, poolId: string): Promise<boolean> {

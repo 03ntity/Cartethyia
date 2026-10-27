@@ -2,6 +2,8 @@
 // behind the routes. Depends only on the contracts and the shared helpers;
 // `routes.ts` is the only HTTP surface.
 import { ConsoleDomainError, requireTenantScope } from "../../shared/errors";
+import { providerRateLimitIsIpScoped } from "../../../providers/provider-metadata";
+import { resolvePoolProviderRateLimitCooldownMs } from "../../../config/cooldowns";
 import type { PoolHealthEvent } from "../../../network/pool-health-machine";
 import type { AccessDecision } from "../../../security/access-control";
 import {
@@ -536,14 +538,26 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
         await config.store.dropProviderCooldownMarker?.(a.tenantId, poolId, providerId, false);
         return { ...result, blockedPool: false };
       }
-      // `throttled` (429) proves the address is *serving* again — its rate
-      // limiter answered — so a stale "retired" claim is corrected. It does
-      // **not** release a cooldown: that is the same fact it just re-measured,
-      // and clearing it there put a spent egress back into rotation to be
-      // refused again ("already cooling, but still taking hits").
+      // `throttled` (429) proves the address is *serving* — its rate limiter
+      // answered — so a stale "retired" claim is corrected. And the throttle
+      // itself is a measurement: the egress just demonstrated it is out of
+      // allowance, which is exactly when dispatch should skip it **and** the
+      // operator sees why. Flag the same (configured) window a dispatch-side
+      // 429 would, in rotation memory *and* in the durable mirror, plus the
+      // health event the activity panel lists. Only a 429 gap was leaving a
+      // rate-limited pool invisible and unflagged.
       if (result.status === "throttled") {
         await config.poolSelector.clearProviderBlockedOnly(poolId, providerId);
         await config.store.dropProviderCooldownMarker?.(a.tenantId, poolId, providerId, true);
+        if (providerRateLimitIsIpScoped(providerId)) {
+          const durationMs = resolvePoolProviderRateLimitCooldownMs();
+          const reason = "Operator probe measured a provider 429";
+          await config.poolSelector.flagProviderCooldown(poolId, providerId, durationMs, reason);
+          await config.store.recordProviderProbeCooldown?.(a.tenantId, poolId, providerId, {
+            until: Date.now() + durationMs,
+            reason,
+          });
+        }
       }
       // `unreachable` learned nothing about the address, so nothing changes.
       return { ...result, blockedPool: false };
