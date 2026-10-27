@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin, type UserConfig, type ConfigEnv } from "vite";
+import { defineConfig, type Plugin, type UserConfig, type ConfigEnv, type ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { createServer } from "node:net";
@@ -7,6 +7,40 @@ import type { IncomingMessage } from "node:http";
 function resolveBackendTarget(): string {
   const backendPort = process.env.PORT?.trim() || "12800";
   return process.env.VITE_BACKEND_URL ?? `http://127.0.0.1:${backendPort}`;
+}
+
+/**
+ * One proxy entry for a gateway route.
+ *
+ * The `configure` hook is what keeps `bun run dev` quiet while the backend is
+ * starting or hot-reloading: without it Vite prints `[vite] http proxy error:
+ * <path> Error: connect ECONNREFUSED …` for every polled health/console
+ * request — a flood every ~5s while the gateway is mid-restart. A refused
+ * connect is answered with a graceful 502 JSON envelope instead, so the SPA
+ * sees an ordinary failed fetch and the terminal stays readable. Other proxy
+ * errors (5xx from the backend itself) are still logged.
+ */
+function backendProxyTarget(target: string) {
+  return {
+    target,
+    changeOrigin: false,
+    configure(proxyServer: { on(event: string, handler: (err: NodeJS.ErrnoException, req: IncomingMessage, res: import("node:http").ServerResponse) => void): void }) {
+      proxyServer.on("error", (err, _req, res) => {
+        if (err.code === "ECONNREFUSED") {
+          if (!res.headersSent) {
+            res.writeHead(502, { "content-type": "application/json" });
+            res.end(
+              JSON.stringify({
+                error: { message: "Gateway backend is not reachable", type: "server_error", code: "backend_unreachable" },
+              }),
+            );
+          }
+          return;
+        }
+        console.error("[dashboard] proxy error:", err.message);
+      });
+    },
+  };
 }
 
 /**
@@ -126,6 +160,26 @@ async function resolveServerPort(): Promise<{ port: number; strictPort: boolean 
 export default defineConfig(async (_env: ConfigEnv): Promise<UserConfig> => {
   const { port, strictPort } = await resolveServerPort();
   const backendTarget = resolveBackendTarget();
+  // `VITE_NO_BACKEND_PROXY=1` runs the dashboard without the gateway proxy
+  // (console API / health / share calls will fail with 502 instead of being
+  // forwarded) — useful for pure UI work when the backend is not running.
+  const backendProxy: Record<string, ProxyOptions | string> =
+    process.env.VITE_NO_BACKEND_PROXY?.trim() === "1" ? {} : {
+      "/console/api": backendProxyTarget(backendTarget),
+      "/v1": backendProxyTarget(backendTarget),
+      "/health": backendProxyTarget(backendTarget),
+      "/metrics": backendProxyTarget(backendTarget),
+      "/share": {
+        target: backendTarget,
+        changeOrigin: false,
+        configure: backendProxyTarget(backendTarget).configure,
+        bypass: (req: IncomingMessage) => {
+          const path = (req.url ?? "").split("?")[0] ?? "";
+          if (path.endsWith("/data") || path.endsWith("/issue") || path.endsWith("/stats") || path.endsWith("/stream") || path.endsWith("/popup-image")) return undefined;
+          return "/index.html";
+        },
+      },
+    };
   return {
   base: "/",
   appType: "spa",
@@ -134,34 +188,7 @@ export default defineConfig(async (_env: ConfigEnv): Promise<UserConfig> => {
     host: "127.0.0.1",
     port,
     strictPort,
-    proxy: {
-      "/console/api": {
-        target: backendTarget,
-        changeOrigin: false,
-      },
-      "/v1": {
-        target: backendTarget,
-        changeOrigin: false,
-      },
-      "/health": {
-        target: backendTarget,
-        changeOrigin: false,
-      },
-      "/metrics": {
-        target: backendTarget,
-        changeOrigin: false,
-      },
-      // Share API routes are proxied; public page deep links use index.html.
-      "/share": {
-        target: backendTarget,
-        changeOrigin: false,
-        bypass: (req: IncomingMessage) => {
-          const path = (req.url ?? "").split("?")[0] ?? "";
-          if (path.endsWith("/data") || path.endsWith("/issue") || path.endsWith("/stats") || path.endsWith("/stream") || path.endsWith("/popup-image")) return undefined;
-          return "/index.html";
-        },
-      },
-    },
+    proxy: backendProxy,
   },
   build: {
     outDir: "../dist/dashboard",
