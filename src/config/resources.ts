@@ -30,11 +30,18 @@ export const FALLBACK_MEMORY_LIMIT_BYTES = 512 * 1024 * 1024;
 /**
  * Ceiling on concurrent in-flight requests per process.
  *
- * A hard ceiling even when memory would allow more: this process is one core,
- * and past this point queueing delay, not memory, is what degrades. It also
- * bounds every per-request structure that is sized by concurrency.
+ * A ceiling even when memory would allow more: past some point queueing
+ * delay, not memory, is what degrades, and it bounds every per-request
+ * structure sized by concurrency.
+ *
+ * It is no longer the number that silently caps a deployment, though. At 64 it
+ * sat *below* the tenant concurrency an operator can set in Settings, so a
+ * tenant raised to 100 was refused by a constant the Settings page never
+ * mentions — the process said no at 64 with every configured limit still
+ * untouched. The ceiling now sits above the largest tenant limit, so a
+ * configured number is what actually governs admission.
  */
-export const MAX_PROCESS_CONCURRENCY = 64;
+export const MAX_PROCESS_CONCURRENCY = 1024;
 
 /**
  * How many copies of a request body are resident at once.

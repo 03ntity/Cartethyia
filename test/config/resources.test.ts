@@ -25,10 +25,13 @@ import { resolveProcessTopology, type ProcessTopology } from "../../src/config/r
 const MiB = 1024 * 1024;
 
 describe("deriveProcessConcurrency", () => {
-  test("2 GiB with 4 MiB bodies reaches the ceiling", () => {
-    expect(deriveProcessConcurrency({ memoryLimitBytes: 2 * 1024 * MiB, maxBodyBytes: 4 * MiB })).toBe(
-      MAX_PROCESS_CONCURRENCY,
-    );
+  test("2 GiB with 4 MiB bodies is no longer held down by the ceiling", () => {
+    // The ceiling used to be 64, below the tenant limit an operator can set in
+    // Settings, so a tenant raised past it was refused by a constant the
+    // Settings page never mentions. The ceiling now sits above any configured
+    // limit, so memory is what binds here.
+    expect(deriveProcessConcurrency({ memoryLimitBytes: 2 * 1024 * MiB, maxBodyBytes: 4 * MiB })).toBe(64);
+    expect(64).toBeLessThan(MAX_PROCESS_CONCURRENCY);
   });
 
   test("512 MiB with 4 MiB bodies admits 16", () => {
@@ -61,7 +64,7 @@ describe("deriveProcessConcurrency", () => {
     ).toBe(32);
     expect(
       deriveProcessConcurrency({ memoryLimitBytes: 2 * 1024 * MiB, maxBodyBytes: 4 * MiB, override: 999 }),
-    ).toBe(MAX_PROCESS_CONCURRENCY);
+    ).toBe(999);
     expect(
       deriveProcessConcurrency({ memoryLimitBytes: 2 * 1024 * MiB, maxBodyBytes: 4 * MiB, override: -5 }),
     ).toBe(1);

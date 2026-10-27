@@ -119,7 +119,14 @@ export const CONFIG_SPEC = {
   // Optional-int, not int-with-a-zero-default: "unset" and "explicitly zero"
   // must not be the same thing. Zero is not a valid ceiling, so a default of 0
   // would need a second sentinel to mean "derive".
-  CARTETHYIA_PROCESS_CONCURRENCY_LIMIT: { kind: "optional-int", min: 1, max: 64 },
+  // Ceiling matches MAX_PROCESS_CONCURRENCY. It used to clamp at 64, below the
+  // tenant limit an operator can set, so raising this never reached the number
+  // configured in Settings.
+  CARTETHYIA_PROCESS_CONCURRENCY_LIMIT: {
+    kind: "optional-int",
+    min: 1,
+    max: 1024,
+  },
   // Slack above each key's concurrency limit. Effective ceiling is
   // limit + tolerance; only requests past it are refused.
   CARTETHYIA_CONCURRENCY_TOLERANCE: { kind: "optional-int", min: 0, max: 1024 },
