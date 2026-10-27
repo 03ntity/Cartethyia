@@ -1,16 +1,15 @@
 /**
- * The in-flight backstop sweep reaps flights whose deadline has passed.
+ * The in-flight backstop sweep aborts requests whose deadline has passed.
  *
- * A cancelled request that never ran a finalizer leaves its flight in the
- * registry. Nothing else releases it, so the gauge — which is what an operator
- * reads as "how busy is this gateway" — stays high with no requests behind it.
- * Idling does not clear it, which is what distinguishes a stuck flight from
- * real load.
+ * A request whose abort path never fired (a half-closed socket that neither
+ * pulls, cancels, nor aborts) stays in the store past its deadline. Nothing
+ * else unblocks it, so the fetch — and the slot the operator reads as
+ * "in flight" — hangs. The sweep aborts those; the request's own cleanup then
+ * drops every entry it owns, so the gauge cannot disagree with the lifecycle.
  *
- * The sweep is the only thing that reaps those, so it is pinned here directly
- * against the store rather than through a request: the property is that a
- * flight past its deadline plus the grace window is released, whether or not
- * any abort path ever fired.
+ * The sweep is pinned here directly against the store rather than through a
+ * request: the property is that a flight past its deadline plus the grace
+ * window is aborted, whether or not any abort path ever fired.
  */
 import { expect, test } from "bun:test";
 import { ProxyRequestStateStore } from "../../src/transport/request/state";
@@ -34,7 +33,7 @@ function expiredStore(): {
   return { store, requestId };
 }
 
-test("a flight inside the grace window is not reaped", () => {
+test("a flight inside the grace window is not touched", () => {
   const store = new ProxyRequestStateStore(undefined);
   const state = store.initialize(
     new Request("https://example.test/v1/chat/completions", { method: "POST" }),
@@ -43,23 +42,23 @@ test("a flight inside the grace window is not reaped", () => {
   );
   state.startProviderFlight();
   expect(store.inFlightCount()).toBe(1);
-  // Still well inside its deadline plus either grace: reaping here would kill
+  // Still well inside its deadline plus grace: aborting here would kill
   // healthy long streams at the pre-stream budget.
   expect(store.sweepOverdueInFlight(Date.now(), GRACE_MS, HARD_GRACE_MS)).toBe(0);
   expect(store.inFlightCount()).toBe(1);
 });
 
-test("a flight past its deadline and the hard grace is force-released", () => {
+test("a flight past its deadline plus grace is aborted and released", () => {
   const { store } = expiredStore();
   expect(store.inFlightCount()).toBe(1);
   // The sweep takes `nowMs` as an argument, so the clock is advanced by value
-  // rather than by waiting. Past deadline + hard grace: the abort the sweep
-  // issues did not release it, so it must untrack the flight outright.
+  // rather than by waiting. The abort unwinds the controller and the state's
+  // cleanup drops the flight entry with it.
   store.sweepOverdueInFlight(Date.now() + HARD_GRACE_MS + 5_000, GRACE_MS, HARD_GRACE_MS);
   expect(store.inFlightCount()).toBe(0);
 });
 
-test("reaping is idempotent and never goes negative", () => {
+test("the sweep is idempotent", () => {
   const { store } = expiredStore();
   const late = Date.now() + HARD_GRACE_MS + 5_000;
   store.sweepOverdueInFlight(late, GRACE_MS, HARD_GRACE_MS);
@@ -68,7 +67,7 @@ test("reaping is idempotent and never goes negative", () => {
   expect(store.inFlightCount()).toBe(0);
 });
 
-test("a flight whose deadline was extended is not reaped early", () => {
+test("a flight whose deadline was extended is not aborted early", () => {
   // Streaming legitimately moves the deadline forward; the sweep must follow
   // the moved deadline rather than the one the flight was registered with.
   const store = new ProxyRequestStateStore(undefined);
@@ -83,7 +82,7 @@ test("a flight whose deadline was extended is not reaped early", () => {
   expect(store.inFlightCount()).toBe(1);
 });
 
-test("the sweep releases only what is overdue", () => {
+test("the sweep touches only what is overdue", () => {
   const store = new ProxyRequestStateStore(undefined);
   // One long-lived and one already expired.
   const longLived = store.initialize(
