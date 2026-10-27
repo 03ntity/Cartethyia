@@ -27,18 +27,11 @@ import { buddyAccountUid } from "../providers/integrations/buddy/buddy-oauth-sha
 import {
   adoptFirstBuddy,
   agreeBuddyAgreement,
-  BUDDY_REDEEM_TIERS,
-  claimBuddyTravel,
-  departBuddyTravel,
   readBuddyFirstTask,
   readBuddyInfo,
-  readBuddyRedemption,
-  readBuddyTravelStatus,
-  redeemBuddyStreakTier,
   useBuddyMakeupCard,
   type BuddyGrowthCall,
   type BuddyGrowthResult,
-  type BuddyRedeemTier,
 } from "../providers/integrations/buddy/buddy-growth-shared";
 import { fetchBuddyRequestUsage } from "../providers/integrations/buddy/buddy-usage-shared";
 import { saveBuddyUsageSnapshots } from "../providers/integrations/buddy/buddy-usage-store";
@@ -50,8 +43,6 @@ import type { FetchLike } from "../providers/quota/quota-contracts";
 /** The task names an operator can switch off. */
 export const BUDDY_TASK_NAMES = [
   "buddy-streak",
-  "buddy-redeem",
-  "buddy-travel",
   "buddy-adopt",
   "buddy-activity-report",
 ] as const;
@@ -253,42 +244,6 @@ async function runTask(
  */
 export function buddyStreakTask(deps: BuddyTaskDeps) {
   return runTask(deps, "buddy-streak", (call) => useBuddyMakeupCard(call));
-}
-
-/**
- * Milestone redeem: claim the highest tier the streak has unlocked and not yet
- * claimed this month.
- */
-export function buddyRedeemTask(deps: BuddyTaskDeps) {
-  return runTask(deps, "buddy-redeem", async (call) => {
-    const status = await readBuddyRedemption(call);
-    if (status === null) return null;
-    // Highest eligible tier first: tiers are the same reward scaled, and a day
-    // that could claim 28d should not spend itself on 7d.
-    const tier = [...BUDDY_REDEEM_TIERS].reverse().find((candidate) => {
-      const state = status.tiers[candidate];
-      return state === "available" || state === "unknown";
-    }) as BuddyRedeemTier | undefined;
-    if (tier === undefined) return null;
-    return redeemBuddyStreakTier(call, tier);
-  });
-}
-
-/** Cat travel: depart an idle cat, claim an arrived one. */
-export function buddyTravelTask(deps: BuddyTaskDeps) {
-  return runTask(deps, "buddy-travel", async (call) => {
-    const status = await readBuddyTravelStatus(call);
-    if (status === null) return null;
-    if (status.state === "arrived") {
-      if (status.recordId === null) return null;
-      return claimBuddyTravel(call, status.recordId);
-    }
-    if (status.state === "idle" && !status.dailyLimitReached) {
-      return departBuddyTravel(call);
-    }
-    // In flight, or today's departure already used: an expected state.
-    return null;
-  });
 }
 
 /**

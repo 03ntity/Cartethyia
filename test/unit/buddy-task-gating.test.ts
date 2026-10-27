@@ -17,8 +17,6 @@ import { ScheduledTaskRegistry } from "../../src/workers/scheduler";
 
 const REGISTERED = [
   "buddy-streak",
-  "buddy-redeem",
-  "buddy-travel",
   "buddy-adopt",
 ];
 
@@ -59,8 +57,6 @@ describe("the buddy growth tasks are individually switchable", () => {
     await registry.stop();
     // The two switched off are absent entirely — no timer, no run.
     expect(runs["buddy-streak"]).toBeUndefined();
-    expect(runs["buddy-travel"]).toBeUndefined();
-    expect(runs["buddy-redeem"]).toBeGreaterThan(0);
     expect(runs["buddy-adopt"]).toBeGreaterThan(0);
   });
 });

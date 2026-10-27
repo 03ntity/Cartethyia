@@ -55,9 +55,7 @@ import { dailyCheckinEgressForPass } from "../workers/daily-checkin";
 import {
   buddyAdoptTask,
   buddyActivityReportTask,
-  buddyRedeemTask,
   buddyStreakTask,
-  buddyTravelTask,
   syncBuddyUsage,
 } from "../workers/buddy-growth-tasks";
 import { createAccountSecretResolver } from "../providers/operations/provider-credential-service";
@@ -603,18 +601,6 @@ export async function buildProductionDeps(): Promise<ProductionDeps> {
     intervalMs: 24 * 60 * 60_000,
     initialDelayMs: 5 * 60_000,
     run: () => buddyStreakTask(buddyTaskDeps),
-  });
-  scheduledTasks.register({
-    name: "buddy-redeem",
-    intervalMs: 24 * 60 * 60_000,
-    initialDelayMs: 8 * 60_000,
-    run: () => buddyRedeemTask(buddyTaskDeps),
-  });
-  scheduledTasks.register({
-    name: "buddy-travel",
-    intervalMs: 24 * 60 * 60_000,
-    initialDelayMs: 14 * 60_000,
-    run: () => buddyTravelTask(buddyTaskDeps),
   });
   scheduledTasks.register({
     name: "buddy-adopt",
