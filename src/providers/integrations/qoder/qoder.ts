@@ -703,10 +703,110 @@ export function buildQoderRequest(
   };
 }
 
+// ---------------------------------------------------------------------------
+// DSML tool-call recovery — DeepSeek's native markup in the text stream
+// ---------------------------------------------------------------------------
+// Some DeepSeek-family models write their tool calls as XML-like DSML markup
+// inside the plain-text `content` stream instead of the structured
+// `tool_calls` field. Left alone, the markup reaches the caller as visible
+// prose and the tool never runs — which is exactly the symptom reported.
+//
+// The reference bridge (`qoder_proxy.py`, `parse_dsml_tool_calls`) recovers
+// these at end of stream. This is the same rule: buffer once DSML appears,
+// parse at the end, emit the clean prose then the real tool calls.
+//
+// Patterns mirror the Python originals (`re.DOTALL` becomes the `s` flag):
+//   TAG_START      = r"<[^>]*DSML[^>]*"
+//   DSML_CALLS_RE  = TAG_START + r"calls>(.*?)</[^>]*DSML[^>]*calls>"
+//   DSML_INVOKE_RE = TAG_START + r"invoke\s+name=["']([^"']+)["']>(.*?)</[^>]*invoke>"
+//   DSML_PARAM_RE  = TAG_START + r"parameter\s+name=["']([^"']+)["'][^>]*>(.*?)</[^>]*parameter>"
+
+const DSML_CALLS_RE = /<[^>]*DSML[^>]*calls>([\s\S]*?)<\/[^>]*DSML[^>]*calls>/;
+const DSML_INVOKE_RE = /<[^>]*DSML[^>]*invoke\s+name=["']([^"']+)["']>([\s\S]*?)<\/[^>]*invoke>/g;
+const DSML_PARAM_RE = /<[^>]*DSML[^>]*parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/[^>]*parameter>/g;
+
+/** One recovered call, in the shape the canonical events want. */
+export interface DsmlCall {
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: string;
+}
+
+/**
+ * Recovers DSML tool calls out of a plain-text string.
+ *
+ * `clean` is the text with the markup removed. With no DSML present, `calls`
+ * is empty and `clean` is the original text unchanged — so this is safe to run
+ * over every stream, not just suspected ones.
+ */
+export function parseDsmlToolCalls(text: string): { calls: DsmlCall[]; clean: string } {
+  if (text.length === 0 || !text.includes("DSML")) return { calls: [], clean: text };
+
+  const callsMatch = DSML_CALLS_RE.exec(text);
+  let block: string;
+  let clean: string;
+
+  if (callsMatch) {
+    block = callsMatch[1] ?? "";
+    const before = text.slice(0, callsMatch.index).trimEnd();
+    const after = text.slice(callsMatch.index + callsMatch[0].length).trimStart();
+    clean = (before + " " + after).trim();
+  } else {
+    // No <calls> wrapper (issue #51): find bare <invoke> blocks in the whole
+    // text, then cut the prose off at the last `<` before the first invoke.
+    DSML_INVOKE_RE.lastIndex = 0;
+    const first = DSML_INVOKE_RE.exec(text);
+    if (!first) return { calls: [], clean: text };
+    block = text;
+    const cut = text.lastIndexOf("<", first.index);
+    clean = text.slice(0, cut >= 0 ? cut : first.index).trim();
+  }
+
+  const calls: DsmlCall[] = [];
+  DSML_INVOKE_RE.lastIndex = 0;
+  let inv: RegExpExecArray | null;
+  while ((inv = DSML_INVOKE_RE.exec(block)) !== null) {
+    const params: Record<string, string> = {};
+    DSML_PARAM_RE.lastIndex = 0;
+    let par: RegExpExecArray | null;
+    while ((par = DSML_PARAM_RE.exec(inv[2] ?? "")) !== null) {
+      params[par[1] ?? ""] = (par[2] ?? "").trim();
+    }
+    calls.push({
+      id: `call_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      name: inv[1] ?? "",
+      arguments: JSON.stringify(params),
+    });
+  }
+
+  return { calls, clean };
+}
+
+/**
+ * The holdable tail of a content chunk: a short suffix that looks like the
+ * start of a DSML tag and may finish in the next frame. Empty when there is
+ * nothing worth holding.
+ *
+ * Mirrors `_dsml_tail_hold` in the reference bridge.
+ */
+export function dsmlTailHold(text: string): string {
+  const at = text.lastIndexOf("<");
+  if (at < 0 || text.length - at > 24) return "";
+  const tail = text.slice(at);
+  // A complete tag already — nothing to wait for.
+  if (tail.includes(">")) return "";
+  const body = tail.replace(/\uFF5C/g, "|").toUpperCase().slice(1).replace(/^\//, "");
+  if (body.length === 0) return tail; // bare "<" or "</"
+  if (!body.startsWith("|")) return "";
+  const rest = body.slice(1);
+  if (rest.length === 0) return tail;
+  if ("DSML".startsWith(rest) || rest.startsWith("DSML")) return tail;
+  return "";
+}
+
 // Stream transformation — decode SSE, unwrap COSY envelope, map OpenAI chat chunks to CanonicalEvent
 
 function mapQoderFinishReason(raw: unknown): CanonicalStopReason | undefined {
-  if (raw === "stop") return "stop";
   if (raw === "length") return "length";
   if (raw === "tool_calls") return "tool_use";
   if (raw === "content_filter") return "content_filter";
@@ -723,6 +823,12 @@ async function* qoderBodyToCanonicalEvents(
   let finishReason: unknown = undefined;
   let rawUsage: Record<string, unknown> | undefined = undefined;
   let hasTerminal = false;
+  // DSML recovery state. While `buf` is empty the text passes through
+  // untouched; once a chunk carries DSML the rest is buffered so the markup can
+  // be parsed whole at end of stream. `tail` holds a possible half-tag that
+  // straddles a frame boundary.
+  let buf = "";
+  let tail = "";
 
   for await (const sse of decodeSseEvents(body, { signal })) {
     const sseData = sse.data;
@@ -751,11 +857,30 @@ async function* qoderBodyToCanonicalEvents(
         const delta = choice["delta"] as Record<string, unknown> | undefined;
         if (delta) {
           if (typeof delta["content"] === "string" && (delta["content"] as string).length > 0) {
-            yield {
-              type: "content_delta",
-              sequence_number: seq++,
-              content: { kind: "text", text: delta["content"] as string },
-            } as CanonicalEvent;
+            const piece = tail + (delta["content"] as string);
+            tail = "";
+            if (buf.length === 0) {
+              // Not yet in a DSML stream: hold back only a possible tag start,
+              // and pass everything before it through unchanged.
+              const hold = dsmlTailHold(piece);
+              const body = hold.length > 0 ? piece.slice(0, piece.length - hold.length) : piece;
+              if (body.includes("DSML")) {
+                buf = body;
+                tail = hold;
+                continue;
+              }
+              if (body.length > 0) {
+                yield {
+                  type: "content_delta",
+                  sequence_number: seq++,
+                  content: { kind: "text", text: body },
+                } as CanonicalEvent;
+              }
+              tail = hold;
+              continue;
+            }
+            buf += piece;
+            continue;
           }
           const reasoningText = readReasoningText(delta);
           if (typeof reasoningText === "string" && reasoningText.length > 0) {
@@ -787,6 +912,45 @@ async function* qoderBodyToCanonicalEvents(
       // Some Qoder chunks carry finish_reason at top level
       if (json["finish_reason"] !== undefined) finishReason = json["finish_reason"];
     }
+  }
+  // End of stream: resolve whatever the DSML buffer collected.
+  if (buf.length > 0) {
+    const { calls, clean } = parseDsmlToolCalls(buf);
+    if (calls.length > 0) {
+      if (clean.length > 0) {
+        yield {
+          type: "content_delta",
+          sequence_number: seq++,
+          content: { kind: "text", text: clean },
+        } as CanonicalEvent;
+      }
+      for (const call of calls) {
+        yield {
+          type: "tool_call_delta",
+          sequence_number: seq++,
+          call_id: call.id,
+          name: call.name,
+          arguments_delta: call.arguments,
+        } as CanonicalEvent;
+      }
+      // The turn ended by calling a tool, whatever the upstream reported.
+      finishReason = finishReason ?? "tool_calls";
+    } else {
+      // Unparseable markup: emit as prose rather than dropping it, so nothing
+      // the model said is lost.
+      yield {
+        type: "content_delta",
+        sequence_number: seq++,
+        content: { kind: "text", text: buf },
+      } as CanonicalEvent;
+    }
+  }
+  if (tail.length > 0) {
+    yield {
+      type: "content_delta",
+      sequence_number: seq++,
+      content: { kind: "text", text: tail },
+    } as CanonicalEvent;
   }
   // If no terminal arrived, synthesize one (prevents truncation error)
   const stopReason = mapQoderFinishReason(finishReason);
