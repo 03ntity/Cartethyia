@@ -62,14 +62,30 @@ describe("classifyAccountError — every arm classifies once", () => {
     expect(c.retryAt).not.toBeNull();
   });
 
-  test("a buddy content-policy rejection parks the account as policy_blocked", () => {
+  test("a buddy content-policy rejection is a request refusal, not an account ban", () => {
     const c = classify("request illegal: did not pass the safety review", {
       statusCode: 403,
       providerCode: "11140",
       providerId: "cb",
     });
-    expect(c.category).toBe("policy_blocked");
+    // A safety review refuses this request; the account is fine. Cooling it
+    // was the bug that made one malformed body look like a dead credential.
+    expect(c.category).toBe("policy_blocked_invalid_request");
+    expect(c.mutatesAccount).toBe(false);
+    expect(c.cooldownMs).toBe(0);
+  });
+
+  test("a buddy account ban disables the account immediately", () => {
+    const c = classify(
+      '{"code":11140,"msg":"request illegal","displayMsg":{"en":"Your account has been restricted due to unusual activity"},"actions":["EDIT_INPUT","SUBMIT_FEEDBACK"]}',
+      { statusCode: 403, providerCode: "11140", providerId: "cb" },
+    );
+    // A ban is a verdict on the credential, not a throttled window: disabled
+    // with no cooldown, so it cannot burn healthy siblings while "cooling".
+    expect(c.category).toBe("policy_blocked_banned");
+    expect(c.status).toBe("disabled");
     expect(c.mutatesAccount).toBe(true);
+    expect(c.cooldownMs).toBe(0);
   });
 
   test("a request-scoped buddy code is recorded without a cooldown", () => {
@@ -83,13 +99,13 @@ describe("classifyAccountError — every arm classifies once", () => {
     expect(c.mutatesAccount).toBe(false);
   });
 
-  test("a channel rejection parks the account as policy_blocked", () => {
+  test("a channel rejection is a request refusal, not an account ban", () => {
     const c = classify("Illegal API invocation from an unapproved channel", {
       providerCode: "11-128",
       providerId: "cb",
     });
-    expect(c.category).toBe("policy_blocked");
-    expect(c.mutatesAccount).toBe(true);
+    expect(c.category).toBe("policy_blocked_invalid_request");
+    expect(c.mutatesAccount).toBe(false);
   });
 
   test("a hosted tool failure is never an auth verdict", () => {

@@ -160,7 +160,29 @@ export type AccountErrorCategory =
   | "model_capacity"
   | "model_unreachable"
   | "auth_invalidated"
+  /**
+   * Deprecated: an upstream ban. Kept so existing health rows keep rendering
+   * instead of showing a blank cause. No longer produced — see
+   * `policy_blocked_banned` and `policy_blocked_invalid_request`.
+   */
   | "policy_blocked"
+  /**
+   * The upstream banned this credential: a verdict on the account, e.g. buddy
+   * `11140` "request illegal" with "Your account has been restricted due to
+   * unusual activity". Cooldown cannot help — the account is not throttled, it
+   * is refused. Disabling immediately is a *feature*: a client's retry budget
+   * is spent in seconds, so surviving attempts burn sibling accounts that are
+   * still healthy.
+   */
+  | "policy_blocked_banned"
+  /**
+   * The upstream refused this request: a verdict on the request. e.g. buddy
+   * `11-128` "request illegal" with no account restriction. Distinguished from
+   * {@link policy_blocked_banned} because the correct responses differ — a
+   * banned account must be disabled, a malformed request must only stop being
+   * retried verbatim.
+   */
+  | "policy_blocked_invalid_request"
   | "server_error"
   | "timeout"
   | "unknown";
@@ -339,6 +361,35 @@ function accountDeadlineMs(
 }
 
 /**
+ * Whether the upstream named a restriction on the account itself.
+ *
+ * The buddy family reuses "request illegal" for two unrelated rejections, and
+ * the difference is only in the body:
+ *
+ * - `11140` carries `displayMsg` about the account being restricted ("Your
+ *   account has been restricted due to unusual activity") and `actions`
+ *   offering an appeal. That is a ban — the account is refused, not throttled.
+ * - `11-128` is a refusal of this request; the account is fine.
+ *
+ * Proven account-scoped (2026-10-16): two live share-page requests carrying
+ * byte-identical bodies and headers to the same model differed only in the
+ * pooled account, and the blocked one 400'd while the other 200'd.
+ *
+ * Matched on the code *and* the account-restriction wording, so an unrelated
+ * upstream that happens to say "restricted" in prose cannot disable accounts.
+ */
+function isBuddyAccountBanned(lower: string, providerCode: string): boolean {
+  if (providerCode !== "11140") return false;
+  return (
+    lower.includes("restricted") ||
+    lower.includes("has been banned") ||
+    lower.includes("unusual activity") ||
+    lower.includes("appeal this restriction") ||
+    lower.includes("submit feedback to appeal")
+  );
+}
+
+/**
  * Bounded to a day, matching `MAX_COOLDOWN_MS` in the failure policy: a stated
  * window longer than that is a monthly or plan-level limit, and parking an
  * account for a month on one upstream field is a decision for the operator,
@@ -421,6 +472,12 @@ interface AccountErrorContext {
   readonly canMutate: boolean;
   readonly providerCode: string;
   readonly statedCooldownMs: number | null;
+  /**
+   * The upstream named a restriction on the account, not a refusal of the
+   * request. Read by the policy arm to pick between disabling the account and
+   * merely refusing the request.
+   */
+  readonly buddyBanned: boolean;
   readonly reason: (prefix: string) => string;
   readonly result: (
     category: AccountErrorCategory,
@@ -476,6 +533,13 @@ interface AccountErrorSignals {
   readonly credentialKind: string | undefined;
   /** Buddy-family provider: the only family with provider-specific codes below. */
   readonly buddy: boolean;
+  /**
+   * The upstream named a restriction on this account, not a refusal of the
+   * request. Only the `11140` shape carries `displayMsg` about the account
+   * being restricted, so the policy arm can tell a ban from a bad request
+   * instead of treating both as one cooldown.
+   */
+  readonly buddyBanned: boolean;
   readonly priceRefusal: boolean;
   readonly deploymentInfraError: boolean;
   readonly quotaSignal: boolean;
@@ -601,6 +665,7 @@ function accountErrorContext(error: unknown, options?: AccountFailureEvidence): 
     canMutate,
     providerCode,
     statedCooldownMs,
+    buddyBanned: isBuddyAccountBanned(lower, providerCode),
     reason,
     result,
   };
@@ -623,6 +688,7 @@ export function classifyAccountError(
     providerCode,
 
     statedCooldownMs,
+    buddyBanned,
     reason,
     result,
   } = accountErrorContext(error, options);
@@ -761,19 +827,46 @@ export function classifyAccountError(
     lower.includes("request illegal") ||
     lower.includes("content blocked") ||
     lower.includes("account suspended");
+  // A ban is a verdict on the credential, and cooldown cannot answer it: the
+  // account is refused, not throttled. Disabling is the fix, and disabling
+  // *immediately* is a feature — a client's retry budget is spent in seconds,
+  // so a banned account that merely cooled stayed in the plan and burned
+  // sibling accounts that were still healthy before the window expired.
+  //
+  // The two shapes are told apart by the body, not the code alone: `11140`
+  // names a restriction on the account, `11-128` refuses the request.
   const policyBlock =
     policyRejection &&
     options?.providerId !== undefined &&
     BUDDY_PROVIDER_IDS.has(options.providerId.toLowerCase());
   if (policyBlock) {
-    const policyBlockMs = resolveAccountPolicyBlockCooldownMs();
+    if (buddyBanned) {
+      return result(
+        "policy_blocked_banned",
+        "disabled",
+        0,
+        null,
+        reason("Account banned by upstream"),
+        // A ban is evidence about the credential even at provider scope, for
+        // the same reason a named revocation is: the message is the evidence.
+        // Without this a stream frame's missing credential detail would leave a
+        // banned account serving.
+        true,
+      );
+    }
+    // Not a ban: the upstream refused this request. The account is fine, so the
+    // only correct move is to stop retrying it verbatim. Cooling the account
+    // here was the bug that made one malformed request look like a dead
+    // credential.
     return result(
-      "policy_blocked",
+      "policy_blocked_invalid_request",
       "cooldown",
-      policyBlockMs,
-      new Date(Date.now() + policyBlockMs),
-      reason("Provider content-policy block"),
-      origin === "upstream",
+      0,
+      null,
+      reason("Upstream refused this request"),
+      // Never mutates: a malformed body fails identically on every account, so
+      // cooling would burn a healthy credential on the gateway's own fault.
+      false,
     );
   }
   // These codes are a verdict on the request, not the account. Cooling the
@@ -829,14 +922,30 @@ export function classifyAccountError(
     options?.providerId !== undefined &&
     BUDDY_PROVIDER_IDS.has(options.providerId.toLowerCase());
   if (channelBlock) {
-    const channelBlockMs = resolveAccountPolicyBlockCooldownMs();
+    // Same split as the policy arm above: a ban disables, a channel refusal
+    // only stops this request. `11-128` is the request shape, so this branch
+    // nearly always takes the refusal path — but it shares the ban test so a
+    // `11140`-shaped body arriving as a channel rejection still disables.
+    if (buddyBanned) {
+      return result(
+        "policy_blocked_banned",
+        "disabled",
+        0,
+        null,
+        reason("Account banned by upstream"),
+        true,
+      );
+    }
     return result(
-      "policy_blocked",
+      "policy_blocked_invalid_request",
       "cooldown",
-      channelBlockMs,
-      new Date(Date.now() + channelBlockMs),
+      0,
+      null,
       reason("Provider channel rejection"),
-      origin === "upstream",
+      // The credential is valid; the upstream refuses this calling channel.
+      // Cooling was the bug: it kept a refused account in the plan, where a
+      // client's retry budget burned healthy siblings for the whole window.
+      false,
     );
   }
   // server-side tool (web search, x search, web fetch), not evidence about the
@@ -907,6 +1016,7 @@ export function classifyAccountError(
     staticToken,
     credentialKind,
     buddy,
+    buddyBanned,
     priceRefusal,
     deploymentInfraError,
     quotaSignal,
@@ -973,6 +1083,31 @@ const ACCOUNT_ERROR_RULES: readonly AccountErrorRule[] = [
       ),
   },
   {
+    // Must precede the unclassified fallback: the fallback is account-blind and
+    // would stamp this as a provider-wide failure, which is how one proxy
+    // refusing CONNECT put every account of every provider behind that pool
+    // into cooldown — opencode's dead front door taking codebuddy down with it.
+    //
+    // A CONNECT refusal is a statement about the proxy pool, not about a
+    // credential: the tunnel was never established, so no upstream ever saw the
+    // request and no account can be at fault. Scoped to the pool so the
+    // provider's own accounts stay in rotation.
+    name: "proxy-connect-refusal",
+    match: (s) =>
+      s.lower.includes("proxy connect failed") ||
+      (s.lower.includes("connect") && s.lower.includes("tunnel") && s.lower.includes("refus")),
+    decide: (s) =>
+      s.result(
+        "model_unreachable",
+        "cooldown",
+        0,
+        null,
+        s.reason("Proxy pool refused the CONNECT tunnel"),
+        // Never mutates: the pool owns this failure, not the account.
+        false,
+      ),
+  },
+  {
     name: "deployment-infrastructure",
     match: (s) => s.deploymentInfraError,
     decide: (s) =>
@@ -1007,14 +1142,42 @@ const ACCOUNT_ERROR_RULES: readonly AccountErrorRule[] = [
     name: "content-policy-block",
     match: (s) => s.policyRejection && s.buddy,
     decide: (s) => {
-      const policyBlockMs = resolveAccountPolicyBlockCooldownMs();
+      // A ban is a verdict on the credential, and cooldown cannot answer it:
+      // the account is refused, not throttled. Disabling is the fix, and
+      // disabling *immediately* is a feature — a client's retry budget is spent
+      // in seconds, so a banned account that merely cooled stayed in the plan
+      // and burned sibling accounts that were still healthy before the window
+      // expired.
+      //
+      // The two shapes are told apart by the body, not the code alone: `11140`
+      // names a restriction on the account, `11-128` refuses the request.
+      if (s.buddyBanned) {
+        return s.result(
+          "policy_blocked_banned",
+          "disabled",
+          0,
+          null,
+          s.reason("Account banned by upstream"),
+          // A ban is evidence about the credential even at provider scope, for
+          // the same reason a named revocation is: the message is the evidence.
+          // Without this a stream frame's missing credential detail would leave
+          // a banned account serving.
+          true,
+        );
+      }
+      // Not a ban: the upstream refused this request. The account is fine, so
+      // the only correct move is to stop retrying it verbatim. Cooling the
+      // account here was the bug that made one malformed request look like a
+      // dead credential.
       return s.result(
-        "policy_blocked",
+        "policy_blocked_invalid_request",
         "cooldown",
-        policyBlockMs,
-        new Date(Date.now() + policyBlockMs),
-        s.reason("Provider content-policy block"),
-        s.origin === "upstream",
+        0,
+        null,
+        s.reason("Upstream refused this request"),
+        // Never mutates: a malformed body fails identically on every account,
+        // so cooling would burn a healthy credential on the gateway's own fault.
+        false,
       );
     },
   },

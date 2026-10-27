@@ -78,6 +78,17 @@ export function UsageFloorControl({ providerId }: { readonly providerId: string 
                 <span>Pooled credits</span>
                 <span className="text-text-primary">{allowance.accounts}</span>
                 <span>{allowance.accounts === 1 ? "active account" : "active accounts"}</span>
+                {/* Shown rather than silently excluded: an inactive account's
+                    balance is not routable, but hiding it made the pooled total
+                    look wrong with no way to see why. */}
+                {allowance.inactiveAccounts > 0 ? (
+                  <span
+                    className="badge border border-warning-line text-status-warning normal-case tracking-normal"
+                    title="Disabled or cooled accounts hold credits this provider cannot route to. Enable or recover them to add their balance."
+                  >
+                    {allowance.inactiveAccounts} inactive
+                  </span>
+                ) : null}
               </div>
               <div
                 className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-caption font-semibold tabular-nums text-text-primary"
@@ -187,13 +198,29 @@ function PrivacyModeControl({ providerId }: { readonly providerId: string }): Re
 function combinedAllowance(
   accounts: readonly { readonly provider: string; readonly active: boolean; readonly quota: { readonly windows: readonly { readonly accounting: "pooled" | "independent"; readonly kind?: string; readonly limit?: number | null; readonly remaining?: number | null; readonly used?: number | null }[] } | null }[],
   providerId: string,
-): { readonly accounts: number; readonly remaining: number; readonly total: number; readonly percent: number } | null {
+): {
+  readonly accounts: number;
+  readonly inactiveAccounts: number;
+  readonly remaining: number;
+  readonly total: number;
+  readonly percent: number;
+} | null {
   let remaining = 0;
   let total = 0;
   let activeAccounts = 0;
+  let inactiveAccounts = 0;
   let hasQuota = false;
   for (const account of accounts) {
-    if (account.provider !== providerId || !account.active) continue;
+    if (account.provider !== providerId) continue;
+    // Only active accounts contribute allowance — a disabled or cooled account
+    // is not routable, so adding its balance would overstate what the floor can
+    // actually use. But it is still counted, not dropped: the operator needs to
+    // see that N accounts hold credits this provider is not drawing on, because
+    // that gap is the answer to "why is the pooled number lower than I expect".
+    if (!account.active) {
+      inactiveAccounts += 1;
+      continue;
+    }
     activeAccounts += 1;
     if (account.quota === null) continue;
     for (const window of account.quota.windows) {
@@ -213,7 +240,13 @@ function combinedAllowance(
     }
   }
   return activeAccounts > 0 && hasQuota
-    ? { accounts: activeAccounts, remaining, total, percent: total > 0 ? Math.round((remaining / total) * 100) : 0 }
+    ? {
+        accounts: activeAccounts,
+        inactiveAccounts,
+        remaining,
+        total,
+        percent: total > 0 ? Math.round((remaining / total) * 100) : 0,
+      }
     : null;
 }
 

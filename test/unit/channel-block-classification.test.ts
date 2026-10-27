@@ -1,12 +1,16 @@
 /**
- * A buddy-family channel rejection must park the account.
+ * A buddy-family channel rejection must not be treated as a healthy request.
  *
- * `11128` ("Illegal API invocation from an unapproved channel") is the
+ * `11-128` ("Illegal API invocation from an unapproved channel") is the
  * upstream refusing the calling channel for a whole account, not one prompt —
  * it repeats on every invocation. It used to fall through to `unknown` with
  * `mutates=false`, so the account stayed in rotation and failed every request;
  * with every account failing the same way the pool looked dead and nothing was
  * ever parked, so routing never moved on.
+ *
+ * It is now classified as {@link policy_blocked_invalid_request}: the upstream
+ * refused the *request*, and the account's credential is not implicated. A
+ * banned account (`11140`) is the shape that disables.
  */
 import { describe, expect, test } from "bun:test";
 import { classifyAccountError } from "../../src/providers/operations/account-health-service";
@@ -26,27 +30,29 @@ function classify(message: string, providerCode: string, providerId: string) {
   });
 }
 
-describe("buddy channel rejection 11128", () => {
-  test("parks the account and mutates it", () => {
-    const c = classify("invalid_request: Illegal API invocation from an unapproved channel", "11128", "cb");
-    expect(c.category).toBe("policy_blocked");
-    expect(c.status).toBe("cooldown");
-    expect(c.mutatesAccount).toBe(true);
+describe("buddy channel rejection 11-128", () => {
+  test("is classified as an invalid request and does not mutate the account", () => {
+    const c = classify("invalid_request: Illegal API invocation from an unapproved channel", "11-128", "cb");
+    expect(c.category).toBe("policy_blocked_invalid_request");
+    expect(c.mutatesAccount).toBe(false);
+    expect(c.cooldownMs).toBe(0);
   });
 
   test("is recognised from the message when no provider code is present", () => {
     const c = classify("Illegal API invocation from an unapproved channel", "", "workbuddy");
-    expect(c.category).toBe("policy_blocked");
-    expect(c.mutatesAccount).toBe(true);
+    expect(c.category).toBe("policy_blocked_invalid_request");
+    expect(c.mutatesAccount).toBe(false);
   });
 
-  test("sets a retryAt in the future so routing skips the account", () => {
-    const c = classify("Illegal API invocation from an unapproved channel", "11128", "cbcn");
-    expect(c.retryAt).not.toBeNull();
-    expect(c.retryAt!.getTime()).toBeGreaterThan(Date.now());
+  test("carries no retry window: nothing about the account is wrong", () => {
+    // Zero cooldown and a null retryAt are the point — a request refusal must
+    // not attach a wait to a credential the upstream never faulted.
+    const c = classify("Illegal API invocation from an unapproved channel", "11-128", "cbcn");
+    expect(c.cooldownMs).toBe(0);
+    expect(c.retryAt).toBeNull();
   });
 
-  test("an upstream account suspension parks the account too", () => {
+  test("an upstream account suspension is a request refusal too", () => {
     // The buddy family reports a suspended account as "Request illegal:
     // Account Suspended." — a bare "Account Suspended" carries no provider
     // code, so it is matched on its text rather than a new code constant.
@@ -55,8 +61,8 @@ describe("buddy channel rejection 11128", () => {
       "Account Suspended",
     ]) {
       const c = classify(message, "", "cb");
-      expect(c.category).toBe("policy_blocked");
-      expect(c.mutatesAccount).toBe(true);
+      expect(c.category).toBe("policy_blocked_invalid_request");
+      expect(c.mutatesAccount).toBe(false);
     }
   });
   test("stays account-wide only for the buddy family", () => {
@@ -102,29 +108,40 @@ describe("buddy credit exhaustion 14018", () => {
  * next request and escalates to the cap within minutes, while one bad prompt or
  * one bad header costs five minutes.
  */
-describe("buddy policy/channel block — a base backoff, not a flat day", () => {
-  test("the first observation is a short backoff, not 6h or 24h", () => {
-    const channel = classify("Illegal API invocation from an unapproved channel", "11128", "cb");
-    expect(channel.cooldownMs).toBeLessThanOrEqual(5 * 60_000);
+/**
+ * Neither buddy policy code attaches a wait any more.
+ *
+ * These used to share one backoff knob on the reasoning that the credential
+ * was valid and the block cleared on its own. That reasoning was right about
+ * the cause and wrong about the remedy: a cooldown keeps the account in the
+ * plan, and a client's retry budget is spent in seconds, so an account the
+ * upstream refuses burns healthy siblings for the whole window.
+ *
+ * A request refusal now costs nothing, and a ban disables outright — so
+ * neither shape needs a tunable.
+ */
+describe("buddy policy codes carry no cooldown", () => {
+  test("a request refusal attaches no window to the credential", () => {
+    const channel = classify("Illegal API invocation from an unapproved channel", "11-128", "cb");
+    expect(channel.cooldownMs).toBe(0);
+    expect(channel.retryAt).toBeNull();
     const policy = classify("request illegal: did not pass the safety review", "11140", "cb");
-    expect(policy.cooldownMs).toBeLessThanOrEqual(5 * 60_000);
+    expect(policy.cooldownMs).toBe(0);
+    expect(policy.retryAt).toBeNull();
   });
 
-  test("both codes share one knob, so an operator can retune them together", () => {
-    // Same category, same control: splitting them would let the two halves of
-    // one upstream decision drift apart.
-    const channel = classify("Illegal API invocation from an unapproved channel", "11128", "cb");
-    const policy = classify("request illegal: did not pass the safety review", "11140", "cb");
-    expect(policy.cooldownMs).toBe(channel.cooldownMs);
-  });
-
-  test("it stays a cooldown with a deadline, so the sweep recovers it", () => {
-    // `disabled` is not an option here even at the cap: the credential is valid
-    // and the block clears on its own, so an operator must never have to
-    // re-enable the account by hand.
-    const c = classify("Illegal API invocation from an unapproved channel", "11128", "cb");
-    expect(c.status).toBe("cooldown");
-    expect(c.retryAt).toBeInstanceOf(Date);
+  test("only a ban disables, and it disables without a window", () => {
+    // `disabled`, not `cooldown`: the upstream refuses the account itself, so
+    // there is nothing for a sweep to recover from.
+    const banned = classify(
+      '{"code":11140,"msg":"request illegal","displayMsg":{"en":"Your account has been restricted due to unusual activity"}}',
+      "11140",
+      "cb",
+    );
+    expect(banned.category).toBe("policy_blocked_banned");
+    expect(banned.status).toBe("disabled");
+    expect(banned.cooldownMs).toBe(0);
+    expect(banned.retryAt).toBeNull();
   });
 });
 
