@@ -226,10 +226,11 @@ describe("providerCanConfigureUserAgent", () => {
     expect(providerCanConfigureUserAgent(eligible)).toBe(true);
   });
 
-  test("a BYOK provider cannot", () => {
-    // Documented: only built-ins get the route-level control; a custom provider's
-    // header comes from the adapter.
-    expect(providerCanConfigureUserAgent({ ...eligible, isBuiltIn: false })).toBe(false);
+  test("a BYOK provider can configure the header", () => {
+    // Custom providers now get the route-level control: the adapter's default
+    // identity is only a default, and an operator may override it with Codex,
+    // Claude Code, or None.
+    expect(providerCanConfigureUserAgent({ ...eligible, isBuiltIn: false })).toBe(true);
   });
 
   test("a provider that needs no account cannot", () => {
@@ -262,11 +263,11 @@ describe("providerCanConfigureUserAgent", () => {
     expect(providerCanConfigureUserAgent({ ...eligible, oauthFlows: flows })).toBe(false);
   });
 
-  test("all four conditions are required, not any", () => {
+  test("the remaining three conditions are required, not any", () => {
     // A sweep over the single-failure shapes, so no condition can be dropped
-    // without a failure.
+    // without a failure. `isBuiltIn` is deliberately absent: custom (BYOK)
+    // providers are now eligible too.
     const failures = [
-      { ...eligible, isBuiltIn: false },
       { ...eligible, requiresAccount: false },
       { ...eligible, hasAdapterUserAgent: true },
       {

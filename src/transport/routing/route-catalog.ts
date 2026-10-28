@@ -199,23 +199,33 @@ export function capabilityProfileCacheSize(): number {
   return capabilityProfileCache.size;
 }
 
-/** Resolves route identity only for bundled adapters without a native User-Agent builder. */
+/** Resolves route identity: bundled adapters without a native User-Agent builder, plus custom providers. */
 export function resolveRouteUserAgent(
   providerId: string,
   tenantUserAgent: string | undefined,
   globalUserAgent: string | undefined,
 ): string | undefined {
-  if (!isBundledProviderId(providerId) || providerHasAdapterUserAgent(providerId)) return undefined;
-  // A provider whose operator set no identity of their own gets the Claude Code
-  // CLI identity, resolved live so the stamped version tracks discovery. This
-  // used to be a frozen `codex_cli_rs` literal, which named a different vendor's
-  // client on requests that mostly reached neither.
-  const selected = resolveTenantOverride(
-    tenantUserAgent,
-    globalUserAgent,
-    buildClaudeCliUserAgent(),
-  );
-  return selected.trim() === "" ? undefined : selected;
+  if (isBundledProviderId(providerId)) {
+    // A bundled adapter that frames its own identity headers never consumes a
+    // route User-Agent (Command Code, Qoder, buddy, ...), so it never gets one
+    // — the control is hidden for it too.
+    if (providerHasAdapterUserAgent(providerId)) return undefined;
+    // Bundled API-key providers: an operator who set no identity of their own
+    // gets the Claude Code CLI identity, resolved live so the stamped version
+    // tracks discovery. This used to be a frozen `codex_cli_rs` literal, which
+    // named a different vendor's client on requests that mostly reached neither.
+    const selected = resolveTenantOverride(
+      tenantUserAgent,
+      globalUserAgent,
+      buildClaudeCliUserAgent(),
+    );
+    return selected.trim() === "" ? undefined : selected;
+  }
+  // Custom (BYOK) providers: only an explicit operator choice rides on the
+  // route; the adapter owns the default otherwise (see `registerByokProviders`).
+  // An explicit empty choice ("None") is preserved so the adapter can honor it.
+  const selected = resolveTenantOverride(tenantUserAgent, globalUserAgent, undefined);
+  return selected === undefined ? undefined : selected.trim();
 }
 
 /** One persisted model row ready for candidate construction. */

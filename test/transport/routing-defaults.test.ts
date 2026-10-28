@@ -221,4 +221,28 @@ describe("default route identity", () => {
     // default here would make that choice unreachable from the UI.
     expect(resolveRouteUserAgent("groq", "", undefined)).toBeUndefined();
   });
+
+  test("a custom provider carries an operator-set identity", () => {
+    // BYOK providers get the route-level control now; an explicit choice must
+    // ride on the route instead of being dropped by the bundled-only guard.
+    expect(resolveRouteUserAgent("my-byok", "codex_cli_rs/1.2.3", undefined)).toBe(
+      "codex_cli_rs/1.2.3",
+    );
+    expect(resolveRouteUserAgent("my-byok", undefined, "claude-cli/2.0.0 (external, cli)")).toBe(
+      "claude-cli/2.0.0 (external, cli)",
+    );
+  });
+
+  test("a custom provider's None choice is preserved so the adapter honors it", () => {
+    // "" means the operator chose silence. The bundled path collapses empty to
+    // undefined (its own default applies); the custom path must keep the empty
+    // string so `registerByokProviders` can distinguish "None" from "unset".
+    expect(resolveRouteUserAgent("my-byok", "", undefined)).toBe("");
+  });
+
+  test("an unconfigured custom provider gets no route identity", () => {
+    // The adapter's own default (CLI identity via `cli_identity`) governs, so
+    // no route value is invented here.
+    expect(resolveRouteUserAgent("my-byok", undefined, undefined)).toBeUndefined();
+  });
 });

@@ -136,7 +136,11 @@ export interface ProviderDispatchContext {
   readonly outbound_attachment_fetch?: ValidatedOutboundFetch | undefined;
   /** Validated bidirectional HTTP/2 egress bound to the same selected network pool. */
   readonly outbound_http2?: ValidatedOutboundHttp2Bidi | undefined;
-  /** Built-in API-key route-selected fallback User-Agent; custom providers leave this unset. */
+  /**
+   * Route-selected fallback User-Agent from Routing Strategy; set when the
+   * operator configured one (bundled API-key providers default to the Claude
+   * CLI identity). Empty means the operator chose "None".
+   */
   readonly user_agent?: string | undefined;
   /** Gateway request id, stable across provider retries for one logical request. */
   readonly request_id?: string | undefined;
@@ -188,7 +192,8 @@ export function applyRouteUserAgent(
   if (
     credential.credential_kind === "oauth" ||
     credential.credential_kind === "scoped_access_token" ||
-    userAgent === undefined
+    userAgent === undefined ||
+    userAgent.trim().length === 0
   ) {
     return;
   }

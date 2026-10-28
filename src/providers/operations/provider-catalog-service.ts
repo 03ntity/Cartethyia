@@ -338,7 +338,17 @@ export async function registerByokProviders(
           provider_id: providerId,
           base_url: baseUrl,
           authentication_header_shape: wireProfile.authHeaderShape,
-          buildExtraHeaders: (_context, _request, candidate) => {
+          buildExtraHeaders: (context, _request, candidate) => {
+            // An operator-set route identity wins over both auto modes: Routing
+            // Strategy now serves custom providers too, and its value (including
+            // the empty "None" choice) must be honored verbatim.
+            const routeAgent = context.user_agent;
+            if (routeAgent !== undefined) {
+              return {
+                ...(routeAgent.length > 0 ? { "user-agent": routeAgent } : {}),
+                ...(compatibilityProfile?.extra_headers ?? {}),
+              };
+            }
             // Explicit gateway identity wins over CLI cloaking, and Codex /
             // Claude-Code-shaped traffic can never take this path: this hook
             // only runs for BYOK custom rows, never bundled first-party

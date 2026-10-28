@@ -5,7 +5,6 @@ export function providerCanConfigureUserAgent(
   provider: Pick<ProviderResponse, "isBuiltIn" | "requiresAccount" | "oauthFlows" | "hasAdapterUserAgent">,
 ): boolean {
   return (
-    provider.isBuiltIn &&
     provider.requiresAccount &&
     provider.oauthFlows === undefined &&
     !provider.hasAdapterUserAgent
