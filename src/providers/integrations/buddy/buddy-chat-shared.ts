@@ -987,6 +987,68 @@ export function ensureBuddyLeadingSystem(
  * (`11151`), then guarantee a leading system turn (`11128`). The system text
  * is the variant's own prompt, so each pre-payload hook passes its prompt in.
  */
+/**
+ * Longest message text that gets an automatic ephemeral prompt-cache marker,
+ * mirroring the reference gateway (`MIN_AUTO_CACHE_TEXT_LENGTH`).
+ */
+const MIN_AUTO_CACHE_TEXT_LENGTH = 1024;
+
+/**
+ * Marks one message's text content cacheable in place: the system turn and the
+ * last user turn are the long, stable ones a prefix cache serves best. A
+ * string message becomes a typed text block; a text part inside an array gets
+ * `cache_control: {type: "ephemeral"}`. Only the first qualifying text part of
+ * a message is marked, like the reference.
+ */
+function markCacheableTextContent(message: Record<string, unknown>): void {
+  const content = message["content"];
+  if (typeof content === "string") {
+    if (content.trim().length >= MIN_AUTO_CACHE_TEXT_LENGTH) {
+      message["content"] = [
+        { type: "text", text: content, cache_control: { type: "ephemeral" } },
+      ];
+    }
+    return;
+  }
+  if (!Array.isArray(content)) return;
+  for (let index = 0; index < content.length; index += 1) {
+    const part = content[index];
+    if (!isRecord(part) || part["type"] !== "text") continue;
+    const text = typeof part["text"] === "string" ? part["text"] : "";
+    if (text.trim().length >= MIN_AUTO_CACHE_TEXT_LENGTH && part["cache_control"] === undefined) {
+      content[index] = { ...part, cache_control: { type: "ephemeral" } };
+      return;
+    }
+  }
+}
+
+/**
+ * Auto-injects ephemeral prompt-cache markers on the system turn and the last
+ * user turn when the caller declared none. Mirrors `applyPromptCacheControl` in
+ * the reference gateway: an explicit `cache_control` anywhere is respected and
+ * disables the auto-pass so the caller's own caching strategy wins.
+ */
+export function applyBuddyAutoPromptCache(messages: Array<Record<string, unknown>>): void {
+  const hasExplicit = messages.some((message) =>
+    Array.isArray(message["content"]) &&
+    (message["content"] as Array<Record<string, unknown>>).some(
+      (part) => isRecord(part) && part["cache_control"] !== undefined,
+    ),
+  );
+  if (hasExplicit) return;
+  if (messages.length === 0) return;
+  const first = messages[0];
+  if (isRecord(first) && first["role"] === "system") markCacheableTextContent(first);
+  let lastUser = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (isRecord(messages[index]) && messages[index]!["role"] === "user") {
+      lastUser = index;
+      break;
+    }
+  }
+  if (lastUser >= 0) markCacheableTextContent(messages[lastUser]!);
+}
+
 function finalizeBuddyMessages(
   messages: Array<Record<string, unknown>>,
   systemPrompt: string,
@@ -994,6 +1056,7 @@ function finalizeBuddyMessages(
   coalesceConsecutiveUserMessages(messages);
   dropEmptyBuddyMessages(messages);
   ensureBuddyLeadingSystem(messages, systemPrompt);
+  applyBuddyAutoPromptCache(messages);
 }
 
 /**
