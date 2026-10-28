@@ -1049,6 +1049,44 @@ export function applyBuddyAutoPromptCache(messages: Array<Record<string, unknown
   if (lastUser >= 0) markCacheableTextContent(messages[lastUser]!);
 }
 
+/**
+ * Strips the `content` key from assistant tool_calls-only turns.
+ *
+ * Mirrors the reference gateway's OpenAI transcript: an assistant turn that
+ * only asks for tools carries `tool_calls` and no content at all (Go's
+ * `omitzero`-style SDKs omit the key rather than send `null`/`""`). Keeping
+ * an empty string content invites the upstream to fall back to its prose/DSML
+ * channel; omitting the key keeps it on the structured `tool_calls` channel.
+ */
+export function omitBuddyAssistantToolCallContent(messages: Array<Record<string, unknown>>): void {
+  for (const message of messages) {
+    if (!isRecord(message) || message["role"] !== "assistant") continue;
+    const calls = message["tool_calls"];
+    if (!Array.isArray(calls) || calls.length === 0) continue;
+    const content = message["content"];
+    if (typeof content === "string" && content.trim().length === 0) {
+      delete message["content"];
+    } else if (Array.isArray(content) && content.length === 0) {
+      delete message["content"];
+    }
+  }
+}
+
+/**
+ * Forwards the caller's parallel tool-call intent onto the buddy wire.
+ *
+ * The canonical control is `generation_controls.parallel_tool_calls`; the
+ * reference gateway always passes it through so upstream keeps the structured
+ * tool channel, and the same is applied here.
+ */
+export function injectBuddyParallelToolCalls(
+  payload: Record<string, unknown>,
+  request: CanonicalRequest,
+): void {
+  const parallel = request.generation_controls?.parallel_tool_calls;
+  if (parallel !== undefined) payload["parallel_tool_calls"] = parallel;
+}
+
 function finalizeBuddyMessages(
   messages: Array<Record<string, unknown>>,
   systemPrompt: string,
@@ -1056,6 +1094,7 @@ function finalizeBuddyMessages(
   coalesceConsecutiveUserMessages(messages);
   dropEmptyBuddyMessages(messages);
   ensureBuddyLeadingSystem(messages, systemPrompt);
+  omitBuddyAssistantToolCallContent(messages);
   applyBuddyAutoPromptCache(messages);
 }
 

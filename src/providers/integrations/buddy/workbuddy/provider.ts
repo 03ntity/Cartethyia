@@ -34,6 +34,7 @@ import { BUDDY_INTL_MODELS_PATH, fetchBuddyDirectoryModels } from "../buddy-disc
 import {
   applyBuddySystemPrompt,
   buddyPrePayloadCommon,
+  injectBuddyParallelToolCalls,
   normalizeBuddyToolNames,
 } from "../buddy-chat-shared";
 
@@ -141,6 +142,7 @@ export function workbuddyPrePayload(
     restoreHistoricalToolDefinitions(payload, normalizedMessages);
   }
   normalizeBuddyToolNames(payload);
+  injectBuddyParallelToolCalls(payload, request);
   void request;
 }
 

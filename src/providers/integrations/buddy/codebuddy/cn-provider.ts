@@ -29,7 +29,9 @@ import {
   coalesceConsecutiveUserMessages,
   dropEmptyBuddyMessages,
   ensureBuddyLeadingSystem,
+  injectBuddyParallelToolCalls,
   normalizeBuddyToolNames,
+  omitBuddyAssistantToolCallContent,
 } from "../buddy-chat-shared";
 
 
@@ -96,9 +98,11 @@ export function codeBuddyCnPrePayload(
     coalesceConsecutiveUserMessages(messages);
     dropEmptyBuddyMessages(messages);
     ensureBuddyLeadingSystem(messages, CODEBUDDY_CN_NEUTRAL_PROMPT);
+    omitBuddyAssistantToolCallContent(messages);
   }
   ensurePayloadModel(payload, candidate, "CodeBuddy CN");
   normalizeBuddyToolNames(payload);
+  injectBuddyParallelToolCalls(payload, request);
   void request;
 }
 

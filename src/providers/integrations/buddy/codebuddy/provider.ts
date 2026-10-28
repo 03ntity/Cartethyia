@@ -30,6 +30,7 @@ import { BUDDY_INTL_MODELS_PATH, fetchBuddyDirectoryModels } from "../buddy-disc
 import {
   applyBuddySystemPrompt,
   buddyPrePayloadCommon,
+  injectBuddyParallelToolCalls,
   normalizeBuddyToolNames,
 } from "../buddy-chat-shared";
 
@@ -86,6 +87,7 @@ function codeBuddyIntlPrePayload(
     applyBuddySystemPrompt(messages as Array<Record<string, unknown>>, CODEBUDDY_SYSTEM_PROMPT);
   }
   normalizeBuddyToolNames(payload);
+  injectBuddyParallelToolCalls(payload, request);
   void request;
 }
 
