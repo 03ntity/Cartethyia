@@ -196,6 +196,43 @@ export function providerRequestMetadataOnly(request: unknown): unknown {
 }
 
 /**
+ * Captures one provider request body into the stored provider-request panel.
+ *
+ * Providers send bodies in several shapes: a plain string (the common case), a
+ * `Uint8Array`/Buffer (Qoder's custom cosy encoding), or another BodyInit
+ * type (URLSearchParams, Blob, FormData) that cannot be sliced safely here.
+ * Strings and byte arrays are decoded and stored; anything else is recorded as
+ * present-but-opaque, same as the metadata path.
+ */
+function captureRequestBodyBody(
+  body: BodyInit,
+  maxBytes: number,
+): { body: unknown } | { body_present: true; body_bytes: number } {
+  if (typeof body === "string") {
+    return { body: parseCapturedBody(truncateUtf8(body, maxBytes)) };
+  }
+  if (body instanceof Uint8Array) {
+    return { body: parseCapturedBody(truncateUtf8(new TextDecoder().decode(body), maxBytes)) };
+  }
+  return { body_present: true, body_bytes: capturedBodyByteLength(body) };
+}
+
+/** Byte length of a request body in whatever shape the provider sent it. */
+function capturedBodyByteLength(body: BodyInit): number {
+  if (typeof body === "string") return Buffer.byteLength(body, "utf8");
+  if (body instanceof Uint8Array) return body.byteLength;
+  if (typeof body === "object" && body !== null && "size" in body) {
+    const size = (body as { size?: unknown }).size;
+    if (typeof size === "number" && Number.isFinite(size)) return Math.round(size);
+  }
+  if (typeof body === "object" && body !== null && "byteLength" in body) {
+    const byteLength = (body as { byteLength?: unknown }).byteLength;
+    if (typeof byteLength === "number" && Number.isFinite(byteLength)) return Math.round(byteLength);
+  }
+  return 0;
+}
+
+/**
  * Wraps a validated outbound fetch to tee the provider request/response.
  *
  * `captureBody=false` records the request line but skips the response
@@ -216,7 +253,7 @@ export function captureProviderExchange(
         : input instanceof URL
           ? input.toString()
           : input.url;
-    const rawBody = typeof init?.body === "string" ? init.body : null;
+    const rawBody = init?.body;
     const headers = selectCapturedHeaders(init);
     sink.request = {
       method: init?.method ?? "GET",
@@ -227,11 +264,11 @@ export function captureProviderExchange(
       // shape sliced up to `maxBytes` of the translated body and ran it through
       // `JSON.parse` for every attempt — content a metadata-mode tenant had
       // explicitly declined to retain, paid on every dispatch.
-      ...(rawBody === null
+      ...(rawBody === null || rawBody === undefined
         ? {}
         : captureBody
-          ? { body: parseCapturedBody(truncateUtf8(rawBody, maxBytes)) }
-          : { body_present: true, body_bytes: Buffer.byteLength(rawBody, "utf8") }),
+          ? captureRequestBodyBody(rawBody, maxBytes)
+          : { body_present: true, body_bytes: capturedBodyByteLength(rawBody) }),
     };
     const response = await inner(input, init);
     sink.response =

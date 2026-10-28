@@ -106,15 +106,6 @@ async function statusOf(accountId: string): Promise<string | undefined> {
   return row?.status;
 }
 
-async function cooldownOf(accountId: string): Promise<Date | null | undefined> {
-  if (!db) throw new Error("fixture not initialised");
-  const [row] = await db
-    .select({ cooldownUntil: providerAccounts.cooldownUntil })
-    .from(providerAccounts)
-    .where(eq(providerAccounts.id, accountId));
-  return row?.cooldownUntil;
-}
-
 function handle(): CartethyiaDatabase {
   if (!db) throw new Error("fixture not initialised");
   return db;
