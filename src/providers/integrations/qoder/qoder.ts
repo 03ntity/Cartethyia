@@ -1043,10 +1043,14 @@ export function parseLeakedToolCalls(
     if (salvaged === null) return { calls: [], clean: text };
     parsed = salvaged;
   }
-  if (!Array.isArray(parsed) || parsed.length === 0) return { calls: [], clean: text };
+  if (Array.isArray(parsed) && parsed.length === 0) return { calls: [], clean: text };
 
+  // The model echoes the call either as a JSON array (`[{name,arguments},…]`)
+  // or as a single object (`{"name":…,"arguments":…}`). Normalize the single
+  // object into a one-entry array so both shapes share one validator.
+  const items: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
   const calls: DsmlCall[] = [];
-  for (const item of parsed) {
+  for (const item of items) {
     if (typeof item !== "object" || item === null) return { calls: [], clean: text };
     const rec = item as Record<string, unknown>;
     const name = typeof rec["name"] === "string" ? rec["name"].trim() : "";

@@ -134,6 +134,19 @@ test("structured epoch fall back to prose when a call lacks an id", () => {
   expect(String(assistant!["content"])).toContain("[assistant 请求调用工具]");
 });
 
+test("single-object echo is recovered (not just arrays)", () => {
+  // The model sometimes answers with the marker followed by one JSON object
+  // instead of an array: `assistant 请求调用工具\n{"name":"write","arguments":"…"}`.
+  // That shape must recover the call; otherwise the whole block is released as
+  // prose and the marker leaks to the client as text.
+  const text = 'assistant 请求调用工具\n{"name":"write","arguments":"{\\"path\\":\\"C:/a.txt\\",\\"content\\":\\"hi\\"}"}';
+  const { calls, clean } = parseLeakedToolCalls(text, new Set(["write"]));
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.name).toBe("write");
+  expect(JSON.parse(calls[0]!.arguments)).toEqual({ path: "C:/a.txt", content: "hi" });
+  expect(clean).toBe("");
+});
+
 test("image parts are carried as structured OpenAI parts, not dropped", () => {
   const body = build([
     {
