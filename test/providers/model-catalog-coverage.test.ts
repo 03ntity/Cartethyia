@@ -87,29 +87,43 @@ describe("generated catalog indexes", () => {
 });
 
 describe("mistral catalog", () => {
-  test("carries the current large and medium generalist aliases", async () => {
+  test("carries the current medium generalist alias", async () => {
     const ids = (await catalogFor("mistral")).map((m) => m.modelId);
-    expect(ids).toContain("mistral-large-latest");
     expect(ids).toContain("mistral-medium-latest");
+    // `mistral-large-latest` is tier-gated (403 `tier_not_allowed`) on the
+    // subscription tier the live probe used, so it is not listed here.
+    expect(ids).not.toContain("mistral-large-latest");
   });
 
-  test("drops the retired Magistral tiers and the unrequested small row", async () => {
-    // Mistral's model overview deprecates Magistral Medium and Small in favour
-    // of Mistral Medium 3.5 and Mistral Small 4, so listing them advertises
-    // models the provider is actively retiring.
+  test("carries the chat models live on a real Mistral account", async () => {
+    // A live probe against the Mistral API verified each of these responds on
+    // /v1/chat/completions. The catalog is the routing claim, so what was
+    // verified is what is listed.
     const ids = (await catalogFor("mistral")).map((m) => m.modelId);
-    expect(ids).not.toContain("magistral-medium-latest");
-    expect(ids).not.toContain("magistral-small");
-    expect(ids).not.toContain("mistral-small-latest");
+    for (const id of [
+      "codestral-2508",
+      "mistral-code-latest",
+      "ministral-8b-latest",
+      "voxtral-small-latest",
+      "mistral-medium-latest",
+      "mistral-small-latest",
+    ]) {
+      expect(ids).toContain(id);
+    }
+    // Non-chat rows and the tier-gated large rows are deliberately absent.
+    expect(ids).not.toContain("mistral-large-latest");
+    expect(ids).not.toContain("mistral-embed");
   });
 
-  test("every row resolves real limits and a price, not the defaults", async () => {
+  test("every row resolves real limits; a price is number or honest unknown", async () => {
     // A row that failed to resolve would silently publish the 200k/64k default,
-    // which looks measured and misleads capacity planning.
+    // which looks measured and misleads capacity planning. Limits must always
+    // resolve to a number. Price may be `null` for a model the base catalog has
+    // not filed yet — that is an honest "unknown", not the default.
     for (const model of await catalogFor("mistral")) {
       expect(model.contextLimit).toBeTypeOf("number");
       expect(model.outputLimit).toBeTypeOf("number");
-      expect(model.cost.input).toBeTypeOf("number");
+      expect(model.cost.input === null || typeof model.cost.input === "number").toBe(true);
     }
   });
 
