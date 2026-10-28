@@ -1087,15 +1087,46 @@ export function injectBuddyParallelToolCalls(
   if (parallel !== undefined) payload["parallel_tool_calls"] = parallel;
 }
 
-function finalizeBuddyMessages(
+export interface BuddyMessageFinalizeOptions {
+  /** The fixed leading system prompt installed on the wire. */
+  readonly leadPrompt: string;
+  /** Coalesce consecutive user turns (default true). */
+  readonly coalesceConsecutiveUser?: boolean;
+  /** Drop empty-content turns the upstream rejects (default true). */
+  readonly dropEmpty?: boolean;
+  /** Guarantee the wire opens with a system turn (default true). */
+  readonly ensureLeadingSystem?: boolean;
+  /** Omit content on assistant tool_calls-only turns (default true). */
+  readonly omitToolCallContent?: boolean;
+  /** Auto-inject ephemeral prompt-cache markers (default true). */
+  readonly autoPromptCache?: boolean;
+}
+
+/**
+ * The single authoritative buddy message-shape pipeline. Every variant runs
+ * the same sequence — coalesce, drop empty turns, guarantee the leading system
+ * turn, omit content on tool_calls-only assistant turns, then auto-cache — so
+ * the wire shape cannot drift between CodeBuddy intl, CN, and WorkBuddy.
+ */
+export function finalizeBuddyMessages(
   messages: Array<Record<string, unknown>>,
-  systemPrompt: string,
+  options: BuddyMessageFinalizeOptions,
 ): void {
-  coalesceConsecutiveUserMessages(messages);
-  dropEmptyBuddyMessages(messages);
-  ensureBuddyLeadingSystem(messages, systemPrompt);
-  omitBuddyAssistantToolCallContent(messages);
-  applyBuddyAutoPromptCache(messages);
+  if (options.coalesceConsecutiveUser !== false) {
+    coalesceConsecutiveUserMessages(messages);
+  }
+  if (options.dropEmpty !== false) {
+    dropEmptyBuddyMessages(messages);
+  }
+  if (options.ensureLeadingSystem !== false) {
+    ensureBuddyLeadingSystem(messages, options.leadPrompt);
+  }
+  if (options.omitToolCallContent !== false) {
+    omitBuddyAssistantToolCallContent(messages);
+  }
+  if (options.autoPromptCache !== false) {
+    applyBuddyAutoPromptCache(messages);
+  }
 }
 
 /**
@@ -1137,5 +1168,5 @@ export function applyBuddySystemPrompt(
       messages.push({ ...message });
     }
   }
-  finalizeBuddyMessages(messages, systemPrompt);
+  finalizeBuddyMessages(messages, { leadPrompt: systemPrompt });
 }

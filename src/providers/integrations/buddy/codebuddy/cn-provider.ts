@@ -26,12 +26,9 @@ import {
 import { BUDDY_CN_MODELS_PATH, fetchBuddyDirectoryModels } from "../buddy-discovery-shared";
 import {
   buddyPrePayloadCommon,
-  coalesceConsecutiveUserMessages,
-  dropEmptyBuddyMessages,
-  ensureBuddyLeadingSystem,
+  finalizeBuddyMessages,
   injectBuddyParallelToolCalls,
   normalizeBuddyToolNames,
-  omitBuddyAssistantToolCallContent,
 } from "../buddy-chat-shared";
 
 
@@ -95,10 +92,7 @@ export function codeBuddyCnPrePayload(
   if (Array.isArray(payload["messages"])) {
     const messages = payload["messages"] as Array<Record<string, unknown>>;
     neutralizeCnMessages(messages);
-    coalesceConsecutiveUserMessages(messages);
-    dropEmptyBuddyMessages(messages);
-    ensureBuddyLeadingSystem(messages, CODEBUDDY_CN_NEUTRAL_PROMPT);
-    omitBuddyAssistantToolCallContent(messages);
+    finalizeBuddyMessages(messages, { leadPrompt: CODEBUDDY_CN_NEUTRAL_PROMPT });
   }
   ensurePayloadModel(payload, candidate, "CodeBuddy CN");
   normalizeBuddyToolNames(payload);
