@@ -631,7 +631,11 @@ function accountErrorContext(error: unknown, options?: AccountFailureEvidence): 
   // evidence, and provider scope is what a frame with no credential detail
   // classifies as. Every other signal still needs account scope.
   const canMutate = origin === "upstream" && (revocationNamed || (scope === "account" && accountEvidence));
-  const providerCode = options?.providerCode?.toLowerCase() ?? "";
+  const providerCode =
+    options?.providerCode?.toLowerCase() ??
+    (error instanceof GatewayError && typeof error.details.providerCode === "string"
+      ? error.details.providerCode.toLowerCase()
+      : "");
 
   const getHeader = (name: string): string | null => {
     const headers = options?.headers;
@@ -1328,6 +1332,30 @@ const ACCOUNT_ERROR_RULES: readonly AccountErrorRule[] = [
     match: (s) => s.priceRefusal,
     decide: (s) =>
       s.result("quota_exhausted", "cooldown", 0, null, s.reason("Request price refused by the provider"), false),
+  },
+  {
+    // Qoder's code-112 pricing refusal (`{"code":"112","message":"{\"pricingUrl\":...}"}`)
+    // is a "this model is not included in this account's plan, buy more" verdict
+    // for one pair — the account keeps serving its other models. The probe path
+    // does not always carry the code in its evidence (only the message does), so
+    // the match keys on the provider id plus the pricing-page wording as well.
+    // It must run before `quota-exhausted`, which would park the whole account.
+    name: "qoder-plan-gated",
+    match: (s) =>
+      (s.providerId === "qoder" || s.providerId === "qodercn") &&
+      (s.providerCode === "112" || s.lower.includes("pricingurl")),
+    decide: (s) => {
+      const cooldownMs = unsupportedModelCooldownMs(s.modelBlockHits);
+      return s.result(
+        "model_unreachable",
+        "cooldown",
+        cooldownMs,
+        new Date(Date.now() + cooldownMs),
+        s.reason("Model not included in this account's plan"),
+        s.origin === "upstream" && s.modelId !== undefined,
+        true,
+      );
+    },
   },
   {
     name: "model-plan-gated",
