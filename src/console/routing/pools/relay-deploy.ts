@@ -63,7 +63,14 @@ const handler = {
     }
     try {
       const response = await fetch(targetUrl, init);
-      return new Response(response.body, { status: response.status, headers: response.headers });
+      // Forward the body verbatim. Content-encoding/content-length must be
+      // stripped: the relay's own runtime already decoded the stream it hands
+      // us, so re-sending the original gzip headers makes the caller decompress
+      // twice (ZlibError). The body bytes are already plaintext here.
+      const headers = new Headers(response.headers);
+      headers.delete("content-encoding");
+      headers.delete("content-length");
+      return new Response(response.body, { status: response.status, headers });
     } catch (error) {
       return new Response(JSON.stringify({ error: String((error && error.message) || error) }), {
         status: 502,

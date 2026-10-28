@@ -180,7 +180,12 @@ export function createValidatedFetch(options: ValidatedFetchOptions = {}): Valid
       let response: Response;
       if (relayEndpoint) {
         const relay = relayRequest(relayEndpoint, url, requestInit);
-        response = await dial(relay.url, relay.init, fetchFn, proxyUrl);
+        // The relay front door is reached directly: it reads the target from
+        // `x-relay-target`/`x-relay-path` and performs the upstream fetch
+        // itself, so the runtime fetch must NOT be given `proxy` here — that
+        // would make it attempt a CONNECT tunnel against the relay, which a
+        // serverless front door refuses (400).
+        response = await dial(relay.url, relay.init, fetchFn, undefined);
       } else {
         response = await dial(url, requestInit, fetchFn, proxyUrl);
       }
