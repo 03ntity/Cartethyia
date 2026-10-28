@@ -87,7 +87,9 @@ export function isEmptyStream(tally: StreamTally): boolean {
  * failing over across ordered endpoints pre-start.
  *
  * Throws GatewayError (platform_unavailable, 502, upstream) on exhaustion,
- * GatewayError (transport_closed, 499) on abort.
+ * GatewayError (deadline_exceeded, 504, upstream) when a first event never
+ * arrives within the window, and GatewayError (transport_closed, 499) on
+ * client abort.
  */
 export async function fetchWithEmptyStreamRecovery(
   endpoints: readonly string[],
@@ -197,7 +199,12 @@ async function fetchWithTimeout(
   // Race the fetch against a first-event timeout
   const timeoutPromise = new Promise<never>((_, reject) => {
     const timer = setTimeout(() => {
-      reject(new GatewayError("transport_closed", 499, "First event timeout", {}, "upstream"));
+      // A first-event timeout is the gateway waiting on a silent upstream (e.g.
+      // a provider that holds the request in a queue), not the client leaving.
+      // It must surface as a deadline failure, never as a `transport_closed`
+      // 499 — that code is reserved for genuine client cancellations and would
+      // otherwise hide a real upstream wait behind "cancelled by client".
+      reject(new GatewayError("deadline_exceeded", 504, "First event timeout", {}, "upstream"));
     }, timeoutMs);
     signal.addEventListener("abort", () => {
       clearTimeout(timer);

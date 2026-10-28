@@ -226,4 +226,32 @@ describe("fetchWithEmptyStreamRecovery", () => {
       expect(error).toBeInstanceOf(GatewayError);
     }
   });
+
+  test("first event timeout → rejects with deadline_exceeded, not transport_closed", async () => {
+    // A silent upstream (e.g. a provider holding the request in a queue) must
+    // surface as a gateway-side deadline — never as a client cancellation. 499
+    // transport_closed would mislabel an upstream wait as the client leaving.
+    const fetch = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      return jsonResponse({ content: "late" });
+    };
+    try {
+      await fetchWithEmptyStreamRecovery(
+        ["https://api.test/v1"],
+        { headers: {}, body: "{}" },
+        {
+          fetch: fetch as EmptyStreamFetch,
+          drain: makeDrain([meaningfulTally()]),
+          signal: makeSignal(),
+          deadlineMs: Date.now() + 60_000,
+          policy: { firstEventTimeoutMs: 50 },
+        },
+      );
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(GatewayError);
+      expect((error as GatewayError).code).toBe("deadline_exceeded");
+      expect((error as GatewayError).status).toBe(504);
+    }
+  });
 });
