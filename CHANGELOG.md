@@ -8,6 +8,137 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.7.1] - 2026-10-28
+
+### Added
+
+- **Inception Labs (Mercury 3) as a bundled free-tier provider.** `inception`
+  ships with `mercury-3` pinned to the free tier — one million token context,
+  131072 max output, reasoning and tool calling, zero price. It appears under
+  Free Limited Providers in the console. A 429 from the per-minute window
+  cools the account for one minute (upstream `Retry-After` still wins) instead
+  of the generic fifteen-minute guess, so a throttled account recovers as soon
+  as the window resets.
+
+- **A `random` pool-group selection strategy.** Pool selection previously only
+  knew the ordered scans, so a burst always hit the same first pools and
+  burned them one by one while siblings sat idle — the "all pools cooling,
+  fresh ones unused" pattern. `random` shuffles the eligible pools per request
+  (still skipping cooldown/blocked pools and falling through full ones). Set
+  it per tenant via the pools strategy endpoint; migration `0025` ships for
+  both backends.
+
+- **Pool cooldown and probe verdicts survive refresh and restart.** A probe
+  429 now writes a cooldown marker the console shows, markers persist across
+  restarts, and blocked egress verdicts are restored at boot — a spent or
+  retired egress is not re-picked after a restart.
+
+- **OpenCode free tier aligned 1:1 with the reference bridge (v2).** Flat
+  `/inference` dispatch paths, the minimal free-tier prompt, native proxy
+  egress, and pool bulk actions in the console.
+
+- **Validated direct egress uses native fetch by default**, with per-provider
+  opt-in and opt-out.
+
+### Fixed
+
+- **Qoder (INTL) tool calls and structured output are more robust.** Adapted
+  from the reference bridge: DeepSeek multi-turn replays `reasoning_content`
+  on every assistant turn once the conversation has a reasoning trace (absent
+  is refused upstream — the source of occasional failures that passed on
+  retry); tool-call echoes are recovered in every marker variant the model
+  emits, with trailing DSML tags stripped; structured tool turns fall back to
+  prose when a call lacks an id; and image parts are sent as structured
+  `image_url` parts instead of being silently dropped (the upstream reads
+  message content, not the top-level field). Verified live on
+  `qoder/deepseek-v4.1-flash` and `qoder/qwen3.8-flash` only.
+
+- **Health events no longer depend on database defaults.** SQLite lacks
+  `gen_random_uuid()`/`now()`, so ids and timestamps are now supplied in code
+  — event rows survive and the activity panel stays truthful in Lite mode.
+
+- **`bun run dev` stays quiet while the backend restarts.** A refused Vite
+  proxy connect answers a graceful 502 JSON instead of a wall of
+  `ECONNREFUSED` logs; `VITE_NO_BACKEND_PROXY=1` removes the proxy entirely
+  for pure dashboard work.
+
+- **Egress blocks are scoped to IP-limited providers.** A free-tier refusal
+  only retires the egress address for providers whose limits follow the
+  address; for everyone else the refusal belongs to the account dialed, so a
+  shared proxy is never sidelined for an account-keyed refusal.
+
+- **OpenCode registry wire-path maps synced to the v2 family segment**, and
+  the system-one surface stays on the flat `/inference` path (verified live).
+
+- **Upstream 429 free-limit probes are labelled as rate limits**, not generic
+  failures, so the health panel draws them correctly.
+
+- **DSML tool-call recovery matches the reference bridge's edge semantics**
+  with parity tests.
+
+- **Boot path hardening.** The 30s task cadence is staggered and the prior
+  listener stops on hot reload; task registration is idempotent, shutdown
+  flush bypasses backoff, the install-id knob is governed, a single share
+  store is used, and the inflight catalog store is cached.
+
+- **Buddy providers no longer hit load-time import cycles** (leaf CN catalog
+  module).
+
+- **The gateway surfaces the upstream's full error prose** instead of
+  truncating it to 500 bytes, and an upstream socket drop is classified as
+  `502/upstream` — not `500/cartethyia`.
+
+### Changed
+
+- **Network egress unified on one native-fetch path** — the node dialer is
+  gone; validated direct egress and proxy egress share the same transport.
+
+- **Transport wiring consolidated.** One `GatewayHandlerDeps` and one
+  `nativeCompletionBase`; dead dispatch fields and an unused
+  `providerAdapters` fallback were removed.
+
+- **Quota shared cache and refresh moved to the providers layer**; transport
+  and workers no longer reach into console code.
+
+- **Protocol layer now owns translation, reasoning, and upstream parsing** —
+  the protocol-to-transport/provider inversions are gone.
+
+- **Backend monoliths split**: pure classification and catalog helpers were
+  extracted from the large services.
+
+- **Dashboard monoliths split**: Proxy, Usage, and Accounts pages are section
+  components; the dead toolbar and EffortPicker were dropped and usage periods
+  are single-sourced.
+
+- **Test layout aligned with the `src` module tree.**
+
+### Removed
+
+- **Buddy redeem, travel, lottery, and trial-claim worker tasks.**
+- **The request-lifecycle-derived in-flight gauge.**
+- **The model-abuse ban surfaces the strike layer owned.**
+- **Orphaned start and watch-traffic scripting.**
+- **The `reports/` artifact directory.**
+
+### Performance
+
+- **Client identity is resolved once per request**, and the route snapshot is
+  warmed at boot instead of on first request.
+- **The worker scheduler injects a lease-acquire timeout.**
+
+### Tests
+
+- Dropped heavy e2e gateway suites, low-value suites with sibling coverage,
+  duplicated assertions, a stale unit bucket, and donor-referencing provider
+  suites; CLI port-startup moved to integration scope.
+
+### Documentation
+
+- README polished with a development/testing section; skill pages point the
+  engineering completion section at the verification owner; stale test
+  references and architecture wording fixed; references refreshed for the
+  relocated translation, quota, and governance paths.
+
 ## [2.7.0] - 2026-10-27
 
 ### Removed
