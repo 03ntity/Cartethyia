@@ -167,6 +167,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   (32 hex, stable across restarts, no DB write). Every pooled account presents
   a distinct device alongside the machine-bound Turing token.
 
+- **Mistral catalog expanded to models verified live.** The static roster was
+  re-checked against a live key: `codestral-2508/latest`,
+  `mistral-code-latest`, the ministral family, `voxtral-small-2507/latest`,
+  the `mistral-medium-latest` aliases, `mistral-vibe-cli-*`, and
+  `magistral-*` now ship, while rows that answer 403
+  (`tier_not_allowed` — e.g. `mistral-large*`) or 400 (`invalid_model` —
+  Labs, embed/OCR/transcribe/TTS/realtime) are excluded, so every model the
+  catalog offers can actually serve.
+
 ### Fixed
 
 - **Qoder (INTL) tool calls and structured output are more robust.** Adapted
@@ -214,6 +223,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 - **The gateway surfaces the upstream's full error prose** instead of
   truncating it to 500 bytes, and an upstream socket drop is classified as
   `502/upstream` — not `500/cartethyia`.
+
+- **Vercel relay deployments are public again.** The deploy flow left the
+  project under Vercel's SSO Protection, so a deployed relay answered 401 for
+  anonymous traffic — "deploynya sukses tapi gak public". Deploys now set
+  `ssoProtection: null` (via the project settings PATCH) so the front door
+  serves any caller.
+
+- **Hosted relay dials are direct fetches, not CONNECT.** A relay front door
+  (Vercel/Workers/Deno) answers application HTTP and refuses CONNECT, but the
+  validated egress handed the relay URL to the runtime fetch as its `proxy`
+  option, so every relay dial failed with "Proxy refused to open a tunnel:
+  400 Bad Request" — including pool health checks and the Add Proxy "Test
+  URL" probe. Relay dials now fetch the relay directly, carrying the target
+  origin/path in `x-relay-target`/`x-relay-path`, and the relay worker strips
+  `content-encoding`/`content-length` from the upstream response — Vercel
+  Edge already decodes the stream it hands back, so re-sending gzip headers
+  made callers decompress twice (ZlibError on gzip targets). Verified live:
+  the canary probe reports healthy and gzip/OpenCode targets return 200
+  through a deployed relay.
 
 ### Changed
 
