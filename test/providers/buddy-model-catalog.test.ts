@@ -203,13 +203,4 @@ describe("measured context windows", () => {
     expect(cn?.contextLimit).toBe(1_000_000);
     expect(cn?.outputLimit).toBe(64_000);
   });
-
-  test("hy3-preview is published with the measured efforts", () => {
-    for (const rows of [CODEBUDDY_MODELS, WORKBUDDY_MODELS]) {
-      const preview = rows.find((model) => model.modelId === "hy3-preview");
-      expect(preview?.contextLimit).toBe(262_144);
-      expect(preview?.outputLimit).toBe(64_000);
-      expect(preview?.reasoningEfforts).toEqual(["low", "high"]);
-    }
-  });
 });

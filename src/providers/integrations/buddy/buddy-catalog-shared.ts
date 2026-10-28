@@ -42,7 +42,6 @@ export const BUDDY_INTL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "glm-5.2": ["high", "xhigh"],
   "glm-5.3": ["low", "high", "max"],
   hy3: ["low", "high"],
-  "hy3-preview": ["low", "high"],
   "hy4-preview-f": ["high"],
 };
 export const BUDDY_CN_EFFORTS: Readonly<Record<string, readonly string[]>> = {
@@ -54,7 +53,6 @@ export const BUDDY_CN_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "glm-5.3": ["low", "high", "max"],
   "glm-5.3-flash": ["low", "high", "max"],
   hy3: ["low", "high"],
-  "hy3-preview": ["low", "high"],
   "hy4-preview": ["high"],
 };
 
