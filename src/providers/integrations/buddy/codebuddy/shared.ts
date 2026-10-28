@@ -6,6 +6,7 @@ import { buddyConversationHeaders } from "../buddy-conversation-headers";
 import { buddyEnterprise, buddyUserId, resolveBuddyIdentity } from "../buddy-identity";
 import { buildCodeBuddyUserAgent, getCodeBuddyCnVersion, getCodeBuddyVersion } from "../../../operations/client-versions";
 import { buddyDeviceTokenHeaders } from "../workbuddy/shared";
+import { CODEBUDDY_TURING_CONFIG } from "../turing-device-token";
 import { buddyCliHeaders, buddyCliTraceHeaders } from "../buddy-cli-headers";
 
 /** Client identity variant behind the per-request CodeBuddy headers. */
@@ -87,10 +88,17 @@ export async function codebuddyHeaders(
     // turn-level aggregation key, and a chat request without it is refused for a
     // missing conversation id.
     ...conversation,
-    // CodeBuddy IDE maps to the international realm; CLI maps to CN. The
-    // device-token pair follows the donor's realm rules (intl never sends;
-    // CN sends the real token or the official failure placeholder).
-    ...buddyDeviceTokenHeaders({ realm: identity === "IDE" ? "intl" : "cn", context, cliIdentity }),
+    // The desktop client sends the device-token pair on both realms. SDK
+    // token when configured, captured token otherwise, or the official failure
+    // placeholder. CodeBuddy uses its own SDK payload profile (same SDK,
+    // distinct product identity). (CLI branch above already returned without
+    // device headers.)
+    ...(await buddyDeviceTokenHeaders({
+      realm: identity === "IDE" ? "intl" : "cn",
+      context,
+      cliIdentity,
+      turingConfig: CODEBUDDY_TURING_CONFIG,
+    })),
   };
 }
 

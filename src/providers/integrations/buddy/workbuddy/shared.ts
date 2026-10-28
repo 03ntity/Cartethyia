@@ -14,6 +14,12 @@ import {
   getWorkBuddyClientVersion,
   getWorkBuddyCliVersion,
 } from "../../../operations/client-versions";
+import {
+  getTuringDeviceTokenService,
+  resolveTuringSdkRoot,
+  type TuringSdkConfig,
+  WORKBUDDY_TURING_CONFIG,
+} from "../turing-device-token";
 
 /**
  * WorkBuddy serves chat from a versioned path on a base URL that carries no
@@ -140,7 +146,7 @@ export async function workbuddyHeaders(
     headers["x-machine-id"] = deriveAccountStableId(accountId, "machine");
     headers["x-session-id"] = deriveAccountStableId(accountId, "session");
   }
-  Object.assign(headers, buddyDeviceTokenHeaders({
+  Object.assign(headers, await buddyDeviceTokenHeaders({
     realm: domain.endsWith(".cn") ? "cn" : "intl",
     context,
     cliIdentity,
@@ -169,36 +175,41 @@ export function readBuddyDeviceToken(context?: ProviderDispatchContext): string 
 }
 
 /**
- * The reference `X-Device-Token` pair, resolved per the donor gateways' rules.
+ * The reference `X-Device-Token` pair, per the official desktop app.
  *
- * - **International never sends it** (donor #448): the overseas risk control
- *   treats a device token on the intl gateway as foreign, so even a real token
- *   is dropped there.
- * - **CN keeps the real-token semantics**: send the resolved token when the
- *   account has one.
- * - **A desktop non-enterprise CN account always presents `token || error`**
- *   (donor #431): the official client writes one of the two, never neither.
- *   We do not run the QIMEI/TuringShield SDK, so when no real token exists we
- *   mirror the official failure state (`sdk_not_initialized`) instead of
- *   omitting the header — an account with neither is a state the upstream never
- *   sees and flags as missing.
+ * The desktop client (WorkBuddyAI, channel 400111) always presents one of the
+ * two on chat traffic — a real token from the TuringShield SDK, or an
+ * `X-Device-Token-Error` when the SDK cannot produce one. It never omits both,
+ * and it sends the header on every realm (Intl and CN alike). The SDK is a
+ * proprietary native addon; when it is not configured we fall back to a
+ * captured token (auth_state / `CARTETHYIA_DEVICE_TOKEN_FILE`) and only then
+ * to the official failure state.
+ *
+ * - `CARTETHYIA_TURING_SDK_PATH` → real token via `TuringDeviceTokenService`.
+ * - Legacy token (auth_state/file) → used when the SDK is unavailable.
  * - CLI identity never carries a device token (the CLI has no device).
  */
-export function buddyDeviceTokenHeaders(args: {
+export async function buddyDeviceTokenHeaders(args: {
   realm: "intl" | "cn";
   context: ProviderDispatchContext | undefined;
   cliIdentity: boolean | undefined;
-}): Record<string, string> {
-  const { realm, context, cliIdentity } = args;
-  if (realm !== "cn") return {};
+  turingConfig?: TuringSdkConfig;
+}): Promise<Record<string, string>> {
+  const { context, cliIdentity, turingConfig } = args;
+  void args.realm; // the desktop client sends the token on both realms
   if (resolveBuddyIdentity(context, cliIdentity) === "cli") return {};
+  // Native SDK first (real token), when configured.
+  if (resolveTuringSdkRoot() !== null) {
+    const sdkHeaders = await getTuringDeviceTokenService(turingConfig ?? WORKBUDDY_TURING_CONFIG).headersForRequest(false);
+    if (sdkHeaders["x-device-token"] !== undefined) return sdkHeaders;
+    // SDK configured but could not produce a token: mirror its failure state,
+    // like the desktop client does — do not fall back to a stale file token.
+    return sdkHeaders;
+  }
+  // No SDK on this deployment: a captured token is better than nothing.
   const token = readBuddyDeviceToken(context);
   if (token !== undefined) return { "x-device-token": token };
-  // Personal (non-enterprise) desktop: mirror the official failure state.
-  if (buddyEnterprise(context) === undefined) {
-    return { "x-device-token-error": "sdk_not_initialized" };
-  }
-  return {};
+  return { "x-device-token-error": "sdk_not_initialized" };
 }
 
 function readDeviceTokenFile(): string | undefined {

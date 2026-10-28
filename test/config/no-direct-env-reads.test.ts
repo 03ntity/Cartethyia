@@ -89,6 +89,11 @@ const ALLOW_LIST: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     // the rest of the buddy credential surface.
     CARTETHYIA_DEVICE_TOKEN_FILE: "buddy device-token file path, deployment-level injection",
   },
+  "src/providers/integrations/buddy/turing-device-token.ts": {
+    // TuringShield native SDK directory (turing_sdk.node + TuringShieldSDK.dll),
+    // injected by the deployment — proprietary binary, not shipped in-repo.
+    CARTETHYIA_TURING_SDK_PATH: "turing SDK native addon directory, deployment-level injection",
+  },
   "src/providers/integrations/cursor/cursor.ts": {
     // Cursor heartbeat tuning; subsystem-specific, only meaningful if the
     // operator is debugging the cursor transport.
