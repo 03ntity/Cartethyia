@@ -24,6 +24,7 @@ import { providerBaseUrl } from "../../provider-metadata";
 import { sleep } from "../../../shared/sleep";
 import { WORKBUDDY_DOMAIN } from "./workbuddy/shared";
 import { BUDDY_PROVIDER_IDS } from "../../provider-metadata";
+import { QODER_CHECKIN_PROVIDER_IDS } from "../qoder/qoder-checkin";
 import {
   buildWorkBuddyUserAgent,
   getWorkBuddyClientVersion,
@@ -38,7 +39,10 @@ import { codebuddyDomain, type CodeBuddyVariant } from "./codebuddy/shared";
  * shared family set so this list cannot drift from the health recorder's or the
  * request preparer's.
  */
-export const DAILY_CHECKIN_PROVIDER_IDS: readonly string[] = [...BUDDY_PROVIDER_IDS];
+export const DAILY_CHECKIN_PROVIDER_IDS: readonly string[] = [
+  ...BUDDY_PROVIDER_IDS,
+  ...QODER_CHECKIN_PROVIDER_IDS,
+];
 
 /** Abort budget for one upstream check-in request. */
 const TIMEOUT_MS = 15_000;

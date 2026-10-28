@@ -29,6 +29,10 @@ import {
   fetchDailyCheckin,
   type DailyCheckinResult,
 } from "../providers/integrations/buddy/buddy-checkin";
+import {
+  fetchQoderDailyCheckin,
+  isQoderCheckinProvider,
+} from "../providers/integrations/qoder/qoder-checkin";
 
 export { DAILY_CHECKIN_PROVIDER_IDS, checkinDayKey };
 export type { DailyCheckinResult };
@@ -423,12 +427,19 @@ export async function attemptDailyGrowthPass(args: {
   }
   let checkin: DailyCheckinResult;
   try {
-    checkin = await fetchDailyCheckin({
-      providerId,
-      accountId,
-      credential,
-      fetcher,
-    });
+    checkin = isQoderCheckinProvider(String(providerId))
+      ? await fetchQoderDailyCheckin({
+          providerId: String(providerId),
+          accountId,
+          credential,
+          fetcher,
+        })
+      : await fetchDailyCheckin({
+          providerId,
+          accountId,
+          credential,
+          fetcher,
+        });
   } catch (error) {
     checkin = {
       providerId,

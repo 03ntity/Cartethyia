@@ -33,6 +33,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   restarts, and blocked egress verdicts are restored at boot — a spent or
   retired egress is not re-picked after a restart.
 
+- **Qoder daily check-in (streak / 100 Credits per day).** Qoder accounts now
+  ride the same daily check-in machinery as the Buddy family: the quota sweep
+  claims the grant once per day, and a manual trigger is available through the
+  account quota surface. Legacy `/sash/.../daily-check-in` status/claim is
+  tried first; when the international realm does not expose it (404), the
+  CREDITS-kind activity campaign is claimed instead. Streak days and the 100
+  credit grant are reported in the sweep log.
+
 - **OpenCode free tier aligned 1:1 with the reference bridge (v2).** Flat
   `/inference` dispatch paths, the minimal free-tier prompt, native proxy
   egress, and pool bulk actions in the console.

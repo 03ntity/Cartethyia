@@ -39,6 +39,10 @@ import {
   type BuddyActivityReportResult,
   type DailyCheckinResult,
 } from "../../providers/integrations/buddy/buddy-checkin";
+import {
+  fetchQoderDailyCheckin,
+  isQoderCheckinProvider,
+} from "../../providers/integrations/qoder/qoder-checkin";
 import { buddyAccountUid } from "../../providers/integrations/buddy/buddy-oauth-shared";
 import {
   supportsAccountReset,
@@ -99,12 +103,20 @@ function toBuddyUsageView(
   };
 }
 
-/** One account's check-in through the buddy billing facade. */
+/** One account's check-in through the buddy billing facade (Qoder uses its own surface). */
 async function runAccountCheckin(
   account: { id: string; providerId: string },
   credential: string,
   forceClaim: boolean,
 ): Promise<DailyCheckinResult> {
+  if (isQoderCheckinProvider(account.providerId)) {
+    return fetchQoderDailyCheckin({
+      providerId: account.providerId,
+      accountId: account.id,
+      credential,
+      fetcher: globalThis.fetch,
+    });
+  }
   return fetchDailyCheckin({
     providerId: account.providerId,
     accountId: account.id,
@@ -153,10 +165,14 @@ async function runDailyGrowthForAccount(
   }
 
   // Report leg: needs a uid, which only a JWT carries, so an opaque API key
-  // fails closed instead of reporting under another account's identity.
+  // fails closed instead of reporting under another account's identity. Qoder
+  // has no activity-report leg — its daily grant is purely the check-in.
+  const qoderAccount = isQoderCheckinProvider(String(providerId));
   const userId = buddyAccountUid(credential);
   let report: { ok: boolean; message: string };
-  if (userId === undefined || userId.length === 0) {
+  if (qoderAccount) {
+    report = { ok: true, message: "Qoder has no activity-report leg" };
+  } else if (userId === undefined || userId.length === 0) {
     report = { ok: false, message: "Report needs an OAuth account (no uid in this credential)" };
   } else {
     try {
@@ -180,13 +196,20 @@ async function runDailyGrowthForAccount(
 
   let checkin: { ok: boolean; message: string };
   try {
-    const result = await fetchDailyCheckin({
-      providerId,
-      accountId: account.id,
-      credential,
-      forceClaim: true,
-      fetcher,
-    });
+    const result = qoderAccount
+      ? await fetchQoderDailyCheckin({
+          providerId: String(providerId),
+          accountId: account.id,
+          credential,
+          fetcher,
+        })
+      : await fetchDailyCheckin({
+          providerId,
+          accountId: account.id,
+          credential,
+          forceClaim: true,
+          fetcher,
+        });
     checkin =
       result.state === "error"
         ? { ok: false, message: result.error ?? "Daily check-in failed" }
