@@ -132,12 +132,13 @@ const CLAMPED_EFFORT_MIN_OUTPUT_TOKENS = 16_384;
 const BUDDY_LEVEL_RANK: Readonly<Record<string, number>> = {
   off: 0,
   none: 0,
-  minimal: 1,
-  low: 2,
-  medium: 3,
-  high: 4,
-  xhigh: 5,
-  max: 6,
+  instant: 1,
+  minimal: 2,
+  low: 3,
+  medium: 4,
+  high: 5,
+  xhigh: 6,
+  max: 7,
 };
 
 /** Builds the Anthropic thinking block from canonical reasoning intent. */

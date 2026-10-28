@@ -52,7 +52,7 @@ export type ServiceKind = (typeof SERVICE_KINDS)[number];
  * their membership set from it, and the probe route's accepted subset is
  * declared separately because it is deliberately narrower.
  */
-export const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const REASONING_EFFORTS = ["none", "instant", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 /** One canonical reasoning effort. */
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];

@@ -12,6 +12,7 @@ import type { CanonicalRequest, ReasoningIntent, WireFamily } from "../canonical
  * Provides a unified effort scale across OpenAI, Anthropic, and open-weight models.
  */
 export const REASONING_EFFORT_LADDER = [
+  "instant",
   "minimal",
   "low",
   "medium",
@@ -54,6 +55,7 @@ export interface ParsedThinkingSuffix {
  */
 export const LEVEL_TO_BUDGET: Readonly<Record<ReasoningEffortLevel | "none", number>> = {
   none: 0,
+  instant: 256,
   minimal: 512,
   low: 1_024,
   medium: 8_192,
@@ -242,6 +244,20 @@ export const BASE_SUPPORTED_EFFORTS: readonly ReasoningEffortLevel[] = [
 const MIMO_V26_SUPPORTED_EFFORTS: readonly ReasoningEffortLevel[] = ["low", "medium", "high"];
 
 /**
+ * Mercury (Inception Labs) — the chat ladder is `{instant, low, medium,
+ * high}`: `minimal`, `xhigh`, and `max` each answer a 400
+ * `reasoning_effort must be one of: 'instant', 'low', 'medium', 'high'`.
+ * `instant` is not on the canonical ladder, so it can only appear here; the
+ * clamp steps down to `high` for any higher request.
+ */
+const INCEPTION_SUPPORTED_EFFORTS: readonly ReasoningEffortLevel[] = [
+  "instant",
+  "low",
+  "medium",
+  "high",
+];
+
+/**
  * `low..max`: the OpenAI 5.6/6/daybreak generation and the new-gen Claude
  * adaptive models (`fable`/`mythos`/`opus-5`/`sonnet-5`/`opus-4-7`/`opus-4-8`)
  * all serve `max`, and none of them advertises `minimal`.
@@ -319,6 +335,12 @@ export function resolveSupportedReasoningEfforts(
   // and `max` — both of which it answers with an opaque 500.
   if (id.includes("mimo-v2.6")) {
     return MIMO_V26_SUPPORTED_EFFORTS;
+  }
+  // Checked before the generic default: Mercury's chat endpoint answers every
+  // effort outside {instant, low, medium, high} with a 400 that names the
+  // field (recorded live from request 40b60777).
+  if (id.includes("mercury") && wireFamily === "chat") {
+    return INCEPTION_SUPPORTED_EFFORTS;
   }
   // Claude catalog ladders: `output_config.effort` rides the
   // Messages wire, so an out-of-ladder tier is an upstream rejection risk.
