@@ -294,17 +294,21 @@ async function disableAccount(
  * "static token" toggle sets — the sweep skips it and its status stops reading
  * as a broken/re-auth account. Not lease-fenced: a non-destructive annotation
  * that any process may write, and the credential is not touched.
+ *
+ * This never changes `status`: a `disabled` account stays `disabled` (only an
+ * operator or an explicit recovery may re-enable it), while an `active` one
+ * stays `active`. The static marker and the error clearing are orthogonal to
+ * the account's health state.
  */
 async function markStaticToken(db: CartethyiaDatabase, accountId: string): Promise<void> {
   await db
     .update(providerAccounts)
     .set({
       staticToken: true,
-      // A static token is a normal, usable credential, not an error state: the
-      // account is `active` and dispatchable, so any error left by the failed
-      // refresh would otherwise keep the row reading "Re-login required" while
-      // it is in fact serving. Mirrors the console's static-token toggle.
-      status: "active",
+      // A static token is a normal, usable credential, not an error state: any
+      // error left by the failed refresh would otherwise keep the row reading
+      // "Re-login required" while it is in fact serving. Mirrors the console's
+      // static-token toggle.
       cooldownUntil: null,
       lastError: null,
       lastErrorCategory: null,

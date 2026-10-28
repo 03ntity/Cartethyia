@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { healthEventBuffer } from "../../persistence/health-event-flush";
-import { and, count, desc, eq, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import { affectedRows, pruneExpiredCooldowns } from "../../persistence/dialect";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import { healthEvents, providerAccounts } from "../../persistence/schema";
@@ -415,24 +415,11 @@ export async function sweepExpiredCooldowns(db: CartethyiaDatabase): Promise<num
       })
       .from(providerAccounts)
       .where(
-        or(
-          // An ordinary cooldown, recovered as soon as its window elapses.
-          and(
-            eq(providerAccounts.status, "cooldown"),
-            isNotNull(providerAccounts.cooldownUntil),
-            lte(providerAccounts.cooldownUntil, now),
-          ),
-          // An **automatic** disable. Selected only when it carries a deadline:
-          // an operator's disable leaves
-          // `cooldownUntil` null, so a human's decision still outranks the
-          // machine and is never swept away. The deadline is written by the two
-          // paths that disable on evidence — the classifier's revocation branch
-          // and a definitively rejected refresh grant.
-          and(
-            eq(providerAccounts.status, "disabled"),
-            isNotNull(providerAccounts.cooldownUntil),
-            lte(providerAccounts.cooldownUntil, now),
-          ),
+        // An ordinary cooldown, recovered as soon as its window elapses.
+        and(
+          eq(providerAccounts.status, "cooldown"),
+          isNotNull(providerAccounts.cooldownUntil),
+          lte(providerAccounts.cooldownUntil, now),
         ),
       )
       // One pass recovers a bounded batch. The sweep runs every 30s, so a

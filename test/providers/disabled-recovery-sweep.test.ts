@@ -1,19 +1,14 @@
 /**
- * An automatic `disabled` is no longer terminal.
+ * A `disabled` account is never re-enabled by the sweep.
  *
- * `disabled` used to be the one state nothing recovered: a credential rejected
- * once — a revoked key, a definitively dead refresh grant — left rotation until
- * an operator noticed by hand and clicked Recover. That is the wrong default for
- * a credential that may come back on its own: keys get re-issued, grants get
- * re-authorized, and an upstream's notion of "invalid" can outrun ours.
- *
- * The safety of automating it is entirely the **deadline**. A row the gateway
- * disables *by itself* carries `cooldownUntil`; a row an *operator* disables
- * keeps it null. So the sweep can undo its own verdict without ever undoing a
- * human's, with no extra column and no way to confuse the two.
+ * Disabling is an operator decision (manual toggle) or a terminal machine
+ * verdict (a revoked credential). Either way the recovery sweep must not undo
+ * it: only an operator's explicit recovery re-enables a disabled account. The
+ * sweep's only job is to return ordinary `cooldown` rows to rotation once
+ * their window elapses.
  *
  * This runs against a real migrated SQLite file rather than a double, because
- * the property under test is a compound `WHERE` over two status values and a
+ * the property under test is a compound `WHERE` over status values and a
  * null check — precisely what a chainable double would let me assert instead of
  * prove.
  */
@@ -125,7 +120,7 @@ function handle(): CartethyiaDatabase {
   return db;
 }
 
-test("an automatic disable whose deadline has elapsed returns to rotation", async () => {
+test("an automatic disable is never re-enabled by the sweep", async () => {
   const accountId = await insertAccount({
     label: "auto-disabled",
     status: "disabled",
@@ -134,9 +129,8 @@ test("an automatic disable whose deadline has elapsed returns to rotation", asyn
 
   const recovered = await sweepExpiredCooldowns(handle());
 
-  expect(recovered).toBe(1);
-  expect(await statusOf(accountId)).toBe("active");
-  expect(await cooldownOf(accountId)).toBeNull();
+  expect(recovered).toBe(0);
+  expect(await statusOf(accountId)).toBe("disabled");
 });
 
 test("an operator disable — no deadline — is never swept", async () => {
@@ -182,11 +176,10 @@ test("a plain cooldown is still recovered exactly as before", async () => {
   expect(await statusOf(stillCooling)).toBe("cooldown");
 });
 
-test("recovery resets the streak and clears the category the row was describing", async () => {
-  // A recovered row that kept `auth_invalidated` still rendered the console's
-  // "Re-login required" pill above an `active` status: healthy to routing and
-  // broken to the operator at once. And keeping `consecutiveFailures` would
-  // escalate its *next* failure from a level the row had already climbed out of.
+test("a disabled account keeps its error state because it is never recovered", async () => {
+  // The machine disable recorded the reason (`auth_invalidated`) and the
+  // streak; since the sweep leaves disabled rows alone, both must survive
+  // unchanged rather than being reset as if the account had recovered.
   const accountId = await insertAccount({
     label: "auto-disabled-category",
     status: "disabled",
@@ -202,11 +195,11 @@ test("recovery resets the streak and clears the category the row was describing"
     })
     .from(providerAccounts)
     .where(eq(providerAccounts.id, accountId));
-  expect(row?.lastErrorCategory).toBeNull();
-  expect(row?.consecutiveFailures).toBe(0);
+  expect(row?.lastErrorCategory).toBe("auth_invalidated");
+  expect(row?.consecutiveFailures).toBe(4);
 });
 
-test("recovery is audited as a health event naming the state it came from", async () => {
+test("no recovery event is written for an untouched disabled account", async () => {
   const accountId = await insertAccount({
     label: "auto-disabled-audit",
     status: "disabled",
@@ -224,9 +217,5 @@ test("recovery is audited as a health event naming the state it came from", asyn
     .where(
       and(eq(healthEvents.entityKind, "account"), eq(healthEvents.accountId, accountId)),
     );
-  expect(rows).toHaveLength(1);
-  // `disabled`, not `cooldown`: an operator reading the log must be able to
-  // tell a re-enabled credential from an ordinary window expiring.
-  expect(rows[0]?.fromStatus).toBe("disabled");
-  expect(rows[0]?.toStatus).toBe("active");
+  expect(rows).toHaveLength(0);
 });

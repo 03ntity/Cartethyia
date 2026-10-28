@@ -179,10 +179,12 @@ dbDescribe("OAuth refresh: automatic static-token detection", () => {
     expect(row.status).toBe("active");
   });
 
-  test("the boot pass recovers an account parked by an earlier build", async () => {
+  test("the boot pass annotates static tokens without re-enabling disabled accounts", async () => {
     // The shape the previous build wrote: disabled, `oauth_revoked`, access
     // token still valid. Detection did not exist then; the boot pass is how
-    // such a row converges without an operator touching it.
+    // such a row converges without an operator touching it — but it must NOT
+    // flip the account back to `active`: only an operator may re-enable a
+    // disabled account. The static marker is an annotation, not a recovery.
     const recoverable = await oauthAccount(jwt(3_600));
     await db()
       .update(providerAccounts)
@@ -201,7 +203,8 @@ dbDescribe("OAuth refresh: automatic static-token detection", () => {
 
     const recovered = await readAccount(recoverable);
     expect(recovered.staticToken).toBe(true);
-    expect(recovered.status).toBe("active");
+    expect(recovered.status).toBe("disabled");
+    expect(recovered.lastErrorCategory).toBeNull();
     const parked = await readAccount(dead);
     expect(parked.staticToken).toBe(false);
     expect(parked.status).toBe("disabled");
