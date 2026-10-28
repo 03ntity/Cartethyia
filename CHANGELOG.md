@@ -66,6 +66,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   degradation wins (e.g. drop only the image, keep tools) before the
   cumulative chain runs as fallback.
 
+- **Trae stream refusals are classified, not blanket-routed.** Upstream
+  `1001 "we are not able to authenticate you"` now surfaces as an account-scoped
+  `authentication_failed` (401 + credential evidence) instead of a generic 502
+  platform fault, and `4008 "exceeded the quota"` as `quota_exceeded` (429).
+  Error objects carried in frame bodies (HTTP 200 with `{"code":…,"message":…}`)
+  are detected too, not only named `error` events — the wrong classification was
+  hiding the real cause and could drag the proxy pool into the story.
+
+- **The health classifier recognizes Trae's 1001 verdict.** A numeric upstream
+  code was previously excluded from the credential arm, so `1001` fell through
+  to the `unknown` fallback that never mutates — the account stayed in rotation
+  and was re-dialled on every request despite the upstream's auth verdict. Trae
+  `1001` is now `auth_invalidated` (account-scoped, routing-visible), so the
+  account cools/excludes and failover moves to a sibling.
+
+- **Trae prompt-cache estimation is re-adopted and scoped per (session,
+  model).** Trae's agent surface never reports cache usage, so repeated
+  prefixes are estimated locally from per-session history; two models sharing a
+  conversation id cannot cross-hit, and the assessed usage rides the terminal
+  event so non-streaming telemetry records real counts.
+
+- **Buddy desktop device-token follows the official `token || error`
+  contract.** The desktop client sends `X-Device-Token` on every realm (Intl
+  included) and never omits both it and the error header: when no real token
+  exists it sends `X-Device-Token-Error: sdk_not_initialized`. The buddy
+  providers now do the same instead of dropping the header (or sending it only
+  on CN).
+
+- **A first-event timeout is a deadline, not a client cancel.** The
+  empty-stream watchdog used to classify a silent upstream (e.g. a provider
+  holding the request in a queue) as `transport_closed` 499 — "cancelled by
+  client" — hiding a real upstream wait behind a cancellation. It is now
+  `deadline_exceeded` 504 with upstream origin, matching the streaming
+  stall/first-chunk watchdogs.
+
+- **Qoder recovers single-object leak echoes.** The INTL leak marker could be
+  followed by one JSON object (`{"name":…,"arguments":…}`) instead of an array;
+  that shape was rejected, so the whole block was released as prose and the
+  marker leaked to the client as visible text. `parseLeakedToolCalls` now
+  normalizes a single object into a one-entry array.
+
 ### Added
 
 - **Provider Detail "Activity Matrix" usage card.** A collapsible card at the
@@ -112,6 +153,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - **Validated direct egress uses native fetch by default**, with per-provider
   opt-in and opt-out.
+
+- **The TuringShield SDK is bundled** under `vendor/turing-sdk/` (WorkBuddy
+  desktop 5.8.4 extract) so buddy providers generate real `X-Device-Token`
+  values without any environment setup — `CARTETHYIA_TURING_SDK_PATH` remains
+  an override. Per-provider payload profiles (WorkBuddy vs CodeBuddy product
+  identity on channel 400111) make tokens differ between providers, and the
+  Dockerfile ships the vendor directory into both builder and runtime stages.
+
+- **Per-account device binding (`qimei36`).** Buddy desktop chat now sends
+  `X-Device-Id-List: {"qimei36":"…"}` resolved per account — explicit
+  `auth_state.qimei36` wins, otherwise a deterministic sha256 of the account id
+  (32 hex, stable across restarts, no DB write). Every pooled account presents
+  a distinct device alongside the machine-bound Turing token.
 
 ### Fixed
 
