@@ -12,6 +12,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Qoder: index-less continuation fragments and plain-text leak markers keep
+  their arguments.** Two upstream shapes still dropped tool arguments after
+  the first fix: continuation chunks that omit `index` entirely (no pinned id
+  to join, so encoders dropped the nameless fragment), and the INTL leak
+  marker `[assistant 请求调用工具] …` when it arrives as plain text rather than
+  DSML markup (it was never buffered, so it never reached recovery). The
+  translator now falls back to the most recently seen call id for index-less
+  fragments (mirroring the generic chat parser), and accumulates non-DSML
+  text so the leak marker is recovered at end of stream with full arguments —
+  the "assistant talks, then calls a tool with {} arguments" reports.
+
 - **Routing no longer redials an account whose cooldown deadline has elapsed
   but has not been swept yet.** A row still in `cooldown` status used to read
   as healthy the moment its `cooldown_until` passed, so requests landing in

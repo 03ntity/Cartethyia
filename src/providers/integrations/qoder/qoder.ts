@@ -1024,14 +1024,23 @@ export async function* qoderBodyToCanonicalEvents(
   let hasTerminal = false;
   /** First-sighting id per wire tool-call index, for continuation chunks. */
   const indexIds = new Map<number, string>();
+  /** Last seen call id/name, for index-less continuation fragments. */
+  let lastSeenToolId: string | undefined = undefined;
+  let lastSeenToolName: string | undefined = undefined;
   // DSML recovery state. While `buf` is empty the text passes through
   // untouched; once a chunk carries DSML the rest is buffered so the markup can
   // be parsed whole at end of stream. `tail` holds a possible half-tag that
   // straddles a frame boundary.
   let buf = "";
   let tail = "";
+  // Text that flowed through while not in a DSML stream. The INTL leak marker
+  // (`[assistant 请求调用工具] …`) is not DSML, so it was never buffered and
+  // recovered; keeping the plain text lets the end-of-stream recovery see it.
+  let plainBuf = "";
   /** Calls recovered from the thinking channel, emitted if content had none. */
   let reasonCalls: readonly DsmlCall[] = [];
+  /** True once any tool call has been emitted by any channel this turn. */
+  let hasEmittedToolCall = false;
   // The same recovery for the thinking channel. A model that plans its call
   // inside `reasoning_content` writes the markup there instead of in `content`,
   // so recovering only the content channel loses the call *and* leaves the
@@ -1079,6 +1088,7 @@ export async function* qoderBodyToCanonicalEvents(
                 continue;
               }
               if (body.length > 0) {
+                plainBuf += body;
                 yield {
                   type: "content_delta",
                   sequence_number: seq++,
@@ -1122,23 +1132,41 @@ export async function* qoderBodyToCanonicalEvents(
             for (const tc of toolCalls) {
               const fn = tc["function"] as Record<string, unknown> | undefined;
               const index = typeof tc["index"] === "number" ? (tc["index"] as number) : undefined;
+              const declaredId = typeof tc["id"] === "string" ? (tc["id"] as string) : undefined;
+              const fragName = typeof fn?.["name"] === "string" ? (fn["name"] as string) : undefined;
               // OpenAI continuation chunks re-identify their call by wire
               // `index` alone — the `id` appears only once, in the first chunk.
-              // Pinning the first id per index and reusing it for continuations
-              // is what keeps those fragments attached to the right call;
-              // synthesizing a fresh `call_<index>` id per chunk instead made
-              // every continuation an unknown nameless call that encoders
-              // dropped, so the client saw a call whose arguments were always
-              // empty.
-              const pinnedId = index !== undefined ? indexIds.get(index) : undefined;
-              const callId = (tc["id"] as string) ?? pinnedId ?? `call_${String(index ?? 0)}`;
-              if (tc["id"] && index !== undefined) indexIds.set(index, callId);
+              // Some bridges omit `index` too, so a fragment then falls back to
+              // the most recently seen call id (mirroring the generic chat
+              // parser's `lastSeenToolId`). Pinning the first id per index and
+              // reusing it for continuations is what keeps fragments attached
+              // to the right call; synthesizing a fresh `call_<index>` id per
+              // chunk instead made every continuation an unknown nameless call
+              // that encoders dropped, so the client saw a call whose arguments
+              // were always empty.
+              let callId: string;
+              if (declaredId !== undefined) {
+                callId = declaredId;
+                if (index !== undefined) indexIds.set(index, callId);
+                lastSeenToolId = callId;
+                if (fragName !== undefined) lastSeenToolName = fragName;
+              } else if (index !== undefined && indexIds.has(index)) {
+                callId = indexIds.get(index)!;
+              } else if (
+                lastSeenToolId !== undefined &&
+                (fragName === undefined || lastSeenToolName === fragName)
+              ) {
+                callId = lastSeenToolId;
+              } else {
+                callId = `call_${String(index ?? 0)}`;
+              }
+              hasEmittedToolCall = true;
               yield {
                 type: "tool_call_delta",
                 sequence_number: seq++,
                 call_id: callId,
                 ...(index !== undefined ? { index } : {}),
-                name: fn?.["name"] as string | undefined,
+                ...(fragName === undefined ? {} : { name: fragName }),
                 arguments_delta: (fn?.["arguments"] as string) ?? "",
               } as CanonicalEvent;
             }
@@ -1191,6 +1219,7 @@ export async function* qoderBodyToCanonicalEvents(
         } as CanonicalEvent;
       }
       for (const call of calls) {
+        hasEmittedToolCall = true;
         yield {
           type: "tool_call_delta",
           sequence_number: seq++,
@@ -1218,6 +1247,7 @@ export async function* qoderBodyToCanonicalEvents(
   // Content carried no call of its own: whatever the thinking channel
   // recovered is the turn's call.
   for (const call of reasonCalls) {
+    hasEmittedToolCall = true;
     yield {
       type: "tool_call_delta",
       sequence_number: seq++,
@@ -1225,6 +1255,28 @@ export async function* qoderBodyToCanonicalEvents(
       name: call.name,
       arguments_delta: call.arguments,
     } as CanonicalEvent;
+  }
+  // The INTL leak marker is plain text, not DSML, so it flowed through to
+  // `plainBuf` instead of the buffered `buf`. Recover it the same way: a
+  // model that answers with `[assistant 请求调用工具] [{"name":…,"arguments":…}]`
+  // intended the tool to run, and left alone the client sees the JSON as
+  // content while nothing executes. Only when no other channel already
+  // claimed the turn.
+  if (plainBuf.length > 0 && !hasEmittedToolCall) {
+    const leaked = parseLeakedToolCalls(plainBuf);
+    if (leaked.calls.length > 0) {
+      for (const call of leaked.calls) {
+        hasEmittedToolCall = true;
+        yield {
+          type: "tool_call_delta",
+          sequence_number: seq++,
+          call_id: call.id,
+          name: call.name,
+          arguments_delta: call.arguments,
+        } as CanonicalEvent;
+      }
+      finishReason = "tool_calls";
+    }
   }
   // A recovered call outranks what the upstream reported. It says `stop`
   // because the markup never became a real tool call on its side, so leaving it

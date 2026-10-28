@@ -51,6 +51,62 @@ const continuation = (fragment: string, wireIndex = 0) => ({
   tool_calls: [{ function: { arguments: fragment }, index: wireIndex, type: "function" }],
 });
 
+test("index-less continuation fragments rejoin the last seen call id", async () => {
+  // Some bridges omit `index` on continuation chunks entirely. The fragment
+  // must still land on the call the first chunk established — the generic
+  // chat parser does this via `lastSeenToolId`.
+  const ev = await collect([
+    frame(CALL_START),
+    frame({ tool_calls: [{ function: { arguments: '{"text":"a' }, type: "function" }] }),
+    frame({ tool_calls: [{ function: { arguments: 'b"}' }, type: "function" }] }),
+  ]);
+  const deltas = calls(ev);
+  for (const d of deltas) expect(d["call_id"]).toBe("call_00_full");
+  expect(JSON.parse(deltas.map((d) => String(d["arguments_delta"])).join(""))).toEqual({
+    text: "ab",
+  });
+});
+
+test("a named fragment with a different name does not merge into the last call", async () => {
+  // The name is the discriminator: a fragment that names a different tool is
+  // a parallel call, not a continuation.
+  const ev = await collect([
+    frame(CALL_START),
+    frame({ tool_calls: [{ function: { arguments: '{"text":"a"}' }, type: "function" }] }),
+    frame({
+      tool_calls: [
+        {
+          function: { arguments: '{"path":"b"}' },
+          index: 1,
+          type: "function",
+          id: "call_01_write",
+        },
+      ],
+    }),
+  ]);
+  const byId = new Map<string, string>();
+  for (const d of calls(ev)) {
+    const id = String(d["call_id"]);
+    byId.set(id, (byId.get(id) ?? "") + String(d["arguments_delta"]));
+  }
+  expect(byId.get("call_00_full")).toBe('{"text":"a"}');
+  expect(byId.get("call_01_write")).toBe('{"path":"b"}');
+});
+
+test("the plain-text INTL leak marker is recovered when not DSML", async () => {
+  // `[assistant 请求调用工具] [{"name":…,"arguments":…}]` flows as ordinary
+  // text (no DSML tags), so it was never buffered/recovered. It must still
+  // become a real tool call with full arguments.
+  const marker =
+    "Siap, gas ya~ 🌸\n[assistant 请求调用工具]\n" +
+    JSON.stringify([{ name: "echo", arguments: '{"text":"halo"}' }]);
+  const ev = await collect([frame({ content: marker }), frame({}, "stop")]);
+  const deltas = calls(ev);
+  expect(deltas).toHaveLength(1);
+  expect(deltas[0]?.["name"]).toBe("echo");
+  expect(JSON.parse(String(deltas[0]?.["arguments_delta"]))).toEqual({ text: "halo" });
+});
+
 test("index-identified continuation fragments rejoin the pinned call id", async () => {
   const ev = await collect([
     frame(CALL_START),
