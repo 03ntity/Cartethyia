@@ -5,7 +5,7 @@ import { resolveInboundSessionId } from "../../../operations/session-resolution"
 import { buddyConversationHeaders } from "../buddy-conversation-headers";
 import { buddyEnterprise, buddyUserId, resolveBuddyIdentity } from "../buddy-identity";
 import { buildCodeBuddyUserAgent, getCodeBuddyCnVersion, getCodeBuddyVersion } from "../../../operations/client-versions";
-import { readBuddyDeviceToken } from "../workbuddy/shared";
+import { buddyDeviceTokenHeaders } from "../workbuddy/shared";
 import { buddyCliHeaders, buddyCliTraceHeaders } from "../buddy-cli-headers";
 
 /** Client identity variant behind the per-request CodeBuddy headers. */
@@ -34,7 +34,6 @@ export async function codebuddyHeaders(
 ): Promise<Record<string, string>> {
   const identity = variant === "IDE" ? "IDE" : "CLI";
   const ua = buildCodeBuddyUserAgent(identity);
-  const deviceToken = readBuddyDeviceToken(context);
   const conversationId = resolveInboundSessionId(context, request);
   const conversation = buddyConversationHeaders({
     ...(conversationId === undefined ? {} : { conversationId }),
@@ -88,7 +87,10 @@ export async function codebuddyHeaders(
     // turn-level aggregation key, and a chat request without it is refused for a
     // missing conversation id.
     ...conversation,
-    ...(deviceToken === undefined ? {} : { "X-Device-Token": deviceToken }),
+    // CodeBuddy IDE maps to the international realm; CLI maps to CN. The
+    // device-token pair follows the donor's realm rules (intl never sends;
+    // CN sends the real token or the official failure placeholder).
+    ...buddyDeviceTokenHeaders({ realm: identity === "IDE" ? "intl" : "cn", context, cliIdentity }),
   };
 }
 

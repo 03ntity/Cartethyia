@@ -304,9 +304,26 @@ describe("Buddy upstream protocol alignment", () => {
   });
 
   test("sends the desktop device token only when the account has one", async () => {
-    const headers = await workbuddyHeaders(context, request);
-    expect(headers["x-device-token"]).toBe("desktop-token");
+    // CN keeps the real-token semantics (donor: 国内版保留真实 token 语义);
+    // international never sends it (#448). The default domain is intl, so the
+    // token assertion must run against the CN host.
+    const intl = await workbuddyHeaders(context, request);
+    expect(intl["x-device-token"]).toBeUndefined();
+    const cnHeaders = await workbuddyHeaders(context, request, "www.workbuddy.cn", "5.7.7.40774747");
+    expect(cnHeaders["x-device-token"]).toBe("desktop-token");
     expect(readBuddyDeviceToken({ credential: { auth_state: {} } } as unknown as ProviderDispatchContext)).toBeUndefined();
+  });
+
+  test("CN desktop without a token mirrors the official failure placeholder", async () => {
+    // The official client always presents token || error, never neither (#431).
+    const headers = await workbuddyHeaders(
+      { credential: { auth_state: {} } } as unknown as ProviderDispatchContext,
+      request,
+      "www.workbuddy.cn",
+      "5.7.7.40774747",
+    );
+    expect(headers["x-device-token"]).toBeUndefined();
+    expect(headers["x-device-token-error"]).toBe("sdk_not_initialized");
   });
 
   test("WorkBuddy CN changes only the host identity in the shared headers", async () => {

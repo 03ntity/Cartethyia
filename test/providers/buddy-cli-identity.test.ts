@@ -137,12 +137,27 @@ describe("the desktop identity is unchanged", () => {
     expect(headers["accept-language"]).toBe("en-US");
     expect(headers["x-requested-with"]).toBe("XMLHttpRequest");
     expect(headers["x-codebuddy-request"]).toBe("1");
-    expect(headers["x-device-token"]).toBe("desktop-token");
+    // International never sends the device token (donor #448), even when the
+    // account carries one — the overseas risk control flags it as foreign.
+    expect(headers["x-device-token"]).toBeUndefined();
+    expect(headers["x-device-token-error"]).toBeUndefined();
     expect(headers["x-ide-name"]).toBe("WorkBuddy");
     expect(headers["accept"]).toBe("application/json, text/event-stream");
     // Not one CLI-only header leaks into the default identity.
     for (const name of AGENT_ENVELOPE) expect(headers[name]).toBeUndefined();
     for (const name of STAINLESS) expect(headers[name]).toBeUndefined();
+  });
+
+  test("CN desktop sends the real device token when the account has one", async () => {
+    const headers = await workbuddyHeaders(context, undefined, "www.workbuddy.cn", "5.7.7.40774747");
+    expect(headers["x-device-token"]).toBe("desktop-token");
+    expect(headers["x-device-token-error"]).toBeUndefined();
+  });
+
+  test("CN desktop without a token mirrors the official failure placeholder", async () => {
+    const headers = await workbuddyHeaders(anonymous, undefined, "www.workbuddy.cn", "5.7.7.40774747");
+    expect(headers["x-device-token"]).toBeUndefined();
+    expect(headers["x-device-token-error"]).toBe("sdk_not_initialized");
   });
 
   test("an account authorized as CLI overrides the desktop default", async () => {

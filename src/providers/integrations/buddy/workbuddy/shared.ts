@@ -140,8 +140,11 @@ export async function workbuddyHeaders(
     headers["x-machine-id"] = deriveAccountStableId(accountId, "machine");
     headers["x-session-id"] = deriveAccountStableId(accountId, "session");
   }
-  const deviceToken = readBuddyDeviceToken(context);
-  if (deviceToken !== undefined) headers["x-device-token"] = deviceToken;
+  Object.assign(headers, buddyDeviceTokenHeaders({
+    realm: domain.endsWith(".cn") ? "cn" : "intl",
+    context,
+    cliIdentity,
+  }));
   return headers;
 }
 
@@ -163,6 +166,39 @@ export function readBuddyDeviceToken(context?: ProviderDispatchContext): string 
   const value = state?.["deviceToken"] ?? state?.["device_token"];
   if (typeof value === "string" && value.trim().length > 0) return value.trim();
   return readDeviceTokenFile();
+}
+
+/**
+ * The reference `X-Device-Token` pair, resolved per the donor gateways' rules.
+ *
+ * - **International never sends it** (donor #448): the overseas risk control
+ *   treats a device token on the intl gateway as foreign, so even a real token
+ *   is dropped there.
+ * - **CN keeps the real-token semantics**: send the resolved token when the
+ *   account has one.
+ * - **A desktop non-enterprise CN account always presents `token || error`**
+ *   (donor #431): the official client writes one of the two, never neither.
+ *   We do not run the QIMEI/TuringShield SDK, so when no real token exists we
+ *   mirror the official failure state (`sdk_not_initialized`) instead of
+ *   omitting the header — an account with neither is a state the upstream never
+ *   sees and flags as missing.
+ * - CLI identity never carries a device token (the CLI has no device).
+ */
+export function buddyDeviceTokenHeaders(args: {
+  realm: "intl" | "cn";
+  context: ProviderDispatchContext | undefined;
+  cliIdentity: boolean | undefined;
+}): Record<string, string> {
+  const { realm, context, cliIdentity } = args;
+  if (realm !== "cn") return {};
+  if (resolveBuddyIdentity(context, cliIdentity) === "cli") return {};
+  const token = readBuddyDeviceToken(context);
+  if (token !== undefined) return { "x-device-token": token };
+  // Personal (non-enterprise) desktop: mirror the official failure state.
+  if (buddyEnterprise(context) === undefined) {
+    return { "x-device-token-error": "sdk_not_initialized" };
+  }
+  return {};
 }
 
 function readDeviceTokenFile(): string | undefined {
