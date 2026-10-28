@@ -87,13 +87,13 @@ where their official feeds differ.
 
 The `/v3/config` result depends on the client identity in `User-Agent`. The
 observed identities in
-[`buddy-live-model-catalogs-2026-10-12.json`](../../data/provider-catalogs/buddy-live-model-catalogs-2026-10-12.json)
+[`buddy-v3-config-model-catalogs-2026-10-25.json`](../../data/provider-catalogs/buddy-v3-config-model-catalogs-2026-10-25.json) (field `identityUserAgent`)
 are examples from that capture, not permanent version pins:
 
 | Product | Host | Observed `User-Agent` |
 |---|---|---|
 | CodeBuddy CLI | `www.codebuddy.ai` | `CLI/4.12.1.39217423 CodeBuddy/4.12.1.39217423` |
-| WorkBuddy desktop | `www.workbuddy.ai` | `WorkBuddy/5.5.2 WorkBuddy AI/5.5.2 CLI/5.5.2` |
+| WorkBuddy desktop | `www.workbuddy.ai` | `CLI/4.12.1.39217423 CodeBuddy/4.12.1.39217423` |
 
 When refreshing the snapshot, use a currently authorized account and the
 matching current client identity. Send `Accept`, `User-Agent`, `Origin`,

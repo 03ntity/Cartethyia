@@ -1,7 +1,17 @@
+> # ARCHIVED — UNTRUSTED
+>
+> This file was archived on 2026-10-28. It is a **point-in-time record**, not a
+> description of current behavior: every `file:line`, symbol, path, and
+> measurement below was true when it was written and has not been kept in sync.
+> Do not read it to answer a question about the current codebase, and never cite
+> it as evidence. The shipped implementation superseded this investigation: the
+> Turing SDK is bundled at `vendor/turing-sdk/` and the per-account binding is
+> described in `documentation/features/09-buddy-device-binding.md`.
+
 # Reverse notes — TuringShield `x-device-token` (WorkBuddy/CodeBuddy)
 
 Status: **investigasi** (bukan implementasi final). Semua artefak ada di
-`documentation/reverse-notes/turing/` (`req0.bin`, `resp0.bin`).
+`documentation/archive/research/turing/` (`req0.bin`, `resp0.bin`).
 
 ## Apa yang terbukti (bukti langsung)
 

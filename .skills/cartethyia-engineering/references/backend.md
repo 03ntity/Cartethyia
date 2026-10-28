@@ -118,7 +118,7 @@ policy — distinct from the routing failover loop.
 | `admission/` | Per-key and per-tenant concurrency, lifetime counters |
 | `model-access-rule.ts` | `whitelist` or `blacklist` plus one `model_list` |
 | `csrf.ts` | Console mutation token |
-| `abuse.ts`, `model-abuse.ts` | IP and model abuse gates |
+| `abuse.ts` | IP and model abuse gates |
 | `ip-boundary.ts` | Trusted proxy peer resolution |
 | `crypto.ts` | Key hashing and secret encryption |
 

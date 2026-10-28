@@ -61,7 +61,7 @@ Returned only when an account id is available (unauthenticated sends none).
 | WorkBuddy headers (incl. `X-Device-Id-List`) | `src/providers/integrations/buddy/workbuddy/shared.ts` |
 | CodeBuddy headers (incl. `X-Device-Id-List`) | `src/providers/integrations/buddy/codebuddy/shared.ts` |
 | Vendored SDK | `vendor/turing-sdk/` |
-| Reverse notes + captured wire fixtures | `documentation/reverse-notes/turing/` |
+| Reverse notes + captured wire fixtures (archived) | `documentation/archive/research/turing/` |
 
 ## Known limitation
 

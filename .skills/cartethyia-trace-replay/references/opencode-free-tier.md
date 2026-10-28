@@ -26,8 +26,15 @@ path.
 
 ## Wire shape (observed 200 on 2026-10-17/18; revalidate)
 
-- Base: `https://opencode.ai/inference/v1`; endpoint
-  `/chat/completions` for free ids.
+- Dial the `/inference` origin with the **2.1 family-segment paths** (as
+  shipped in `provider.ts`):
+  - Chat: `https://opencode.ai/inference/openai/v1/chat/completions`
+  - Responses: `https://opencode.ai/inference/openai/v1/responses` (free ids
+    are chat-only, so this is informational)
+  - Anthropic: `https://opencode.ai/inference/anthropic/v1/messages?beta=true`
+  - System One: `https://opencode.ai/inference/v1/systemone` (flat — no
+    family segment)
+  The catalog stays on `/zen/v1/models`; `/inference/v1/models` answers 404.
 - `stream: true` is required — `false` answers 403.
 - **At least 3 tools.** The gate is a membership test, not an exact-match test:
   0/1/2 answer 403, 3 through 13 all answer 200. We send the full
@@ -45,7 +52,9 @@ path.
   We keep sending it.
 - Everything else is optional: `x-opencode-client` (`cli` or `desktop`),
   `x-opencode-project` (40 hex, `global`, `prj_*`, or absent), `accept`,
-  `content-type`, `traceparent`/`b3`, `x-opencode-request`.
+  `content-type`, `traceparent`/`b3`.
+- `x-opencode-request` is **not sent** — the current client no longer sends
+  it and the v2 lane rejects it (403).
 - The legacy lane `https://opencode.ai/zen/v1/chat/completions` answered **429
   `FreeUsageLimitError`** on 2026-10-18 — rate-limited, not refused. Treat it as
   a fallback whose quota is unknown, not as a dead lane.
@@ -139,6 +148,6 @@ Observed by replay, so check these only when current evidence points to them:
 | Extra tool definitions beyond the fingerprint | Allowed; the gate is membership, not equality. |
 | Tool order | Irrelevant. |
 | `authorization` | Absent passes; *wrong* answers 401. |
-| `x-opencode-request` | Answers 200 on `/inference`. |
+| `x-opencode-request` | Never sent (v2 lane rejects it). |
 | Prompt size, turn count, `system` turns, `temperature`, `top_p`, missing token cap | All 200. |
 | The egress IP | **Decisive.** Check this first. |

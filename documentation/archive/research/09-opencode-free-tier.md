@@ -1,3 +1,12 @@
+> # ARCHIVED — UNTRUSTED
+>
+> This file was archived on 2026-10-28. It is a **point-in-time record**, not a
+> description of current behavior: every `file:line`, symbol, path, and
+> measurement below was true when it was written and has not been kept in sync.
+> Do not read it to answer a question about the current codebase, and never cite
+> it as evidence. The live reference for the OpenCode free tier lives at
+> `.skills/cartethyia-trace-replay/references/opencode-free-tier.md`.
+
 # OpenCode free-tier wire
 
 How Cartethyia talks to OpenCode's anonymous free tier: the endpoint shape,

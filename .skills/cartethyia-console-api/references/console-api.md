@@ -131,7 +131,6 @@ into the next.
 | `quota/` | `/console/api/quota/*`, `/console/api/accounts/*`, `/console/api/global/accounts/*` | Quota windows and refresh; cached readings also feed the per-account [Usage floor](../../../documentation/features/04-usage-floor.md) routing policy |
 | `observability/` | `/console/api/system/*` (including `/system/performance`), `/system/usage/requests/:id/download` (JSON attachment of the full detail incl. payloads), `/telemetry/*`, `/logs/*`, `/live/*` | File-log reads, log ring SSE, live in-flight gauge, pool health streams |
 | `audit/` | `/console/api/audit` | Cursor-paginated `admin_audit_log` read, `platform:admin` only |
-| `admin/model-abuse` | `/console/api/model-bans` | List (`GET`), instant-ban one caller for a chosen duration (`POST`, `{ip, apiKeyId?, minutes?, addressOnly?}`), lift early (`DELETE`, `{identity}`); mounted only when `ctx.modelStrikes` exists (`domain-registration.ts`). A ban is scoped to the address **and** the key — `addressOnly` is the explicit opt-in to ban every key from the address |
 | `updates/` | `/console/api/updates/release` | Current release channel read |
 
 That table is the index. Four areas carry their own feature page — data,
