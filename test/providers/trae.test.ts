@@ -358,6 +358,26 @@ describe("buildTraeChatBody", () => {
   test("an empty model name is refused", () => {
     expect(() => buildTraeChatBody("", request(), "intl")).toThrow();
   });
+
+  test("a resolved session id is carried as session_id", () => {
+    const body = buildTraeChatBody("gpt-5.5", request(), "intl", "ses_abc123");
+    expect(body.session_id).toBe("ses_abc123");
+  });
+
+  test("the caller's session id wins over the resolved one", () => {
+    const body = buildTraeChatBody(
+      "gpt-5.5",
+      request({ session_id: "caller-ses" }),
+      "intl",
+      "resolved-ses",
+    );
+    expect(body.session_id).toBe("caller-ses");
+  });
+
+  test("no session id means no session_id field", () => {
+    const body = buildTraeChatBody("gpt-5.5", request(), "intl");
+    expect("session_id" in body).toBe(false);
+  });
 });
 
 describe("toTraeAgentBody", () => {

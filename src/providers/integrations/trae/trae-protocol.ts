@@ -160,6 +160,7 @@ export function buildTraeChatBody(
   modelId: string,
   request: CanonicalRequest,
   realm: TraeRealm,
+  sessionId?: string,
 ): TraeChatBody {
   if (modelId.length === 0) throw new Error("trae model name is required");
 
@@ -235,7 +236,7 @@ export function buildTraeChatBody(
     stream: request.stream,
     region: config.region,
     ai_region: config.region,
-    ...(request.session_id ? { session_id: request.session_id } : {}),
+    ...(request.session_id ?? sessionId ? { session_id: request.session_id ?? sessionId } : {}),
   };
   /**
    * Tool declarations, with `parameters` serialized to a string.

@@ -16,6 +16,7 @@ import {
 } from "../../provider-contracts";
 import { mapUpstreamHttpError } from "../../../transport/failure-policy";
 import { abortGatewayError, createUpstreamDeadlineLifecycle } from "../../operations/upstream-deadline";
+import { resolvePromptCacheKey } from "../../operations/session-resolution";
 import { TRAE_CN_MODELS, TRAE_INTL_MODELS, traeMaxContextWindow } from "./trae-catalog";
 import { buildTraeHeaders } from "./trae-headers";
 import {
@@ -115,7 +116,17 @@ class TraeAdapter implements ProviderAdapter {
       (context.outbound_fetch as unknown as typeof fetch | undefined) ?? this.fetchFn;
 
     const auth = traeAuth(secret, context.credential.account_id);
-    const body = buildTraeChatBody(modelId, request, this.realm);
+    /**
+     * Trae keeps upstream prompt-cache state keyed by the request's
+     * `session_id`. The canonical request rarely carries one (surfaces do not
+     * populate it), so without this the body always omitted `session_id` and
+     * upstream treated every turn as a fresh context — `cached_tokens: 0`
+     * even for byte-identical prefixes. Resolve the same session/cache key the
+     * other adapters use (caller key → inbound session headers → opening-turn
+     * hash) and thread it through.
+     */
+    const sessionId = request.session_id ?? resolvePromptCacheKey(request, context);
+    const body = buildTraeChatBody(modelId, request, this.realm, sessionId);
     /**
      * The endpoint follows the model, not the provider.
      *
