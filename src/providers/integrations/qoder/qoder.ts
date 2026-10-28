@@ -11,6 +11,7 @@ import {
   upstreamErrorIdentifier,
 } from "../../../transport/failure-policy";
 import { GatewayError } from "../../../protocol/gateway-error";
+import { resolveImageSource } from "../../../protocol/codecs";
 import type {
   CanonicalEvent,
   CanonicalRequest,
@@ -512,16 +513,25 @@ function qoderKeepsReasoning(modelId: string): boolean {
  *
  * Presence, not length, decides: a client that already knows the rule sends
  * `""` on a thinking turn whose text is not readable back, and dropping that
- * empty string re-triggers the complaint it was sent to avoid. An assistant
- * turn with no reasoning at all gains nothing, so nothing is fabricated.
+ * empty string re-triggers the complaint it was sent to avoid.
+ *
+ * DeepSeek multi-turn consistency also backfills the field on every assistant
+ * turn once the conversation carries a reasoning trace at all — the reference
+ * bridge does the same (`backfill_reasoning_content`), and notes the symptom
+ * when it is missed: occasional failures that sometimes pass on retry. An
+ * assistant turn with no reasoning and no trace gains nothing, so nothing is
+ * fabricated.
  */
 function qoderReasoningEcho(
   message: { content: readonly ContentPart[] },
   modelId: string,
+  hasReasoningTrace = false,
 ): { reasoning_content: string } | Record<string, never> {
   if (!qoderKeepsReasoning(modelId)) return {};
   const reasoning = message.content.filter((part) => part.kind === "reasoning");
-  if (reasoning.length === 0) return {};
+  if (reasoning.length === 0) {
+    return hasReasoningTrace ? { reasoning_content: "" } : {};
+  }
   const text = reasoning
     .map((part) => (part.kind === "reasoning" ? (part.summary ?? part.payload ?? "") : ""))
     .join("");
@@ -644,6 +654,12 @@ export function buildQoderRequest(
   const systemPrompt = systemParts.join("\n\n").trim();
   const qoderMessages: Array<Record<string, unknown>> = [];
   const structuredTools = qoderStructuredTools(realm);
+  // DeepSeek multi-turn: once any turn in the conversation carries a reasoning
+  // trace, every assistant message must replay `reasoning_content` (see
+  // `qoderReasoningEcho`).
+  const hasReasoningTrace = allMessages.some((message) =>
+    message.content.some((part) => part.kind === "reasoning"),
+  );
   if (MODERN_PROFILE.mirrorTopLevelSystem && systemPrompt.length > 0) {
     qoderMessages.push({
       role: "system",
@@ -689,8 +705,14 @@ export function buildQoderRequest(
     // rejected the whole transcript: "Messages with role 'tool' must be a
     // response to a preceding message with 'tool_calls'".
     const allCalls = m.content.filter((part) => part.kind === "toolCall");
-    const reasoningEcho = qoderReasoningEcho(m, modelId);
-    if (!structuredTools && allCalls.length > 0) {
+    const reasoningEcho = qoderReasoningEcho(m, modelId, hasReasoningTrace);
+    // Structured tool turns are only safe when every call carries an id — the
+    // upstream drops or rejects a transcript whose `tool` result answers a call
+    // without one. Fall back to prose history exactly like INTL in that case.
+    const structuredIdsOk = allCalls.every(
+      (part) => typeof part.call_id === "string" && part.call_id.length > 0,
+    );
+    if ((!structuredTools || !structuredIdsOk) && allCalls.length > 0) {
       // INTL does not read structured turns, so the call is written into the
       // text instead of being dropped. Dropping it left the next `tool` turn
       // answering a call that was never made, and the model had no record of
@@ -711,7 +733,7 @@ export function buildQoderRequest(
       });
       continue;
     }
-    const calls = structuredTools ? allCalls : [];
+    const calls = structuredTools && structuredIdsOk ? allCalls : [];
     if (calls.length > 0) {
       const textParts = m.content.filter((part) => part.kind !== "toolCall");
       const flat = flattenCanonicalContent(textParts);
@@ -730,12 +752,41 @@ export function buildQoderRequest(
       });
       continue;
     }
-    const flat = flattenCanonicalContent(m.content);
     const role = m.role === "assistant" ? "assistant" : "user";
+    // Images must travel as structured OpenAI parts inside the message content —
+    // the upstream reads `image_url` parts there and not the top-level
+    // `image_urls` (mirroring `flatten_messages` in the reference bridge). A
+    // bare file_id reference degrades to a text note instead of being dropped.
+    const hasImages = m.content.some((part) => part.kind === "image");
+    if (hasImages) {
+      const parts: Array<Record<string, unknown>> = [];
+      for (const part of m.content) {
+        if (part.kind === "text") {
+          parts.push({ type: "text", text: part.text });
+        } else if (part.kind === "image") {
+          const source = resolveImageSource(part.payload);
+          if (source?.url !== undefined) {
+            parts.push({ type: "image_url", image_url: { url: source.url } });
+          } else {
+            parts.push({
+              type: "text",
+              text: source?.fileId !== undefined ? `[image: ${source.fileId}]` : "[image: unsupported source]",
+            });
+          }
+        }
+      }
+      qoderMessages.push({
+        role,
+        content: parts,
+        ...(role === "assistant" ? qoderReasoningEcho(m, modelId, hasReasoningTrace) : {}),
+      });
+      continue;
+    }
+    const flat = flattenCanonicalContent(m.content);
     qoderMessages.push({
       role,
       content: flat,
-      ...(role === "assistant" ? qoderReasoningEcho(m, modelId) : {}),
+      ...(role === "assistant" ? qoderReasoningEcho(m, modelId, hasReasoningTrace) : {}),
     });
   }
   const latestUserMessage = [...qoderMessages].reverse().find((m) => m["role"] === "user");
@@ -846,6 +897,14 @@ function repairJsonQuotes(text: string): string {
 const ECHO_LOOSE_RE = /^\[\s*\{\s*"name"\s*:\s*"([^"]{1,200})"\s*,\s*"arguments"\s*:\s*"(.*)"\s*\}\s*\]$/s;
 
 /**
+ * Any spelling of the INTL tool-call leak marker — the square-bracket
+ * canonical form, the angle-bracket variant the upstream also emits
+ * (`<assistant 请求调用工具>`), and partial variants missing the closing
+ * bracket. Mirrors `_LEAK_MARKER_RE` in the reference bridge.
+ */
+const LEAK_MARKER_ANY_RE = /[\[<(]*\s*assistant\s*请求调用工具\s*[\]>)]?/;
+
+/**
  * Rebuilds the single-call echo shape when strict parsing fails.
  *
  * Returns `null` when the text is not that shape at all, so a caller can fall
@@ -885,12 +944,26 @@ export function parseLeakedToolCalls(
   text: string,
   allowedNames?: ReadonlySet<string>,
 ): { calls: DsmlCall[]; clean: string } {
-  if (text.length === 0 || !text.includes(QODER_TOOL_MARKER)) {
+  if (text.length === 0) {
     return { calls: [], clean: text };
   }
-  const at = text.indexOf(QODER_TOOL_MARKER);
-  const head = text.slice(0, at).trim();
-  const rest = text.slice(at + QODER_TOOL_MARKER.length).trim();
+  // The upstream occasionally echoes the marker in variants — angle brackets,
+  // a missing closing bracket, or wrapped inside a ``` fence. Strip a leading
+  // fence, then locate any marker spelling, mirroring the reference bridge's
+  // `_normalize_leak_marker`.
+  const fence = text.match(/^```[a-z]*\s*\n?/i);
+  const src = fence && fence[0] ? text.slice(fence[0].length) : text;
+  const marker = LEAK_MARKER_ANY_RE.exec(src);
+  if (!marker) {
+    return { calls: [], clean: text };
+  }
+  const head = src.slice(0, marker.index).trim();
+  let rest = src.slice(marker.index + marker[0].length).trim();
+  // The model occasionally leaves raw DSML closing tags after the echo array
+  // (`</｜DSML｜parameter>` etc.), and a ``` fence may close the block. Strip
+  // trailing residue so the JSON parse is not poisoned by "Extra data".
+  rest = stripDsmlCloseTags(rest);
+  rest = rest.replace(/\s*```\s*$/, "").trim();
 
   let parsed: unknown;
   try {
