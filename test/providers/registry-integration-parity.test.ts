@@ -38,6 +38,12 @@ const INTEGRATION_ROOT = join("src", "providers", "integrations");
 const ORPHAN_ALLOWLIST: Readonly<Record<string, string>> = {
   // Codegen stamp written by the model-roster regenerator; not source.
   "src/providers/integrations/.codegen-stamp": "codegen marker",
+  // Gateway-executed web-tool engine for the Buddy family. Pure engine with
+  // no adapter consumer yet: the streaming re-drive loop that consumes it is
+  // the next integration step, so it is not reachable from a registry
+  // entrypoint today.
+  "src/providers/integrations/buddy/buddy-server-tools.ts":
+    "server-tools engine; adapter stream loop wiring pending",
 };
 
 /** Walk a directory, yielding every regular file path. */
