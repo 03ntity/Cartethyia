@@ -10,6 +10,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [2.7.1] - 2026-10-28
 
+### Fixed
+
+- **Capability degradation no longer strips tools as collateral.** When the
+  only capability a route cannot serve was ordered after `tools` in the
+  degradation chain (an image attached to a text-only model such as Mercury
+  3), the surviving cumulative variant had already lost the tool catalog — the
+  tool-capable model then received a transcript of `[tool:<name>]` text
+  placeholders with no tool definitions and imitated them instead of
+  structurally calling tools. Degradation now tries each single-capability
+  loss against the pristine request first, so the smallest surviving
+  degradation wins (e.g. drop only the image, keep tools) before the
+  cumulative chain runs as fallback.
+
 ### Added
 
 - **Provider Detail "Activity Matrix" usage card.** A collapsible card at the

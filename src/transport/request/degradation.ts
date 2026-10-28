@@ -261,6 +261,25 @@ export function* degradedRequestVariants(
     "audio",
   ] as RequiredCapability[];
   const ordered = priority.filter((c) => required.includes(c));
+  // Pre-pass: drop exactly one capability from the pristine request. The
+  // cumulative chain below can only ADD losses, so when the plan's real blocker
+  // is a late capability in this order (an image on a text-only model), every
+  // surviving chain variant has already lost `tools` as collateral — a
+  // tool-capable model then served a transcript of `[tool:<name>]` placeholders
+  // with no tool catalog at all. Trying each single loss first finds the
+  // smallest degradation that satisfies routing: `degraded: [cap]` alone is
+  // always lexicographically smaller than the chain's `[...earlier, cap]`, so
+  // a single-loss win must be preferred, never the reverse.
+  for (const cap of ordered) {
+    const singular = degradeRequestForCapability(original, cap);
+    if (singular) {
+      yield {
+        request: singular,
+        degraded: [cap],
+        required: required.filter((c) => c !== cap),
+      };
+    }
+  }
   let current: CanonicalRequest = original;
   const degraded: RequiredCapability[] = [];
   for (const cap of ordered) {
