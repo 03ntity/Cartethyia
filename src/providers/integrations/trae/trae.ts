@@ -26,8 +26,7 @@ import {
   TRAE_AGENT_ENDPOINT,
   TRAE_CHAT_ENDPOINT,
 } from "./trae-protocol";
-import { traeCoreCandidates, type TraeRealm } from "./trae-realm";
-import { uidFromToken } from "./trae-quota";
+import { TRAE_REGION_CORE_HOSTS, traeCoreCandidates, type TraeRealm } from "./trae-realm";
 
 export interface TraeAdapterOptions {
   readonly providerId?: string;
@@ -67,12 +66,7 @@ function traeAuth(secret: string, accountId: string | undefined): TraeAuth {
   if (token === undefined) {
     throw new GatewayError("authentication_failed", 401, "Trae credential has no access token", {}, "upstream");
   }
-  // The device fingerprint must derive from the token's own numeric user id
-  // (`data.id`), not from the gateway's account UUID: the commercial surface
-  // correlates the credential against that fingerprint, and a mismatch is
-  // answered 401 code 1001 even with a valid token.
-  const uid = uidFromToken(token) ?? accountId ?? "";
-  return { token, uid };
+  return { token, uid: accountId ?? "" };
 }
 
 function extractToken(secret: string): string | undefined {
@@ -446,15 +440,17 @@ export { TRAE_CN_MODELS, TRAE_INTL_MODELS };
 /**
  * Core host for one account.
  *
- * Intl is locked to SG: this deployment only serves SG-provisioned accounts,
- * so the account's stored region is ignored — there is no other host to send
- * it to (a US host would answer `1001` for every token here). CN keeps its
- * single host.
+ * An intl account is provisioned into a region and its token only authenticates
+ * against that region's host, so the account's own `region` wins over the
+ * realm default. Falling back to the realm keeps older accounts (stored before
+ * the region was captured) working exactly as before.
  */
 function traeCoreForAccount(
   realm: TraeRealm,
   authState: Readonly<Record<string, unknown>> | undefined,
 ): string {
-  void authState;
+  const region = typeof authState?.["region"] === "string" ? authState["region"].toLowerCase() : "";
+  const regional = TRAE_REGION_CORE_HOSTS[region];
+  if (regional !== undefined) return regional;
   return traeCoreCandidates(realm)[0] ?? "";
 }

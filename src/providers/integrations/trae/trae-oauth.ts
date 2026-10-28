@@ -652,10 +652,10 @@ interface TraeCallbackPayload {
   /** Host the exchange must go to, echoed back by the page. */
   readonly host?: string;
   /**
-   * Provisioned region (`sg`, …).
+   * Provisioned region (`sg`, `us`, …).
    *
-   * Persisted for traceability; this deployment routes every intl account to
-   * the SG host regardless of the stored value.
+   * The token only authenticates against its own region's core host, so this is
+   * persisted with the account rather than inferred from the realm.
    */
   readonly region?: string;
 }

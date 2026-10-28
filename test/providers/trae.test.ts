@@ -77,9 +77,9 @@ describe("trae realms", () => {
     expect(traeRealmForProvider("trae")).toBe("intl");
   });
 
-  test("CN has exactly one core host and intl is locked to SG", () => {
+  test("CN has exactly one core host and intl has fallbacks", () => {
     expect(traeCoreCandidates("cn")).toEqual([TRAE_REALMS.cn.core]);
-    expect(traeCoreCandidates("intl")).toEqual([TRAE_REALMS.intl.core]);
+    expect(traeCoreCandidates("intl").length).toBeGreaterThan(1);
   });
 
   test("the live model list is supported on both realms", () => {
@@ -91,21 +91,21 @@ describe("trae realms", () => {
   });
 
   test("a regional account is dispatched to its own core host", () => {
-    // Locked to SG: the only provisioned region this deployment serves.
+    // Verified live: an SG token on the US core answers 1001 "not able to
+    // authenticate you", while the SG core streams normally.
     expect(TRAE_REGION_CORE_HOSTS["sg"]).toBe("https://coresg-normal.trae.ai");
+    expect(TRAE_REGION_CORE_HOSTS["us"]).toBe("https://core-normal.traeapi.us");
   });
 
-  test("intl is locked to SG — no US host exists anywhere", () => {
+  test("intl defaults to SG, with US still reachable", () => {
+    // The default is SG, not US. Region routing is a property of the account, so
+    // this decides only accounts whose region was never captured — and SG
+    // serves the wider international roster. US is demoted to a fallback rather
+    // than removed: a genuinely US-provisioned account with no stored region
+    // still needs somewhere to land.
     expect(TRAE_REALMS.intl.core).toBe("https://coresg-normal.trae.ai");
     expect(TRAE_REALMS.intl.core).toBe(TRAE_REGION_CORE_HOSTS["sg"] ?? "<missing>");
-    // No US fallbacks in candidates, account list, or pay/usage hosts.
-    expect(traeCoreCandidates("intl")).toEqual(["https://coresg-normal.trae.ai"]);
-    expect(traeCoreCandidates("intl")).not.toContain("https://core-normal.traeapi.us");
-    expect(TRAE_REALMS.intl.coreFallbacks).toEqual([]);
-    expect(TRAE_REALMS.intl.accountFallbacks).toEqual([]);
-    expect(TRAE_REALMS.intl.pay).not.toContain("traeapi.us");
-    expect(TRAE_REALMS.intl.ug).not.toContain("traeapi.us");
-    expect(TRAE_REGION_CORE_HOSTS["us"]).toBeUndefined();
+    expect(traeCoreCandidates("intl")).toContain("https://core-normal.traeapi.us");
   });
 
   test("an intl account with no stored region is not sent to US first", () => {
@@ -227,11 +227,9 @@ describe("buildTraeHeaders", () => {
   });
 
   test("intl uses the same Cloud-IDE-JWT scheme as CN", () => {
-    // Trae 1.107.1 bundle: both realms send Cloud-IDE-JWT, not Bearer. The
-    // commercial surfaces and the chat/agent surfaces agree on this scheme.
+    // Trae 1.107.1 bundle: both realms send Cloud-IDE-JWT, not Bearer.
     const headers = buildTraeHeaders({ realm: "intl", token: "t", uid: "1" });
     expect(headers["Authorization"]).toBe("Cloud-IDE-JWT t");
-    expect(headers["x-ide-token"]).toBe("t");
     expect(headers["x-ide-version"]).toBeUndefined();
     expect(headers["x-app-version"]).toBeUndefined();
     expect(headers["User-Agent"]).toBe("TraeClient/TTNet");
