@@ -1,4 +1,5 @@
 import type { ProviderDispatchContext } from "../../provider-contracts";
+import { createHash } from "node:crypto";
 import { decodeJwtPayload } from "../../authentication/oauth-flow-store";
 
 /**
@@ -95,4 +96,28 @@ export function buddyEnterprise(context?: ProviderDispatchContext): string | und
     if (typeof value === "string" && value.trim().length > 0) return value.trim();
   }
   return undefined;
+}
+
+/**
+ * Per-account device binding (`qimei36`) for the buddy providers.
+ *
+ * The desktop auth state sends `X-Device-Id-List: {"qimei36":"…"}` alongside
+ * the Turing token — a second, independent device identity. Pinning it per
+ * account makes every account in a pool present a distinct device to the
+ * upstream risk control instead of sharing the machine's single fingerprint.
+ *
+ * Resolution order:
+ * 1. `auth_state.qimei36` — explicit operator-set binding (imported or edited).
+ * 2. Determinstic derivation from the internal account id (sha256 → 32 hex).
+ *    This keeps the binding stable across restarts without a database write,
+ *    and gives each freshly-added account its own id automatically.
+ *
+ * Returns `undefined` only when no account id is available (unauthenticated).
+ */
+export function resolveBuddyDeviceBinding(context?: ProviderDispatchContext): string | undefined {
+  const explicit = context?.credential.auth_state?.["qimei36"];
+  if (typeof explicit === "string" && explicit.trim().length > 0) return explicit.trim();
+  const accountId = context?.credential.account_id;
+  if (accountId === undefined || accountId.length === 0) return undefined;
+  return createHash("sha256").update(`wb2a:qimei36:${accountId}`).digest("hex").slice(0, 32);
 }

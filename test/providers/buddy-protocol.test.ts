@@ -13,6 +13,7 @@ import {
 } from "../../src/providers/integrations/buddy/workbuddy/provider";
 import { codeBuddyCnPrePayload } from "../../src/providers/integrations/buddy/codebuddy/cn-provider";
 import { readBuddyDeviceToken, workbuddyHeaders } from "../../src/providers/integrations/buddy/workbuddy/shared";
+import { resolveBuddyDeviceBinding } from "../../src/providers/integrations/buddy/buddy-identity";
 import { fetchTencentBillingQuota } from "../../src/providers/integrations/buddy/buddy-quota-shared";
 import { fetchWorkBuddyCnQuota } from "../../src/providers/integrations/buddy/workbuddy/quota";
 import { parseDsmlToolCalls } from "../../src/protocol/response/dsml";
@@ -313,6 +314,36 @@ describe("Buddy upstream protocol alignment", () => {
     expect(token !== undefined || err !== undefined).toBe(true);
     if (token === undefined) expect(err).toBe("sdk_not_initialized");
     expect(readBuddyDeviceToken({ credential: { auth_state: {} } } as unknown as ProviderDispatchContext)).toBeUndefined();
+  });
+
+  test("resolves a stable, per-account device binding (qimei36)", () => {
+    // Deterministic from the account id: stable across restarts, and distinct
+    // between accounts — so each account in a pool presents its own device.
+    const accountA = { credential: { account_id: "acc-A", auth_state: {} } } as unknown as ProviderDispatchContext;
+    const accountB = { credential: { account_id: "acc-B", auth_state: {} } } as unknown as ProviderDispatchContext;
+    const a1 = resolveBuddyDeviceBinding(accountA);
+    const a2 = resolveBuddyDeviceBinding(accountA);
+    const b = resolveBuddyDeviceBinding(accountB);
+    expect(a1).toBeDefined();
+    expect(a1).toBe(a2);
+    expect(a1).not.toBe(b);
+    expect(a1).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  test("an explicit auth_state qimei36 wins over derivation", () => {
+    const account = {
+      credential: { account_id: "acc-A", auth_state: { qimei36: "manual-binding-123" } },
+    } as unknown as ProviderDispatchContext;
+    expect(resolveBuddyDeviceBinding(account)).toBe("manual-binding-123");
+  });
+
+  test("the desktop request carries X-Device-Id-List with the account binding", async () => {
+    const headers = await workbuddyHeaders(context, request);
+    const list = headers["x-device-id-list"];
+    expect(list).toBeDefined();
+    const parsed = JSON.parse(list as string) as { qimei36?: string };
+    expect(parsed.qimei36).toBeDefined();
+    expect(parsed.qimei36).toMatch(/^[0-9a-f]{32}$/);
   });
 
   test("an account with no captured token and no SDK mirrors the failure placeholder", async () => {

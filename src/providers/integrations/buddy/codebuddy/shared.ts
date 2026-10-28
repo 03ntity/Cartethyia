@@ -3,7 +3,7 @@ import type { CanonicalRequest } from "../../../../protocol/canonical-model";
 import type { ProviderDispatchContext, ProviderDispatchTarget, ProviderId } from "../../../provider-contracts";
 import { resolveInboundSessionId } from "../../../operations/session-resolution";
 import { buddyConversationHeaders } from "../buddy-conversation-headers";
-import { buddyEnterprise, buddyUserId, resolveBuddyIdentity } from "../buddy-identity";
+import { buddyEnterprise, buddyUserId, resolveBuddyDeviceBinding, resolveBuddyIdentity } from "../buddy-identity";
 import { buildCodeBuddyUserAgent, getCodeBuddyCnVersion, getCodeBuddyVersion } from "../../../operations/client-versions";
 import { buddyDeviceTokenHeaders } from "../workbuddy/shared";
 import { CODEBUDDY_TURING_CONFIG } from "../turing-device-token";
@@ -88,6 +88,11 @@ export async function codebuddyHeaders(
     // turn-level aggregation key, and a chat request without it is refused for a
     // missing conversation id.
     ...conversation,
+    // Per-account device binding (qimei36) — distinct device per account.
+    ...(() => {
+      const binding = resolveBuddyDeviceBinding(context);
+      return binding === undefined ? {} : { "X-Device-Id-List": JSON.stringify({ qimei36: binding }) };
+    })(),
     // The desktop client sends the device-token pair on both realms. SDK
     // token when configured, captured token otherwise, or the official failure
     // placeholder. CodeBuddy uses its own SDK payload profile (same SDK,

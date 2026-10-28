@@ -8,7 +8,7 @@ import type { ProviderDispatchContext, ProviderDispatchTarget, ProviderId } from
 import { resolveInboundSessionId } from "../../../operations/session-resolution";
 import { buddyConversationHeaders } from "../buddy-conversation-headers";
 import { buddyCliHeaders, buddyCliTraceHeaders } from "../buddy-cli-headers";
-import { buddyEnterprise, buddyUserId, resolveBuddyIdentity } from "../buddy-identity";
+import { buddyEnterprise, buddyUserId, resolveBuddyDeviceBinding, resolveBuddyIdentity } from "../buddy-identity";
 import {
   buildWorkBuddyUserAgent,
   getWorkBuddyClientVersion,
@@ -145,6 +145,12 @@ export async function workbuddyHeaders(
     headers["x-user-id"] = accountId;
     headers["x-machine-id"] = deriveAccountStableId(accountId, "machine");
     headers["x-session-id"] = deriveAccountStableId(accountId, "session");
+  }
+  // Per-account device binding: distinct device identity per account (see
+  // resolveBuddyDeviceBinding). Sent as the desktop's X-Device-Id-List.
+  const binding = resolveBuddyDeviceBinding(context);
+  if (binding !== undefined) {
+    headers["x-device-id-list"] = JSON.stringify({ qimei36: binding });
   }
   Object.assign(headers, await buddyDeviceTokenHeaders({
     realm: domain.endsWith(".cn") ? "cn" : "intl",
