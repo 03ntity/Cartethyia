@@ -66,6 +66,23 @@ describe("Trae refresh", () => {
     expect(result.refresh).toBe("rt-new");
   });
 
+  test("refresh prefers the upstream user id from auth_state", async () => {
+    const { fetchFn, calls } = stubFetch(() => ({ payload: OK_PAYLOAD }));
+    await new TraeOAuthClient(fetchFn, "cn").refresh("rt-old", undefined, {
+      account_id: "gateway-row-uuid",
+      auth_state: { userId: "upstream-user-7" },
+    });
+    expect(calls[0]?.body["UserID"]).toBe("upstream-user-7");
+  });
+
+  test("refresh falls back to account_id when auth_state has no user id", async () => {
+    const { fetchFn, calls } = stubFetch(() => ({ payload: OK_PAYLOAD }));
+    await new TraeOAuthClient(fetchFn, "cn").refresh("rt-old", undefined, {
+      account_id: "gateway-row-uuid",
+    });
+    expect(calls[0]?.body["UserID"]).toBe("gateway-row-uuid");
+  });
+
   test("reads expiry from TokenExpireAt milliseconds", async () => {
     const { fetchFn } = stubFetch(() => ({ payload: OK_PAYLOAD }));
     const result = await new TraeOAuthClient(fetchFn, "cn").refreshWithUser("rt-old", "user-1");
@@ -178,6 +195,25 @@ describe("Trae credential import", () => {
     expect(result.refresh).toBe("rt-existing");
     expect(result.accountLabel).toBe("ops@example.com");
     expect(result.expiresAt.getTime()).toBe(1_800_000_000_000);
+  });
+
+  test("a full export row with authState keeps its upstream user id", async () => {
+    const { fetchFn, calls } = stubFetch(() => ({ payload: OK_PAYLOAD }));
+    // The exporter nests the user id under `authState`; re-import must restore
+    // it so refresh is addressed to the right upstream account.
+    const result = await new TraeOAuthClient(fetchFn, "cn").importCredential({
+      credential: JSON.stringify({
+        credentialKind: "oauth",
+        providerId: "trae",
+        accessToken: "at-existing",
+        refreshToken: "rt-existing",
+        expiredAt: 1_800_000_000_000,
+        authState: { userId: "upstream-user-9" },
+      }),
+      fields: {},
+    });
+    expect(calls.length).toBe(0);
+    expect(result.auth_state).toEqual({ userId: "upstream-user-9" });
   });
 
   test("an export with no refresh token is marked static", async () => {

@@ -185,10 +185,15 @@ function pastedAuthState(
   const profileArn = firstStringFrom(sources, ["profileArn", "profile_arn"]);
   const authMethod = firstStringFrom(sources, ["authMethod", "auth_method"]);
   const region = firstStringFrom(sources, ["region"]);
+  // The upstream user id, carried on a re-import of an exported account. Trae
+  // refresh is addressed per upstream user id, so restoring it is what keeps a
+  // re-imported account refreshable.
+  const userId = firstStringFrom(sources, ["userId", "user_id", "uid", "UserID"]);
   return {
     ...(profileArn === undefined ? {} : { profileArn }),
     ...(authMethod === undefined ? {} : { authMethod }),
     ...(region === undefined ? {} : { region }),
+    ...(userId === undefined ? {} : { userId }),
   };
 }
 

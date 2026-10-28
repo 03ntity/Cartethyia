@@ -663,6 +663,11 @@ export function createProviderCatalogOperations(config: ProviderCatalogConfig) {
         const selected = owned.filter(
           (account) => wanted.has(account.id) && account.tenantId === a.tenantId,
         );
+        const authStates = await config.store.listAccountAuthStates(
+          a.tenantId,
+          providerId,
+          selected.map((account) => account.id),
+        );
         const accounts = await Promise.all(
           selected.map(async (account): Promise<ProviderAccountExport> => {
             let accessToken = "";
@@ -685,6 +690,15 @@ export function createProviderCatalogOperations(config: ProviderCatalogConfig) {
               status: account.status,
               accessToken,
               ...(refreshToken === undefined ? {} : { refreshToken }),
+              // Non-secret auth state is part of the credential export: without
+              // it a re-import loses the upstream user id and region that Trae
+              // refresh and dispatch are addressed by.
+              ...(() => {
+                const authState = authStates[account.id];
+                return authState !== undefined && Object.keys(authState).length > 0
+                  ? { authState }
+                  : {};
+              })(),
               ...(account.inflight === undefined ? {} : { inflight: account.inflight }),
               createdAt: account.createdAt,
               ...(account.cooldownUntil ? { cooldownUntil: account.cooldownUntil } : {}),

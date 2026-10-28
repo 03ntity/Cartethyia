@@ -112,6 +112,34 @@ test("a fetched model on a global provider is editable", async () => {
   });
 });
 
+test("listAccountAuthStates returns only owned accounts' auth state", async () => {
+  await withFixture(async ({ store, db, tenantId }) => {
+    const otherTenant = randomUUID();
+    await db.insert(tenants).values({ id: otherTenant, name: "Other", status: "active" });
+    const owned = await store.createAccount(tenantId, "opencode", {
+      credentialKind: "oauth",
+      secret: JSON.stringify({
+        accessToken: "at-1",
+        refreshToken: "rt-1",
+        authState: { userId: "upstream-1", region: "sg" },
+      }),
+    });
+    const foreign = await store.createAccount(otherTenant, "opencode", {
+      credentialKind: "oauth",
+      secret: JSON.stringify({
+        accessToken: "at-2",
+        refreshToken: "rt-2",
+        authState: { userId: "upstream-2" },
+      }),
+    });
+
+    const states = await store.listAccountAuthStates(tenantId, "opencode", [owned.id, foreign.id]);
+    expect(Object.keys(states)).toEqual([owned.id]);
+    expect(states[owned.id]).toMatchObject({ userId: "upstream-1", region: "sg" });
+    expect(states[foreign.id]).toBeUndefined();
+  });
+});
+
 test("a built-in model on a global provider is still refused", async () => {
   await withFixture(async ({ store, tenantId }) => {
     await expect(

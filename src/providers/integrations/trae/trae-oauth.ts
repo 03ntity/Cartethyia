@@ -505,9 +505,15 @@ export class TraeOAuthClient extends OAuthClient {
   override async refresh(
     refreshToken: string,
     signal?: AbortSignal,
-    context?: { readonly account_id?: string },
+    context?: { readonly account_id?: string; readonly auth_state?: Readonly<Record<string, unknown>> },
   ): Promise<OAuthTokenRefreshResult> {
-    return this.refreshWithUser(refreshToken, context?.account_id ?? "", signal);
+    // The exchange is addressed per Trae account, not per gateway account row:
+    // `UserID` must be the upstream user id. The login flow stores it in
+    // `auth_state.userId`, and re-imports carry it the same way — preferring it
+    // over `account_id` keeps refresh working for accounts whose row id is not
+    // the upstream user id (any account created before the id was persisted).
+    const upstreamUserId = firstString(context?.auth_state ?? {}, ["userId", "user_id", "uid"]);
+    return this.refreshWithUser(refreshToken, upstreamUserId ?? context?.account_id ?? "", signal);
   }
 
   async #exchange(
@@ -577,12 +583,15 @@ function parsedResult(
   refresh: string,
   isStatic: boolean,
 ): OAuthExchangeResult {
+  const state: Record<string, unknown> = {};
+  if (isStatic) state["staticToken"] = true;
+  if (parsed.userId !== undefined) state["userId"] = parsed.userId;
   return {
     access,
     refresh,
     expiresAt:
       parsed.expiresAtMs === undefined ? new Date(Date.now() + 3600_000) : new Date(parsed.expiresAtMs),
-    ...(isStatic ? { auth_state: { staticToken: true } } : {}),
+    ...(Object.keys(state).length === 0 ? {} : { auth_state: state }),
     ...(parsed.email === undefined ? {} : { accountLabel: parsed.email }),
   };
 }
@@ -619,7 +628,12 @@ function parseExport(credential: string): TraeExport | undefined {
   const refresh = firstString(parsed, ["refreshToken", "refresh_token", "refresh"]);
   const expiresAtMs = firstNumber(parsed, ["expiredAt", "expiresAt", "TokenExpireAt", "tokenExpireAt"]);
   const email = firstString(parsed, ["email", "userEmail", "accountLabel"]);
-  const userId = firstString(parsed, ["userId", "user_id", "uid", "UserID"]);
+  // The exporter nests the user id under `authState`; a hand-built export may
+  // carry it at the top level instead.
+  const authState = firstRecord(parsed, ["authState", "auth_state"]);
+  const userId =
+    firstString(authState ?? {}, ["userId", "user_id", "uid", "UserID"]) ??
+    firstString(parsed, ["userId", "user_id", "uid", "UserID"]);
   return {
     access,
     ...(refresh === undefined ? {} : { refresh }),
@@ -627,6 +641,17 @@ function parseExport(credential: string): TraeExport | undefined {
     ...(email === undefined ? {} : { email }),
     ...(userId === undefined ? {} : { userId }),
   };
+}
+
+/** First object value present under any of `keys`, or undefined. */
+function firstRecord(record: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+  }
+  return undefined;
 }
 
 function firstNumber(record: Record<string, unknown>, keys: readonly string[]): number | undefined {

@@ -796,6 +796,31 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
     );
   }
 
+  async listAccountAuthStates(
+    tenantId: string,
+    providerId: string,
+    accountIds: readonly string[],
+  ): Promise<Readonly<Record<string, Readonly<Record<string, unknown>>>>> {
+    if (accountIds.length === 0) return {};
+    const rows = await this.db
+      .select({ id: providerAccounts.id, authState: providerAccounts.authState })
+      .from(providerAccounts)
+      .where(
+        and(
+          eq(providerAccounts.providerId, providerId),
+          globalOrOwnedBy(providerAccounts.tenantId, tenantId),
+          inArray(providerAccounts.id, accountIds),
+        ),
+      );
+    const out: Record<string, Readonly<Record<string, unknown>>> = {};
+    for (const row of rows) {
+      if (row.authState !== null && typeof row.authState === "object" && !Array.isArray(row.authState)) {
+        out[row.id] = row.authState as Record<string, unknown>;
+      }
+    }
+    return out;
+  }
+
   async listAccounts(
     tenantId: string,
     providerId: string,
