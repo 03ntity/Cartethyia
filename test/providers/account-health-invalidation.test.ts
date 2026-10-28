@@ -147,6 +147,50 @@ describe("a queued upstream is capacity, not a dead credential", () => {
   });
 });
 
+describe("Trae upstream auth verdict 1001", () => {
+  const trae1001 = (): GatewayError =>
+    new GatewayError(
+      "authentication_failed" as never,
+      401,
+      "Trae could not authenticate the account (upstream code 1001): We're sorry, but we are not able to authenticate you.",
+      { providerCode: "1001", providerStatus: 1001, credentialEvidence: true } as never,
+      "upstream" as never,
+    );
+
+  test("is auth_invalidated, not the unknown fallback", () => {
+    // The 1001 code is numeric, so the bare-401/403 credential arm normally
+    // refuses to claim it. Without the explicit Trae recognition the account
+    // fell to `unknown` with `mutatesAccount: false` — it stayed in rotation
+    // and was re-dialled on every request despite the upstream's auth verdict.
+    const classification = classifyAccountError(trae1001(), {
+      origin: "upstream",
+      scope: "account",
+      providerId: "trae",
+      credentialKind: "oauth",
+      providerCode: "1001",
+      credentialEvidence: true,
+      statusCode: 401,
+    });
+    expect(classification.category).toBe("auth_invalidated");
+    expect(classification.mutatesAccount).toBe(true);
+    expect(classification.routesVisible).toBe(true);
+  });
+
+  test("a same code from another provider stays unclassified", () => {
+    // The numeric-code guard exists so unknown numeric codes do not park
+    // healthy accounts: only Trae's own 1001 verdict is recognised.
+    const classification = classifyAccountError(trae1001(), {
+      origin: "upstream",
+      scope: "account",
+      providerId: "some-other-provider",
+      providerCode: "1001",
+      credentialEvidence: true,
+      statusCode: 401,
+    });
+    expect(classification.category).not.toBe("auth_invalidated");
+  });
+});
+
 describe("an unclassified failure is a cooldown, never a parked account", () => {
   test("an unmapped upstream error cools down for 15 minutes", () => {
     const error = new GatewayError(

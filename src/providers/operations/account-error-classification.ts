@@ -1355,6 +1355,14 @@ const ACCOUNT_ERROR_RULES: readonly AccountErrorRule[] = [
         s.folded.includes("invalidated oauth token") ||
         s.folded.includes("reauthorization required") ||
         s.folded.includes("account deactivated") ||
+        // Trae answers `1001 "we are not able to authenticate you"` when the
+        // credential is dead or invalidated — it is the provider's own auth
+        // verdict, but the code is numeric, so it is excluded from the bare
+        // 401/403 arm below. Recognising it here keeps the account out of the
+        // `unknown` fallback (which never mutates and leaves the account in
+        // rotation to be re-dialled on every request).
+        ((s.providerId === "trae" || s.providerId === "traecn") &&
+          s.providerCode === "1001") ||
         // A bare 401/403 only proves the credential when the body actually
         // says so. A purely numeric provider code carries no auth vocabulary —
         // providers encode limit/entitlement verdicts as numbers too (Qoder's
