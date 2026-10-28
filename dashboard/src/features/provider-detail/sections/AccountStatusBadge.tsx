@@ -1,9 +1,15 @@
 import { type ReactNode } from "react";
+import { ExternalLink } from "lucide-react";
 import { Badge } from "../../../components/ui/badge";
 import { Inline } from "../../../components/ui/inline";
 import { activeModelCooldowns } from "../../../components/AccountCooldown";
 import { formatResetDistance } from "../../../lib/format/quota";
-import { accountErrorLabel, authInvalidatedLabel, showsErrorPill } from "../../../lib/format/labels";
+import {
+  accountErrorLabel,
+  authInvalidatedLabel,
+  showsErrorPill,
+  validationTargetUrl,
+} from "../../../lib/format/labels";
 import type { ProviderAccountResponse } from "../../../data/contracts";
 
 /**
@@ -38,6 +44,33 @@ function credentialFamily(account: ProviderAccountResponse): string | undefined 
   return undefined;
 }
 
+/**
+ * The error pill for an account. For `validation_required` the pill becomes a
+ * real link to the upstream verification URL (external icon included), because
+ * the only remediation is the operator clicking through and verifying the
+ * account.
+ */
+function renderErrorPill(account: ProviderAccountResponse): ReactNode {
+  if (!showsErrorPill(account.lastErrorCategory)) return null;
+  if (account.lastErrorCategory === "quota_exhausted" && activeModelCooldowns(account)) return null;
+  const label = accountErrorLabel(account.lastErrorCategory, account.credentialKind);
+  const title = account.lastError ?? account.lastErrorCategory;
+  if (account.lastErrorCategory === "validation_required") {
+    const url = validationTargetUrl(account.lastError);
+    if (url !== undefined) {
+      return (
+        <a href={url} target="_blank" rel="noreferrer noopener" title={title}>
+          <Badge tone="warn">
+            {label}
+            <ExternalLink size={12} className="shrink-0" aria-hidden="true" />
+          </Badge>
+        </a>
+      );
+    }
+  }
+  return <Badge tone="warn" title={title}>{label}</Badge>;
+}
+
 function activeCredentialTone(account: ProviderAccountResponse): "blue" | "ok" {
   return account.credentialKind === "oauth" ? "blue" : "ok";
 }
@@ -69,11 +102,7 @@ export function AccountStatusBadge({
           <Badge tone="warn" title={account.lastError}>
             {authInvalidatedLabel(account.credentialKind)}
           </Badge>
-        ) : showsErrorPill(account.lastErrorCategory) && !(account.lastErrorCategory === "quota_exhausted" && modelCooldowns) ? (
-          <Badge tone="warn" title={account.lastError ?? account.lastErrorCategory}>
-            {accountErrorLabel(account.lastErrorCategory, account.credentialKind)}
-          </Badge>
-        ) : null}
+        ) : renderErrorPill(account)}
         <ModelCooldownChip cooldowns={modelCooldowns} reason={account.lastErrorCategory === "quota_exhausted" ? account.lastError : undefined} />
       </Inline>
     );
@@ -90,11 +119,7 @@ export function AccountStatusBadge({
         <Badge tone={activeCredentialTone(account)} dot>
           Active{credentialFamily(account) ? ` - ${credentialFamily(account)}` : ""}
         </Badge>
-        {showsErrorPill(account.lastErrorCategory) && !(account.lastErrorCategory === "quota_exhausted" && modelCooldowns) ? (
-          <Badge tone="warn" title={account.lastError ?? account.lastErrorCategory}>
-            {accountErrorLabel(account.lastErrorCategory, account.credentialKind)}
-          </Badge>
-        ) : null}
+        {renderErrorPill(account)}
         <ModelCooldownChip cooldowns={modelCooldowns} reason={account.lastErrorCategory === "quota_exhausted" ? account.lastError : undefined} />
       </Inline>
     );
@@ -106,11 +131,7 @@ export function AccountStatusBadge({
           Cooldown{credentialFamily(account) ? ` - ${credentialFamily(account)}` : ""}{" "}
           {account.cooldownUntil ? `(${formatResetDistance(account.cooldownUntil)})` : ""}
         </Badge>
-        {showsErrorPill(account.lastErrorCategory) && !(account.lastErrorCategory === "quota_exhausted" && modelCooldowns) ? (
-          <Badge tone="warn" title={account.lastError ?? account.lastErrorCategory}>
-            {accountErrorLabel(account.lastErrorCategory, account.credentialKind)}
-          </Badge>
-        ) : null}
+        {renderErrorPill(account)}
         <ModelCooldownChip cooldowns={modelCooldowns} reason={account.lastErrorCategory === "quota_exhausted" ? account.lastError : undefined} />
       </Inline>
     );

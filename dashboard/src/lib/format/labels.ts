@@ -15,6 +15,7 @@ const ACCOUNT_ERROR_LABELS: Readonly<Record<string, string>> = {
   policy_blocked: "Policy blocked",
   rate_limit_transient: "Rate limited",
   missing_credential: "No credential",
+  validation_required: "Verification required",
 };
 
 /**
@@ -60,4 +61,19 @@ export function authInvalidatedLabel(credentialKind: string | undefined): string
 export function accountErrorLabel(category: string, credentialKind?: CredentialKind): string {
   if (category === "auth_invalidated") return authInvalidatedLabel(credentialKind);
   return ACCOUNT_ERROR_LABELS[category] ?? category;
+}
+
+const VALIDATION_URL_RE = /https?:\/\/[^\s"'\\]+/;
+
+/**
+ * Extracts the actionable verification URL from the recorded account error.
+ *
+ * The backend appends the upstream `validation_url` to the reason for
+ * `validation_required`, so a plain URL scan of the raw text is enough — no
+ * extra API surface needed.
+ */
+export function validationTargetUrl(lastError: string | null | undefined): string | undefined {
+  if (!lastError) return undefined;
+  const m = VALIDATION_URL_RE.exec(lastError);
+  return m?.[0];
 }

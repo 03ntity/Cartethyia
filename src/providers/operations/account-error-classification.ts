@@ -184,6 +184,7 @@ export type AccountErrorCategory =
   | "policy_blocked_invalid_request"
   | "server_error"
   | "timeout"
+  | "validation_required"
   | "unknown";
 export type AccountFailureOrigin = "cartethyia" | "upstream" | "network";
 export type AccountFailureScope =
@@ -524,6 +525,8 @@ interface AccountErrorContext {
   readonly statedCooldownMs: number | null;
   /** Echo of the caller's evidence; read only by the arms that need it. */
   readonly providerId: string | undefined;
+  /** The raw upstream response body, when the dispatch path stored it. */
+  readonly rawUpstreamResponse: string | undefined;
   /**
    * The upstream named a restriction on the account, not a refusal of the
    * request. Read by the policy arm to pick between disabling the account and
@@ -602,11 +605,42 @@ interface AccountErrorSignals {
   readonly hostedToolFailure: boolean;
   readonly modelEntitlementFailure: boolean;
   readonly queuedUpstream: boolean;
+  readonly validationRequired: boolean;
+  readonly validationUrl: string | undefined;
+}
+
+const VALIDATION_URL_RE = /https?:\/\/[^\s"'\\]+/;
+
+/**
+ * Extracts the Google `validation_url` from an Antigravity rejection.
+ *
+ * The URL can appear either in the message itself or nested in the raw
+ * upstream JSON (`details[].metadata.validation_url`). Returning `undefined`
+ * means nothing actionable was found — the classifier then just parks the
+ * account without a link.
+ */
+function extractValidationUrl(message: string, rawUpstreamResponse: string | undefined): string | undefined {
+  if (rawUpstreamResponse !== undefined && rawUpstreamResponse.includes("validation_url")) {
+    try {
+      const parsed = JSON.parse(rawUpstreamResponse) as {
+        error?: {
+          details?: Array<{ metadata?: Record<string, unknown> }>;
+        };
+      };
+      for (const detail of parsed?.error?.details ?? []) {
+        const url = detail?.metadata?.["validation_url"];
+        if (typeof url === "string" && url.length > 0 && url.startsWith("http")) return url;
+      }
+    } catch {
+      /* fall through to message regex */
+    }
+  }
+  const m = VALIDATION_URL_RE.exec(message);
+  return m?.[0];
 }
 
 /** Build the request-independent evidence consumed by the ordered classifier. */
-function accountErrorContext(error: unknown, options?: AccountFailureEvidence): AccountErrorContext {
-  const errorRecord = isRecord(error) ? error : undefined;
+function accountErrorContext(error: unknown, options?: AccountFailureEvidence): AccountErrorContext {  const errorRecord = isRecord(error) ? error : undefined;
   const message =
     error instanceof Error
       ? error.message
@@ -729,6 +763,7 @@ function accountErrorContext(error: unknown, options?: AccountFailureEvidence): 
     providerCode,
     providerId: options?.providerId,
     statedCooldownMs,
+    rawUpstreamResponse,
     buddyBanned: isBuddyAccountBanned(lower, providerCode, banBody),
     reason,
     result,
@@ -750,7 +785,7 @@ export function classifyAccountError(
     accountEvidence,
     canMutate,
     providerCode,
-
+    rawUpstreamResponse,
     statedCooldownMs,
     buddyBanned,
     reason,
@@ -1042,6 +1077,22 @@ export function classifyAccountError(
       lower.includes("model_not_supported") ||
       lower.includes("not available in your region"));
   /**
+   * Google Cloud Code / Antigravity account verification: the upstream answers
+   * an unverified account with HTTP 403 `PERMISSION_DENIED` and a
+   * `VALIDATION_REQUIRED` reason plus a `validation_url`. The operator must
+   * complete verification before the credential can ever serve again, so the
+   * account must be parked (`disabled`) — not left `active`, and not a
+   * cooldown (no amount of waiting clears it). The validation URL is carried
+   * in the recorded reason so the dashboard can surface it as an actionable
+   * pill link.
+   */
+  const validationRequired =
+    (statusCode === 403 || lower.includes("permission_denied")) &&
+    (lower.includes("validation_required") ||
+      lower.includes("verify your account") ||
+      lower.includes("validation_url"));
+  const validationUrl = validationRequired ? extractValidationUrl(message, rawUpstreamResponse) : undefined;
+  /**
    * The upstream accepted the request and put it in a queue behind other
    * callers — it is busy, not rejecting the caller's credential.
    *
@@ -1093,6 +1144,8 @@ export function classifyAccountError(
     hostedToolFailure,
     modelEntitlementFailure,
     queuedUpstream,
+    validationRequired,
+    validationUrl,
   };
 
   for (const rule of ACCOUNT_ERROR_RULES) {
@@ -1268,6 +1321,23 @@ const ACCOUNT_ERROR_RULES: readonly AccountErrorRule[] = [
         s.origin === "upstream",
       );
     },
+  },
+  {
+    name: "validation-required",
+    match: (s) => s.validationRequired,
+    decide: (s) =>
+      s.result(
+        "validation_required",
+        "disabled",
+        0,
+        null,
+        s.validationUrl !== undefined
+          ? `${s.reason("Google account verification required")} — ${s.validationUrl}`
+          : s.reason("Google account verification required"),
+        // The upstream named the verdict; the account cannot serve until the
+        // operator completes verification.
+        true,
+      ),
   },
   {
     name: "credential-rejected",
