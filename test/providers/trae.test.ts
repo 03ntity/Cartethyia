@@ -542,6 +542,44 @@ describe("trae Agent tool streams", () => {
     expect(events.some((event) => event.type === "tool_call_delta")).toBe(true);
   });
 
+  test("the terminal event carries the assessed usage", async () => {
+    // Non-streaming dispatch reads usage off the terminal event; without it the
+    // request is reconciled to the estimate. The same session must hit the
+    // cache estimator, so a repeated prefix reports cached tokens.
+    const adapter = createTraeAdapter();
+    const frames = (usage: Record<string, unknown>) => [
+      { event: "output", data: { response: "hai" } },
+      { event: "token_usage", data: usage },
+    ];
+    const session = "ses-terminal-usage";
+    const requestWithSession = (content: string) =>
+      request({ session_id: session, messages: [{ role: "user", content: [{ kind: "text", text: content }] }] });
+
+    // First call: no history yet → cached unavailable, terminal usage present.
+    const first = [];
+    for await (const event of adapter.dispatch(
+      requestWithSession("halo"),
+      AGENT_TARGET,
+      dispatchContext(frames({ prompt_tokens: 45, completion_tokens: 10, total_tokens: 55 })),
+    )) first.push(event);
+    const t1 = first.find((e) => e.type === "terminal") as { usage?: { input_tokens: number } };
+    expect(t1?.usage?.input_tokens).toBe(45);
+    expect((t1?.usage as { cached_input_tokens?: number | string })?.cached_input_tokens).toBe("unavailable");
+
+    // Second call, identical prefix → cached estimate applies on the terminal.
+    const second = [];
+    for await (const event of adapter.dispatch(
+      requestWithSession("halo"),
+      AGENT_TARGET,
+      dispatchContext(frames({ prompt_tokens: 45, completion_tokens: 12, total_tokens: 57 })),
+    )) second.push(event);
+    const t2 = second.find((e) => e.type === "terminal") as {
+      usage?: { input_tokens: number; cached_input_tokens: number; uncached_input_tokens: number };
+    };
+    expect(t2?.usage?.cached_input_tokens).toBe(45);
+    expect(t2?.usage?.uncached_input_tokens).toBe(0);
+  });
+
   test("tool ids from one request never resolve fragments in the next request", async () => {
     const adapter = createTraeAdapter();
     const collect = async (frames: readonly Record<string, unknown>[]) => {
