@@ -87,6 +87,53 @@ function extractToken(secret: string): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+/**
+ * Maps a Trae upstream error (a named `error` SSE event, or an error object
+ * in a frame body) to the canonical GatewayError.
+ *
+ * The mapping mirrors the reference bridge's `TRAE_ERROR_MAP`:
+ * - `1001` — "we are not able to authenticate you" — is a credential verdict.
+ *   It must surface as account-scoped `authentication_failed` so the account
+ *   is parked for re-login and failover tries a sibling — never the proxy
+ *   pool.
+ * - `4008` / "exceeded the quota" — free-tier quota exhausted. That is a
+ *   `quota_exceeded` 429, not a platform fault.
+ * - Everything else is a platform fault (`platform_unavailable`).
+ */
+function throwTraeUpstreamError(codeRaw: unknown, messageRaw: unknown): never {
+  const code =
+    typeof codeRaw === "number" || typeof codeRaw === "string" ? String(codeRaw) : undefined;
+  const message =
+    typeof messageRaw === "string" && messageRaw.trim().length > 0
+      ? messageRaw.trim()
+      : code !== undefined
+        ? `Trae stream error (upstream code ${code})`
+        : "Trae stream error";
+
+  if (code === "1001") {
+    throw new GatewayError(
+      "authentication_failed",
+      401,
+      `Trae could not authenticate the account (upstream code 1001): ${message}`,
+      { providerCode: "1001", providerStatus: 1001, credentialEvidence: true },
+      "upstream",
+    );
+  }
+
+  const lower = message.toLowerCase();
+  if (code === "4008" || lower.includes("exceeded the quota") || lower.includes("quota")) {
+    throw new GatewayError(
+      "quota_exceeded",
+      429,
+      `Trae quota exceeded (upstream code ${code ?? "unknown"}): ${message}`,
+      { providerCode: code ?? "4008", providerStatus: code === "4008" ? 4008 : 429 },
+      "upstream",
+    );
+  }
+
+  throw new GatewayError("platform_unavailable", 502, message, {}, "upstream");
+}
+
 class TraeAdapter implements ProviderAdapter {
   readonly provider_id: ProviderId;
   private readonly realm: TraeRealm;
@@ -213,15 +260,21 @@ class TraeAdapter implements ProviderAdapter {
       }
       if (frame.event === "error") {
         const data = frame.data as { message?: unknown; code?: unknown };
-        const message = typeof data.message === "string" && data.message.length > 0
-          ? data.message
-          : typeof data.code === "number" || typeof data.code === "string"
-            ? `Trae stream error (upstream code ${data.code})`
-            : "Trae stream error";
-        throw new GatewayError("platform_unavailable", 502, message, {}, "upstream");
+        throwTraeUpstreamError(data.code, data.message);
       }
       if (typeof frame.data !== "object" || frame.data === null) continue;
       const record = frame.data as Record<string, unknown>;
+      // The upstream can answer with an error object in the frame body rather
+      // than a named `error` event — e.g. HTTP 200 carrying `{"code":1001,
+      // "message":"…"}` (sometimes nested under an `error` key). Detect both
+      // spellings so a rejected turn surfaces as the real error instead of an
+      // empty stream that ends with a normal `stop`.
+      if (record["code"] !== undefined || (typeof record["error"] === "object" && record["error"] !== null)) {
+        const nested = record["error"] as Record<string, unknown> | undefined;
+        const code = record["code"] ?? nested?.["code"];
+        const message = record["message"] ?? nested?.["message"];
+        throwTraeUpstreamError(code, message);
+      }
       /**
        * Two frame layouts reach here and both are live.
        *

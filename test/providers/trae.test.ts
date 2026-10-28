@@ -17,6 +17,7 @@ import {
   toTraeAgentBody,
 } from "../../src/providers/integrations/trae/trae-protocol";
 import type { CanonicalRequest } from "../../src/protocol/canonical-model";
+import { GatewayError } from "../../src/protocol/gateway-error";
 import { createTraeAdapter } from "../../src/providers/integrations/trae/trae";
 import type {
   ProviderDispatchContext,
@@ -523,6 +524,62 @@ describe("trae Agent tool streams", () => {
   test("an SSE error without a message preserves the upstream code", async () => {
     await expect(agentEvents([{ event: "error", data: { code: 4015, message: "" } }]))
       .rejects.toThrow("Trae stream error (upstream code 4015)");
+  });
+
+  test("an upstream 1001 is classified as auth failure, not platform_unavailable", async () => {
+    // Trae answers an unauthenticated account with `1001 "we are not able to
+    // authenticate you"`. That is a credential verdict: it must surface as
+    // account-scoped `authentication_failed` (parking the account for
+    // re-login, failover to a sibling) — never as a 502 platform error that
+    // could drag the proxy pool into the story.
+    let thrown: unknown;
+    try {
+      await agentEvents([
+        { event: "error", data: { code: 1001, message: "We're sorry, but we are not able to authenticate you." } },
+      ]);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(GatewayError);
+    const g = thrown as GatewayError;
+    expect(g.code).toBe("authentication_failed");
+    expect(g.status).toBe(401);
+    expect(g.details.credentialEvidence).toBe(true);
+    expect(g.details.providerCode).toBe("1001");
+  });
+
+  test("an upstream 4008 is classified as quota_exceeded", async () => {
+    // Free-tier quota exhausted: `4008 "Your requests have exceeded the quota."`
+    // must surface as a 429 `quota_exceeded` — not a 502 platform error.
+    let thrown: unknown;
+    try {
+      await agentEvents([
+        { event: "error", data: { code: 4008, message: "Your requests have exceeded the quota." } },
+      ]);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(GatewayError);
+    const g = thrown as GatewayError;
+    expect(g.code).toBe("quota_exceeded");
+    expect(g.status).toBe(429);
+  });
+
+  test("an error object in a frame body is classified too", async () => {
+    // HTTP 200 frames can carry `{"code":1001,"message":"…"}` directly in the
+    // body instead of a named `error` event — same verdict required.
+    let thrown: unknown;
+    try {
+      await agentEvents([
+        { event: "message", data: { code: 1001, message: "We're sorry, but we are not able to authenticate you." } },
+      ]);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(GatewayError);
+    const g = thrown as GatewayError;
+    expect(g.code).toBe("authentication_failed");
+    expect(g.status).toBe(401);
   });
 
   test("an opening tool frame keeps arguments delivered beside the id", async () => {
