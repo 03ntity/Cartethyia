@@ -610,6 +610,12 @@ const QUOTA_ERROR_IDENTIFIERS: ReadonlySet<string> = new Set([
   "usage_not_included",
   "subscription:free-usage-exhausted",
   "resource_exhausted",
+  // Qoder answers an exhausted daily billing allowance with a bare numeric
+  // code: `{"code":"110","message":"Billing daily count exceeded"}`. The 403
+  // wrapper made the old status-only fallback read it as a credential fault;
+  // it is a spend/limit verdict, never an auth one, so it must classify as
+  // quota (a cooldown) instead of `auth_invalidated`.
+  "110",
   // InferHub publishes its own vocabulary in `error.code`. The two 403s below
   // are deliberate absences: `account_blocked` means the account was blocked
   // (an auth/entitlement verdict, not a spend limit) and

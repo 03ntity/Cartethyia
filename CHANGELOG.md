@@ -12,6 +12,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Qoder billing-limit refusals no longer invalidate the credential.** Qoder
+  answers an exhausted daily billing allowance with
+  `{"code":"110","message":"Billing daily count exceeded"}` on a 403 wrapper.
+  The status-only fallback read the 403 as a credential fault, so a healthy
+  account was parked as `auth_invalidated` — the console's "Re-login
+  required" — and operators were sent to re-authenticate a credential that was
+  never rejected. The `110` code and the "Billing daily count exceeded" phrase
+  now classify as quota (an account cooldown), and unknown numeric provider
+  codes are never treated as credential evidence — the safe unclassified
+  cooldown is the default for a code we do not recognise.
+
 - **Qoder streaming tool calls no longer lose their arguments.** The upstream
   identifies one streamed call by OpenAI chunk shape — `id` + `name` in the
   first chunk, then only the wire `index` on every continuation fragment. The

@@ -292,6 +292,14 @@ export interface AccountErrorClassification {
 const COOLDOWN_ESCALATION_MAX_LEVEL = 4;
 
 /**
+ * A provider code that is digits only. Such codes are identifiers, not auth
+ * vocabulary — providers encode spend/entitlement verdicts as numbers (Qoder's
+ * `110`, buddy's `6004`) — so the bare-401/403 credential arm must not treat
+ * an unknown one as evidence that the credential died.
+ */
+const NUMERIC_PROVIDER_CODE = /^\d+$/;
+
+/**
  * Escalates a *fallback* cooldown for an account that keeps failing.
  *
  * `consecutiveFailures` has been incremented on every account failure since the
@@ -827,6 +835,7 @@ export function classifyAccountError(
       // below scopes the resulting cooldown to the model, because the account
       // keeps serving its other models.
       providerCode === "112" ||
+      providerCode === "110" ||
       providerCode === "insufficient_quota" ||
       providerCode === "quota_exceeded" ||
       providerCode === "subscription:free-usage-exhausted" ||
@@ -869,6 +878,7 @@ export function classifyAccountError(
       lower.includes("out of credits") ||
       lower.includes("credits exhausted") ||
       lower.includes("spending limit") ||
+      lower.includes("billing daily count exceeded") ||
       // Same Qoder family reached by body text when the code is not parsed out.
       (lower.includes("pricingurl") && lower.includes("qoder.com/pricing")));
   // A deterministic content-policy rejection is NOT credential invalidation.
@@ -1275,7 +1285,16 @@ const ACCOUNT_ERROR_RULES: readonly AccountErrorRule[] = [
         s.folded.includes("invalidated oauth token") ||
         s.folded.includes("reauthorization required") ||
         s.folded.includes("account deactivated") ||
-        ((s.statusCode === 401 || s.statusCode === 403) && s.accountEvidence)),
+        // A bare 401/403 only proves the credential when the body actually
+        // says so. A purely numeric provider code carries no auth vocabulary —
+        // providers encode limit/entitlement verdicts as numbers too (Qoder's
+        // `110`, buddy's `6004`) — and treating an unknown one as credential
+        // evidence parked healthy accounts as "Re-login required". Unmapped
+        // numeric codes fall through to the unclassified cooldown instead of
+        // ever invalidating.
+        ((s.statusCode === 401 || s.statusCode === 403) &&
+          s.accountEvidence &&
+          !NUMERIC_PROVIDER_CODE.test(s.providerCode))),
     decide: (s) => {
       // A static token has no refresh to run, so an auth rejection must not park
       // the account: disabling it throws away a token that may still work (a
