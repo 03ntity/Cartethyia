@@ -72,8 +72,10 @@ describe("deployRelay sends the region", () => {
     const patches = calls.filter((call) => call.url.includes("/projects/") && call.method === "PATCH");
     expect(patches.length).toBeGreaterThan(0);
     for (const patch of patches) {
-      const parsed = JSON.parse(patch.body ?? "{}") as { serverlessFunctionRegion?: string };
+      const parsed = JSON.parse(patch.body ?? "{}") as { serverlessFunctionRegion?: string; ssoProtection?: unknown };
       expect(parsed.serverlessFunctionRegion).toBe("hkg1");
+      // Vercel Authentication must be disabled so the relay URL is public.
+      expect(parsed.ssoProtection).toBeNull();
     }
   });
 
@@ -83,8 +85,9 @@ describe("deployRelay sends the region", () => {
     const patches = calls.filter((call) => call.url.includes("/projects/") && call.method === "PATCH");
     expect(patches.length).toBeGreaterThan(0);
     for (const patch of patches) {
-      const parsed = JSON.parse(patch.body ?? "{}") as { serverlessFunctionRegion?: string };
+      const parsed = JSON.parse(patch.body ?? "{}") as { serverlessFunctionRegion?: string; ssoProtection?: unknown };
       expect(parsed.serverlessFunctionRegion).toBe(DEFAULT_RELAY_REGION);
+      expect(parsed.ssoProtection).toBeNull();
     }
   });
 
@@ -96,8 +99,9 @@ describe("deployRelay sends the region", () => {
     const patches = calls.filter((call) => call.url.includes("/projects/") && call.method === "PATCH");
     expect(patches.length).toBeGreaterThan(0);
     for (const patch of patches) {
-      const parsed = JSON.parse(patch.body ?? "{}") as { serverlessFunctionRegion?: string };
+      const parsed = JSON.parse(patch.body ?? "{}") as { serverlessFunctionRegion?: string; ssoProtection?: unknown };
       expect(parsed.serverlessFunctionRegion).toBe(DEFAULT_RELAY_REGION);
+      expect(parsed.ssoProtection).toBeNull();
     }
   });
 

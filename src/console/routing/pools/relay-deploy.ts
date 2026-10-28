@@ -217,10 +217,14 @@ async function deployVercel(
   // PATCH is used rather than POST /v1/projects because the project already
   // exists once the first deployment lands; the first deploy below creates it,
   // and this call is what pins its region before that deploy runs its build.
+  //
+  // `ssoProtection: null` disables Vercel Authentication (SSO) on the project.
+  // Without it every deployment is protected and answers `302 → vercel.com/
+  // sso-api` to anonymous callers — the relay URL exists but is not public.
   await fetchImpl(`https://api.vercel.com/v9/projects/${encodeURIComponent(projectName)}`, {
     method: "PATCH",
     headers: auth,
-    body: JSON.stringify({ serverlessFunctionRegion: region }),
+    body: JSON.stringify({ serverlessFunctionRegion: region, ssoProtection: null }),
   }).catch(() => undefined);
   const deployRes = await fetchImpl("https://api.vercel.com/v13/deployments", {
     method: "POST",
@@ -243,11 +247,13 @@ async function deployVercel(
     throw new GatewayError("platform_unavailable", deployRes.status, `Vercel deploy failed: ${await readError(deployRes)}`);
   // Pin the region again after the deploy created the project: the PATCH above
   // is a no-op on first deploy (the project does not exist yet), and a redeploy
-  // is what Vercel requires for a region change to take effect anyway.
+  // is what Vercel requires for a region change to take effect anyway. The SSO
+  // protection reset is repeated for the same reason — the first PATCH had no
+  // project to act on.
   await fetchImpl(`https://api.vercel.com/v9/projects/${encodeURIComponent(projectName)}`, {
     method: "PATCH",
     headers: auth,
-    body: JSON.stringify({ serverlessFunctionRegion: region }),
+    body: JSON.stringify({ serverlessFunctionRegion: region, ssoProtection: null }),
   }).catch(() => undefined);
   await fetchImpl("https://api.vercel.com/v13/deployments", {
     method: "POST",
