@@ -329,7 +329,16 @@ export default function ProviderDetail(): ReactNode {
     // `opener` is severed (noopener equivalent) while retaining the handle
     // needed to navigate/close the window; `window.open` with a literal
     // `noopener` feature would return null instead.
-    const blankPopup = window.open("about:blank", "cartethyia-oauth", "popup,width=720,height=820");
+    //
+    // Close any popup from a previous attempt first, and use a window name
+    // that is unique per attempt: a fixed name would make `window.open`
+    // *reuse* a still-open popup from an earlier login (for example the
+    // loopback success page, which never auto-closes), leaving the new flow
+    // navigating a stale window.
+    const previous = oauthPopupRef.current;
+    if (previous && !previous.closed) previous.close();
+    const windowName = `cartethyia-oauth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const blankPopup = window.open("about:blank", windowName, "popup,width=720,height=820");
     if (blankPopup) {
       blankPopup.opener = null;
       oauthPopupRef.current = blankPopup;
@@ -343,7 +352,7 @@ export default function ProviderDetail(): ReactNode {
             blankPopup.location.href = authorizeUrl;
             target = blankPopup;
           } else {
-            target = window.open(authorizeUrl, "cartethyia-oauth", "popup,width=720,height=820");
+            target = window.open(authorizeUrl, windowName, "popup,width=720,height=820");
             if (target) {
               target.opener = null;
               oauthPopupRef.current = target;

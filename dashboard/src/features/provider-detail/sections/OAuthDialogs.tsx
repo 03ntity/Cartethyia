@@ -90,6 +90,12 @@ export function OAuthBrowserDialog({
   const accountsQuery = useProviderAccounts(providerId);
   const baselineAccountIdsRef = useRef<ReadonlySet<string> | null>(null);
   const completionDetectedRef = useRef(false);
+  // The baseline must come from a *fresh* account read, not a cached snapshot.
+  // A snapshot left over from a previous login can list the account that login
+  // added, and if it becomes the baseline here, this login "completes"
+  // instantly when that earlier account first shows up in the poll — the
+  // dialog closes claiming success for a login that never happened.
+  const [baselinePending, setBaselinePending] = useState(true);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -101,6 +107,19 @@ export function OAuthBrowserDialog({
   }, [queryClient, providerId]);
 
   useEffect(() => {
+    let cancelled = false;
+    void queryClient
+      .invalidateQueries({ queryKey: queryKeys.providers.accounts(providerId) })
+      .finally(() => {
+        if (!cancelled) setBaselinePending(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [queryClient, providerId]);
+
+  useEffect(() => {
+    if (baselinePending) return;
     const ids = accountsQuery.data?.map((account) => account.id) ?? null;
     if (ids === null) return;
     if (baselineAccountIdsRef.current === null) {
@@ -114,7 +133,7 @@ export function OAuthBrowserDialog({
     popup.close();
     toast.success("Account connected", "OAuth login completed successfully");
     onClose(true);
-  }, [accountsQuery.data, popup, onClose]);
+  }, [accountsQuery.data, baselinePending, popup, onClose]);
 
   const cancel = () => {
     popup.close();
