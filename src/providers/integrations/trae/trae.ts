@@ -129,6 +129,10 @@ class TraeAdapter implements ProviderAdapter {
      */
     const sessionId = request.session_id ?? resolvePromptCacheKey(request, context);
     const body = buildTraeChatBody(modelId, request, this.realm, sessionId);
+    // The cache estimator is scoped per (session, model): upstream cache keys
+    // are model-specific, so two models sharing a conversation id must not
+    // treat each other's identical prefixes as hits.
+    const cacheSessionKey = sessionId === undefined ? undefined : `${modelId}:${sessionId}`;
     /**
      * The endpoint follows the model, not the provider.
      *
@@ -172,7 +176,7 @@ class TraeAdapter implements ProviderAdapter {
         response.body as ReadableStream<Uint8Array>,
         lifecycle.signal,
         request.model,
-        sessionId,
+        cacheSessionKey,
         request.messages,
       );
     } catch (err: unknown) {
