@@ -1300,6 +1300,17 @@ describe("classifyUpstreamError", () => {
     }
   });
 
+  test("maps Trae's numeric 4026 context-overflow code to a 413", () => {
+    // A stream frame carries no HTTP status, so the identifier is the only
+    // evidence. Before this the code fell through to the 502
+    // `platform_unavailable` fallback.
+    expect(classifyUpstreamError(undefined, "4026")).toEqual({
+      code: "context_length_exceeded",
+      status: 413,
+      origin: "upstream",
+    });
+  });
+
   test("maps quota identifiers to a 429, keeping 402 when the status said so", () => {
     for (const identifier of [
       "rate_limit_exceeded",

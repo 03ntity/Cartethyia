@@ -459,6 +459,13 @@ const CONTEXT_LENGTH_CODES: ReadonlySet<string> = new Set([
   "model_context_window_exceeded",
   // InferHub's spelling for the same condition.
   "context_too_long",
+  // Trae answers an overflow on its streaming surface with the bare numeric
+  // code `4026` and the prose "We're sorry, your context length has exceeded
+  // the maximum limit." — no HTTP status, no symbolic code (verified live
+  // 2026-10: `event:error data:{"code":4026,"message":"..."}`). Without it
+  // the frame fell to the 502 `platform_unavailable` fallback and the client
+  // never saw the 413 it compacts on.
+  "4026",
 ]);
 
 /**

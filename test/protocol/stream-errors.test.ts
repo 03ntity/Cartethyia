@@ -256,6 +256,21 @@ describe("gatewayErrorFromStreamError: structured identifiers", () => {
     expect(detailsWithoutRaw(error)).toEqual({ providerCode: "context_length_exceeded" });
   });
 
+  test("Trae's numeric 4026 context-overflow code is a 413", () => {
+    // The exact frame from the trace: `event:error data:{"code":4026,
+    // "message":"We're sorry, your context length has exceeded the maximum
+    // limit."}` — no HTTP status, so before this it fell through to the 502
+    // `platform_unavailable` fallback and the client never saw the 413 it
+    // compacts on.
+    const error = gatewayErrorFromStreamError(
+      { code: 4026, message: "We're sorry, your context length has exceeded the maximum limit." },
+      "trae",
+    );
+    expect(classified(error)).toBe("context_length_exceeded/413/upstream");
+    expect(error?.message).toBe("We're sorry, your context length has exceeded the maximum limit.");
+    expect(detailsWithoutRaw(error)).toEqual({ providerCode: "4026" });
+  });
+
   test("a capacity identifier is a 529 unless the status already says 503", () => {
     expect(gatewayErrorFromStreamError({ type: "overloaded_error" }, "l")?.status).toBe(529);
     expect(gatewayErrorFromStreamError({ status: 503, type: "overloaded_error" }, "l")?.status).toBe(503);
