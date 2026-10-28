@@ -107,6 +107,59 @@ test("the plain-text INTL leak marker is recovered when not DSML", async () => {
   expect(JSON.parse(String(deltas[0]?.["arguments_delta"]))).toEqual({ text: "halo" });
 });
 
+test("the INTL leak marker never leaks as visible text", async () => {
+  // Regression for the visible leak: the marker + JSON array flowed through as
+  // a content_delta *before* the end-of-stream recovery, so the client saw
+  // "assistant 请求调用工具" plus the raw JSON as message text while the tool
+  // also ran. The held-back marker must never become a content_delta.
+  const marker =
+    "Siap, gas ya~ 🌸\n[assistant 请求调用工具]\n" +
+    JSON.stringify([{ name: "echo", arguments: '{"text":"halo"}' }]);
+  const ev = await collect([frame({ content: marker }), frame({}, "stop")]);
+  const textDeltas = ev.filter(
+    (e) =>
+      e["type"] === "content_delta" &&
+      String(((e["content"] as { text?: unknown } | undefined)?.text ?? "")).length > 0,
+  );
+  expect(textDeltas).toHaveLength(1);
+  const visible = String(
+    (textDeltas[0]?.["content"] as { text?: unknown } | undefined)?.text ?? "",
+  );
+  expect(visible).not.toContain("请求调用工具");
+  expect(visible).not.toContain('"name"');
+  expect(visible).toBe("Siap, gas ya~ 🌸\n");
+  expect(calls(ev)).toHaveLength(1);
+});
+
+test("the leak marker split across frames is withheld then recovered", async () => {
+  // The upstream may cut the marker mid-sentence: `[assistant 请求调用工`
+  // arrives first, the rest in the next frame. Neither fragment may be shown
+  // to the client; the assembled block becomes a tool call.
+  const header = "[assistant 请求调用工";
+  const tail = "具]\n" + JSON.stringify([{ name: "echo", arguments: '{"text":"hai"}' }]);
+  const ev = await collect([frame({ content: header }), frame({ content: tail }), frame({}, "stop")]);
+  const textDeltas = ev.filter((e) => e["type"] === "content_delta");
+  expect(textDeltas).toHaveLength(0);
+  const deltas = calls(ev);
+  expect(deltas).toHaveLength(1);
+  expect(deltas[0]?.["name"]).toBe("echo");
+  expect(JSON.parse(String(deltas[0]?.["arguments_delta"]))).toEqual({ text: "hai" });
+});
+
+test("a marker followed by ordinary prose is released as text, not a call", async () => {
+  // The model writes about the marker without echoing a valid array: the held
+  // block must be released as prose (fail-open), and no tool call emitted.
+  const text = "[assistant 请求调用工具] hanya penanda, bukan panggilan beneran";
+  const ev = await collect([frame({ content: text }), frame({}, "stop")]);
+  const textDeltas = ev.filter((e) => e["type"] === "content_delta");
+  expect(textDeltas.length).toBeGreaterThan(0);
+  const joined = textDeltas
+    .map((e) => String(((e["content"] as { text?: unknown } | undefined)?.text ?? "")))
+    .join("");
+  expect(joined).toContain("请求调用工具");
+  expect(calls(ev)).toHaveLength(0);
+});
+
 test("index-identified continuation fragments rejoin the pinned call id", async () => {
   const ev = await collect([
     frame(CALL_START),

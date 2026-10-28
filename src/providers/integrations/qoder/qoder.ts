@@ -904,6 +904,71 @@ const ECHO_LOOSE_RE = /^\[\s*\{\s*"name"\s*:\s*"([^"]{1,200})"\s*,\s*"arguments"
  */
 const LEAK_MARKER_ANY_RE = /[\[<(]*\s*assistant\s*请求调用工具\s*[\]>)]?/;
 
+/** Canonical marker literal used to seed prefix matching. */
+const LEAK_MARKER_LITERALS: readonly string[] = [
+  "[assistant 请求调用工具]",
+  "<assistant 请求调用工具>",
+  "assistant 请求调用工具",
+];
+
+/** Longest partial marker we hold across frames (mirrors `_MARKER_HOLD_WINDOW`). */
+const LEAK_HOLD_WINDOW = 24;
+/** Fail-open caps so an endless lookalike cannot hold text forever. */
+const LEAK_HOLD_MAX_CHARS = 32_768;
+const LEAK_HOLD_MAX_FRAMES = 200;
+
+/**
+ * True when `suffix` is a strict prefix of some marker literal — the stream
+ * may be mid-marker and the rest arrives in the next frame.
+ */
+function isLeakMarkerPrefix(suffix: string): boolean {
+  if (suffix.length === 0 || suffix.length >= LEAK_HOLD_WINDOW) return false;
+  return LEAK_MARKER_LITERALS.some((literal) => literal.startsWith(suffix));
+}
+
+/**
+ * Splits one content chunk into `{ emit, hold }`, mirroring the reference
+ * bridge's `_find_marker_split`: prose before a complete marker is emitted
+ * immediately, the marker and everything after it is held, and a partial
+ * marker at the very end is held for the next frame.
+ */
+function qoderLeakSplit(text: string): { emit: string; hold: string } {
+  if (text.length === 0) return { emit: "", hold: "" };
+  const marker = LEAK_MARKER_ANY_RE.exec(text);
+  if (marker) {
+    return { emit: text.slice(0, marker.index), hold: text.slice(marker.index) };
+  }
+  // No complete marker: hold a trailing partial-marker suffix only.
+  const tail = text.slice(-LEAK_HOLD_WINDOW);
+  for (let n = tail.length; n >= 1; n -= 1) {
+    const seg = tail.slice(-n);
+    if (isLeakMarkerPrefix(seg)) {
+      return { emit: text.slice(0, text.length - n), hold: text.slice(text.length - n) };
+    }
+  }
+  return { emit: text, hold: "" };
+}
+
+/**
+ * True when `text` is still plausibly the INTL leak block (marker + JSON
+ * array). Used to keep holding across frames; false means it is ordinary
+ * prose and can be released. Mirrors `_still_leak_candidate`.
+ */
+function qoderStillLeakCandidate(text: string): boolean {
+  if (text.length === 0) return true;
+  const marker = LEAK_MARKER_ANY_RE.exec(text);
+  if (!marker) {
+    // No complete marker yet: still a candidate only while it could grow into
+    // one (full prefix or pending marker remainder).
+    return isLeakMarkerPrefix(text) || LEAK_MARKER_ANY_RE.test(text);
+  }
+  const rest = text.slice(marker.index + marker[0].length).trim();
+  if (rest.length === 0) return true;
+  if (rest.startsWith("[")) return true;
+  if (rest.startsWith("{")) return true;
+  return false;
+}
+
 /**
  * Rebuilds the single-call echo shape when strict parsing fails.
  *
@@ -1037,6 +1102,12 @@ export async function* qoderBodyToCanonicalEvents(
   // (`[assistant 请求调用工具] …`) is not DSML, so it was never buffered and
   // recovered; keeping the plain text lets the end-of-stream recovery see it.
   let plainBuf = "";
+  // INTL leak-marker hold-back. Text that may grow into the leak block is
+  // withheld from the client (not yielded) until the stream proves it is
+  // either a tool-call echo (recovered at end of stream) or ordinary prose
+  // (released). Mirrors the reference bridge's `hold` logic.
+  let leakBuf = "";
+  let leakFrames = 0;
   /** Calls recovered from the thinking channel, emitted if content had none. */
   let reasonCalls: readonly DsmlCall[] = [];
   /** True once any tool call has been emitted by any channel this turn. */
@@ -1087,7 +1158,52 @@ export async function* qoderBodyToCanonicalEvents(
                 tail = hold;
                 continue;
               }
-              if (body.length > 0) {
+              // INTL leak-marker hold-back: do not let a marker echo reach the
+              // client as text. Prose before a complete marker is emitted now;
+              // the marker and anything after it are held until the stream
+              // decides (a valid echo → tool calls; anything else → released).
+              if (leakBuf.length > 0) {
+                leakBuf += body;
+                leakFrames += 1;
+                if (
+                  leakBuf.length > LEAK_HOLD_MAX_CHARS ||
+                  leakFrames > LEAK_HOLD_MAX_FRAMES ||
+                  !qoderStillLeakCandidate(leakBuf)
+                ) {
+                  // Released as ordinary prose: it was already shown, so it
+                  // must not re-enter `plainBuf` (the end-of-stream recovery
+                  // would re-parse it and emit a duplicate tool call).
+                  if (leakBuf.length > 0) {
+                    yield {
+                      type: "content_delta",
+                      sequence_number: seq++,
+                      content: { kind: "text", text: leakBuf },
+                    } as CanonicalEvent;
+                  }
+                  leakBuf = "";
+                  leakFrames = 0;
+                }
+                tail = hold;
+                continue;
+              }
+              const { emit, hold: leakHold } = qoderLeakSplit(body);
+              if (emit.length > 0) {
+                plainBuf += emit;
+                yield {
+                  type: "content_delta",
+                  sequence_number: seq++,
+                  content: { kind: "text", text: emit },
+                } as CanonicalEvent;
+              }
+              if (leakHold.length > 0) {
+                leakBuf = leakHold;
+                leakFrames = 1;
+                tail = hold;
+                continue;
+              }
+              // No marker at all: `emit` already covered the whole body, so
+              // only yield here when the split held nothing and emitted nothing.
+              if (emit.length === 0 && body.length > 0) {
                 plainBuf += body;
                 yield {
                   type: "content_delta",
@@ -1262,20 +1378,47 @@ export async function* qoderBodyToCanonicalEvents(
   // intended the tool to run, and left alone the client sees the JSON as
   // content while nothing executes. Only when no other channel already
   // claimed the turn.
-  if (plainBuf.length > 0 && !hasEmittedToolCall) {
-    const leaked = parseLeakedToolCalls(plainBuf);
-    if (leaked.calls.length > 0) {
-      for (const call of leaked.calls) {
-        hasEmittedToolCall = true;
+  if (!hasEmittedToolCall) {
+    // Held-back marker block first: it was withheld from the client, so a
+    // recovery here never duplicates text already shown. A valid echo becomes
+    // tool calls; anything else is released as ordinary prose.
+    if (leakBuf.length > 0) {
+      const leaked = parseLeakedToolCalls(leakBuf);
+      if (leaked.calls.length > 0) {
+        for (const call of leaked.calls) {
+          hasEmittedToolCall = true;
+          yield {
+            type: "tool_call_delta",
+            sequence_number: seq++,
+            call_id: call.id,
+            name: call.name,
+            arguments_delta: call.arguments,
+          } as CanonicalEvent;
+        }
+        finishReason = "tool_calls";
+      } else if (leaked.clean.length > 0) {
         yield {
-          type: "tool_call_delta",
+          type: "content_delta",
           sequence_number: seq++,
-          call_id: call.id,
-          name: call.name,
-          arguments_delta: call.arguments,
+          content: { kind: "text", text: leaked.clean },
         } as CanonicalEvent;
       }
-      finishReason = "tool_calls";
+    }
+    if (plainBuf.length > 0 && !hasEmittedToolCall) {
+      const leaked = parseLeakedToolCalls(plainBuf);
+      if (leaked.calls.length > 0) {
+        for (const call of leaked.calls) {
+          hasEmittedToolCall = true;
+          yield {
+            type: "tool_call_delta",
+            sequence_number: seq++,
+            call_id: call.id,
+            name: call.name,
+            arguments_delta: call.arguments,
+          } as CanonicalEvent;
+        }
+        finishReason = "tool_calls";
+      }
     }
   }
   // A recovered call outranks what the upstream reported. It says `stop`
