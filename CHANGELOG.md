@@ -12,6 +12,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Qoder streaming tool calls no longer lose their arguments.** The upstream
+  identifies one streamed call by OpenAI chunk shape — `id` + `name` in the
+  first chunk, then only the wire `index` on every continuation fragment. The
+  qoder translator synthesized a fresh `call_<index>` id per chunk instead of
+  pinning the first id, so every continuation arrived nameless under an
+  unestablished identity and was dropped by the encoders. Clients saw tool
+  calls whose `arguments` were always `{}` (agent harnesses rejected every
+  native bash/write/read call as "missing required field"). The translator now
+  pins the first id per wire index and hands retries the same behavior as the
+  generic chat parser.
+
 - **Capability degradation no longer strips tools as collateral.** When the
   only capability a route cannot serve was ordered after `tools` in the
   degradation chain (an image attached to a text-only model such as Mercury

@@ -1,0 +1,106 @@
+import { expect, test } from "bun:test";
+import { qoderBodyToCanonicalEvents } from "../../../src/providers/integrations/qoder/qoder";
+
+/**
+ * Streaming tool calls must keep their arguments.
+ *
+ * The upstream streams one call in the OpenAI shape: the first chunk carries
+ * `id` + `name` + empty `arguments`, every continuation carries only `index`
+ * + the next `arguments` fragment. The translator previously synthesized a
+ * fresh `call_<index>` id for each continuation chunk, so those nameless
+ * fragments arrived at the encoders under an identity nobody had established
+ * and were all dropped — the client saw a call whose arguments were always
+ * empty (`{}`), exactly what the qoder/deepseek omp reports showed.
+ *
+ * Reproduced live (captured frame `acfd7b10`, 60 `tool_call_delta`s from the
+ * upstream, `arguments:""` alone at the client); the fix pins the first id per
+ * wire index, like the generic chat parser already does.
+ */
+
+function frame(delta: Record<string, unknown>, finishReason?: string): string {
+  const chunk = {
+    choices: [{ delta, index: 0, ...(finishReason === undefined ? {} : { finish_reason: finishReason }) }],
+  };
+  return `data:${JSON.stringify({ statusCodeValue: 200, body: JSON.stringify(chunk) })}\n\n`;
+}
+
+async function collect(chunks: readonly string[]): Promise<Array<Record<string, unknown>>> {
+  const enc = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) {
+      for (const chunk of chunks) c.enqueue(enc.encode(chunk));
+      c.close();
+    },
+  });
+  const out: Array<Record<string, unknown>> = [];
+  for await (const e of qoderBodyToCanonicalEvents(stream, new AbortController().signal, "m")) {
+    out.push(e as unknown as Record<string, unknown>);
+  }
+  return out;
+}
+
+const calls = (ev: readonly Record<string, unknown>[]) =>
+  ev.filter((e) => e["type"] === "tool_call_delta");
+
+const CALL_START: Record<string, unknown> = {
+  tool_calls: [
+    { function: { arguments: "", name: "echo" }, id: "call_00_full", index: 0, type: "function" },
+  ],
+};
+const continuation = (fragment: string, wireIndex = 0) => ({
+  tool_calls: [{ function: { arguments: fragment }, index: wireIndex, type: "function" }],
+});
+
+test("index-identified continuation fragments rejoin the pinned call id", async () => {
+  const ev = await collect([
+    frame(CALL_START),
+    frame(continuation('{"text"')),
+    frame(continuation(': "hello')),
+    frame(continuation('-qoder"}')),
+    frame({}, "stop"),
+  ]);
+  const deltas = calls(ev);
+  // The tail hold means the JSON fragments may arrive spread or joined; every
+  // delta must reference the real call id, not a per-chunk `call_0` synthetic.
+  for (const delta of deltas) expect(delta["call_id"]).toBe("call_00_full");
+  const joined = deltas
+    .map((delta) => (delta["arguments_delta"] as string) ?? "")
+    .join("");
+  expect(JSON.parse(joined)).toEqual({ text: "hello-qoder" });
+});
+
+test("two parallel calls keep separate identities across index 0 and 1", async () => {
+  const secondStart: Record<string, unknown> = {
+    tool_calls: [
+      { function: { arguments: "", name: "write" }, id: "call_01_full", index: 1, type: "function" },
+    ],
+  };
+  const ev = await collect([
+    frame(CALL_START),
+    frame(continuation('{"text":"a"}')),
+    frame(secondStart),
+    frame(continuation('{"path":"b"}', 1)),
+  ]);
+  const byFragment = calls(ev).map((delta) => [
+    delta["call_id"],
+    delta["arguments_delta"],
+    delta["index"],
+  ]);
+  const echoFragments = byFragment.filter(([id]) => id === "call_00_full");
+  const writeFragments = byFragment.filter(([id]) => id === "call_01_full");
+  expect(JSON.parse(echoFragments.map(([, args]) => String(args)).join(""))).toEqual({
+    text: "a",
+  });
+  expect(JSON.parse(writeFragments.map(([, args]) => String(args)).join(""))).toEqual({
+    path: "b",
+  });
+});
+
+test("a chunk carrying both id and arguments pins AND emits in one pass", async () => {
+  // Some frames carry the name and a first real fragment together.
+  const ev = await collect([
+    frame({ tool_calls: [{ function: { arguments: '{"a":', name: "echo" }, id: "call_00_x", index: 0, type: "function" }] }),
+    frame(continuation('1}')),
+  ]);
+  expect(JSON.parse(calls(ev).map((d) => String(d["arguments_delta"])).join(""))).toEqual({ a: 1 });
+});

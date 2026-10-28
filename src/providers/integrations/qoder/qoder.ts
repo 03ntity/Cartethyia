@@ -1022,6 +1022,8 @@ export async function* qoderBodyToCanonicalEvents(
   let finishReason: unknown = undefined;
   let rawUsage: Record<string, unknown> | undefined = undefined;
   let hasTerminal = false;
+  /** First-sighting id per wire tool-call index, for continuation chunks. */
+  const indexIds = new Map<number, string>();
   // DSML recovery state. While `buf` is empty the text passes through
   // untouched; once a chunk carries DSML the rest is buffered so the markup can
   // be parsed whole at end of stream. `tail` holds a possible half-tag that
@@ -1119,10 +1121,23 @@ export async function* qoderBodyToCanonicalEvents(
           if (toolCalls) {
             for (const tc of toolCalls) {
               const fn = tc["function"] as Record<string, unknown> | undefined;
+              const index = typeof tc["index"] === "number" ? (tc["index"] as number) : undefined;
+              // OpenAI continuation chunks re-identify their call by wire
+              // `index` alone — the `id` appears only once, in the first chunk.
+              // Pinning the first id per index and reusing it for continuations
+              // is what keeps those fragments attached to the right call;
+              // synthesizing a fresh `call_<index>` id per chunk instead made
+              // every continuation an unknown nameless call that encoders
+              // dropped, so the client saw a call whose arguments were always
+              // empty.
+              const pinnedId = index !== undefined ? indexIds.get(index) : undefined;
+              const callId = (tc["id"] as string) ?? pinnedId ?? `call_${String(index ?? 0)}`;
+              if (tc["id"] && index !== undefined) indexIds.set(index, callId);
               yield {
                 type: "tool_call_delta",
                 sequence_number: seq++,
-                call_id: (tc["id"] as string) ?? `call_${String(tc["index"] ?? 0)}`,
+                call_id: callId,
+                ...(index !== undefined ? { index } : {}),
                 name: fn?.["name"] as string | undefined,
                 arguments_delta: (fn?.["arguments"] as string) ?? "",
               } as CanonicalEvent;
