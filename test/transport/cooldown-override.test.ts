@@ -153,4 +153,28 @@ dbDescribe("forceDisableCooldown", () => {
       .where(eq(providerAccounts.id, accountId));
     expect(rows[0]?.status).toBe("cooldown");
   });
+
+  test("an expired row still reads as cooldown until the sweeper recovers it", async () => {
+    // A row that still says `cooldown` must stay excluded even after its
+    // deadline elapses: the sweeper is the only exit from `cooldown`, and
+    // redialing an expired-but-not-yet-recovered account mid-window reproduces
+    // the refusal that cooled it — the "still hit a cooled-down account"
+    // report, logging a fresh `cooldown → cooldown` row each time.
+    await writePreferences({});
+    await getDb()
+      .update(providerAccounts)
+      .set({
+        status: "cooldown",
+        cooldownUntil: new Date(Date.now() - 5 * 60_000),
+        lastErrorCategory: "quota_exhausted",
+      })
+      .where(eq(providerAccounts.id, accountId));
+    const candidate = await candidateFor();
+    expect(candidate).toBeDefined();
+    expect(candidate?.["health_status"]).toBe("cooldown");
+    expect(candidate?.["cooldown_kind"]).toBe("hard");
+    // No reset to quote: the window already closed, and the sweep is about to
+    // recover the row.
+    expect(candidate?.["cooldown_until"]).toBeUndefined();
+  });
 });

@@ -12,6 +12,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Routing no longer redials an account whose cooldown deadline has elapsed
+  but has not been swept yet.** A row still in `cooldown` status used to read
+  as healthy the moment its `cooldown_until` passed, so requests landing in
+  the window between the deadline and the next 30s recovery sweep reproduced
+  the refusal that cooled the account — logging a fresh `cooldown →
+  cooldown` health row for each one (the "still hit a cooled-down account"
+  report). The snapshot builder now stamps a `cooldown` row regardless of
+  whether its deadline is expired; the sweeper remains the only exit, so the
+  account is not served again until it is genuinely recovered.
+
 - **Qoder billing-limit refusals no longer invalidate the credential.** Qoder
   answers an exhausted daily billing allowance with
   `{"code":"110","message":"Billing daily count exceeded"}` on a 403 wrapper.

@@ -741,43 +741,53 @@ class RouteCatalogRepository {
             : {}),
         };
         if (account.status === "cooldown") {
-          // Expired cooldowns read as healthy here without a fire-and-forget
-          // write: AccountHealthSweeper materializes the recovery every 30s,
-          // so the builder stays a pure read (no UPDATE racing the request).
+          // A row that still says `cooldown` stays excluded until the sweeper
+          // flips it back to `active`. An *expired* deadline used to read as
+          // healthy here (the comment below's "pure read" reasoning), which let
+          // routing redial the account in the window between the deadline
+          // elapsing and the next 30s sweep — reproducing the refusal that
+          // cooled it and logging a fresh `cooldown → cooldown` row each time
+          // (the operator's "still hit a cooled-down account" report). The
+          // sweep is the only exit from `cooldown`; until it runs the row is
+          // not proof the account can serve.
           //
           // `forceDisableCooldown` skips the exclusion entirely. The cooldown
           // is still real and still recorded — it simply stops deciding
           // routing. That is what makes the setting reversible: nothing was
           // written, so turning it off needs no cleanup, and Health still
           // reports the truth about the account.
-          if (account.cooldownUntil && account.cooldownUntil.getTime() > Date.now()) {
-            const overrideActive =
-              rowTenantId === null
-                ? anyTenantOverrides
-                : cooldownOverrideTenants.has(rowTenantId);
-            if (overrideActive) {
-              // The account is still cooling — this only stops it from being
-              // excluded. `plan()` reads `cooldown_until` to answer the
-              // all-cooling case, so it stays populated either way.
-              //
-              // Neither `health_status` nor `cooldown_kind` is set: the
-              // evaluator excludes a hard cooldown on `health_status ===
-              // "cooldown"` alone, so stamping it here would keep excluding
-              // the very accounts the override exists to reach — a spent quota
-              // or a policy block, which are the ones an operator actually
-              // wants to override.
-              candidate.cooldown_until = account.cooldownUntil.getTime();
-            } else {
-              candidate.health_status = "cooldown";
-              candidate.cooldown_kind = hardCooldownCategory(account.lastErrorCategory)
-                ? "hard"
-                : "soft";
-              // The deadline rides with the exclusion it explains. `plan()`
-              // reads it to answer the all-cooling case with the real reset
-              // instead of a bare 429, so a client backs off for the window
-              // that is actually open rather than inventing one.
-              candidate.cooldown_until = account.cooldownUntil.getTime();
-            }
+          const overrideActive =
+            rowTenantId === null
+              ? anyTenantOverrides
+              : cooldownOverrideTenants.has(rowTenantId);
+          const accountDeadline = account.cooldownUntil;
+          const unexpired =
+            accountDeadline !== null && accountDeadline.getTime() > Date.now();
+          if (overrideActive) {
+            // The account is still cooling — this only stops it from being
+            // excluded. `plan()` reads `cooldown_until` to answer the
+            // all-cooling case, so it stays populated either way.
+            //
+            // Neither `health_status` nor `cooldown_kind` is set: the
+            // evaluator excludes a hard cooldown on `health_status ===
+            // "cooldown"` alone, so stamping it here would keep excluding
+            // the very accounts the override exists to reach — a spent quota
+            // or a policy block, which are the ones an operator actually
+            // wants to override.
+            if (unexpired) candidate.cooldown_until = accountDeadline!.getTime();
+          } else {
+            candidate.health_status = "cooldown";
+            candidate.cooldown_kind = hardCooldownCategory(account.lastErrorCategory)
+              ? "hard"
+              : "soft";
+            // The deadline rides with the exclusion it explains. `plan()`
+            // reads it to answer the all-cooling case with the real reset
+            // instead of a bare 429, so a client backs off for the window
+            // that is actually open rather than inventing one. An expired
+            // deadline carries no reset — the sweep is about to recover the
+            // row, and quoting a past instant would tell the client to retry
+            // "immediately" for a wait that is already over.
+            if (unexpired) candidate.cooldown_until = accountDeadline!.getTime();
           }
         }
 
