@@ -24,6 +24,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { log } from "../../../observability/logger";
+import { resolvePackagePath } from "../../../config/package-paths";
 
 /** Channel assigned to the WorkBuddy desktop product (see cli/product.json). */
 export const TURING_CHANNEL_ID = 400111;
@@ -60,13 +61,15 @@ const MAX_BACKOFF_LEVEL = 20;
  * Resolve the directory holding the Turing SDK native files, or null.
  *
  * Priority: `CARTETHYIA_TURING_SDK_PATH` override → bundled copy in
- * `vendor/turing-sdk/build/Release/` relative to this repo root.
+ * `vendor/turing-sdk/build/Release/` under the package root (works both in
+ * source and in the compiled binary, where `CARTETHYIA_PACKAGE_ROOT` points at
+ * `/app`).
  */
 export function resolveTuringSdkRoot(): string | null {
   const env = process.env["CARTETHYIA_TURING_SDK_PATH"];
   if (env !== undefined && env.trim().length > 0) return env.trim();
   // Bundled SDK (committed in vendor/).
-  const bundled = path.resolve(__dirname, "../../../../vendor/turing-sdk/build/Release");
+  const bundled = resolvePackagePath("vendor", "turing-sdk", "build", "Release");
   if (existsSync(path.join(bundled, "turing_sdk.node"))) return bundled;
   return null;
 }
