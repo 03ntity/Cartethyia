@@ -1,11 +1,12 @@
 // Trae realms: one vendor, two unrelated deployments.
 //
-// `trae` (global / intl) and `traecn` (China) share the wire protocol — an
-// `x-ide-token` credential, a `model_name` body, an SSE stream — but nothing
-// else about the address: different core host, different account/oauth host,
-// different UA, a *different authorization scheme*, and a different model
-// roster. Treating them as one provider with a region flag is what would send
-// a CN account to `*.traeapi.us` and get it refused.
+// `trae` (global / intl, locked to the SG region) and `traecn` (China) share
+// the wire protocol — an `x-ide-token` credential, a `model_name` body, an
+// SSE stream — but nothing else about the address: different core host,
+// different account/oauth host, different UA, a *different authorization
+// scheme*, and a different model roster. Treating them as one provider with a
+// region flag is what would send a CN account to the intl host and get it
+// refused.
 //
 // Everything per-realm lives here so the adapter, the auth builder, and the
 // discovery fetcher cannot drift apart on host, UA, or version code.
@@ -159,28 +160,19 @@ export const TRAE_REALMS: Readonly<Record<TraeRealm, TraeRealmConfig>> = {
     modelListSupported: true,
   },
   intl: {
-    // SG is the primary, not a fallback. Region-routing is a property of the
-    // account, not the deployment: an account provisioned into `sg` only
-    // authenticates against the SG host, and sending it to the US core answers
-    // `1001 "we are not able to authenticate you"`. Accounts with a captured
-    // region still resolve to their own host through `TRAE_REGION_CORE_HOSTS`,
-    // so moving the default only changes the answer for accounts whose region
-    // was never recorded — and SG serves the wider international roster, which
-    // makes it the better bet for those than US.
-    // Inlined rather than read from `TRAE_REGION_CORE_HOSTS` below: that map is
-    // declared after this one, and a `const` forward reference throws at module
-    // init. The value must stay identical to `TRAE_REGION_CORE_HOSTS.sg`.
+    // Locked to SG. Region-routing is a property of the account, and this
+    // deployment only serves SG-provisioned accounts: a US core would answer
+    // `1001 "we are not able to authenticate you"` for every token this
+    // gateway holds, so no US host is configured anywhere in this realm.
     core: "https://coresg-normal.trae.ai",
-    // US stays reachable as a fallback: an account that really is US-provisioned
-    // but has no stored region still has to have somewhere to land.
-    coreFallbacks: ["https://core-normal.traeapi.us", "https://core-normal.trae.ai"],
+    coreFallbacks: [],
     account: "https://grow-normal.trae.ai",
-    accountFallbacks: ["https://grow-normal.traeapi.us"],
-    pay: "https://grow-normal.traeapi.us",
-    ug: "https://grow-normal.traeapi.us",
+    accountFallbacks: [],
+    pay: "https://grow-normal.trae.ai",
+    ug: "https://grow-normal.trae.ai",
     userAgent: "Trae/3.6.2",
     versionCode: "20260212",
-    region: "US",
+    region: "SG",
     // Verified against an SG account: the region host answers `model_list`.
     modelListSupported: true,
   },
@@ -189,18 +181,13 @@ export const TRAE_REALMS: Readonly<Record<TraeRealm, TraeRealmConfig>> = {
 /**
  * Data-plane host per account region, when the login reported one.
  *
- * An intl account is provisioned into a region and its token only authenticates
- * against that region's core host. Verified: a `userRegion=sg` account sent to
- * `core-normal.traeapi.us` answers `1001 "we are not able to authenticate you"`,
- * while `coresg-normal.trae.ai` accepts the same token and streams normally.
- * Without this, a correct login produced an account that could never dispatch.
- *
- * `store-country-code` follows the same value: the US host was rejecting the
- * token *and* the roster it serves is a different catalog.
+ * This deployment is locked to the SG region: every intl account is served by
+ * `coresg-normal.trae.ai`, and no US host is configured. An account that
+ * reports any other region still resolves here, because there is nowhere else
+ * to send it — this deployment is locked to SG.
  */
 export const TRAE_REGION_CORE_HOSTS: Readonly<Record<string, string>> = {
   sg: "https://coresg-normal.trae.ai",
-  us: "https://core-normal.traeapi.us",
 };
 
 /** The app id is constant across realms. */

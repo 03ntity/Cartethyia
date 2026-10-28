@@ -39,7 +39,6 @@ import { buildTraeHeaders } from "./trae-headers";
 import { log } from "../../../observability/logger";
 import {
   TRAE_ENT_USAGE_PATH,
-  TRAE_REGION_CORE_HOSTS,
   TRAE_REALMS,
   TRAE_SESSION_USAGE_PATH,
   type TraeRealm,
@@ -66,7 +65,7 @@ const DOLLAR_BUCKETS: readonly (readonly [string, string])[] = [
 interface TraeQuotaAuth {
   readonly realm: TraeRealm;
   readonly uid: string;
-  /** Provisioned region (`sg`, `us`), which selects the core host. */
+  /** Provisioned region, stored for traceability (routing is locked to SG). */
   readonly region: string;
 }
 
@@ -88,10 +87,9 @@ function quotaAuth(context: QuotaCollectionContext | undefined): TraeQuotaAuth {
   // fingerprint empty for every account.
   const uidRaw = raw["uid"] ?? raw["userId"] ?? raw["user_id"];
   const uid = typeof uidRaw === "string" && uidRaw.trim() ? uidRaw.trim() : "";
-  // `region` is provisioned, not chosen: an intl account is created into one
-  // and its token only authenticates against that region's core host. `us` and
-  // `cn` are served by the realm's default host, but `sg` is a different host
-  // entirely — sending it to the US core answers 401 code 1001.
+  // `region` is provisioned, not chosen, and is persisted for traceability.
+  // Routing is locked to SG: every intl account goes to the SG host, so the
+  // stored value never selects a host.
   const region = typeof raw["region"] === "string" ? raw["region"].trim().toLowerCase() : "";
   return { realm, uid, region };
 }
@@ -104,7 +102,7 @@ function quotaAuth(context: QuotaCollectionContext | undefined): TraeQuotaAuth {
  * device, answering `1001` for a token that is perfectly valid. The JWT carries
  * the id, so it is read there when the auth state does not have it.
  */
-function uidFromToken(credential: string): string | undefined {
+export function uidFromToken(credential: string): string | undefined {
   const payload = decodeJwtPayload(credential);
   if (!payload) return undefined;
   // The id is nested: this token's payload is `{data:{id,type,tenant_id},exp,
@@ -261,11 +259,11 @@ function logTraeQuotaMiss(errors: readonly string[]): void {
 /**
  * The core host for this account.
  *
- * A provisioned region overrides the realm default: an `sg` account sent to the
- * US core is answered 401 code 1001, which looks exactly like a dead token.
+ * Intl is locked to SG: no US host is configured, so the realm default
+ * (`coresg-normal.trae.ai`) is the only host intl accounts are sent to.
  */
-function coreHost(region: string, config: (typeof TRAE_REALMS)[TraeRealm]): string {
-  return (region !== "" ? TRAE_REGION_CORE_HOSTS[region] : undefined) ?? config.core;
+function coreHost(config: (typeof TRAE_REALMS)[TraeRealm]): string {
+  return config.core;
 }
 
 export async function fetchTraeQuota(
@@ -273,7 +271,7 @@ export async function fetchTraeQuota(
   fetcher: FetchLike,
   context?: QuotaCollectionContext,
 ): Promise<ProviderQuotaResult> {
-  const { realm, uid, region } = quotaAuth(context);
+  const { realm, uid } = quotaAuth(context);
   const resolvedUid = uid || uidFromToken(credential) || "";
   const errors: string[] = [];
 
@@ -296,14 +294,10 @@ export async function fetchTraeQuota(
         // no windows while its token is perfectly valid.
         authorization: `Cloud-IDE-JWT ${credential}`,
         "content-type": "application/json",
-        // The builder pins `us` for every intl account. An `sg` account sent
-        // with a US country code is refused with 401 code 1001 — the country
-        // code is part of the identity this surface checks, not a hint.
-        // `sg` rather than `us` for an account with no recorded region: the
-        // default core is SG now, and this header is part of the identity the
-        // commercial surface checks, so it has to agree with the host it is
-        // sent to. An account that *has* a region still sends its own.
-        "store-country-code": region || "sg",
+        // Locked to SG: the country code is part of the identity this surface
+        // checks, and there is no US host to agree with — an `sg` value is
+        // the only one that authenticates here.
+        "store-country-code": "sg",
       },
       body: "{}",
     });
@@ -348,7 +342,7 @@ export async function fetchTraeQuota(
     return null;
   };
 
-  const session = await tryRealms((config) => coreHost(region, config) + TRAE_SESSION_USAGE_PATH, "session usage", parseSessionUsage);
+  const session = await tryRealms((config) => coreHost(config) + TRAE_SESSION_USAGE_PATH, "session usage", parseSessionUsage);
   const entitlement = await tryRealms((config) => config.pay + TRAE_ENT_USAGE_PATH, "entitlement", parseEntitlement);
 
   const windows = [...(session?.windows ?? []), ...(entitlement?.windows ?? [])];
