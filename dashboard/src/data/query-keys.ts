@@ -30,6 +30,8 @@ export const queryKeys = {
     flatAll: ["console", "providers", "models-flat-all"] as const,
     accounts: (providerId: string | undefined) =>
       ["console", "providers", providerId, "accounts"] as const,
+    usageMatrix: (providerId: string | undefined) =>
+      ["console", "providers", providerId, "usage-matrix"] as const,
     routing: (providerId: string | undefined) =>
       ["console", "providers", providerId, "routing"] as const,
     accountInflight: (providerId: string | undefined) =>

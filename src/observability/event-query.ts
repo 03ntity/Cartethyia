@@ -537,6 +537,63 @@ export async function chartTelemetry(
   }));
 }
 
+/** One day × model usage cell for a single provider — the Activity Matrix feed. */
+export interface ProviderUsageDayRow {
+  /** UTC day, `YYYY-MM-DD` (epoch-day buckets, so the same key on both backends). */
+  readonly day: string;
+  /** What the client asked for; `null` when the event carried no model. */
+  readonly model: string | null;
+  readonly requests: number;
+  readonly inputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly outputTokens: number;
+  readonly costUsd: number;
+}
+
+/**
+ * Per-provider daily usage grouped by `requested_model`, day-bucketed like
+ * {@link chartTelemetry} but with a second grouping dimension (requested
+ * model) and the totals the tooltip/summary strip need. Provider rows carry
+ * no catalog foreign keys, so an unknown or deleted provider id returns empty
+ * rather than erroring.
+ */
+export async function providerUsageMatrix(
+  db: CartethyiaDatabase,
+  tenantId: string,
+  providerId: string,
+  since: Date,
+): Promise<ProviderUsageDayRow[]> {
+  // Same inlining rule as chartTelemetry: SELECT and GROUP BY must spell the
+  // identical expression or Postgres 42803-rejects the grouped reference.
+  const w = sql.raw(String(86400));
+  const dayExpression = isPostgres(db)
+    ? sql<number>`(cast(extract(epoch from ${telemetryEvents.createdAt}) as bigint) / ${w}) * ${w}`
+    : sql<number>`(cast(strftime('%s', ${telemetryEvents.createdAt}) as integer) / ${w}) * ${w}`;
+  const rows = await db
+    .select({
+      day: dayExpression,
+      model: telemetryEvents.requestedModel,
+      requests: sql<number>`count(*)`,
+      inputTokens: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}), 0)`,
+      cachedInputTokens: sql<number>`coalesce(sum(${telemetryEvents.cachedInputTokens}), 0)`,
+      outputTokens: sql<number>`coalesce(sum(${telemetryEvents.outputTokens}), 0)`,
+      costUsd: sql<number>`coalesce(sum(${telemetryEvents.estimatedCostUsd}), 0)`,
+    })
+    .from(telemetryEvents)
+    .where(and(scoped(tenantId, since), eq(telemetryEvents.providerId, providerId)))
+    .groupBy(dayExpression, telemetryEvents.requestedModel)
+    .orderBy(dayExpression);
+  return rows.map((row) => ({
+    day: new Date(numeric(row.day) * 1000).toISOString().slice(0, 10),
+    model: row.model,
+    requests: numeric(row.requests),
+    inputTokens: numeric(row.inputTokens),
+    cachedInputTokens: numeric(row.cachedInputTokens),
+    outputTokens: numeric(row.outputTokens),
+    costUsd: numeric(row.costUsd),
+  }));
+}
+
 /** Overview/health totals for one tenant window. */
 export async function healthTelemetry(
   db: CartethyiaDatabase,

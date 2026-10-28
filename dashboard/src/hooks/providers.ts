@@ -275,6 +275,86 @@ export function useProviderAccounts(providerId: string | undefined) {
   });
 }
 
+/** One day × model usage cell from the provider usage matrix endpoint. */
+export interface ProviderUsageDayRow {
+  /** UTC day, `YYYY-MM-DD`. */
+  readonly day: string;
+  readonly model: string | null;
+  readonly requests: number;
+  readonly inputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly outputTokens: number;
+  readonly costUsd: number;
+}
+
+export interface ProviderUsageMatrixResponse {
+  readonly days: number;
+  readonly rows: readonly ProviderUsageDayRow[];
+}
+
+/**
+ * Normalizes the matrix response defensively: the endpoint aggregates over SQL
+ * values that can arrive as strings (`numeric`/bigint), and a hostile payload
+ * must never reach the calendar as `NaN`.
+ */
+function assertUsageMatrix(raw: unknown): ProviderUsageMatrixResponse {
+  const shape = raw as {
+    days?: unknown;
+    rows?: readonly {
+      day?: unknown;
+      model?: unknown;
+      requests?: unknown;
+      inputTokens?: unknown;
+      cachedInputTokens?: unknown;
+      outputTokens?: unknown;
+      costUsd?: unknown;
+    }[];
+  };
+  const rows = Array.isArray(shape.rows) ? shape.rows : [];
+  const asNumber = (value: unknown): number => {
+    const parsed = Number(value ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  return {
+    days: Math.max(1, Math.trunc(asNumber(shape.days)) || 30),
+    rows: rows.map((row) => ({
+      day: typeof row.day === "string" ? row.day : "",
+      model: typeof row.model === "string" ? row.model : null,
+      requests: asNumber(row.requests),
+      inputTokens: asNumber(row.inputTokens),
+      cachedInputTokens: asNumber(row.cachedInputTokens),
+      outputTokens: asNumber(row.outputTokens),
+      costUsd: asNumber(row.costUsd),
+    })),
+  };
+}
+
+/**
+ * Day × model usage for the provider Activity Matrix.
+ *
+ * Deliberately lazy-friendly: pass `enabled: false` until the card is
+ * expanded, so a provider the operator only brands on never costs an
+ * aggregate scan. The matrix barely changes within a minute, so a 60 s
+ * freshness window covers repeated expand/collapse toggles.
+ */
+export function useProviderUsageMatrix(
+  providerId: string | undefined,
+  enabled: boolean,
+): ReturnType<typeof useQuery<ProviderUsageMatrixResponse>> {
+  return useQuery({
+    queryKey: queryKeys.providers.usageMatrix(providerId),
+    queryFn: (context) => {
+      if (!providerId) throw { status: 400, code: "invalid_request", message: "Provider is required" } satisfies ApiErrorShape;
+      return consoleRequest<unknown>(
+        `/providers/${encodeURIComponent(providerId)}/usage/matrix`,
+        { signal: querySignal(context) },
+      ).then(assertUsageMatrix);
+    },
+    ...DASHBOARD_QUERY_OPTIONS,
+    enabled: Boolean(providerId) && enabled,
+  });
+}
+
 /** Creates a provider account. */
 export function useCreateProviderAccount() {
   const queryClient = useQueryClient();

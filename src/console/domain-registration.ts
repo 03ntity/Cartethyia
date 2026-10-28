@@ -46,6 +46,7 @@ import type { ConsoleCredentialService } from "./auth/credentials";
 import { resolveTelemetryRetentionDays } from "../config/telemetry";
 import { payloadRetentionMs, resolvePayloadCapture } from "../observability/payload-capture";
 import { TELEMETRY_EVENT_DIR } from "../observability/event-log";
+import { providerUsageMatrix } from "../observability/event-query";
 
 import { InMemoryOAuthFlowStore, OAuthFlowStore } from "../providers/authentication/oauth-flow-store";
 import { OAuthCallbackListener } from "./providers/oauth/callback-listener";
@@ -279,6 +280,13 @@ export function registerConsoleDomains(
       aliases: await modelRoutingStore.listAliases(tenantId),
       combos: await modelRoutingStore.listCombos(tenantId),
     }),
+    providerUsageMatrix: (tenantId, providerId, days) =>
+      providerUsageMatrix(
+        ctx.db,
+        tenantId,
+        providerId,
+        new Date(Date.now() - days * 86_400_000),
+      ),
   }));
   console.use(createProviderDetailRoutes({
     store: providerDetailStore,

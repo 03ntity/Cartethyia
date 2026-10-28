@@ -147,6 +147,9 @@ const deleteModelBody = t.Object({
 const bulkDeleteModelsBody = t.Object({
   items: t.Array(deleteModelBody, { minItems: 1, maxItems: 1000 }),
 });
+const usageMatrixQuery = t.Object({
+  days: t.Optional(t.Integer({ minimum: 1, maximum: 366 })),
+});
 export function createProviderCatalogRoutes(config: ProviderCatalogConfig): Elysia {
   const factory = createProviderCatalogOperations(config);
   const modelFactory = createModelCatalogOperations(config);
@@ -191,6 +194,17 @@ export function createProviderCatalogRoutes(config: ProviderCatalogConfig): Elys
     .get("/:providerId", async ({ request, params }) => {
       return await factory.getProviderDetail(config.accessResolver(request), params.providerId);
 })
+    .get(
+      "/:providerId/usage/matrix",
+      { query: usageMatrixQuery },
+      async ({ request, params, query }) => {
+        return await factory.getUsageMatrix(
+          config.accessResolver(request),
+          params.providerId,
+          query.days ?? 30,
+        );
+      },
+    )
     .post("/", { body: createProviderBody }, async ({ request, body, set }) => {
       set.status = 201;
       return await factory.createProvider(

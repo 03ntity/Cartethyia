@@ -12,6 +12,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Provider Detail "Activity Matrix" usage card.** A collapsible card at the
+  top of the provider page condenses the last 1–366 days of usage into a
+  calendar heatmap (Mon–Sun weeks, `GET
+  /console/api/providers/:providerId/usage/matrix?days=N`, aggregated directly
+  from `telemetry_events` — no migration). Summary strip totals requests,
+  tokens, cached tokens, and estimated cost. Cells are tinted by the day's
+  dominant model with a stable per-model color (hashed hue), hover shows a
+  native day tooltip broken down per model, and an expandable "Usage by model"
+  list ranks models by tokens with colored share bars.
 - **Inception Labs (Mercury 3) as a bundled free-tier provider.** `inception`
   ships with `mercury-3` pinned to the free tier — one million token context,
   131072 max output, reasoning and tool calling, zero price. It appears under
