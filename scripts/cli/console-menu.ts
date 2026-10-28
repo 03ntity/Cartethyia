@@ -18,7 +18,6 @@ import { exportBackup, resetConsoleAccount } from "./admin";
 import { printUpdateInstructions, runDetachedUpdate } from "./update";
 import { acquireController } from "./controller";
 import { restoreControllerAfterFailedHandoff } from "./controller";
-import { attachGateway as attachRunningGateway } from "./instance";
 
 /**
  * Seconds to keep the update notice on screen before returning to the shell.
@@ -316,7 +315,11 @@ async function runMenu(handoff: { readonly token: string; readonly parentPid: nu
   // would stop the very process the tray just adopted, which is why the menu
   // appeared to hand over a gateway that was not listening.
   if (handedOff) return;
-  if (runningAttached !== null || (await attachRunningGateway(port, drainToken)) !== null) {
+  // An attached (externally owned) gateway is left running for its owner; our
+  // own child is drained before the menu returns to the shell. `attachGateway`
+  // is deliberately NOT probed again here: it would always see our own child's
+  // lock and turn a clean drain into a rough kill on the exit backstop.
+  if (runningAttached !== null) {
     detachAttached();
     return;
   }

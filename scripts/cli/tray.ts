@@ -64,15 +64,16 @@ export async function startTray(): Promise<void> {
   const handoff = inheritedControllerHandoff();
   const controller = acquireController("tray", handoff);
   const releaseController = (): void => controller.release();
-  const failedHandoff = (): void => {
-    if (handoff) restoreControllerAfterFailedHandoff(handoff);
-  };
-  process.once("exit", failedHandoff);
   process.once("exit", releaseController);
   try {
     await runTray();
+  } catch (error) {
+    // Only a tray that never became ready restores the menu's lease. After a
+    // successful handoff the tray owns the controller; restoring it on a later
+    // normal exit would pin a controller record to the long-gone menu pid.
+    if (handoff) restoreControllerAfterFailedHandoff(handoff);
+    throw error;
   } finally {
-    process.removeListener("exit", failedHandoff);
     controller.release();
     process.removeListener("exit", releaseController);
   }
@@ -174,7 +175,21 @@ async function runTray(): Promise<void> {
     // over HTTP before it ever reaches for `kill()`, so detaching costs the
     // exit path nothing: the tray can still stop the gateway on Exit.
     adoptedGateway = await attachGateway(port, drainToken);
-    if (adoptedGateway === null) gateway = await startGateway(port, drainToken, { detached: true });
+    if (adoptedGateway === null) {
+      gateway = await startGateway(port, drainToken, { detached: true });
+    } else {
+      // The adopted gateway was started by the menu as a non-detached child of
+      // the menu's console. When the menu exits — and especially when the
+      // operator closes that terminal window afterwards — Windows delivers
+      // CTRL_CLOSE to the whole console group and the gateway (handling
+      // SIGTERM) shuts down with it: "Hide to tray" left nothing serving. The
+      // menu cannot hand the same process off to another console, so re-cycle
+      // it into a detached gateway now, before reporting ready, so the tray
+      // owns a gateway that is not attached to any console after the handoff.
+      await stopAttachedGateway(adoptedGateway, drainToken);
+      adoptedGateway = null;
+      gateway = await startGateway(port, drainToken, { detached: true });
+    }
     // The launcher that spawned this tray is blocked on a signal file: it
     // cannot read our stdio, because the tray is detached. Without this write
     // it waits out its 60 s deadline and reports a failure for a tray that is
