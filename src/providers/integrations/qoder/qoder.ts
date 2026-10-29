@@ -893,9 +893,6 @@ function repairJsonQuotes(text: string): string {
   return text.replace(/\\"/g, ph).replace(/"/g, '\\"').replaceAll(ph, '\\"');
 }
 
-/** `[{"name":"…","arguments":"<unescaped JSON>"}]`, one call only. */
-const ECHO_LOOSE_RE = /^\[\s*\{\s*"name"\s*:\s*"([^"]{1,200})"\s*,\s*"arguments"\s*:\s*"(.*)"\s*\}\s*\]$/s;
-
 /**
  * Any spelling of the INTL tool-call leak marker — the square-bracket
  * canonical form, the angle-bracket variant the upstream also emits
@@ -970,41 +967,98 @@ function qoderStillLeakCandidate(text: string): boolean {
 }
 
 /**
- * Rebuilds the single-call echo shape when strict parsing fails.
+ * Rebuilds the leaked tool-call echo shape when strict parsing fails.
+ *
+ * DeepSeek-family models echo calls with their inner quotes unescaped:
+ * `[{"name":"read","arguments":"{"path":"a"}"},…]` is not valid JSON at either
+ * level, and a parallel batch (several calls in one echo) previously fell
+ * through the single-call regex and leaked as visible text. The scanner splits
+ * top-level objects without relying on JSON validity (commas and braces inside
+ * string values are respected by scanning quote-by-quote), rebuilds each call,
+ * and accepts it only when its arguments parse as JSON. Both bracketed arrays
+ * and bare comma-separated object lists are accepted.
  *
  * Returns `null` when the text is not that shape at all, so a caller can fall
  * back rather than accepting a guess. The result still goes through the same
  * strict checks as a normally-parsed array.
  */
 function salvageEchoArray(rest: string): unknown {
-  const m = ECHO_LOOSE_RE.exec(rest.trim());
-  if (!m) return null;
-  const name = m[1] ?? "";
-  const raw = m[2] ?? "";
-  for (const candidate of [raw, repairJsonQuotes(raw)]) {
-    try {
-      JSON.parse(candidate);
-      return [{ name, arguments: candidate }];
-    } catch {
+  const src = rest.trim();
+  if (src.length === 0) return null;
+  const calls: Array<{ name: string; arguments: string }> = [];
+  let i = 0;
+  const bracketed = src[0] === "[";
+  if (bracketed) i = 1;
+  const skipWs = (): void => {
+    while (
+      i < src.length &&
+      (src[i] === " " || src[i] === "\t" || src[i] === "\n" || src[i] === "\r")
+    ) {
+      i += 1;
+    }
+  };
+  const NAME_RE = /"name"\s*:\s*"([^"]{1,200})"/y;
+  const ARG_KEY_RE = /"arguments"\s*:\s*"/y;
+
+  for (;;) {
+    skipWs();
+    if (i >= src.length) break;
+    if (bracketed && src[i] === "]") break;
+    if (src[i] !== "{") return null;
+    i += 1;
+    skipWs();
+    NAME_RE.lastIndex = i;
+    const nameMatch = NAME_RE.exec(src);
+    if (!nameMatch) return null;
+    const name = nameMatch[1] ?? "";
+    i = NAME_RE.lastIndex;
+    skipWs();
+    if (i < src.length && src[i] === ",") {
+      i += 1;
+      skipWs();
+    }
+    ARG_KEY_RE.lastIndex = i;
+    if (!ARG_KEY_RE.exec(src)) return null;
+    const argStart = ARG_KEY_RE.lastIndex;
+    // Raw arguments run to the first `}"` — the argument value's own closing
+    // bracket immediately followed by the object's closing quote. Scanning for
+    // that pair separates the argument JSON from the enclosing object even when
+    // commas or braces appear inside string values.
+    let rawEnd = -1;
+    for (let j = argStart; j + 1 < src.length; j += 1) {
+      if (src[j] === "}" && src[j + 1] === '"') {
+        rawEnd = j;
+        break;
+      }
+    }
+    if (rawEnd < 0) return null;
+    const raw = src.slice(argStart, rawEnd + 1);
+    const parsedArgs = [raw, repairJsonQuotes(raw)].find((candidate) => {
+      try {
+        JSON.parse(candidate);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (parsedArgs === undefined) return null;
+    calls.push({ name, arguments: parsedArgs });
+    // Past the argument's closing quote and the object's closing brace.
+    i = rawEnd + 2;
+    skipWs();
+    if (i >= src.length || src[i] !== "}") return null;
+    i += 1;
+    skipWs();
+    if (i < src.length && src[i] === ",") {
+      i += 1;
       continue;
     }
+    if (i < src.length && bracketed && src[i] === "]") continue;
+    if (i < src.length) return null;
   }
-  return null;
+  return calls.length > 0 ? calls : null;
 }
 
-/**
- * Recovers a tool call the model echoed back as text.
- *
- * On INTL the upstream reads tool calls as prose, so a turn that called a tool
- * is described with `QODER_TOOL_MARKER` followed by a JSON array of
- * `{name, arguments}`. The model occasionally reproduces that shape verbatim as
- * its answer instead of calling again, and left alone the client shows the JSON
- * as content while the tool never runs.
- *
- * Only a well-formed array whose every entry names a tool and carries parseable
- * arguments is accepted. Anything else returns no calls and the original text,
- * so a model merely talking about the format is never mistaken for a call.
- */
 export function parseLeakedToolCalls(
   text: string,
   allowedNames?: ReadonlySet<string>,
@@ -1122,6 +1176,9 @@ export async function* qoderBodyToCanonicalEvents(
   // tags visible in the user's thinking.
   let reasonBuf = "";
   let reasonTail = "";
+  /** INTL leak-marker hold-back for the thinking channel, mirroring `leakBuf`. */
+  let reasonLeakBuf = "";
+  let reasonLeakFrames = 0;
 
   for await (const sse of decodeSseEvents(body, { signal })) {
     const sseData = sse.data;
@@ -1233,7 +1290,49 @@ export async function* qoderBodyToCanonicalEvents(
                 reasonTail = hold;
                 continue;
               }
-              const visible = stripDsmlCloseTags(body);
+              // Thinking-channel leak-marker hold-back, the same as the content
+              // channel: a model that plans its calls inside `reasoning_content`
+              // writes `[assistant 请求调用工具] …` there, and left alone the
+              // marker leaks into the user's visible thinking.
+              if (reasonLeakBuf.length > 0) {
+                reasonLeakBuf += body;
+                reasonLeakFrames += 1;
+                if (
+                  reasonLeakBuf.length > LEAK_HOLD_MAX_CHARS ||
+                  reasonLeakFrames > LEAK_HOLD_MAX_FRAMES ||
+                  !qoderStillLeakCandidate(reasonLeakBuf)
+                ) {
+                  if (reasonLeakBuf.length > 0) {
+                    yield {
+                      type: "content_delta",
+                      sequence_number: seq++,
+                      content: { kind: "reasoning", payload: null, summary: reasonLeakBuf },
+                    } as CanonicalEvent;
+                  }
+                  reasonLeakBuf = "";
+                  reasonLeakFrames = 0;
+                }
+                reasonTail = hold;
+                continue;
+              }
+              const { emit, hold: leakHold } = qoderLeakSplit(body);
+              if (leakHold.length > 0) {
+                if (emit.length > 0) {
+                  const visible = stripDsmlCloseTags(emit);
+                  if (visible.length > 0) {
+                    yield {
+                      type: "content_delta",
+                      sequence_number: seq++,
+                      content: { kind: "reasoning", payload: null, summary: visible },
+                    } as CanonicalEvent;
+                  }
+                }
+                reasonLeakBuf = leakHold;
+                reasonLeakFrames = 1;
+                reasonTail = hold;
+                continue;
+              }
+              const visible = stripDsmlCloseTags(emit);
               if (visible.length > 0) {
                 yield {
                   type: "content_delta",
@@ -1316,6 +1415,33 @@ export async function* qoderBodyToCanonicalEvents(
     // channel — the two are deduplicated below, so a model that writes the
     // block in one channel and its tail in the other still yields one call.
     if (calls.length > 0) reasonCalls = calls;
+  }
+  // The thinking channel carries the INTL leak marker the same way the content
+  // channel does; recover it identically so a model that plans its calls in
+  // `reasoning_content` still gets them turned into real tool calls instead of
+  // leaking into visible thinking.
+  if (reasonLeakBuf.length > 0) {
+    const leaked = parseLeakedToolCalls(reasonLeakBuf);
+    if (leaked.calls.length > 0) {
+      reasonCalls = [...reasonCalls, ...leaked.calls];
+      const clean = leaked.clean.trim();
+      if (clean.length > 0) {
+        yield {
+          type: "content_delta",
+          sequence_number: seq++,
+          content: { kind: "reasoning", payload: null, summary: clean },
+        } as CanonicalEvent;
+      }
+    } else {
+      const visible = reasonLeakBuf.trim();
+      if (visible.length > 0) {
+        yield {
+          type: "content_delta",
+          sequence_number: seq++,
+          content: { kind: "reasoning", payload: null, summary: visible },
+        } as CanonicalEvent;
+      }
+    }
   }
   if (buf.length > 0) {
     // Two ways a call can arrive as text: DSML markup, and the marker + JSON

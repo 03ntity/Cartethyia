@@ -213,3 +213,53 @@ test("a chunk carrying both id and arguments pins AND emits in one pass", async 
   ]);
   expect(JSON.parse(calls(ev).map((d) => String(d["arguments_delta"])).join(""))).toEqual({ a: 1 });
 });
+
+test("a parallel leak echo (unescaped, many calls) is recovered and hidden", async () => {
+  // The user-facing regression: a parallel batch of tools leaks as
+  // `[assistant 请求调用工具]` + JSON when the model echoes calls with their
+  // inner quotes unescaped. The old single-call salvage dropped the whole
+  // block, so the marker reached the client as visible text and nothing ran.
+  const marker =
+    "Siap, gas ya~ 🌸\n[assistant 请求调用工具]\n" +
+    '[{"name":"echo","arguments":"{"text":"a"}"},' +
+    '{"name":"write","arguments":"{"path":"b","content":"hi"}"}]';
+  const ev = await collect([frame({ content: marker }), frame({}, "stop")]);
+  const textDeltas = ev.filter(
+    (e) =>
+      e["type"] === "content_delta" &&
+      String(((e["content"] as { text?: unknown } | undefined)?.text ?? "")).length > 0,
+  );
+  expect(textDeltas).toHaveLength(1);
+  const visible = String(
+    (textDeltas[0]?.["content"] as { text?: unknown } | undefined)?.text ?? "",
+  );
+  expect(visible).not.toContain("请求调用工具");
+  expect(visible).toBe("Siap, gas ya~ 🌸\n");
+  const deltas = calls(ev);
+  expect(deltas).toHaveLength(2);
+  const byName = new Map(deltas.map((d) => [String(d["name"]), String(d["arguments_delta"])]));
+  expect(JSON.parse(byName.get("echo") ?? "{}")).toEqual({ text: "a" });
+  expect(JSON.parse(byName.get("write") ?? "{}")).toEqual({ path: "b", content: "hi" });
+});
+
+test("the leak marker inside reasoning is recovered, not shown as thinking", async () => {
+  // DeepSeek reasoning models plan their calls inside `reasoning_content`. The
+  // marker there must become a tool call, not leak into the visible thinking.
+  const marker =
+    "rencana:\n[assistant 请求调用工具]\n" +
+    JSON.stringify([{ name: "echo", arguments: '{"text":"plan"}' }]);
+  const ev = await collect([frame({ reasoning_content: marker }), frame({}, "stop")]);
+  const reasoningDeltas = ev.filter(
+    (e) =>
+      e["type"] === "content_delta" &&
+      ((e["content"] as { kind?: unknown } | undefined)?.kind) === "reasoning",
+  );
+  const joined = reasoningDeltas
+    .map((e) => String(((e["content"] as { summary?: unknown } | undefined)?.summary ?? "")))
+    .join("");
+  expect(joined).not.toContain("请求调用工具");
+  const deltas = calls(ev);
+  expect(deltas).toHaveLength(1);
+  expect(deltas[0]?.["name"]).toBe("echo");
+  expect(JSON.parse(String(deltas[0]?.["arguments_delta"]))).toEqual({ text: "plan" });
+});
