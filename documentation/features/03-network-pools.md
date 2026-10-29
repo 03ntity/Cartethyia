@@ -119,6 +119,13 @@ serverless host that cannot answer CONNECT at all — `isRelayHost` recognizes
 `bridge` kind with its own `x-bridge-*` contract, is gone; backup restore maps
 any legacy `bridge` pool to `https`.
 
+`http`/`https` pools dial through the runtime-native fetch's `proxy` option.
+`socks5` pools are the exception: the native fetch rejects `socks5://` with
+`UnsupportedProxyProtocol`, so they dial through an `undici` dispatcher built
+from the pool's `SocksProxyAgent` (`createSocks5Agent`). Both paths run the
+same SSRF resolve/validate pass and the same redirect loop, so a socks pool
+behaves identically to an HTTP pool from the caller's perspective.
+
 An SSRF policy check runs on every dial. `src/network/ssrf.ts` rejects
 destinations the policy does not allow; custom provider hosts go through the
 same check, and a provider registered after boot resolves its binding on first

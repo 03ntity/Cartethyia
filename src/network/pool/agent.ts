@@ -315,6 +315,12 @@ export interface ProxyAgentPair {
    * the URL is what carries the pool egress.
    */
   readonly proxyUrl?: string;
+  /**
+   * The SOCKS5 agent instance for socks pools. The runtime-native fetch does
+   * not support `socks5://` proxies, so the validated fetcher drives this via
+   * the `undici` dispatcher when the pool is a socks pair.
+   */
+  readonly socks?: SocksProxyAgent;
 }
 
 export function isProxyAgentPair(value: unknown): value is ProxyAgentPair {
@@ -479,6 +485,7 @@ export function createSocks5Agent(
   return {
     http: http as unknown as HttpAgent,
     https: https as unknown as HttpsAgent,
+    socks: http,
     proxyUrl: withCredential(url, credential).toString(),
   };
 }

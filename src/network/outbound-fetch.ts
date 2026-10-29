@@ -2,6 +2,8 @@
 import { GatewayError } from "../protocol/gateway-error";
 import { Agent as HttpAgent } from "node:http";
 import { Agent as HttpsAgent } from "node:https";
+import { Agent as UndiciAgent, fetch as undiciFetch, type UndiciRequestInit } from "undici";
+import { SocksProxyAgent } from "socks-proxy-agent";
 import { resolveAllAddresses, validateResolvedAddresses } from "./ssrf";
 import type { SsrfPolicy } from "../config/network";
 import { isProxyAgentPair, type ProxyAgentPair } from "./pool/agent";
@@ -20,6 +22,11 @@ export interface ValidatedFetchOptions {
    * a request that should leave through a proxy leaves directly.
    */
   readonly proxyUrl?: string;
+  /**
+   * Fetch implementation used for SOCKS5 dials (via the undici dispatcher).
+   * Defaults to undici's fetch; injectable for offline tests.
+   */
+  readonly socksFetch?: (input: RequestInfo | URL, init?: UndiciRequestInit) => Promise<Response>;
 }
 export type ValidatedFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -73,6 +80,41 @@ function dialer(options: ValidatedFetchOptions): typeof fetch {
 }
 
 /**
+ * Builds the `undici` dispatcher that routes a dial through a SOCKS5 pool
+ * agent. The runtime-native fetch does not support `socks5://` proxies
+ * (`UnsupportedProxyProtocol`), so the socks pair drives the transport via
+ * undici's dispatcher instead — no node `http`/`https` adapter is involved.
+ */
+let socksDispatcherCache: WeakMap<SocksProxyAgent, UndiciAgent> | undefined;
+function socksDispatcherFor(agent: SocksProxyAgent): UndiciAgent {
+  socksDispatcherCache ??= new WeakMap();
+  let dispatcher = socksDispatcherCache.get(agent);
+  if (!dispatcher) {
+    dispatcher = new UndiciAgent({
+      connect: async (opts) => {
+        const o = opts as {
+          hostname?: string;
+          port?: number | string;
+          family?: number;
+          lookup?: (hostname: string, options: unknown, cb: (err: Error | null, addresses: unknown) => void) => void;
+        };
+        return await agent.connect(
+          {} as never,
+          {
+            host: o.hostname ?? "localhost",
+            port: Number(o.port ?? 80),
+            ...(o.family === undefined ? {} : { family: o.family }),
+            ...(o.lookup === undefined ? {} : { lookup: o.lookup }),
+          } as never,
+        );
+      },
+    });
+    socksDispatcherCache.set(agent, dispatcher);
+  }
+  return dispatcher;
+}
+
+/**
  * One dial, always through `fetch`.
  *
  * The runtime's own fetch (Bun/Undici) is the transport the clients this
@@ -97,6 +139,8 @@ async function dial(
   init: RequestInit,
   fetchFn: typeof fetch,
   proxyUrl: string | undefined,
+  dispatcher?: UndiciAgent,
+  socksFetch: (input: RequestInfo | URL, init?: UndiciRequestInit) => Promise<Response> = undiciFetch,
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   const rawBody = init.body;
@@ -108,6 +152,13 @@ async function dial(
           ? rawBody.byteLength
           : (await new Response(rawBody).arrayBuffer()).byteLength;
     headers.set("content-length", String(bytes));
+  }
+  if (dispatcher !== undefined) {
+    return await socksFetch(url, {
+      ...init,
+      headers,
+      dispatcher,
+    });
   }
   return await fetchFn(url, {
     ...init,
@@ -125,6 +176,10 @@ export function createValidatedFetch(options: ValidatedFetchOptions = {}): Valid
   const relayEndpoint = isProxyAgentPair(configuredAgent)
     ? configuredAgent.relayEndpoint
     : undefined;
+  const socksAgent = isProxyAgentPair(configuredAgent)
+    ? configuredAgent.socks
+    : undefined;
+  const socksFetch = options.socksFetch ?? undiciFetch;
   const proxyUrl =
     options.proxyUrl ?? (isProxyAgentPair(configuredAgent) ? configuredAgent.proxyUrl : undefined);
   return async (input, init = {}) => {
@@ -187,7 +242,7 @@ export function createValidatedFetch(options: ValidatedFetchOptions = {}): Valid
         // serverless front door refuses (400).
         response = await dial(relay.url, relay.init, fetchFn, undefined);
       } else {
-        response = await dial(url, requestInit, fetchFn, proxyUrl);
+        response = await dial(url, requestInit, fetchFn, proxyUrl, socksAgent ? socksDispatcherFor(socksAgent) : undefined, socksFetch);
       }
       if (response.status < 300 || response.status >= 400) {
         trackNetworkCall(url.hostname, performance.now() - startedAt);
