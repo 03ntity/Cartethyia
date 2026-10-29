@@ -55,6 +55,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   stores `auth_state` as JSON text, so the adapter received `undefined` after
   a cache eviction and refused with "missing its user identity; sign in
   again". The state parser now accepts the JSON-string form too.
+- **Qoder tool-protocol echoes fail closed instead of leaking.** When Qoder
+  echoes a tool-call block (`[assistant 请求调用工具] …`) that cannot be
+  recovered — malformed inner JSON, unescaped quotes that do not repair —
+  the turn now fails with a 502 instead of surfacing the protocol text as
+  visible content and leaving the model looking successful while nothing ran.
 
 ## [2.7.1] - 2026-10-28
 
