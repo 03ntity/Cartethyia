@@ -1,15 +1,13 @@
 /**
- * Pins the donor-adapted Qoder recovery behaviors:
- * - the INTL tool-call leak marker is recognized in its variants (angle
- *   brackets, missing closing bracket, ``` fence, trailing DSML residue);
+ * Pins donor-adapted Qoder behaviors:
  * - DeepSeek multi-turn backfills `reasoning_content` on every assistant turn
  *   once the conversation carries a reasoning trace.
+ * - Qoder speaks structured `tool_calls` (no DSML/XML text-echo recovery).
  */
 import { expect, test } from "bun:test";
 import {
   buildQoderRequest,
 } from "../../../src/providers/integrations/qoder/qoder";
-import { parseQoderTextToolCalls as parseLeakedToolCalls } from "../../../src/providers/integrations/qoder/qoder-text-tools";
 import type { CanonicalRequest, ContentPart } from "../../../src/protocol/canonical-model";
 
 const CONFIG = {
@@ -51,37 +49,6 @@ function build(parts: CanonicalRequest["messages"], model = "deepseek-v4.1-flash
   } as CanonicalRequest;
   return buildQoderRequest(model, req, CONFIG, AUTH, "intl");
 }
-
-test("leak echo is recovered from the angle-bracket marker variant", () => {
-  const text = '<assistant 请求调用工具>\n[{"name":"Read","arguments":"{\\"file_path\\":\\"a.ts\\"}"}]';
-  const { calls, clean } = parseLeakedToolCalls(text, new Set(["Read"]));
-  expect(calls).toHaveLength(1);
-  expect(calls[0]!.name).toBe("Read");
-  expect(clean).toBe("");
-});
-
-test("leak echo is recovered when the marker misses its closing bracket", () => {
-  const text = '[assistant 请求调用工具\n[{"name":"Read","arguments":"{\\"file_path\\":\\"a.ts\\"}"}]';
-  const { calls } = parseLeakedToolCalls(text, new Set(["Read"]));
-  expect(calls).toHaveLength(1);
-  expect(calls[0]!.name).toBe("Read");
-});
-
-test("leak echo is recovered from inside a ``` fence", () => {
-  const text = "```json\n[assistant 请求调用工具]\n[{\"name\":\"Read\",\"arguments\":\"{\\\"file_path\\\":\\\"a.ts\\\"}\"}]\n```";
-  const { calls, clean } = parseLeakedToolCalls(text, new Set(["Read"]));
-  expect(calls).toHaveLength(1);
-  expect(calls[0]!.name).toBe("Read");
-  expect(clean).toBe("");
-});
-
-test("leak echo tolerates trailing DSML residue after the array", () => {
-  const text =
-    '[assistant 请求调用工具]\n[{"name":"Read","arguments":"{\\"file_path\\":\\"a.ts\\"}"}]\n</｜DSML｜parameter> </｜DSML｜invoke>';
-  const { calls } = parseLeakedToolCalls(text, new Set(["Read"]));
-  expect(calls).toHaveLength(1);
-  expect(calls[0]!.name).toBe("Read");
-});
 
 test("DeepSeek backfills reasoning_content on assistant turns without a trace field", () => {
   const body = build([
@@ -132,19 +99,6 @@ test("structured epoch fall back to prose when a call lacks an id", () => {
   // No structured `tool_calls` field, and the call is recorded in prose.
   expect(assistant!["tool_calls"]).toBeUndefined();
   expect(String(assistant!["content"])).toContain("[assistant 请求调用工具]");
-});
-
-test("single-object echo is recovered (not just arrays)", () => {
-  // The model sometimes answers with the marker followed by one JSON object
-  // instead of an array: `assistant 请求调用工具\n{"name":"write","arguments":"…"}`.
-  // That shape must recover the call; otherwise the whole block is released as
-  // prose and the marker leaks to the client as text.
-  const text = 'assistant 请求调用工具\n{"name":"write","arguments":"{\\"path\\":\\"C:/a.txt\\",\\"content\\":\\"hi\\"}"}';
-  const { calls, clean } = parseLeakedToolCalls(text, new Set(["write"]));
-  expect(calls).toHaveLength(1);
-  expect(calls[0]!.name).toBe("write");
-  expect(JSON.parse(calls[0]!.arguments)).toEqual({ path: "C:/a.txt", content: "hi" });
-  expect(clean).toBe("");
 });
 
 test("image parts are carried as structured OpenAI parts, not dropped", () => {

@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import {
   buildQoderRequest,
 } from "../../../src/providers/integrations/qoder/qoder";
-import { parseQoderTextToolCalls as parseLeakedToolCalls } from "../../../src/providers/integrations/qoder/qoder-text-tools";
 import type { CanonicalRequest, ContentPart } from "../../../src/protocol/canonical-model";
 
 /**
@@ -69,32 +68,4 @@ test("CN keeps the structured call", () => {
   const out = build([{ role: "assistant", content: [CALL] }, { role: "tool", content: [RESULT] }], "cn");
   const assistant = out.find((m) => m["role"] === "assistant");
   expect(assistant?.["tool_calls"]).toHaveLength(1);
-});
-
-test("an echoed call is recovered from the text", () => {
-  const text = `Let me read it.\n\n${MARKER}\n[{"name":"Read","arguments":"{\\"file_path\\":\\"a.ts\\"}"}]`;
-  const { calls, clean } = parseLeakedToolCalls(text);
-  expect(calls).toHaveLength(1);
-  expect(calls[0]?.name).toBe("Read");
-  expect(JSON.parse(calls[0]?.arguments ?? "{}")).toEqual({ file_path: "a.ts" });
-  expect(clean).toBe("Let me read it.");
-});
-
-test("a call naming an undeclared tool is not recovered", () => {
-  // The marker is easy to reproduce; a name the caller never declared means
-  // this is the model talking, not a call.
-  const text = `${MARKER}\n[{"name":"Nope","arguments":"{}"}]`;
-  expect(parseLeakedToolCalls(text, new Set(["Read"])).calls).toHaveLength(0);
-});
-
-test("malformed arguments are not recovered", () => {
-  const text = `${MARKER}\n[{"name":"Read","arguments":"not json"}]`;
-  expect(parseLeakedToolCalls(text).calls).toHaveLength(0);
-});
-
-test("prose mentioning the marker without a call is left alone", () => {
-  const text = `The marker ${MARKER} is how calls are written.`;
-  const { calls, clean } = parseLeakedToolCalls(text);
-  expect(calls).toHaveLength(0);
-  expect(clean).toBe(text);
 });
