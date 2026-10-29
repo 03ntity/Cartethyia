@@ -243,3 +243,20 @@ test("a wrapped echo with prose between blocks is rejected", () => {
   const { calls } = parseQoderTextToolCalls(text, new Set(["read", "write"]));
   expect(calls).toHaveLength(0);
 });
+
+test("an angle-wrapped JSON echo <{...}> is recovered", () => {
+  const text =
+    "[assistant 请求调用工具]\n" +
+    "<{" +
+    '{"name":"edit","arguments":"{\\"path\\":\\"D:/tmp/x.sh\\",\\"oldString\\":\\"a\\",\\"newString\\":\\"b\\"}"}' +
+    "}>";
+  const { calls, clean } = parseQoderTextToolCalls(text, new Set(["edit"]));
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.name).toBe("edit");
+  expect(JSON.parse(calls[0]!.arguments)).toEqual({
+    path: "D:/tmp/x.sh",
+    oldString: "a",
+    newString: "b",
+  });
+  expect(clean).toBe("");
+});

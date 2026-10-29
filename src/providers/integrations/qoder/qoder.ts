@@ -959,8 +959,16 @@ function qoderStillLeakCandidate(text: string): boolean {
   if (rest.length === 0) return true;
   if (rest.startsWith("[")) return true;
   if (rest.startsWith("{")) return true;
-  // Tool-style echoes (self-closing `<execute …/>` or wrapped `<tool_call>…`).
+  // Tool-style echoes (self-closing `<execute …/>`, wrapped `<tool_call>…`,
+  // or angle-wrapped JSON `<{…}>`).
   if (/^<[a-zA-Z0-9_.:-]+\b/.test(rest)) return true;
+  // Angle-wrapped JSON: `<{` / `<[` — a candidate while it may still become
+  // `<{…}>`. Keep holding until a closing `>` appears, so a long fragmented
+  // echo is not released mid-stream. Once a `>` is present, require it to be
+  // the terminator (valid) or fall through (release).
+  if (rest.startsWith("<{") || rest.startsWith("<[")) {
+    return !rest.includes(">") || rest.endsWith(">");
+  }
   return false;
 }
 

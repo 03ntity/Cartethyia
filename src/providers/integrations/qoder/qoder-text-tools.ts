@@ -35,69 +35,76 @@ export function isQoderEchoAttempt(text: string): boolean {
   const marker = LEAK_MARKER_ANY_RE.exec(src);
   if (!marker) return false;
   const rest = src.slice(marker.index + marker[0].length).trim();
-  return rest.startsWith("[") || rest.startsWith("{") || /^<[a-zA-Z0-9_.:-]+\b/.test(rest);
+  return (
+    rest.startsWith("[") ||
+    rest.startsWith("{") ||
+    /^<[a-zA-Z0-9_.:-]+\b/.test(rest) ||
+    // Angle-wrapped JSON: `<{…}>` / `<[…]>` (no tag name).
+    (rest.startsWith("<[") || rest.startsWith("<{")) &&
+      (!rest.includes(">") || rest.endsWith(">"))
+  );
 }
 
 /**
- * A tool-style echo: the model writes the call as an XML-like self-closing
- * tag instead of JSON, e.g. `<execute code="const x = 1;" />`. Each tag
- * becomes one tool call whose attributes become the JSON arguments object.
- * Returns null when the rest is not a contiguous run of such tags.
+ * One generic XML-style echo parser for the whole tag family Qoder's
+ * DeepSeek emits. It recognizes three forms, in order, and accepts a sequence
+ * of any of them as long as only whitespace separates the elements:
+ *
+ *   1. Self-closing tags: `<execute code="..." />` — each attribute becomes a
+ *      JSON argument.
+ *   2. Paired wrapper blocks: `<tool_call>\n{json}\n</tool_call>` — the inner
+ *      text is parsed as JSON (object or array) and becomes call(s).
+ *   3. Angle-wrapped JSON: `<{...}>` / `<[...]>` — bare JSON inside angle
+ *      brackets.
+ *
+ * Returns null unless every element parsed and no non-whitespace text remains.
+ * The caller applies the declared-name allowlist afterwards.
  */
-const TAG_STYLE_ATTR_RE = /([a-zA-Z0-9_.:-]+)="((?:[^"\\]|\\.)*)"/g;
-const TAG_STYLE_TAG_RE = /<([a-zA-Z0-9_.:-]+)((?:\s+[a-zA-Z0-9_.:-]+="(?:[^"\\]|\\.)*")*)\s*\/?>/g;
+const XML_ATTR_RE = /([a-zA-Z0-9_.:-]+)=\"((?:[^"\\]|\\.)*)\"/g;
+const XML_SELF_CLOSING_RE = /<([a-zA-Z0-9_.:-]+)((?:\s+[a-zA-Z0-9_.:-]+="(?:[^"\\]|\\.)*")*)\s*\/?>/g;
+const XML_PAIRED_RE = /<([a-zA-Z0-9_.:-]+)>([\s\S]*?)<\/\1>/g;
 
-function parseTagStyleEcho(rest: string): DsmlCall[] | null {
+function parseXmlStyleEcho(rest: string): DsmlCall[] | null {
   const src = rest.trim();
   if (!src.startsWith("<")) return null;
   const calls: DsmlCall[] = [];
   let cursor = 0;
-  for (const match of src.matchAll(TAG_STYLE_TAG_RE)) {
-    const between = src.slice(cursor, match.index);
-    if (between.trim() !== "") return null;
-    const name = match[1]!;
-    const attrBlock = match[2] ?? "";
-    const args: Record<string, unknown> = {};
-    let attrCount = 0;
-    for (const attr of attrBlock.matchAll(TAG_STYLE_ATTR_RE)) {
-      args[attr[1]!] = attr[2]!;
-      attrCount += 1;
+
+  const addJsonItem = (item: unknown): boolean => {
+    if (typeof item !== "object" || item === null) return false;
+    const rec = item as Record<string, unknown>;
+    const name = typeof rec["name"] === "string" ? rec["name"].trim() : "";
+    if (name.length === 0) return false;
+    let args: string;
+    if (typeof rec["arguments"] === "object" && rec["arguments"] !== null) {
+      args = JSON.stringify(rec["arguments"]);
+    } else if (typeof rec["arguments"] === "string") {
+      args = rec["arguments"];
+    } else {
+      return false;
     }
-    if (attrCount === 0) return null;
+    let ok = false;
+    try {
+      JSON.parse(args);
+      ok = true;
+    } catch {
+      try {
+        JSON.parse(escapeControlInsideStrings(args));
+        ok = true;
+      } catch {
+        // invalid
+      }
+    }
+    if (!ok) return false;
     calls.push({
       id: `call_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
       name,
-      arguments: JSON.stringify(args),
+      arguments: args,
     });
-    cursor = match.index + match[0].length;
-  }
-  if (calls.length === 0) return null;
-  if (src.slice(cursor).trim() !== "") return null;
-  return calls;
-}
+    return true;
+  };
 
-/**
- * A wrapped tool-style echo: the model writes each call inside an XML-like
- * block that contains the JSON call, e.g.
- *
- *   <tool_call>
- *   {"name":"read","arguments":"{\"path\":\"a.txt\"}"}
- *   </tool_call>
- *
- * Every block must be one JSON object/array; prose between blocks invalidates
- * the echo. Returns null when the rest is not a contiguous run of such blocks.
- */
-const WRAPPED_TAG_BLOCK_RE = /<([a-zA-Z0-9_.:-]+)>([\s\S]*?)<\/\1>/g;
-
-function parseWrappedTagEcho(rest: string): DsmlCall[] | null {
-  const src = rest.trim();
-  if (!src.startsWith("<")) return null;
-  const calls: DsmlCall[] = [];
-  let cursor = 0;
-  for (const match of src.matchAll(WRAPPED_TAG_BLOCK_RE)) {
-    const between = src.slice(cursor, match.index);
-    if (between.trim() !== "") return null;
-    const inner = match[2]!.trim();
+  const addJsonInner = (inner: string): boolean => {
     let parsedInner: unknown;
     try {
       parsedInner = JSON.parse(inner);
@@ -106,47 +113,73 @@ function parseWrappedTagEcho(rest: string): DsmlCall[] | null {
         parsedInner = JSON.parse(escapeControlInsideStrings(inner));
       } catch {
         const salvaged = salvageEchoArray(inner);
-        if (salvaged === null) return null;
+        if (salvaged === null) return false;
         parsedInner = salvaged;
       }
     }
     const items: unknown[] = Array.isArray(parsedInner) ? parsedInner : [parsedInner];
     for (const item of items) {
-      if (typeof item !== "object" || item === null) return null;
-      const rec = item as Record<string, unknown>;
-      const name = typeof rec["name"] === "string" ? rec["name"].trim() : "";
-      if (name.length === 0) return null;
-      let args: string;
-      if (typeof rec["arguments"] === "object" && rec["arguments"] !== null) {
-        args = JSON.stringify(rec["arguments"]);
-      } else if (typeof rec["arguments"] === "string") {
-        args = rec["arguments"];
-      } else {
-        return null;
+      if (!addJsonItem(item)) return false;
+    }
+    return true;
+  };
+
+  while (cursor < src.length) {
+    const remaining = src.slice(cursor);
+    if (remaining.trim() === "") break;
+
+    // 3. Angle-wrapped JSON: `<{...}>` / `<[...]>`
+    if (remaining.startsWith("<{") || remaining.startsWith("<[")) {
+      const close = remaining.indexOf(">");
+      if (close < 0) return null;
+      let inner = remaining.slice(1, close);
+      if (inner.trim() === "") return null;
+      // Double-brace artifact from the JSON object itself: `<{{...}}>`.
+      inner = inner.trim();
+      if (inner.startsWith("{{") && inner.endsWith("}}")) {
+        inner = inner.slice(1, -1);
+      } else if (inner.startsWith("[[") && inner.endsWith("]]")) {
+        inner = inner.slice(1, -1);
       }
-      let ok = false;
-      try {
-        JSON.parse(args);
-        ok = true;
-      } catch {
-        try {
-          JSON.parse(escapeControlInsideStrings(args));
-          ok = true;
-        } catch {
-          // invalid
-        }
+      if (!addJsonInner(inner)) return null;
+      cursor += close + 1;
+      continue;
+    }
+
+    // 2. Paired wrapper block: `<tag>…</tag>`
+    const paired = new RegExp(`^\\s*${XML_PAIRED_RE.source}`, XML_PAIRED_RE.flags).exec(remaining);
+    if (paired) {
+      const inner = paired[2]!;
+      if (!addJsonInner(inner)) return null;
+      cursor += paired[0].length;
+      continue;
+    }
+
+    // 1. Self-closing tag: `<tag attr="v" … />`
+    const selfClosing = new RegExp(`^\\s*${XML_SELF_CLOSING_RE.source}`, XML_SELF_CLOSING_RE.flags).exec(remaining);
+    if (selfClosing) {
+      const name = selfClosing[1]!;
+      const attrBlock = selfClosing[2] ?? "";
+      const args: Record<string, unknown> = {};
+      let attrCount = 0;
+      for (const attr of attrBlock.matchAll(new RegExp(XML_ATTR_RE.source, XML_ATTR_RE.flags))) {
+        args[attr[1]!] = attr[2]!;
+        attrCount += 1;
       }
-      if (!ok) return null;
+      if (attrCount === 0) return null;
       calls.push({
         id: `call_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
         name,
-        arguments: args,
+        arguments: JSON.stringify(args),
       });
+      cursor += selfClosing[0].length;
+      continue;
     }
-    cursor = match.index + match[0].length;
+
+    return null;
   }
+
   if (calls.length === 0) return null;
-  if (src.slice(cursor).trim() !== "") return null;
   return calls;
 }
 
@@ -378,8 +411,8 @@ export function parseQoderTextToolCalls(
     } catch {
       const salvaged = salvageEchoArray(rest);
       if (salvaged === null) {
-        // Not a JSON echo — check the tool-style forms before giving up.
-        const tagCalls = parseTagStyleEcho(rest) ?? parseWrappedTagEcho(rest);
+        // Not a JSON echo — check the generic XML-style form before giving up.
+        const tagCalls = parseXmlStyleEcho(rest);
         if (tagCalls !== null) {
           if (allowedNames && !tagCalls.every((c) => allowedNames.has(c.name))) {
             return { calls: [], clean: text };
