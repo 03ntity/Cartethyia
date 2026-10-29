@@ -74,6 +74,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   each echoed call in `<tool_call>…</tool_call>` blocks; the stream hold-back
   now keeps tag-style candidates (not just JSON) so a long, fragmented wrapped
   echo is recovered instead of released as visible text.
+- **Qoder XML-style echoes use one generic parser.** Self-closing tags
+  (`<execute code="…" />`), paired blocks (`<tool_call>…</tool_call>`), and
+  angle-wrapped JSON (`<{…}>`/`<[…]>`, including a double-brace artifact)
+  are handled by a single parser, and the stream hold-back keeps angle-wrapped
+  candidates until their closing `>` so long fragmented echoes recover instead
+  of leaking.
 
 ## [2.7.1] - 2026-10-28
 
