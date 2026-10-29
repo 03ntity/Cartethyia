@@ -45,3 +45,21 @@ test("isQoderEchoAttempt flags marker followed by JSON only", () => {
   expect(isQoderEchoAttempt(`${MARKER} hanya penanda`)).toBe(false);
   expect(isQoderEchoAttempt("halo biasa")).toBe(false);
 });
+
+test("isQoderEchoAttempt flags tool-style XML/angle echoes", () => {
+  expect(
+    isQoderEchoAttempt(`${MARKER}\n<tool_call>\n<name>edit</name>\n<arguments>{"a":"b"}</arguments>\n</tool_call>`),
+  ).toBe(true);
+  expect(isQoderEchoAttempt(`${MARKER}\n<execute code="x" />`)).toBe(true);
+  expect(isQoderEchoAttempt(`${MARKER}\n<{"name":"edit","arguments":"{}"}>`)).toBe(true);
+  expect(isQoderEchoAttempt(`${MARKER}\nprosa biasa`)).toBe(false);
+});
+
+test("the XML tool_call echo is not parsed but is recognized as an echo", () => {
+  const text = `${MARKER}\n<tool_call>\n<name>edit</name>\n<arguments>{"path":"a","oldString":"x","newString":"y"}</arguments>\n</tool_call>`;
+  const { calls } = parseQoderTextToolCalls(text);
+  // Not recoverable as JSON (it's XML), so no calls — but it must be flagged
+  // as an echo attempt so the fail-closed path rejects it rather than leaking.
+  expect(calls).toHaveLength(0);
+  expect(isQoderEchoAttempt(text)).toBe(true);
+});

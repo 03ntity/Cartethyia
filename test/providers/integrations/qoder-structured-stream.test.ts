@@ -114,3 +114,18 @@ test("a turn whose structured call ran reports tool_use", async () => {
   const terminal = ev.find((e) => e["type"] === "terminal");
   expect(terminal?.["stop_reason"]).toBe("tool_use");
 });
+
+test("an unrecoverable tool-style echo fails the turn instead of leaking", async () => {
+  // The model writes a tool call as prose with the marker + XML tags. No
+  // recovery exists for that shape — the turn must fail (502) so the harness
+  // retries, never surfacing the protocol text as visible content.
+  const echo =
+    "assistant 请求调用工具\n" +
+    "<tool_call>\n" +
+    "<name>edit</name>\n" +
+    "<arguments>{\"path\":\"D:/tmp/a.txt\",\"oldString\":\"x\",\"newString\":\"y\"}</arguments>\n" +
+    "</tool_call>";
+  await expect(collect([frame({ content: echo }), frame({}, "stop")])).rejects.toThrow(
+    /unparseable tool-call echo/,
+  );
+});

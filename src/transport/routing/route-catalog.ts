@@ -35,7 +35,19 @@ import { providerHasAdapterUserAgent, providerUsesBespokeWire } from "../../prov
 
 const CLAUDE_MODEL_FAMILIES = new Set(["opus", "sonnet", "haiku", "fable", "mythos"]);
 
+/** Codex's built-in (non-routeable) model spellings worth matching. */
+const CODEX_REVIEW_MODELS = new Set(["codex-auto-review"]);
+
 export function cliMappingSourceKeys(toolId: string, sourceModel: string): readonly string[] {
+  if (toolId === "codex") {
+    const normalized = sourceModel.trim().toLowerCase();
+    if (CODEX_REVIEW_MODELS.has(normalized)) {
+      // Guardian's auto-review model is one fixed spelling; surface the full
+      // spelling plus the bare family so a slot mapped to either one hits.
+      return [...new Set([sourceModel, "codex-auto-review"])];
+    }
+    return [sourceModel];
+  }
   if (toolId !== "claude") return [sourceModel];
   const normalized = sourceModel.trim().toLowerCase();
   const family =

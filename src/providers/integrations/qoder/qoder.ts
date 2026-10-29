@@ -20,7 +20,7 @@ import type {
   ToolChoice,
   ToolDefinition,
 } from "../../../protocol/canonical-model";
-import { toolResultParts } from "../../../protocol/canonical-model";
+import { toolResultParts, toolCallParts } from "../../../protocol/canonical-model";
 import { decodeSseEvents } from "../../../protocol/sse-decoder";
 import { usageFromProvider, readReasoningText } from "../../provider-usage";
 import { readCredentialSecret, type ProviderDispatchTarget, type ProviderAdapter, type ProviderDispatchContext, type ProviderId } from "../../provider-contracts";
@@ -65,9 +65,9 @@ function isLeakMarkerPrefix(suffix: string): boolean {
 }
 
 /**
- * True when `text` is still plausibly the INTL marker+JSON echo block. Used to
- * keep holding across frames; false means it is ordinary prose and can be
- * released. The candidate is the marker followed by a JSON array/object.
+ * True when `text` is still plausibly the INTL marker echo block (marker +
+ * JSON array/object, or a tool-style tag). Used to keep holding across frames;
+ * false means it is ordinary prose and can be released.
  */
 function qoderStillLeakCandidate(text: string): boolean {
   if (text.length === 0) return true;
@@ -77,7 +77,13 @@ function qoderStillLeakCandidate(text: string): boolean {
   }
   const rest = text.slice(marker.index + marker[0].length).trim();
   if (rest.length === 0) return true;
-  return rest.startsWith("[") || rest.startsWith("{");
+  if (rest.startsWith("[") || rest.startsWith("{")) return true;
+  if (/^<[a-zA-Z0-9_.:-]+\b/.test(rest)) return true;
+  // Angle-wrapped JSON: `<{` / `<[` — candidate until a closing `>` appears.
+  if (rest.startsWith("<{") || rest.startsWith("<[")) {
+    return !rest.includes(">") || rest.endsWith(">");
+  }
+  return false;
 }
 
 interface QoderModeProfile {
@@ -670,25 +676,17 @@ function qoderToolChoice(choice: ToolChoice | undefined): unknown {
 }
 
 /**
- * Marks a tool call recorded into the text of an assistant turn.
- *
- * The upstream only reads structured turns on its CN realm, so on INTL a past
- * call has to be described in prose or the model loses the record of what it
- * asked for. The wording matches the reference bridge, which is what the
- * upstream has been trained to read back.
- */
-const QODER_TOOL_MARKER = "[assistant 请求调用工具]";
-
-/**
  * Whether this request sends its tool history as structured turns.
  *
- * The upstream honours the structured form on its CN realm only. On INTL it is
- * not enabled, and sending it anyway yields tool calls that come back right in
- * name but with no arguments filled in — a call that cannot run. So the shape
- * follows the realm rather than being assumed everywhere.
+ * Qoder's wire is OpenAI-compatible `tool_calls` deltas on every realm; the
+ * model is fed the same structured turns in both INTL and CN. Writing a past
+ * call as prose (`[assistant 请求调用工具] …`) contaminates the conversation
+ * history with a text echo the model starts imitating — the origin of the
+ * text-leak feedback loop. Structured history keeps the model seeing only real
+ * tool calls, so it never learns the prose marker.
  */
-function qoderStructuredTools(realm: QoderRealm): boolean {
-  return realm === "cn";
+function qoderStructuredTools(_realm: QoderRealm): boolean {
+  return true;
 }
 
 export function buildQoderRequest(
@@ -727,6 +725,45 @@ export function buildQoderRequest(
       content: systemPrompt,
     });
   }
+  // Every tool result across the whole conversation, keyed by call id. An
+  // assistant `tool_calls` turn is only sent structured when every call has a
+  // matching result somewhere in the history — otherwise the upstream rejects
+  // the transcript ("An assistant message with 'tool_calls' must be followed by
+  // tool messages responding to each 'tool_call_id'"). Calls without a result
+  // are left out of the structured turn instead of poisoning it.
+  const toolResultsById = new Map<string, string>();
+  for (const msg of allMessages) {
+    for (const part of toolResultParts(msg)) {
+      if (typeof part.call_id === "string" && part.call_id.length > 0) {
+        toolResultsById.set(part.call_id, part.call_id);
+      }
+    }
+  }
+  // The tool calls that actually survive onto the wire. A call only makes it
+  // when every call on its assistant turn carries an id AND a matching result
+  // exists in the history. This is the single source of truth for both sides
+  // of the transcript: the assistant `tool_calls` emit and the `tool` result
+  // turns. If a result's call is not here, its `tool` turn is dropped too —
+  // leaving it would emit an orphan `tool` turn with no preceding call, which
+  // the upstream rejects ("Messages with role 'tool' must be a response to a
+  // preceding message with 'tool_calls'"). This is what a cancelled or
+  // compacted parallel call looks like, and it is the "insufficient tool
+  // messages" failure the client sees on the turn after.
+  const emittableCallIds = new Set<string>();
+  for (const msg of allMessages) {
+    if (msg.role !== "assistant") continue;
+    const calls = toolCallParts(msg);
+    if (calls.length === 0) continue;
+    const idsOk = calls.every(
+      (part) => typeof part.call_id === "string" && part.call_id.length > 0,
+    );
+    const everyCallHasResult = calls.every((part) =>
+      typeof part.call_id === "string" ? toolResultsById.has(part.call_id) : false,
+    );
+    if (idsOk && everyCallHasResult) {
+      for (const part of calls) emittableCallIds.add(part.call_id as string);
+    }
+  }
   for (const m of allMessages) {
     if (m.role === "system" || m.role === "developer") continue;
     // Answers may live in a `user` turn (the Messages ledger re-homes them),
@@ -735,7 +772,13 @@ export function buildQoderRequest(
     // is emitted after, so nothing is duplicated or lost.
     const results = structuredTools ? toolResultParts(m) : [];
     if (results.length > 0) {
+      let emittedAnyTool = false;
       for (const block of results) {
+        // Drop orphan results: their assistant `tool_calls` turn was filtered
+        // out (a sibling call has no result), and emitting the `tool` turn
+        // anyway would make the upstream reject the whole transcript.
+        if (!emittableCallIds.has(block.call_id)) continue;
+        emittedAnyTool = true;
         const text = flattenCanonicalContent(
           typeof block.content === "string"
             ? [{ kind: "text", text: block.content }]
@@ -753,11 +796,13 @@ export function buildQoderRequest(
       // same content, which doubled the payload for no reason.
       const remaining = m.content.filter((part) => part.kind !== "toolResult");
       const flat = flattenCanonicalContent(remaining);
-      if (flat.length === 0) continue;
-      qoderMessages.push({
-        role: "user",
-        content: flat,
-      });
+      if (flat.length === 0 && !emittedAnyTool) continue;
+      if (flat.length > 0) {
+        qoderMessages.push({
+          role: "user",
+          content: flat,
+        });
+      }
       continue;
     }
     // An assistant turn that called tools must carry the calls, not just its
@@ -767,34 +812,15 @@ export function buildQoderRequest(
     // response to a preceding message with 'tool_calls'".
     const allCalls = m.content.filter((part) => part.kind === "toolCall");
     const reasoningEcho = qoderReasoningEcho(m, modelId, hasReasoningTrace);
-    // Structured tool turns are only safe when every call carries an id — the
-    // upstream drops or rejects a transcript whose `tool` result answers a call
-    // without one. Fall back to prose history exactly like INTL in that case.
-    const structuredIdsOk = allCalls.every(
-      (part) => typeof part.call_id === "string" && part.call_id.length > 0,
-    );
-    if ((!structuredTools || !structuredIdsOk) && allCalls.length > 0) {
-      // INTL does not read structured turns, so the call is written into the
-      // text instead of being dropped. Dropping it left the next `tool` turn
-      // answering a call that was never made, and the model had no record of
-      // what it had asked for — so it re-emitted a call with no arguments.
-      //
-      // The marker and the JSON shape mirror the reference bridge, which is
-      // what the upstream has actually been trained to read back.
-      const textParts = m.content.filter((part) => part.kind !== "toolCall");
-      const prose = flattenCanonicalContent(textParts);
-      const recorded = allCalls.map((part) => ({
-        name: part.name,
-        arguments: typeof part.arguments === "string" ? part.arguments : "",
-      }));
-      qoderMessages.push({
-        role: "assistant",
-        content: (prose.length > 0 ? prose + "\n\n" : "") + QODER_TOOL_MARKER + "\n" + JSON.stringify(recorded),
-        ...reasoningEcho,
-      });
-      continue;
-    }
-    const calls = structuredTools && structuredIdsOk ? allCalls : [];
+    // Structured tool turns are only safe when every call carries an id AND a
+    // matching result exists in the history — the upstream rejects a transcript
+    // whose `tool_calls` is not fully answered by `tool` turns. The same set
+    // that gates the `tool` emit above decides this, so the two halves of the
+    // transcript can never disagree.
+    const calls =
+      structuredTools && allCalls.every((part) => emittableCallIds.has(part.call_id))
+        ? allCalls
+        : [];
     if (calls.length > 0) {
       const textParts = m.content.filter((part) => part.kind !== "toolCall");
       const flat = flattenCanonicalContent(textParts);
@@ -807,7 +833,12 @@ export function buildQoderRequest(
           type: "function",
           function: {
             name: part.name,
-            arguments: typeof part.arguments === "string" ? part.arguments : "",
+            arguments:
+              typeof part.arguments === "string"
+                ? part.arguments
+                : part.arguments !== undefined && part.arguments !== null
+                  ? JSON.stringify(part.arguments)
+                  : "",
           },
         })),
       });
@@ -1119,15 +1150,20 @@ export async function* qoderBodyToCanonicalEvents(
         } as CanonicalEvent;
       }
       finishReason = "tool_calls";
-    } else if (leaked.clean.length > 0) {
+    } else {
+      // An echo that could not be recovered must fail the turn (502) so the
+      // harness retries — never surface protocol text as visible content.
       if (isQoderEchoAttempt(leakBuf)) {
         throw badEchoError();
       }
-      yield {
-        type: "content_delta",
-        sequence_number: seq++,
-        content: { kind: "text", text: leaked.clean },
-      } as CanonicalEvent;
+      const visible = leaked.clean.trim();
+      if (visible.length > 0) {
+        yield {
+          type: "content_delta",
+          sequence_number: seq++,
+          content: { kind: "text", text: visible },
+        } as CanonicalEvent;
+      }
     }
   }
   // If no terminal arrived, synthesize one (prevents truncation error)

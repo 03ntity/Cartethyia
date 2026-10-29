@@ -9,7 +9,6 @@ import {
   parseToolDefinition,
 } from "../dialects";
 import { readBoolean, readNumber, readString } from "../../../protocol/codecs";
-import { ResponsesReasoningError } from "./errors";
 import type { ResponsesComputerAction, ResponsesInputItem, ResponsesItemMetadata } from "./contracts";
 const OPENAI_RESPONSE_INCLUDES = {
   "file_search_call.results": true,
@@ -397,6 +396,21 @@ function parseInputItem(item: ResponsesInputItem): {
       metadata: itemMetadata(item),
     };
   }
+  if (type === "additional_tools") {
+    // Codex's automatic approval review (Guardian) declares the tools its
+    // review isolate may run as an `additional_tools` input item. It is
+    // metadata about the client's runtime, not a conversation turn — the
+    // tools it names never reach an upstream model and have no canonical
+    // representation. It is skipped (never forwarded, never hoisted into
+    // instructions) rather than decoded. The critical part is that it must
+    // not throw: rejecting it fails the whole auto-review request, which
+    // Codex surfaces as "Automatic approval review failed" — making every
+    // permission escalation look like an infrastructure error.
+    return {
+      message: { role: "developer", content: [] },
+      metadata: itemMetadata(item),
+    };
+  }
   if (type === "computer_call") {
     const id = readString(item, "id");
     const callId = readString(item, "call_id") ?? id;
@@ -443,12 +457,7 @@ function parseInputItem(item: ResponsesInputItem): {
     const encryptedPresent = hasOwn(item, "encrypted_content");
     const encrypted = item["encrypted_content"];
     const summary = reasoningItemText(item);
-    if (encryptedPresent) {
-      if (typeof encrypted !== "string")
-        throw new ResponsesReasoningError(
-          "reasoning.encrypted_content",
-          "Encrypted reasoning must remain a string artifact",
-        );
+    if (encryptedPresent && typeof encrypted === "string") {
       const reasoningPart: ContentPart = {
         kind: "reasoning",
         payload: encrypted,
@@ -508,6 +517,9 @@ export function parseResponsesRequest(input: unknown): CanonicalRequest {
   const hoistedInstructionParts: ContentPart[] = [];
   const messages: CanonicalMessage[] = [];
   for (const entry of parsedItems) {
+    // Codex's auto-review `additional_tools` item is client-side tool
+    // metadata, not a conversation turn — never forwarded, never hoisted.
+    if (entry.metadata.type === "additional_tools") continue;
     if (entry.message.role === "system") hoistedSystemParts.push(...entry.message.content);
     else if (entry.message.role === "developer") hoistedInstructionParts.push(...entry.message.content);
     else messages.push(entry.message);
@@ -540,6 +552,24 @@ export function parseResponsesRequest(input: unknown): CanonicalRequest {
     message !== undefined &&
     message.role === "assistant" &&
     message.content.some((part) => part.kind === "toolCall");
+  // An assistant turn that carries tool calls — and no standalone prose to
+  // keep separate. Responses clients (opencode, Codex) send parallel
+  // `function_call` items as consecutive entries with no output between them;
+  // decoding each into its own canonical assistant turn produced a transcript
+  // the Qoder/OpenAI wire rejects — an assistant `tool_calls` turn must be
+  // directly followed by the `tool` turns answering it, and a second assistant
+  // turn interposed before one result ("An assistant message with 'tool_calls'
+  // must be followed by tool messages responding to each 'tool_call_id'").
+  // Consecutive such turns are one assistant turn, so they are folded
+  // together. Reasoning may be part of either side (a leading reasoning item
+  // merged onto the first call turn, then a bare call turn follows) — that is
+  // still one logical turn.
+  const isToolCallOnlyTurn = (message: CanonicalMessage | undefined): message is CanonicalMessage =>
+    message !== undefined &&
+    message.role === "assistant" &&
+    message.content.length > 0 &&
+    message.content.some((part) => part.kind === "toolCall") &&
+    message.content.every((part) => part.kind === "toolCall" || part.kind === "reasoning");
   for (const message of messages) {
     if (isReasoningOnly(message)) {
       const previous = messagesWithReasoning[messagesWithReasoning.length - 1];
@@ -569,6 +599,18 @@ export function parseResponsesRequest(input: unknown): CanonicalRequest {
       // rather than dropped.
       messagesWithReasoning.push({ role: "assistant", content: pendingReasoning });
       pendingReasoning = undefined;
+    }
+    // Parallel `function_call` items arrive as consecutive tool-call turns
+    // (bare, or carrying a leading reasoning that was already merged into
+    // them); fold them into one assistant turn so the tool results that
+    // follow answer a single `tool_calls` turn (see isToolCallOnlyTurn).
+    const previous = messagesWithReasoning[messagesWithReasoning.length - 1];
+    if (isToolCallOnlyTurn(previous) && isToolCallOnlyTurn(message)) {
+      messagesWithReasoning[messagesWithReasoning.length - 1] = {
+        ...previous,
+        content: [...previous.content, ...message.content],
+      };
+      continue;
     }
     messagesWithReasoning.push(message);
   }

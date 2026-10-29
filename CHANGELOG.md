@@ -10,8 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [2.7.2] - 2026-10-29
+
 ### Added
 
+- **Codex CLI remote model mapping.** Codex now participates in the CLI Tools
+  remote-routing table like Claude Code: the Codex page gains the "CLI asks
+  for → Cartethyia routes to" mapping surface, and the inbound User-Agent
+  (`codex-tui/…`, `codex-cli/…`) is recognised for `routing:cli_mapping`.
+  The Codex `review` slot is first-class with its real source model
+  (`codex-auto-review`), so the Guardian approval-review model can be routed to
+  a serving provider instead of answering `accounts_unavailable`.
 - **Ollama Cloud provider catalog.** A static floor for the six public models
   (gemma4:31b, gpt-oss:20b/120b, nemotron-3-nano:30b/-super/-ultra) with
   live limits from the public roster, so the provider works before discovery
@@ -26,6 +35,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Qoder "insufficient tool messages" after cancelled/compacted parallel
+  calls.** An assistant `tool_calls` turn whose sibling call had no result
+  used to be withheld while the surviving `tool` result turn was still sent,
+  producing an orphan `tool` turn the upstream rejected
+  ("Messages with role 'tool' must be a response to a preceding message with
+  'tool_calls'"). The assistant `tool_calls` emit and the `tool` result turns
+  now share one source of truth, so a transcript is never half-stripped.
+- **Responses parallel `function_call` items fold into one assistant turn.**
+  Clients that send several `function_call` input items back-to-back (opencode,
+  Codex) decoded into separate canonical assistant turns, so the Qoder/OpenAI
+  wire saw an assistant `tool_calls` turn before the previous one's results —
+  rejected as "An assistant message with 'tool_calls' must be followed by tool
+  messages responding to each 'tool_call_id'". Consecutive tool-call turns now
+  merge (a leading `reasoning` item included).
+- **Responses `additional_tools` item no longer rejects Codex auto-review.**
+  Codex's Guardian approval reviewer declares its review tools with an
+  `additional_tools` input item; parsing it threw
+  ("Unsupported Responses input item type"), which failed the whole
+  auto-review request and made every permission escalation look like an
+  infrastructure error. The item is client-side metadata and is now skipped
+  safely.
+- **Responses "Encrypted reasoning" robust to non-string payloads.** A
+  reasoning item whose `encrypted_content` is not a string no longer throws;
+  it falls back to the readable reasoning, and the encoder only emits
+  `encrypted_content` when it is a string.
 - **Trae context-overflow streams classify as 413.** The upstream error code
   4026 ("context length exceeded") now maps to `context_length_exceeded`
   (413) instead of `platform_unavailable` (502).

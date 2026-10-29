@@ -413,6 +413,7 @@ export const TOOL_REGISTRY = {
     description: "OpenAI Codex CLI with Responses API, subagents, and review roles",
     configType: "custom" as const,
     surface: "responses" as const,
+    mappingMode: "remote" as const,
     settingsFile: "~/.codex/config.toml",
     docsUrl: "https://developers.openai.com/codex/config-reference",
     defaultModels: [
@@ -433,12 +434,17 @@ export const TOOL_REGISTRY = {
         defaultValue: "gpt-5.5",
       },
       {
-        id: "gpt-5.6-terra",
-        name: "GPT-5.6 Terra",
+        // Codex's Guardian auto-review agent always sends the hardcoded
+        // `codex-auto-review` model. It must be routable for approval reviews
+        // to work at all, so it is a first-class mapping slot here. The `id`
+        // is qualified (routable via the codex provider) while `defaultValue`
+        // carries the exact spelling Codex sends — the source the gateway maps.
+        id: "codex/codex-auto-review",
+        name: "Codex Auto Review",
         alias: "review",
-        roleLabel: "Review model",
+        roleLabel: "Review (Guardian)",
         roleKind: "review",
-        defaultValue: "gpt-5.6-terra",
+        defaultValue: "codex-auto-review",
       },
     ],
   },

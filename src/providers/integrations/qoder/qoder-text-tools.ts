@@ -170,7 +170,10 @@ function salvageEchoArray(rest: string): unknown {
 
 /**
  * True when the text is clearly an attempted tool-protocol echo rather than
- * ordinary prose: a leak marker followed by the start of a JSON array/object.
+ * ordinary prose: a leak marker followed by the start of a JSON array/object,
+ * or of a tool-style tag (`<tool_call>`, `<execute …/>`, angle-wrapped
+ * `<{…}>`). Used by the fail-closed decision: an echo that cannot be recovered
+ * fails the turn instead of surfacing protocol text as visible content.
  */
 export function isQoderEchoAttempt(text: string): boolean {
   const fence = text.match(/^```[a-z]*\s*\n?/i);
@@ -178,7 +181,12 @@ export function isQoderEchoAttempt(text: string): boolean {
   const marker = LEAK_MARKER_ANY_RE.exec(src);
   if (!marker) return false;
   const rest = src.slice(marker.index + marker[0].length).trim();
-  return rest.startsWith("[") || rest.startsWith("{");
+  return (
+    rest.startsWith("[") ||
+    rest.startsWith("{") ||
+    /^<[a-zA-Z0-9_.:-]+\b/.test(rest) ||
+    (rest.startsWith("<[") || rest.startsWith("<{"))
+  );
 }
 
 /**

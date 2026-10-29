@@ -82,7 +82,7 @@ test("non-DeepSeek models are not backfilled", () => {
   expect(plain!["reasoning_content"]).toBeUndefined();
 });
 
-test("structured epoch fall back to prose when a call lacks an id", () => {
+test("a past call without an id is not written as text", () => {
   const body = build(
     [
       { role: "user", content: [{ kind: "text", text: "go" }] },
@@ -96,9 +96,34 @@ test("structured epoch fall back to prose when a call lacks an id", () => {
   );
   const messages = body["messages"] as Array<Record<string, unknown>>;
   const assistant = messages.find((m) => m["role"] === "assistant");
-  // No structured `tool_calls` field, and the call is recorded in prose.
+  // No structured `tool_calls` field (the call carries no id), and crucially
+  // no prose marker — the text-echo contamination must never be written.
   expect(assistant!["tool_calls"]).toBeUndefined();
-  expect(String(assistant!["content"])).toContain("[assistant 请求调用工具]");
+  expect(String(assistant!["content"])).not.toContain("[assistant 请求调用工具]");
+});
+
+test("INTL sends structured tool_calls history, not the prose marker", () => {
+  const body = build([
+    { role: "user", content: [{ kind: "text", text: "go" }] },
+    {
+      role: "assistant",
+      content: [{ kind: "toolCall", call_id: "call_1", name: "Read", arguments: '{"path":"a.ts"}' }],
+    },
+    { role: "user", content: [RESULT] },
+  ]);
+  const messages = body["messages"] as Array<Record<string, unknown>>;
+  const assistant = messages.find((m) => m["role"] === "assistant");
+  expect(assistant!["tool_calls"]).toHaveLength(1);
+  expect(((assistant!["tool_calls"] as Array<Record<string, unknown>>)[0])).toEqual({
+    id: "call_1",
+    type: "function",
+    function: { name: "Read", arguments: '{"path":"a.ts"}' },
+  });
+  expect(String(assistant!["content"])).not.toContain("[assistant 请求调用工具]");
+  // The tool result is a structured `tool` turn, not text.
+  const tool = messages.find((m) => m["role"] === "tool");
+  expect(tool).toBeDefined();
+  expect(tool!["tool_call_id"]).toBe("call_1");
 });
 
 test("image parts are carried as structured OpenAI parts, not dropped", () => {

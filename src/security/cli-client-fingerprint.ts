@@ -50,13 +50,20 @@ const REMOTE_CLI_TOOL_UA: ReadonlyArray<{
   // filtering; MCP traffic uses `claude-code/<version>` instead.
   { toolId: "claude", pattern: /(^|[^a-z0-9])claude-cli\//i },
   { toolId: "claude", pattern: /(^|[^a-z0-9])claude-code\//i },
+  // Codex CLI (TUI/CLI builds) — the Guardian auto-review agent sends a
+  // `codex-auto-review` model that is only useful when the gateway can
+  // remap it to a serving provider. `codex-tui`, `codex-cli`, and the
+  // desktop agent's `opencode`-ish UAs all carry this prefix.
+  { toolId: "codex", pattern: /(^|[^a-z0-9])codex-(tui|cli)\//i },
 ];
 
 /**
  * Returns the remote CLI tool id recognised from the probe, or `null` when
  * the caller is not a remote-mapping client. Ordinary SDKs, curl, and local
- * mapping tools (Codex, …) stay unlabelled so their model ids resolve
- * through ordinary aliases / allowlists.
+ * mapping tools stay unlabelled so their model ids resolve through ordinary
+ * aliases / allowlists. Codex is labelled because its Guardian auto-review
+ * agent sends the hardcoded `codex-auto-review` model, which must be remapable
+ * to a serving provider for approval reviews to work at all.
  */
 export function detectRemoteCliToolId(probe: CliClientProbe): string | null {
   const userAgent = readUserAgent(probe);
