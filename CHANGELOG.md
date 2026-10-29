@@ -60,6 +60,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   recovered — malformed inner JSON, unescaped quotes that do not repair —
   the turn now fails with a 502 instead of surfacing the protocol text as
   visible content and leaving the model looking successful while nothing ran.
+- **Qoder echo recovery holds long, fragmented streams.** A valid echo split
+  across hundreds of tiny stream deltas used to trip the 200-frame hold cap
+  and was released as visible prose — the leak. The cap now counts only
+  frames that add no bytes, so a growing echo is held until recovery, and
+  salvaged arguments are validated (malformed arguments are rejected, not
+  passed through).
 
 ## [2.7.1] - 2026-10-28
 
