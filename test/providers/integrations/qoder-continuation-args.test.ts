@@ -249,6 +249,54 @@ test("an unrecoverable leak echo fails the turn instead of leaking", async () =>
   );
 });
 
+test("a long echo split across hundreds of small deltas is still recovered", async () => {
+  // Real Qoder streams split the echo into tiny chunks (1-10 chars each). A
+  // 500-delta stream used to trip the 200-frame hold cap and release the whole
+  // block as visible prose — the leak. The frame cap must only count idle
+  // frames, so a growing echo never hits it.
+  const echo =
+    "[assistant 请求调用工具]\n" +
+    "[" +
+    '{"name":"write","arguments":"{\\"path\\":\\"D:/tmp/a.txt\\",\\"content\\":\\"line one\nline two\nline three\nline four\nline five\n\\"}"},' +
+    '{"name":"write","arguments":"{\\"path\\":\\"D:/tmp/b.js\\",\\"content\\":\\"export const a = 1;\nexport const b = 2;\n\\"}"},' +
+    '{"name":"write","arguments":"{\\"path\\":\\"D:/tmp/c.txt\\",\\"content\\":\\"plain content, not nested json\nline two\n\\"}"},' +
+    '{"name":"write","arguments":"{\\"path\\":\\"D:/tmp/d.md\\",\\"content\\":\\"# Doc\n\nparagraph one\n\nparagraph two\n\n\\"}"},' +
+    '{"name":"write","arguments":"{\\"path\\":\\"D:/tmp/e.py\\",\\"content\\":\\"def main():\n    print(\'ok\')\n\n\nif __name__ == \'__main__\':\n    main()\n\\"}"},' +
+    '{"name":"shell","arguments":"{\\"command\\":\\"ls -la\\"}"}' +
+    "]";
+  const chunks: string[] = [];
+  for (let i = 0; i < echo.length; i += 3) {
+    chunks.push(echo.slice(i, i + 3));
+  }
+  expect(chunks.length).toBeGreaterThan(200);
+  const ev = await collect([...chunks.map((c) => frame({ content: c })), frame({}, "stop")]);
+  const textDeltas = ev.filter((e) => e["type"] === "content_delta");
+  const visible = textDeltas
+    .map((e) => String(((e["content"] as { text?: unknown } | undefined)?.text ?? "")))
+    .join("");
+  expect(visible).not.toContain("请求调用工具");
+  const deltas = calls(ev);
+  expect(deltas).toHaveLength(6);
+  expect(new Set(deltas.map((d) => String(d["name"])))).toEqual(
+    new Set(["write", "shell"]),
+  );
+});
+
+test("an echo with one unrecoverable argument fails closed, never leaks", async () => {
+  // If any call in the echo carries arguments that cannot be recovered (nested
+  // JSON with unescaped quotes), the whole echo is a protocol failure: it must
+  // fail the turn instead of surfacing the protocol text as visible content.
+  const brokenEcho =
+    "[assistant 请求调用工具]\n" +
+    "[" +
+    '{"name":"write","arguments":"{\\"path\\":\\"D:/tmp/ok.txt\\",\\"content\\":\\"fine\n\\"}"},' +
+    '{"name":"write","arguments":"{\\"path\\":\\"D:/tmp/bad.json\\",\\"content\\":\\"{\n  \\\"name\\\": \\\"x\\\",\n  \\\"ok\\\": true\n}\\n\\"}"}' +
+    "]";
+  await expect(
+    collect([frame({ content: brokenEcho }), frame({}, "stop")]),
+  ).rejects.toThrow(/unparseable tool-call echo/);
+});
+
 test("a parallel leak echo (unescaped, many calls) is recovered and hidden", async () => {
   // The user-facing regression: a parallel batch of tools leaks as
   // `[assistant 请求调用工具]` + JSON when the model echoes calls with their

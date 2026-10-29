@@ -65,7 +65,7 @@ test("a bare comma-separated echo (no brackets) is salvaged", () => {
   expect(JSON.parse(calls[1]?.arguments ?? "{}")).toEqual({ command: "ls" });
 });
 
-test("parallel salvage fails open when any argument stays broken", () => {
+test("parallel salvage rejects when any argument stays broken", () => {
   const text =
     `${MARKER}\n` +
     '[{"name":"bash","arguments":"{"command":"ls"}"},' +

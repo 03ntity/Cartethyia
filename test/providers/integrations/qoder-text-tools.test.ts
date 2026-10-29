@@ -131,7 +131,7 @@ test("a name the caller never declared is rejected", () => {
   expect(parseQoderTextToolCalls(text, new Set(["bash"])).calls).toHaveLength(0);
 });
 
-test("arguments that stay broken are rejected fail-open", () => {
+test("arguments that stay broken are rejected", () => {
   const text = `${MARKER}\n[{"name":"bash","arguments":"{{{ broken"}]`;
   expect(parseQoderTextToolCalls(text, new Set(["bash"])).calls).toHaveLength(0);
   const multi =

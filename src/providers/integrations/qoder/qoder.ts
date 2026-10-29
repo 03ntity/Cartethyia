@@ -1061,7 +1061,12 @@ export async function* qoderBodyToCanonicalEvents(
               // decides (a valid echo → tool calls; anything else → released).
               if (leakBuf.length > 0) {
                 leakBuf += body;
-                leakFrames += 1;
+                // Count only consecutive idle frames (no new bytes). A
+                // legitimately long echo split across hundreds of small stream
+                // deltas must not hit the frame cap and be released as visible
+                // prose — growth resets the counter, so the cap only bounds a
+                // stream that stalls without progress.
+                leakFrames = body.length === 0 ? leakFrames + 1 : 0;
                 if (
                   leakBuf.length > LEAK_HOLD_MAX_CHARS ||
                   leakFrames > LEAK_HOLD_MAX_FRAMES ||
@@ -1132,7 +1137,10 @@ export async function* qoderBodyToCanonicalEvents(
               // marker leaks into the user's visible thinking.
               if (reasonLeakBuf.length > 0) {
                 reasonLeakBuf += body;
-                reasonLeakFrames += 1;
+                // Same idle-frame rule as the content channel: only frames that
+                // add no bytes count against the cap, so a long echo split
+                // across many small reasoning deltas is not released early.
+                reasonLeakFrames = body.length === 0 ? reasonLeakFrames + 1 : 0;
                 if (
                   reasonLeakBuf.length > LEAK_HOLD_MAX_CHARS ||
                   reasonLeakFrames > LEAK_HOLD_MAX_FRAMES ||
@@ -1364,7 +1372,9 @@ export async function* qoderBodyToCanonicalEvents(
         }
         finishReason = "tool_calls";
       } else if (leaked.clean.length > 0) {
-        if (isQoderEchoAttempt(leakBuf)) throw badEchoError();
+        if (isQoderEchoAttempt(leakBuf)) {
+          throw badEchoError();
+        }
         yield {
           type: "content_delta",
           sequence_number: seq++,

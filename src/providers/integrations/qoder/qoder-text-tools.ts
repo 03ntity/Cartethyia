@@ -304,8 +304,7 @@ export function parseQoderTextToolCalls(
         try {
           JSON.parse(accepted);
           ok = true;
-        } catch {
-          // fail open below
+        } catch (e) {
         }
       }
       if (!ok) return { calls: [], clean: text };
