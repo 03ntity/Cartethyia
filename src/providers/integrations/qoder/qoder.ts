@@ -32,6 +32,53 @@ import { qoderMachineOs } from "../../operations/cli-platform";
 import { qoderInferenceCandidates, QODER_CHAT_PATH, QODER_REALMS, type QoderRealm } from "./qoder-realm";
 import { QODER_CN_MODEL_CONFIGS, QODER_INTL_MODEL_CONFIGS, QODER_INTL_MODELS } from "./qoder-catalog";
 import { isQoderVirtualModel, qoderDispatchModelId } from "./qoder-virtual";
+import {
+  LEAK_MARKER_ANY_RE,
+  LEAK_MARKER_LITERALS,
+  parseQoderTextToolCalls,
+  isQoderEchoAttempt,
+} from "./qoder-text-tools";
+
+/** How long a trailing partial marker may be before it is held for the next frame. */
+const LEAK_HOLD_WINDOW = 24;
+/** Fail-open caps so an endless lookalike cannot hold text forever. */
+const LEAK_HOLD_MAX_CHARS = 32_768;
+const LEAK_HOLD_MAX_FRAMES = 200;
+
+const BAD_ECHO_MESSAGE =
+  "Qoder returned an unparseable tool-call echo; no tools were emitted";
+
+function badEchoError(): GatewayError {
+  return new GatewayError(
+    "platform_unavailable",
+    502,
+    BAD_ECHO_MESSAGE,
+    { providerId: QODER_PROVIDER_ID },
+    "upstream",
+  );
+}
+
+/** True when `suffix` is a strict prefix of some marker literal. */
+function isLeakMarkerPrefix(suffix: string): boolean {
+  if (suffix.length === 0 || suffix.length >= LEAK_HOLD_WINDOW) return false;
+  return LEAK_MARKER_LITERALS.some((literal) => literal.startsWith(suffix));
+}
+
+/**
+ * True when `text` is still plausibly the INTL marker+JSON echo block. Used to
+ * keep holding across frames; false means it is ordinary prose and can be
+ * released. The candidate is the marker followed by a JSON array/object.
+ */
+function qoderStillLeakCandidate(text: string): boolean {
+  if (text.length === 0) return true;
+  const marker = LEAK_MARKER_ANY_RE.exec(text);
+  if (!marker) {
+    return isLeakMarkerPrefix(text) || LEAK_MARKER_ANY_RE.test(text);
+  }
+  const rest = text.slice(marker.index + marker[0].length).trim();
+  if (rest.length === 0) return true;
+  return rest.startsWith("[") || rest.startsWith("{");
+}
 
 interface QoderModeProfile {
   readonly chatUrl: string;
@@ -895,6 +942,11 @@ export async function* qoderBodyToCanonicalEvents(
   /** Last seen call id/name, for index-less continuation fragments. */
   let lastSeenToolId: string | undefined = undefined;
   let lastSeenToolName: string | undefined = undefined;
+  // INTL leak-marker hold-back: text that may grow into the marker+JSON echo
+  // is withheld from the client until end of stream proves it is a tool call
+  // (recovered) or ordinary prose (released).
+  let leakBuf = "";
+  let leakFrames = 0;
 
   for await (const sse of decodeSseEvents(body, { signal })) {
     const sseData = sse.data;
@@ -923,11 +975,69 @@ export async function* qoderBodyToCanonicalEvents(
         const delta = choice["delta"] as Record<string, unknown> | undefined;
         if (delta) {
           if (typeof delta["content"] === "string" && (delta["content"] as string).length > 0) {
-            const text = delta["content"] as string;
+            const piece = delta["content"] as string;
+            // Marker+JSON hold-back. A complete marker and everything after it is
+            // held until end of stream; prose before it is emitted now.
+            if (leakBuf.length > 0) {
+              leakBuf += piece;
+              leakFrames = piece.length === 0 ? leakFrames + 1 : 0;
+              if (
+                leakBuf.length > LEAK_HOLD_MAX_CHARS ||
+                leakFrames > LEAK_HOLD_MAX_FRAMES ||
+                !qoderStillLeakCandidate(leakBuf)
+              ) {
+                if (leakBuf.length > 0) {
+                  yield {
+                    type: "content_delta",
+                    sequence_number: seq++,
+                    content: { kind: "text", text: leakBuf },
+                  } as CanonicalEvent;
+                }
+                leakBuf = "";
+                leakFrames = 0;
+              }
+              continue;
+            }
+            const marker = LEAK_MARKER_ANY_RE.exec(piece);
+            if (marker) {
+              const emit = piece.slice(0, marker.index);
+              if (emit.length > 0) {
+                yield {
+                  type: "content_delta",
+                  sequence_number: seq++,
+                  content: { kind: "text", text: emit },
+                } as CanonicalEvent;
+              }
+              leakBuf = piece.slice(marker.index);
+              leakFrames = 1;
+              continue;
+            }
+            // No marker: hold only a possible partial-marker suffix.
+            const tail = piece.slice(-LEAK_HOLD_WINDOW);
+            let heldFrom = -1;
+            for (let n = tail.length; n >= 1; n -= 1) {
+              if (isLeakMarkerPrefix(tail.slice(-n))) {
+                heldFrom = piece.length - n;
+                break;
+              }
+            }
+            if (heldFrom >= 0) {
+              const emit = piece.slice(0, heldFrom);
+              if (emit.length > 0) {
+                yield {
+                  type: "content_delta",
+                  sequence_number: seq++,
+                  content: { kind: "text", text: emit },
+                } as CanonicalEvent;
+              }
+              leakBuf = piece.slice(heldFrom);
+              leakFrames = 1;
+              continue;
+            }
             yield {
               type: "content_delta",
               sequence_number: seq++,
-              content: { kind: "text", text },
+              content: { kind: "text", text: piece },
             } as CanonicalEvent;
             continue;
           }
@@ -993,8 +1103,33 @@ export async function* qoderBodyToCanonicalEvents(
       if (json["finish_reason"] !== undefined) finishReason = json["finish_reason"];
     }
   }
-  // Qoder emits structured `tool_calls` deltas inline, so the turn's calls
-  // are already yielded above — nothing to recover at end of stream.
+  // End of stream: recover a held-back marker+JSON echo. A valid echo becomes
+  // tool calls; anything else is released as ordinary prose (or fails closed
+  // when it is unmistakably an echo that cannot be parsed).
+  if (leakBuf.length > 0) {
+    const leaked = parseQoderTextToolCalls(leakBuf);
+    if (leaked.calls.length > 0) {
+      for (const call of leaked.calls) {
+        yield {
+          type: "tool_call_delta",
+          sequence_number: seq++,
+          call_id: call.id,
+          name: call.name,
+          arguments_delta: call.arguments,
+        } as CanonicalEvent;
+      }
+      finishReason = "tool_calls";
+    } else if (leaked.clean.length > 0) {
+      if (isQoderEchoAttempt(leakBuf)) {
+        throw badEchoError();
+      }
+      yield {
+        type: "content_delta",
+        sequence_number: seq++,
+        content: { kind: "text", text: leaked.clean },
+      } as CanonicalEvent;
+    }
+  }
   // If no terminal arrived, synthesize one (prevents truncation error)
   const stopReason = mapQoderFinishReason(finishReason);
   const _providerStop = typeof finishReason === "string" ? finishReason : undefined;
