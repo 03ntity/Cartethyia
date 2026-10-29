@@ -40,6 +40,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   visible text. Multi-call echoes now salvage into real tool calls, and the
   same recovery applies to the thinking channel (`reasoning_content`), so
   DeepSeek-planned parallel batches run instead of leaking.
+- **Routing no longer dials a cooling account through continuation affinity.**
+  A multi-turn request carrying tool results was pinned to the account that
+  owns the live session *before* health was checked, so a session whose
+  account had hit quota kept being dialed and reproduced the refusal — the
+  "still hit a cooled-down account" report. The pin now evaluates eligibility:
+  a hard-cooling account answers `429` with the real reset, and a
+  disabled/locked one answers a clear `400`.
+- **Qoder upstream 499 refusals cool the account as quota.** Qoder closes an
+  exhausted-quota stream with an nginx-style 499, which read as a malformed
+  request (non-retryable, no cooldown) and kept the account in rotation. 499
+  scoped to qoder now classifies as `quota_exceeded` with a cooldown.
+- **Qoder OAuth accounts recover from a cold credential cache.** The loader
+  stores `auth_state` as JSON text, so the adapter received `undefined` after
+  a cache eviction and refused with "missing its user identity; sign in
+  again". The state parser now accepts the JSON-string form too.
 
 ## [2.7.1] - 2026-10-28
 
