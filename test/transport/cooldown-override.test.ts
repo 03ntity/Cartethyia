@@ -20,6 +20,8 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../../src/persistence/boot";
 import { consoleSettings, providerAccounts } from "../../src/persistence/schema";
 import { createDatabaseSnapshotBuilder } from "../../src/transport/routing/route-catalog";
+import { InMemoryRouteSnapshotService } from "../../src/transport/routing/route-model";
+import { RoutingEngine } from "../../src/transport/routing/router";
 import { dbDescribe, requireDatabase } from "../helpers/database";
 import { createWorld, type GatewayWorld } from "../helpers/fixtures";
 
@@ -116,6 +118,67 @@ dbDescribe("forceDisableCooldown", () => {
     // `cooldown_until` rides along even when the exclusion is skipped, so an
     // all-cooling answer can say when to retry instead of a bare 429.
     expect(await candidateFor().then((c) => c?.["cooldown_until"])).toBe(FUTURE.getTime());
+  });
+
+  test("continuation affinity refuses a hard-cooling account with 429", async () => {
+    await writePreferences({});
+    await cool("quota_exhausted");
+    const service = new InMemoryRouteSnapshotService(createDatabaseSnapshotBuilder(getDb()));
+    const snapshot = await service.getSnapshot();
+    const candidate = (snapshot.candidates ?? []).find(
+      (c) => c["provider_account_id"] === accountId,
+    ) as Record<string, unknown> | undefined;
+    expect(candidate).toBeDefined();
+    const engine = new RoutingEngine();
+    const run = () =>
+      engine.plan(
+        String(candidate?.["model_id"]),
+        snapshot,
+        world.tenantId,
+        undefined,
+        false,
+        undefined,
+        {
+          providerId: String(candidate?.["provider_id"]),
+          providerAccountId: accountId,
+        },
+      );
+    let thrown: { code?: string; status?: number } | undefined;
+    try {
+      await run();
+    } catch (error) {
+      thrown = error as { code?: string; status?: number };
+    }
+    expect(thrown).toBeDefined();
+    expect(thrown?.code).toBe("accounts_rate_limited");
+    expect(thrown?.status).toBe(429);
+  });
+
+  test("continuation affinity keeps serving a healthy pinned account", async () => {
+    await getDb()
+      .update(providerAccounts)
+      .set({ status: "active", cooldownUntil: null, lastErrorCategory: null })
+      .where(eq(providerAccounts.id, accountId));
+    const service = new InMemoryRouteSnapshotService(createDatabaseSnapshotBuilder(getDb()));
+    const snapshot = await service.getSnapshot();
+    const candidate = (snapshot.candidates ?? []).find(
+      (c) => c["provider_account_id"] === accountId,
+    ) as Record<string, unknown> | undefined;
+    expect(candidate).toBeDefined();
+    const engine = new RoutingEngine();
+    const plan = await engine.plan(
+      String(candidate?.["model_id"]),
+      snapshot,
+      world.tenantId,
+      undefined,
+      false,
+      undefined,
+      {
+        providerId: String(candidate?.["provider_id"]),
+        providerAccountId: accountId,
+      },
+    );
+    expect(plan.candidates.map((c) => c.provider_account_id)).toContain(accountId);
   });
 
   test("a hard cooldown is excluded by default", async () => {

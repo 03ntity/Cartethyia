@@ -579,6 +579,34 @@ export class RoutingEngine {
           },
         );
       }
+      // The pinned account owns the live session, so it is the only correct
+      // target for this tool result — but health still applies. Forcing a
+      // session whose account is hard-cooling (quota exhausted) reproduces the
+      // refusal that cooled it, which is how "still hit a cooled-down account"
+      // leaked through continuation affinity. Evaluate the pin before
+      // returning: time-bounded cooling answers 429 with the real reset; an
+      // account that is disabled/locked answers a clear 400.
+      const pinnedDecisions = pinned.map((candidate) => this.eligibility.evaluate(candidate));
+      const blocked = pinnedDecisions.find((decision) => !decision.eligible);
+      if (blocked !== undefined) {
+        const reason = blocked.reason;
+        if (
+          reason === "cooldown_hard" ||
+          reason === "model_cooldown" ||
+          (reason === "quota_exhausted" && typeof blocked.cooldown_until === "number")
+        ) {
+          throw accountsRateLimitedError(requestedModel, resolved.model, earliestResetMs(pinnedDecisions));
+        }
+        throw new GatewayError(
+          "invalid_request",
+          400,
+          "This tool result belongs to an account that is no longer routable. Reconnect the account, or resend the complete conversation.",
+          {
+            providerId: continuationAffinity.providerId,
+            accountId: continuationAffinity.providerAccountId,
+          },
+        );
+      }
       return {
         revision: snapshot.revision,
         candidates: pinned,
