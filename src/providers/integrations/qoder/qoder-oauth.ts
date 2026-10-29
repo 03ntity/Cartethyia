@@ -150,7 +150,18 @@ export interface QoderOAuthState {
 
 /** Reads the persisted Qoder identity; `undefined` when the account predates it. */
 export function parseQoderOAuthState(value: unknown): QoderOAuthState | undefined {
-  const root = record(value);
+  let root = record(value);
+  if (root === undefined && typeof value === "string") {
+    // The credential loader stores `auth_state` as JSON text in SQLite, so
+    // the resolver hands the adapter a string when the cache was cold. Parse
+    // it before giving up — a login that works once must work again after the
+    // cache is evicted.
+    try {
+      root = record(JSON.parse(value));
+    } catch {
+      return undefined;
+    }
+  }
   if (root === undefined) return undefined;
   const userId = nonEmptyTrimmedString(root.userId);
   const machineId = nonEmptyTrimmedString(root.machineId);

@@ -180,6 +180,16 @@ describe("Qoder dispatch credential branches", () => {
     expect(parseQoderOAuthState({ userId: "u" })).toBeUndefined();
     expect(parseQoderOAuthState(null)).toBeUndefined();
   });
+
+  test("parseQoderOAuthState accepts the JSON-string form the loader stores", () => {
+    // The credential loader persists `auth_state` as JSON text in SQLite and
+    // hands the adapter that string on a cold cache, so the parser must accept
+    // both shapes or a working login breaks on the next cache eviction.
+    const serialized = JSON.stringify({ userId: "u", machineId: "m" });
+    expect(parseQoderOAuthState(serialized)).toEqual({ userId: "u", machineId: "m" });
+    expect(parseQoderOAuthState(JSON.stringify({ userId: "u" }))).toBeUndefined();
+    expect(parseQoderOAuthState("{ not json")).toBeUndefined();
+  });
 });
 
 describe("readQoderUserInfo", () => {
