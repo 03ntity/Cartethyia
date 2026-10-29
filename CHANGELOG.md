@@ -70,6 +70,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   tool call as an XML-like tag (`<execute code="..." />`) instead of a JSON
   array. These now recover into structured tool calls instead of leaking as
   visible text.
+- **Qoder wrapped `<tool_call>` echoes are recovered.** The model also wraps
+  each echoed call in `<tool_call>…</tool_call>` blocks; the stream hold-back
+  now keeps tag-style candidates (not just JSON) so a long, fragmented wrapped
+  echo is recovered instead of released as visible text.
 
 ## [2.7.1] - 2026-10-28
 
