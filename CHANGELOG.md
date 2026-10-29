@@ -8,6 +8,39 @@ current baseline; an existing one applies the numbered files that followed it.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **Ollama Cloud provider catalog.** A static floor for the six public models
+  (gemma4:31b, gpt-oss:20b/120b, nemotron-3-nano:30b/-super/-ultra) with
+  live limits from the public roster, so the provider works before discovery
+  runs.
+
+### Changed
+
+- **BYOK providers can set a route client identity.** The Routing Strategy
+  "Client identity" control now applies to custom (BYOK) providers too: Codex
+  / Claude Code / None. The operator's explicit choice wins over the adapter's
+  default, and `None` is honored as no identity at all.
+
+### Fixed
+
+- **Trae context-overflow streams classify as 413.** The upstream error code
+  4026 ("context length exceeded") now maps to `context_length_exceeded`
+  (413) instead of `platform_unavailable` (502).
+- **OAuth browser login no longer completes on a stale account snapshot.** The
+  dialog used a cached account baseline from an earlier login, so a second
+  login could report success before anything happened. The baseline is now
+  taken only after a fresh refetch, and each attempt opens a unique popup so a
+  leftover window is never reused.
+- **Qoder parallel tool echoes are recovered, not leaked.** When Qoder echoes
+  several tool calls as text (`[assistant 请求调用工具] …` JSON) with
+  unescaped inner quotes, the whole block used to be dropped and shown as
+  visible text. Multi-call echoes now salvage into real tool calls, and the
+  same recovery applies to the thinking channel (`reasoning_content`), so
+  DeepSeek-planned parallel batches run instead of leaking.
+
 ## [2.7.1] - 2026-10-28
 
 ### Fixed
