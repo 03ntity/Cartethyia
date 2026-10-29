@@ -59,6 +59,27 @@ test("upstream classification maps code 110 to quota, not auth", () => {
   expect(classification.credentialEvidence).toBeUndefined();
 });
 
+test("Qoder upstream 499 classifies as quota cooldown, not transport", () => {
+  const classification = classifyAccountError(new Error("Qoder stream closed"), {
+    ...UPSTREAM,
+    providerId: "qoder",
+    statusCode: 499,
+  });
+  expect(classification.category).toBe("quota_exhausted");
+  expect(classification.status).toBe("cooldown");
+  expect(classification.cooldownMs).toBeGreaterThan(0);
+  expect(classification.mutatesAccount).toBe(true);
+});
+
+test("Qoder 499 does not classify for other providers", () => {
+  const classification = classifyAccountError(new Error("stream closed"), {
+    ...UPSTREAM,
+    providerId: "openai",
+    statusCode: 499,
+  });
+  expect(classification.category).not.toBe("quota_exhausted");
+});
+
 test("an unknown numeric provider code never invalidates the credential", () => {
   const classification = classifyAccountError(new Error("some opaque error"), {
     ...UPSTREAM,

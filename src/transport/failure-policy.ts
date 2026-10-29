@@ -2,6 +2,7 @@ import { GatewayError, type GatewayErrorCode, type GatewayErrorOrigin } from "..
 import { isRecord } from "../protocol/codecs";
 import { resolveFallbackRetryBaseMs, resolveFallbackRetryCapMs } from "../config/timeouts";
 import { parseUpstreamBackoff } from "../protocol/upstream-parsing";
+import { resolveAccountQuotaCooldownMs } from "../config/cooldowns";
 
 /**
  * How much of the upstream's error body is kept and surfaced.
@@ -232,6 +233,31 @@ export function classifyUpstreamFailure(error: unknown): UpstreamFailurePolicy {
   // DNS failure. Failing the client request instead of failing over is the wrong
   // outcome for a whole class the table already names as platform-wide.
   const statusCode = error.status;
+  // Qoder answers an exhausted quota by closing the stream with an upstream 499
+  // (nginx client-close style). That is a refusal from the upstream — the
+  // gateway's own aborts are `transport_closed`, produced locally, and never
+  // carry a qoder providerId — so a 499 scoped to qoder is quota, not a
+  // malformed request. Without this it fell through to `invalid_request`
+  // (non-retryable, no cooldown) and the account was re-dialled on every
+  // request inside the exhausted window until a late 429 finally classified it.
+  if (
+    error.origin === "upstream" &&
+    statusCode === 499 &&
+    (providerId === "qoder" || providerId === "qodercn")
+  ) {
+    const cooldownMs = resolveAccountQuotaCooldownMs();
+    return {
+      retryable: true,
+      mutatesAccount: true,
+      category: "quota_exceeded",
+      scope: "account",
+      origin: error.origin,
+      ...(providerCode ? { providerCode } : {}),
+      ...(providerId ? { providerId } : {}),
+      cooldownMs,
+      statusCode,
+    };
+  }
   const retryableByStatus =
     statusCode === 401 ||
     statusCode === 403 ||

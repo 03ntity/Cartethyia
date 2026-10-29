@@ -1627,6 +1627,30 @@ const ACCOUNT_ERROR_RULES: readonly AccountErrorRule[] = [
     },
   },
   {
+    // Qoder closes an exhausted-quota stream with upstream 499 (nginx
+    // client-close style). The gateway's own aborts are local `transport_closed`
+    // and never carry a qoder providerId, so a 499 scoped to qoder is a quota
+    // verdict, not a transport fault. It must run before `transport-fault`,
+    // which otherwise reads the status as a 5xx-class outage and cools the
+    // account for the shorter transient window — or leaves it unmutated.
+    name: "qoder-499-quota",
+    match: (s) =>
+      (s.providerId === "qoder" || s.providerId === "qodercn") &&
+      s.statusCode === 499 &&
+      s.origin === "upstream",
+    decide: (s) => {
+      const cooldownMs = s.statedCooldownMs ?? DEFAULT_QUOTA_COOLDOWN_MS();
+      return s.result(
+        "quota_exhausted",
+        "cooldown",
+        cooldownMs,
+        new Date(Date.now() + cooldownMs),
+        s.reason("Qoder quota exhausted (upstream 499)"),
+        s.origin === "upstream",
+      );
+    },
+  },
+  {
     name: "transport-fault",
     match: (s) =>
       (s.statusCode !== null && s.statusCode >= 500 && s.statusCode <= 504) ||
