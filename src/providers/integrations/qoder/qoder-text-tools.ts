@@ -22,7 +22,8 @@ export type DsmlCall = DsmlToolCall;
 
 /**
  * True when the text is clearly an attempted tool-protocol echo rather than
- * ordinary prose: a leak marker followed by the start of a JSON array/object.
+ * ordinary prose: a leak marker followed by the start of a JSON array/object,
+ * or of a tool-style tag (`<execute code="..." />`).
  *
  * Used by the adapter's fail-closed decision: an echo that cannot be recovered
  * must fail the turn (never surface the protocol text as visible content),
@@ -34,7 +35,45 @@ export function isQoderEchoAttempt(text: string): boolean {
   const marker = LEAK_MARKER_ANY_RE.exec(src);
   if (!marker) return false;
   const rest = src.slice(marker.index + marker[0].length).trim();
-  return rest.startsWith("[") || rest.startsWith("{");
+  return rest.startsWith("[") || rest.startsWith("{") || /^<[a-zA-Z0-9_.:-]+\b/.test(rest);
+}
+
+/**
+ * A tool-style echo: the model writes the call as an XML-like self-closing
+ * tag instead of JSON, e.g. `<execute code="const x = 1;" />`. Each tag
+ * becomes one tool call whose attributes become the JSON arguments object.
+ * Returns null when the rest is not a contiguous run of such tags.
+ */
+const TAG_STYLE_ATTR_RE = /([a-zA-Z0-9_.:-]+)="((?:[^"\\]|\\.)*)"/g;
+const TAG_STYLE_TAG_RE = /<([a-zA-Z0-9_.:-]+)((?:\s+[a-zA-Z0-9_.:-]+="(?:[^"\\]|\\.)*")*)\s*\/?>/g;
+
+function parseTagStyleEcho(rest: string): DsmlCall[] | null {
+  const src = rest.trim();
+  if (!src.startsWith("<")) return null;
+  const calls: DsmlCall[] = [];
+  let cursor = 0;
+  for (const match of src.matchAll(TAG_STYLE_TAG_RE)) {
+    const between = src.slice(cursor, match.index);
+    if (between.trim() !== "") return null;
+    const name = match[1]!;
+    const attrBlock = match[2] ?? "";
+    const args: Record<string, unknown> = {};
+    let attrCount = 0;
+    for (const attr of attrBlock.matchAll(TAG_STYLE_ATTR_RE)) {
+      args[attr[1]!] = attr[2]!;
+      attrCount += 1;
+    }
+    if (attrCount === 0) return null;
+    calls.push({
+      id: `call_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      name,
+      arguments: JSON.stringify(args),
+    });
+    cursor = match.index + match[0].length;
+  }
+  if (calls.length === 0) return null;
+  if (src.slice(cursor).trim() !== "") return null;
+  return calls;
 }
 
 /**
@@ -264,7 +303,17 @@ export function parseQoderTextToolCalls(
       parsed = JSON.parse(escapeControlInsideStrings(rest));
     } catch {
       const salvaged = salvageEchoArray(rest);
-      if (salvaged === null) return { calls: [], clean: text };
+      if (salvaged === null) {
+        // Not a JSON echo — check the tool-style tag form before giving up.
+        const tagCalls = parseTagStyleEcho(rest);
+        if (tagCalls !== null) {
+          if (allowedNames && !tagCalls.every((c) => allowedNames.has(c.name))) {
+            return { calls: [], clean: text };
+          }
+          return { calls: tagCalls, clean: head };
+        }
+        return { calls: [], clean: text };
+      }
       parsed = salvaged;
     }
   }

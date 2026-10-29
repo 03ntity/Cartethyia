@@ -297,6 +297,23 @@ test("an echo with one unrecoverable argument fails closed, never leaks", async 
   ).rejects.toThrow(/unparseable tool-call echo/);
 });
 
+test("a tool-style tag echo is recovered and never leaks", async () => {
+  const echo =
+    "[assistant 请求调用工具]\n" +
+    '<execute code="const urls = [1, 2];" />\n' +
+    '<read path="http://127.0.0.1:8765/text/alpha.txt" />';
+  const ev = await collect([frame({ content: echo }), frame({}, "stop")]);
+  const visible = ev
+    .filter((e) => e["type"] === "content_delta")
+    .map((e) => String(((e["content"] as { text?: unknown } | undefined)?.text ?? "")))
+    .join("");
+  expect(visible).not.toContain("请求调用工具");
+  const deltas = calls(ev);
+  expect(deltas).toHaveLength(2);
+  expect(deltas[0]?.["name"]).toBe("execute");
+  expect(deltas[1]?.["name"]).toBe("read");
+});
+
 test("a parallel leak echo (unescaped, many calls) is recovered and hidden", async () => {
   // The user-facing regression: a parallel batch of tools leaks as
   // `[assistant 请求调用工具]` + JSON when the model echoes calls with their

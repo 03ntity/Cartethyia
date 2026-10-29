@@ -163,3 +163,38 @@ test("isQoderEchoAttempt flags marker followed by JSON, not prose", () => {
   expect(isQoderEchoAttempt("[assistant 请求调用工具] hanya penanda")).toBe(false);
   expect(isQoderEchoAttempt("halo biasa tanpa marker")).toBe(false);
 });
+
+test("a tool-style tag echo is recovered", () => {
+  const text =
+    "[assistant 请求调用工具]\n" +
+    '<execute code="const urls = [1, 2];" />\n' +
+    '<read path="http://127.0.0.1:8765/text/alpha.txt" />';
+  const { calls, clean } = parseQoderTextToolCalls(text, new Set(["execute", "read"]));
+  expect(calls).toHaveLength(2);
+  expect(calls[0]!.name).toBe("execute");
+  expect(JSON.parse(calls[0]!.arguments)).toEqual({
+    code: "const urls = [1, 2];",
+  });
+  expect(calls[1]!.name).toBe("read");
+  expect(JSON.parse(calls[1]!.arguments)).toEqual({
+    path: "http://127.0.0.1:8765/text/alpha.txt",
+  });
+  expect(clean).toBe("");
+});
+
+test("a tool-style echo with an undeclared tool is rejected", () => {
+  const text =
+    "[assistant 请求调用工具]\n" + '<execute code="const x = 1;" />';
+  const { calls } = parseQoderTextToolCalls(text, new Set(["read"]));
+  expect(calls).toHaveLength(0);
+});
+
+test("a tool-style echo with prose between tags is rejected", () => {
+  const text =
+    "[assistant 请求调用工具]\n" +
+    '<execute code="x" />\n' +
+    "beberapa teks\n" +
+    '<read path="y" />';
+  const { calls } = parseQoderTextToolCalls(text, new Set(["execute", "read"]));
+  expect(calls).toHaveLength(0);
+});
