@@ -314,6 +314,26 @@ test("a tool-style tag echo is recovered and never leaks", async () => {
   expect(deltas[1]?.["name"]).toBe("read");
 });
 
+test("a wrapped <tool_call> echo is recovered and never leaks", async () => {
+  const echo =
+    "[assistant 请求调用工具]\n" +
+    "<tool_call>\n" +
+    '{"name":"read","arguments":"{\\"path\\":\\"D:/tmp/sandbox/work/step2-write.txt\\"}"}\n' +
+    "</tool_call>";
+  const ev = await collect([frame({ content: echo }), frame({}, "stop")]);
+  const visible = ev
+    .filter((e) => e["type"] === "content_delta")
+    .map((e) => String(((e["content"] as { text?: unknown } | undefined)?.text ?? "")))
+    .join("");
+  expect(visible).not.toContain("请求调用工具");
+  const deltas = calls(ev);
+  expect(deltas).toHaveLength(1);
+  expect(deltas[0]?.["name"]).toBe("read");
+  expect(JSON.parse(String(deltas[0]?.["arguments_delta"]))).toEqual({
+    path: "D:/tmp/sandbox/work/step2-write.txt",
+  });
+});
+
 test("a parallel leak echo (unescaped, many calls) is recovered and hidden", async () => {
   // The user-facing regression: a parallel batch of tools leaks as
   // `[assistant 请求调用工具]` + JSON when the model echoes calls with their

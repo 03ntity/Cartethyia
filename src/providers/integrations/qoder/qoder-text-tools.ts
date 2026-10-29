@@ -77,6 +77,80 @@ function parseTagStyleEcho(rest: string): DsmlCall[] | null {
 }
 
 /**
+ * A wrapped tool-style echo: the model writes each call inside an XML-like
+ * block that contains the JSON call, e.g.
+ *
+ *   <tool_call>
+ *   {"name":"read","arguments":"{\"path\":\"a.txt\"}"}
+ *   </tool_call>
+ *
+ * Every block must be one JSON object/array; prose between blocks invalidates
+ * the echo. Returns null when the rest is not a contiguous run of such blocks.
+ */
+const WRAPPED_TAG_BLOCK_RE = /<([a-zA-Z0-9_.:-]+)>([\s\S]*?)<\/\1>/g;
+
+function parseWrappedTagEcho(rest: string): DsmlCall[] | null {
+  const src = rest.trim();
+  if (!src.startsWith("<")) return null;
+  const calls: DsmlCall[] = [];
+  let cursor = 0;
+  for (const match of src.matchAll(WRAPPED_TAG_BLOCK_RE)) {
+    const between = src.slice(cursor, match.index);
+    if (between.trim() !== "") return null;
+    const inner = match[2]!.trim();
+    let parsedInner: unknown;
+    try {
+      parsedInner = JSON.parse(inner);
+    } catch {
+      try {
+        parsedInner = JSON.parse(escapeControlInsideStrings(inner));
+      } catch {
+        const salvaged = salvageEchoArray(inner);
+        if (salvaged === null) return null;
+        parsedInner = salvaged;
+      }
+    }
+    const items: unknown[] = Array.isArray(parsedInner) ? parsedInner : [parsedInner];
+    for (const item of items) {
+      if (typeof item !== "object" || item === null) return null;
+      const rec = item as Record<string, unknown>;
+      const name = typeof rec["name"] === "string" ? rec["name"].trim() : "";
+      if (name.length === 0) return null;
+      let args: string;
+      if (typeof rec["arguments"] === "object" && rec["arguments"] !== null) {
+        args = JSON.stringify(rec["arguments"]);
+      } else if (typeof rec["arguments"] === "string") {
+        args = rec["arguments"];
+      } else {
+        return null;
+      }
+      let ok = false;
+      try {
+        JSON.parse(args);
+        ok = true;
+      } catch {
+        try {
+          JSON.parse(escapeControlInsideStrings(args));
+          ok = true;
+        } catch {
+          // invalid
+        }
+      }
+      if (!ok) return null;
+      calls.push({
+        id: `call_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
+        name,
+        arguments: args,
+      });
+    }
+    cursor = match.index + match[0].length;
+  }
+  if (calls.length === 0) return null;
+  if (src.slice(cursor).trim() !== "") return null;
+  return calls;
+}
+
+/**
  * Any spelling of the INTL tool-call leak marker — the square-bracket
  * canonical form, the angle-bracket variant the upstream also emits
  * (`<assistant 请求调用工具>`), and partial variants missing the closing
@@ -304,8 +378,8 @@ export function parseQoderTextToolCalls(
     } catch {
       const salvaged = salvageEchoArray(rest);
       if (salvaged === null) {
-        // Not a JSON echo — check the tool-style tag form before giving up.
-        const tagCalls = parseTagStyleEcho(rest);
+        // Not a JSON echo — check the tool-style forms before giving up.
+        const tagCalls = parseTagStyleEcho(rest) ?? parseWrappedTagEcho(rest);
         if (tagCalls !== null) {
           if (allowedNames && !tagCalls.every((c) => allowedNames.has(c.name))) {
             return { calls: [], clean: text };

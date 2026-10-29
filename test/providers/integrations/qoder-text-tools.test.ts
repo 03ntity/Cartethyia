@@ -198,3 +198,48 @@ test("a tool-style echo with prose between tags is rejected", () => {
   const { calls } = parseQoderTextToolCalls(text, new Set(["execute", "read"]));
   expect(calls).toHaveLength(0);
 });
+
+test("a wrapped <tool_call> echo is recovered", () => {
+  const text =
+    "[assistant 请求调用工具]\n" +
+    "<tool_call>\n" +
+    '{"name":"read","arguments":"{\\"path\\":\\"D:/tmp/sandbox/work/step2-write.txt\\"}"}\n' +
+    "</tool_call>";
+  const { calls, clean } = parseQoderTextToolCalls(text, new Set(["read"]));
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.name).toBe("read");
+  expect(JSON.parse(calls[0]!.arguments)).toEqual({
+    path: "D:/tmp/sandbox/work/step2-write.txt",
+  });
+  expect(clean).toBe("");
+});
+
+test("a wrapped echo with multiple <tool_call> blocks is recovered", () => {
+  const text =
+    "[assistant 请求调用工具]\n" +
+    "<tool_call>\n" +
+    '{"name":"read","arguments":"{\\"path\\":\\"a.txt\\"}"}\n' +
+    "</tool_call>\n" +
+    "<tool_call>\n" +
+    '{"name":"write","arguments":"{\\"path\\":\\"b.txt\\",\\"content\\":\\"hi\\"}"}\n' +
+    "</tool_call>";
+  const { calls } = parseQoderTextToolCalls(text, new Set(["read", "write"]));
+  expect(calls).toHaveLength(2);
+  expect(calls[0]!.name).toBe("read");
+  expect(calls[1]!.name).toBe("write");
+  expect(JSON.parse(calls[1]!.arguments)).toEqual({ path: "b.txt", content: "hi" });
+});
+
+test("a wrapped echo with prose between blocks is rejected", () => {
+  const text =
+    "[assistant 请求调用工具]\n" +
+    "<tool_call>\n" +
+    '{"name":"read","arguments":"{}"}\n' +
+    "</tool_call>\n" +
+    "kata-kata\n" +
+    "<tool_call>\n" +
+    '{"name":"write","arguments":"{}"}\n' +
+    "</tool_call>";
+  const { calls } = parseQoderTextToolCalls(text, new Set(["read", "write"]));
+  expect(calls).toHaveLength(0);
+});

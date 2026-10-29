@@ -959,6 +959,8 @@ function qoderStillLeakCandidate(text: string): boolean {
   if (rest.length === 0) return true;
   if (rest.startsWith("[")) return true;
   if (rest.startsWith("{")) return true;
+  // Tool-style echoes (self-closing `<execute …/>` or wrapped `<tool_call>…`).
+  if (/^<[a-zA-Z0-9_.:-]+\b/.test(rest)) return true;
   return false;
 }
 
