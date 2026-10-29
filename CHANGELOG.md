@@ -66,6 +66,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   frames that add no bytes, so a growing echo is held until recovery, and
   salvaged arguments are validated (malformed arguments are rejected, not
   passed through).
+- **Qoder tool-style tag echoes are recovered.** The model sometimes echoes a
+  tool call as an XML-like tag (`<execute code="..." />`) instead of a JSON
+  array. These now recover into structured tool calls instead of leaking as
+  visible text.
 
 ## [2.7.1] - 2026-10-28
 
