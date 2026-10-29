@@ -127,7 +127,6 @@ interface QoderModelConfig {
   source?: string;
 }
 
-
 function qoderMd5(value: string | Uint8Array): string {
   return createHash("md5").update(value).digest("hex");
 }
@@ -586,7 +585,6 @@ function qoderTools(
   return out;
 }
 
-
 /**
  * Projects the canonical tool choice onto the upstream's field.
  *
@@ -874,6 +872,7 @@ import {
   stripDsmlCloseTags,
   type DsmlToolCall,
 } from "../../../protocol/dsml";
+import { LEAK_MARKER_ANY_RE, LEAK_MARKER_LITERALS, parseQoderTextToolCalls } from "./qoder-text-tools";
 
 /** Qoder's dialect bounds the shared parser to the fuzzy (non-strict) form. */
 export const parseDsmlToolCalls = (text: string) => parseFuzzyDsmlToolCalls(text);
@@ -888,27 +887,6 @@ export type DsmlCall = DsmlToolCall;
  * Escaped quotes are parked first so they are not escaped twice, then every
  * remaining quote is escaped, then the parked ones are restored.
  */
-function repairJsonQuotes(text: string): string {
-  const ph = "\u0000";
-  return text.replace(/\\"/g, ph).replace(/"/g, '\\"').replaceAll(ph, '\\"');
-}
-
-/**
- * Any spelling of the INTL tool-call leak marker — the square-bracket
- * canonical form, the angle-bracket variant the upstream also emits
- * (`<assistant 请求调用工具>`), and partial variants missing the closing
- * bracket. Mirrors `_LEAK_MARKER_RE` in the reference bridge.
- */
-const LEAK_MARKER_ANY_RE = /[\[<(]*\s*assistant\s*请求调用工具\s*[\]>)]?/;
-
-/** Canonical marker literal used to seed prefix matching. */
-const LEAK_MARKER_LITERALS: readonly string[] = [
-  "[assistant 请求调用工具]",
-  "<assistant 请求调用工具>",
-  "assistant 请求调用工具",
-];
-
-/** Longest partial marker we hold across frames (mirrors `_MARKER_HOLD_WINDOW`). */
 const LEAK_HOLD_WINDOW = 24;
 /** Fail-open caps so an endless lookalike cannot hold text forever. */
 const LEAK_HOLD_MAX_CHARS = 32_768;
@@ -964,166 +942,6 @@ function qoderStillLeakCandidate(text: string): boolean {
   if (rest.startsWith("[")) return true;
   if (rest.startsWith("{")) return true;
   return false;
-}
-
-/**
- * Rebuilds the leaked tool-call echo shape when strict parsing fails.
- *
- * DeepSeek-family models echo calls with their inner quotes unescaped:
- * `[{"name":"read","arguments":"{"path":"a"}"},…]` is not valid JSON at either
- * level, and a parallel batch (several calls in one echo) previously fell
- * through the single-call regex and leaked as visible text. The scanner splits
- * top-level objects without relying on JSON validity (commas and braces inside
- * string values are respected by scanning quote-by-quote), rebuilds each call,
- * and accepts it only when its arguments parse as JSON. Both bracketed arrays
- * and bare comma-separated object lists are accepted.
- *
- * Returns `null` when the text is not that shape at all, so a caller can fall
- * back rather than accepting a guess. The result still goes through the same
- * strict checks as a normally-parsed array.
- */
-function salvageEchoArray(rest: string): unknown {
-  const src = rest.trim();
-  if (src.length === 0) return null;
-  const calls: Array<{ name: string; arguments: string }> = [];
-  let i = 0;
-  const bracketed = src[0] === "[";
-  if (bracketed) i = 1;
-  const skipWs = (): void => {
-    while (
-      i < src.length &&
-      (src[i] === " " || src[i] === "\t" || src[i] === "\n" || src[i] === "\r")
-    ) {
-      i += 1;
-    }
-  };
-  const NAME_RE = /"name"\s*:\s*"([^"]{1,200})"/y;
-  const ARG_KEY_RE = /"arguments"\s*:\s*"/y;
-
-  for (;;) {
-    skipWs();
-    if (i >= src.length) break;
-    if (bracketed && src[i] === "]") break;
-    if (src[i] !== "{") return null;
-    i += 1;
-    skipWs();
-    NAME_RE.lastIndex = i;
-    const nameMatch = NAME_RE.exec(src);
-    if (!nameMatch) return null;
-    const name = nameMatch[1] ?? "";
-    i = NAME_RE.lastIndex;
-    skipWs();
-    if (i < src.length && src[i] === ",") {
-      i += 1;
-      skipWs();
-    }
-    ARG_KEY_RE.lastIndex = i;
-    if (!ARG_KEY_RE.exec(src)) return null;
-    const argStart = ARG_KEY_RE.lastIndex;
-    // Raw arguments run to the first `}"` — the argument value's own closing
-    // bracket immediately followed by the object's closing quote. Scanning for
-    // that pair separates the argument JSON from the enclosing object even when
-    // commas or braces appear inside string values.
-    let rawEnd = -1;
-    for (let j = argStart; j + 1 < src.length; j += 1) {
-      if (src[j] === "}" && src[j + 1] === '"') {
-        rawEnd = j;
-        break;
-      }
-    }
-    if (rawEnd < 0) return null;
-    const raw = src.slice(argStart, rawEnd + 1);
-    const parsedArgs = [raw, repairJsonQuotes(raw)].find((candidate) => {
-      try {
-        JSON.parse(candidate);
-        return true;
-      } catch {
-        return false;
-      }
-    });
-    if (parsedArgs === undefined) return null;
-    calls.push({ name, arguments: parsedArgs });
-    // Past the argument's closing quote and the object's closing brace.
-    i = rawEnd + 2;
-    skipWs();
-    if (i >= src.length || src[i] !== "}") return null;
-    i += 1;
-    skipWs();
-    if (i < src.length && src[i] === ",") {
-      i += 1;
-      continue;
-    }
-    if (i < src.length && bracketed && src[i] === "]") continue;
-    if (i < src.length) return null;
-  }
-  return calls.length > 0 ? calls : null;
-}
-
-export function parseLeakedToolCalls(
-  text: string,
-  allowedNames?: ReadonlySet<string>,
-): { calls: DsmlCall[]; clean: string } {
-  if (text.length === 0) {
-    return { calls: [], clean: text };
-  }
-  // The upstream occasionally echoes the marker in variants — angle brackets,
-  // a missing closing bracket, or wrapped inside a ``` fence. Strip a leading
-  // fence, then locate any marker spelling, mirroring the reference bridge's
-  // `_normalize_leak_marker`.
-  const fence = text.match(/^```[a-z]*\s*\n?/i);
-  const src = fence && fence[0] ? text.slice(fence[0].length) : text;
-  const marker = LEAK_MARKER_ANY_RE.exec(src);
-  if (!marker) {
-    return { calls: [], clean: text };
-  }
-  const head = src.slice(0, marker.index).trim();
-  let rest = src.slice(marker.index + marker[0].length).trim();
-  // The model occasionally leaves raw DSML closing tags after the echo array
-  // (`</｜DSML｜parameter>` etc.), and a ``` fence may close the block. Strip
-  // trailing residue so the JSON parse is not poisoned by "Extra data".
-  rest = stripDsmlCloseTags(rest);
-  rest = rest.replace(/\s*```\s*$/, "").trim();
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rest);
-  } catch {
-    // A model echoing the call writes the inner quotes unescaped:
-    // `[{"name":"Read","arguments":"{"file_path":"a.ts"}"}]`. That is not
-    // valid JSON at either level, so the array has to be rebuilt before it can
-    // be trusted. Only the single-call shape is salvaged, which is what an echo
-    // almost always is.
-    const salvaged = salvageEchoArray(rest);
-    if (salvaged === null) return { calls: [], clean: text };
-    parsed = salvaged;
-  }
-  if (Array.isArray(parsed) && parsed.length === 0) return { calls: [], clean: text };
-
-  // The model echoes the call either as a JSON array (`[{name,arguments},…]`)
-  // or as a single object (`{"name":…,"arguments":…}`). Normalize the single
-  // object into a one-entry array so both shapes share one validator.
-  const items: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
-  const calls: DsmlCall[] = [];
-  for (const item of items) {
-    if (typeof item !== "object" || item === null) return { calls: [], clean: text };
-    const rec = item as Record<string, unknown>;
-    const name = typeof rec["name"] === "string" ? rec["name"].trim() : "";
-    if (name.length === 0) return { calls: [], clean: text };
-    if (allowedNames && !allowedNames.has(name)) return { calls: [], clean: text };
-    let args = rec["arguments"];
-    if (typeof args === "object" && args !== null) args = JSON.stringify(args);
-    if (typeof args !== "string") return { calls: [], clean: text };
-    // Arguments that do not parse are not a call this can trust.
-    if (args.trim().length > 0) {
-      try {
-        JSON.parse(args);
-      } catch {
-        return { calls: [], clean: text };
-      }
-    }
-    calls.push({ id: `call_${randomUUID().replace(/-/g, "").slice(0, 16)}`, name, arguments: args });
-  }
-  return { calls, clean: head };
 }
 
 // Stream transformation — decode SSE, unwrap COSY envelope, map OpenAI chat chunks to CanonicalEvent
@@ -1421,7 +1239,7 @@ export async function* qoderBodyToCanonicalEvents(
   // `reasoning_content` still gets them turned into real tool calls instead of
   // leaking into visible thinking.
   if (reasonLeakBuf.length > 0) {
-    const leaked = parseLeakedToolCalls(reasonLeakBuf);
+    const leaked = parseQoderTextToolCalls(reasonLeakBuf);
     if (leaked.calls.length > 0) {
       reasonCalls = [...reasonCalls, ...leaked.calls];
       const clean = leaked.clean.trim();
@@ -1449,7 +1267,7 @@ export async function* qoderBodyToCanonicalEvents(
     // first finds nothing, so a DSML stream is never re-read as an echo.
     let { calls, clean } = parseDsmlToolCalls(buf);
     if (calls.length === 0) {
-      const leaked = parseLeakedToolCalls(buf);
+      const leaked = parseQoderTextToolCalls(buf);
       if (leaked.calls.length > 0) {
         calls = leaked.calls;
         clean = leaked.clean;
@@ -1513,7 +1331,7 @@ export async function* qoderBodyToCanonicalEvents(
     // recovery here never duplicates text already shown. A valid echo becomes
     // tool calls; anything else is released as ordinary prose.
     if (leakBuf.length > 0) {
-      const leaked = parseLeakedToolCalls(leakBuf);
+      const leaked = parseQoderTextToolCalls(leakBuf);
       if (leaked.calls.length > 0) {
         for (const call of leaked.calls) {
           hasEmittedToolCall = true;
@@ -1535,7 +1353,7 @@ export async function* qoderBodyToCanonicalEvents(
       }
     }
     if (plainBuf.length > 0 && !hasEmittedToolCall) {
-      const leaked = parseLeakedToolCalls(plainBuf);
+      const leaked = parseQoderTextToolCalls(plainBuf);
       if (leaked.calls.length > 0) {
         for (const call of leaked.calls) {
           hasEmittedToolCall = true;

@@ -214,6 +214,27 @@ test("a chunk carrying both id and arguments pins AND emits in one pass", async 
   expect(JSON.parse(calls(ev).map((d) => String(d["arguments_delta"])).join(""))).toEqual({ a: 1 });
 });
 
+test("an empty-argument call is forwarded verbatim, not dropped", async () => {
+  // Qoder's DeepSeek occasionally emits a native call with empty arguments and
+  // never continues it. The translator must still forward it unchanged: the
+  // harness's own feedback loop ("missing key") is what makes the model retry
+  // with arguments. Silently dropping it here would hide the failure and leave
+  // the model without the feedback it needs.
+  const ev = await collect([
+    frame({
+      tool_calls: [
+        { function: { arguments: "", name: "echo" }, id: "call_empty", index: 0, type: "function" },
+      ],
+    }),
+    frame({}, "tool_calls"),
+  ]);
+  const deltas = calls(ev);
+  expect(deltas).toHaveLength(1);
+  expect(deltas[0]?.["call_id"]).toBe("call_empty");
+  expect(deltas[0]?.["name"]).toBe("echo");
+  expect(deltas[0]?.["arguments_delta"]).toBe("");
+});
+
 test("a parallel leak echo (unescaped, many calls) is recovered and hidden", async () => {
   // The user-facing regression: a parallel batch of tools leaks as
   // `[assistant 请求调用工具]` + JSON when the model echoes calls with their

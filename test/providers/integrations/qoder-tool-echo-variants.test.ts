@@ -8,8 +8,8 @@
 import { expect, test } from "bun:test";
 import {
   buildQoderRequest,
-  parseLeakedToolCalls,
 } from "../../../src/providers/integrations/qoder/qoder";
+import { parseQoderTextToolCalls as parseLeakedToolCalls } from "../../../src/providers/integrations/qoder/qoder-text-tools";
 import type { CanonicalRequest, ContentPart } from "../../../src/protocol/canonical-model";
 
 const CONFIG = {

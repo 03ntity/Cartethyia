@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseLeakedToolCalls } from "../../../src/providers/integrations/qoder/qoder";
+import { parseQoderTextToolCalls as parseLeakedToolCalls } from "../../../src/providers/integrations/qoder/qoder-text-tools";
 
 /**
  * The model echoes a call with its inner quotes unescaped. Seen in the wild as
