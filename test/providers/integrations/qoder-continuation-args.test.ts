@@ -235,6 +235,20 @@ test("an empty-argument call is forwarded verbatim, not dropped", async () => {
   expect(deltas[0]?.["arguments_delta"]).toBe("");
 });
 
+test("an unrecoverable leak echo fails the turn instead of leaking", async () => {
+  // A marker + array whose inner arguments are broken JSON (escaped outer,
+  // unescaped inner quotes) cannot be salvaged. It must fail the turn — never
+  // surface the protocol text as visible content.
+  const badEcho =
+    "[assistant 请求调用工具]\n" +
+    '[' +
+    '{"name":"write","arguments":"{"path":"D:/tmp/data.json","content":"{\n  "name": "jinhsi",\n  "nested": { "ok": "yes" }\n}\n"}"}' +
+    ']';
+  await expect(collect([frame({ content: badEcho }), frame({}, "stop")])).rejects.toThrow(
+    /unparseable tool-call echo/,
+  );
+});
+
 test("a parallel leak echo (unescaped, many calls) is recovered and hidden", async () => {
   // The user-facing regression: a parallel batch of tools leaks as
   // `[assistant 请求调用工具]` + JSON when the model echoes calls with their

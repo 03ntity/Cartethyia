@@ -21,6 +21,23 @@ import { stripDsmlCloseTags, type DsmlToolCall } from "../../../protocol/dsml";
 export type DsmlCall = DsmlToolCall;
 
 /**
+ * True when the text is clearly an attempted tool-protocol echo rather than
+ * ordinary prose: a leak marker followed by the start of a JSON array/object.
+ *
+ * Used by the adapter's fail-closed decision: an echo that cannot be recovered
+ * must fail the turn (never surface the protocol text as visible content),
+ * while prose that merely mentions the marker keeps passing through.
+ */
+export function isQoderEchoAttempt(text: string): boolean {
+  const fence = text.match(/^```[a-z]*\s*\n?/i);
+  const src = fence && fence[0] ? text.slice(fence[0].length) : text;
+  const marker = LEAK_MARKER_ANY_RE.exec(src);
+  if (!marker) return false;
+  const rest = src.slice(marker.index + marker[0].length).trim();
+  return rest.startsWith("[") || rest.startsWith("{");
+}
+
+/**
  * Any spelling of the INTL tool-call leak marker — the square-bracket
  * canonical form, the angle-bracket variant the upstream also emits
  * (`<assistant 请求调用工具>`), and partial variants missing the closing

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseQoderTextToolCalls } from "../../../src/providers/integrations/qoder/qoder-text-tools";
+import { parseQoderTextToolCalls, isQoderEchoAttempt } from "../../../src/providers/integrations/qoder/qoder-text-tools";
 
 /**
  * Pins the canonical INTL text-mode tool-call parser against the whole family
@@ -146,4 +146,20 @@ test("prose that merely mentions the marker is left intact", () => {
   const { calls, clean } = parseQoderTextToolCalls(text);
   expect(calls).toHaveLength(0);
   expect(clean).toBe(text);
+});
+
+test("isQoderEchoAttempt flags marker followed by JSON, not prose", () => {
+  expect(
+    isQoderEchoAttempt(
+      "[assistant 请求调用工具]\n" +
+        '[{"name":"bash","arguments":"{"command":"ls"}"}]',
+    ),
+  ).toBe(true);
+  expect(
+    isQoderEchoAttempt(
+      "[assistant 请求调用工具]\n" + '{"name":"write","arguments":"{}"}',
+    ),
+  ).toBe(true);
+  expect(isQoderEchoAttempt("[assistant 请求调用工具] hanya penanda")).toBe(false);
+  expect(isQoderEchoAttempt("halo biasa tanpa marker")).toBe(false);
 });

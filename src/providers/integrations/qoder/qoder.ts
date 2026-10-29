@@ -872,7 +872,7 @@ import {
   stripDsmlCloseTags,
   type DsmlToolCall,
 } from "../../../protocol/dsml";
-import { LEAK_MARKER_ANY_RE, LEAK_MARKER_LITERALS, parseQoderTextToolCalls } from "./qoder-text-tools";
+import { LEAK_MARKER_ANY_RE, LEAK_MARKER_LITERALS, parseQoderTextToolCalls, isQoderEchoAttempt } from "./qoder-text-tools";
 
 /** Qoder's dialect bounds the shared parser to the fuzzy (non-strict) form. */
 export const parseDsmlToolCalls = (text: string) => parseFuzzyDsmlToolCalls(text);
@@ -891,6 +891,24 @@ const LEAK_HOLD_WINDOW = 24;
 /** Fail-open caps so an endless lookalike cannot hold text forever. */
 const LEAK_HOLD_MAX_CHARS = 32_768;
 const LEAK_HOLD_MAX_FRAMES = 200;
+
+/**
+ * A tool-protocol echo the gateway recognised but could not recover. The
+ * turn is failed (502) instead of surfacing the protocol text as visible
+ * content — leaking it makes the model look successful while nothing ran.
+ */
+const BAD_ECHO_MESSAGE =
+  "Qoder returned an unparseable tool-call echo; no tools were emitted";
+
+function badEchoError(): GatewayError {
+  return new GatewayError(
+    "platform_unavailable",
+    502,
+    BAD_ECHO_MESSAGE,
+    { providerId: QODER_PROVIDER_ID },
+    "upstream",
+  );
+}
 
 /**
  * True when `suffix` is a strict prefix of some marker literal — the stream
@@ -1251,6 +1269,7 @@ export async function* qoderBodyToCanonicalEvents(
         } as CanonicalEvent;
       }
     } else {
+      if (isQoderEchoAttempt(reasonLeakBuf)) throw badEchoError();
       const visible = reasonLeakBuf.trim();
       if (visible.length > 0) {
         yield {
@@ -1345,6 +1364,7 @@ export async function* qoderBodyToCanonicalEvents(
         }
         finishReason = "tool_calls";
       } else if (leaked.clean.length > 0) {
+        if (isQoderEchoAttempt(leakBuf)) throw badEchoError();
         yield {
           type: "content_delta",
           sequence_number: seq++,
@@ -1366,6 +1386,8 @@ export async function* qoderBodyToCanonicalEvents(
           } as CanonicalEvent;
         }
         finishReason = "tool_calls";
+      } else if (isQoderEchoAttempt(plainBuf)) {
+        throw badEchoError();
       }
     }
   }
