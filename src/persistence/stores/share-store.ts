@@ -155,7 +155,12 @@ export type SharedApiKeyIssueResult =
       readonly keyPrefix: string;
       readonly createdAt: Date;
     }
-  | { readonly kind: "link_unavailable" };
+  | { readonly kind: "link_unavailable" }
+  | {
+      readonly kind: "already_issued";
+      readonly parentKeyId: string;
+      readonly tenantId: string;
+    };
 
 type ApiKeyRow = typeof apiKeys.$inferSelect;
 type ShareLinkRow = typeof shareLinks.$inferSelect;
@@ -484,6 +489,33 @@ export class DrizzleShareLinkStore implements ShareLinkStore {
           .limit(1),
       );
       if (!activeLink) return { kind: "link_unavailable" };
+
+      // One child key per canonical client IP. The public route mints from an
+      // enrollment link, and a bot replaying the same URL from one IP was
+      // creating an unbounded number of children (observed: 331k `api_keys`
+      // rows from two Google Cloud IPs in three days). If this (parent, IP)
+      // pair already has a live child, that is the same enrollment — return it
+      // as `already_issued` instead of minting another.
+      if (material.clientIpKey.length > 0) {
+        const existing = await tx
+          .select({ id: apiKeys.id })
+          .from(apiKeys)
+          .where(
+            and(
+              eq(apiKeys.parentKeyId, parent.id),
+              eq(apiKeys.issuedClientIpKey, material.clientIpKey),
+              isNull(apiKeys.revokedAt),
+            ),
+          )
+          .limit(1);
+        if (existing[0] !== undefined) {
+          return {
+            kind: "already_issued",
+            parentKeyId: parent.id,
+            tenantId: parent.tenantId,
+          };
+        }
+      }
 
       // The label is `hint + random`, capped at 12 chars — never the
       // parent's full label plus a suffix, which grew past every table

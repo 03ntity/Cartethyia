@@ -392,6 +392,18 @@ export function createShareRouter(options: ShareRouterOptions): Elysia {
         nameHint,
       });
       if (issued.kind === "link_unavailable") return notFound();
+      if (issued.kind === "already_issued") {
+        // The recipient's IP already enrolled from this link. The original
+        // bearer secret is not stored server-side, so it cannot be returned;
+        // refuse the duplicate mint instead. The share page surfaces this as
+        // a clear message rather than minting an unbounded key set.
+        return json({
+          error: {
+            code: "already_issued",
+            message: "This address already has a key from this share link.",
+          },
+        }, 409);
+      }
       set.status = 201;
       return json({
         key: generated.secret,
