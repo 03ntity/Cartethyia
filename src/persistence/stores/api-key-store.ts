@@ -265,7 +265,13 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
       .select()
       .from(apiKeys)
       .where(eq(apiKeys.tenantId, tenantId))
-      .orderBy(apiKeys.sortIndex, apiKeys.createdAt, apiKeys.id)
+      // Parents first: share children all carry `sort_index = 0` (the column
+      // default), so sorting by `sort_index` alone lets a huge family of
+      // children crowd every top-level key except the one with the oldest
+      // `created_at` out of the 1000-row page. The console only renders
+      // top-level keys, so they must never be truncated away by their own
+      // children.
+      .orderBy(sql`(${apiKeys.parentKeyId} IS NOT NULL)`, apiKeys.sortIndex, apiKeys.createdAt, apiKeys.id)
       .limit(1000);
     return this.withPopups(this.db, rows);
   }
