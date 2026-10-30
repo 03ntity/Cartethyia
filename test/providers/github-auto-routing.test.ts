@@ -64,7 +64,7 @@ describe("GitHub Copilot Auto routing", () => {
       requests.push({ url, headers: new Headers(init?.headers), body });
       if (url.endsWith("/auto")) {
         return new Response(JSON.stringify({
-          selected_model: { id: "routed-model" },
+          selected_model: { id: "routed-model", supported_endpoints: ["/responses", "ws:/responses"] },
           session_token: "auto-session-token",
           expires_at: Math.floor(Date.now() / 1_000) + 3_600,
         }), {
@@ -164,7 +164,6 @@ describe("GitHub Copilot Auto routing", () => {
 
     expect(requests.map(({ url }) => new URL(url).pathname)).toEqual([
       "/auto",
-      "/models",
       "/responses",
       "/responses",
     ]);
@@ -173,14 +172,14 @@ describe("GitHub Copilot Auto routing", () => {
       tier: "efficiency",
     });
     expect(requests[0]?.headers.get("x-github-api-version")).toBe("2026-08-01");
-    expect(requests[2]?.body.model).toBe("routed-model");
-    expect(requests[2]?.body.temperature).toBeUndefined();
-    expect(requests[2]?.body.reasoning).toBeUndefined();
+    expect(requests[1]?.body.model).toBe("routed-model");
+    expect(requests[1]?.body.temperature).toBeUndefined();
+    expect(requests[1]?.body.reasoning).toBeUndefined();
     expect(requests[0]?.body.multi_turn).toBeUndefined();
     expect(requests[0]?.headers.get("copilot-session-token")).toBeNull();
+    expect(requests[1]?.headers.get("copilot-session-token")).toBe("auto-session-token");
     expect(requests[2]?.headers.get("copilot-session-token")).toBe("auto-session-token");
-    expect(requests[3]?.headers.get("copilot-session-token")).toBe("auto-session-token");
-    const followupInput = requests[3]?.body.input as Array<Record<string, unknown>>;
+    const followupInput = requests[2]?.body.input as Array<Record<string, unknown>>;
     expect(followupInput.some((item) => item.type === "function_call")).toBe(true);
     expect(followupInput.some((item) => item.type === "function_call_output")).toBe(true);
     expect(followupInput.some((item) => item.type === "reasoning")).toBe(true);
@@ -193,5 +192,88 @@ describe("GitHub Copilot Auto routing", () => {
       .toBe("I will inspect the relevant file. raw private reasoning");
     expect(JSON.stringify(clientResponse)).not.toContain("opaque-reasoning-artifact");
     expect(JSON.stringify(clientResponse)).toContain("raw private reasoning");
+  });
+
+  test("waits for the routed streaming response after the Auto selection", async () => {
+    const streamCredential = JSON.stringify({
+      access: "copilot-stream-access",
+      apiHost: "copilot.example",
+      github: "account-auto-stream",
+    });
+    const requests: string[] = [];
+    const responseEvents = [
+      {
+        type: "response.created",
+        response: { id: "response-stream-1", model: "gpt-6-luna", status: "in_progress" },
+      },
+      { type: "response.output_text.delta", delta: "routed answer" },
+      {
+        type: "response.completed",
+        response: {
+          id: "response-stream-1",
+          model: "gpt-6-luna",
+          status: "completed",
+          output: [],
+          usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
+        },
+      },
+    ];
+    const outboundFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      requests.push(new URL(url).pathname);
+      if (url.endsWith("/auto")) {
+        return new Response(JSON.stringify({
+          selected_model: {
+            id: "gpt-6-luna",
+            supported_endpoints: ["/responses", "ws:/responses"],
+          },
+          session_token: "auto-stream-session-token",
+          expires_at: Math.floor(Date.now() / 1_000) + 3_600,
+          selection_reason: "Auto selected GPT-6 Luna.",
+        }), { headers: { "content-type": "application/json" } });
+      }
+      if (url.endsWith("/responses")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        expect(body.model).toBe("gpt-6-luna");
+        expect(new Headers(init?.headers).get("copilot-session-token"))
+          .toBe("auto-stream-session-token");
+        const sse = responseEvents
+          .map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+          .join("");
+        return new Response(sse, { headers: { "content-type": "text/event-stream" } });
+      }
+      throw new Error(`Unexpected Copilot request: ${url}`);
+    }) as unknown as ProviderDispatchContext["outbound_fetch"];
+    const context = {
+      credential: {
+        provider_id: "github",
+        credential_kind: "oauth",
+        secret: new TextEncoder().encode(streamCredential),
+      },
+      deadline: Date.now() + 30_000,
+      abort_signal: new AbortController().signal,
+      outbound_fetch: outboundFetch,
+      request_headers: { "x-session-id": "auto-stream-session-1" },
+    } as unknown as ProviderDispatchContext;
+    const streamingRequest = { ...request, stream: true } as CanonicalRequest;
+    const events: CanonicalEvent[] = [];
+    for await (const event of githubAdapter.dispatch(
+      streamingRequest,
+      candidate,
+      { ...context, request_id: "auto-stream-request-1" },
+    )) events.push(event);
+
+    expect(requests).toEqual(["/auto", "/responses"]);
+    expect(events.map((event) => event.type)).toEqual([
+      "response_start",
+      "content_delta",
+      "terminal",
+    ]);
+    expect(events[1]).toMatchObject({
+      type: "content_delta",
+      content: { kind: "text", text: "routed answer" },
+    });
+    expect(JSON.stringify(events)).not.toContain("Auto selected GPT-6 Luna.");
+    expect(events[2]).toMatchObject({ type: "terminal", state: "complete" });
   });
 });

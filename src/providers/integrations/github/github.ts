@@ -288,6 +288,23 @@ interface GithubAutoDecision {
   readonly sessionToken: string;
   readonly expiresAt: number;
   readonly hasImage: boolean;
+  readonly route?: GithubModelRoute;
+}
+
+function routeFromAutoModel(value: unknown): GithubModelRoute | undefined {
+  if (!isRecord(value) || !Array.isArray(value["supported_endpoints"])) return undefined;
+  const endpoints = new Set(
+    value["supported_endpoints"]
+      .filter((endpoint): endpoint is string => typeof endpoint === "string")
+      .map((endpoint) => endpoint.replace(/^\/v1(?=\/)/, "")),
+  );
+  if (endpoints.has("/chat/completions")) {
+    return { wireFamily: "chat", endpointPath: GITHUB_ENDPOINT_PATH };
+  }
+  if (endpoints.has("/responses")) {
+    return { wireFamily: "responses", endpointPath: GITHUB_RESPONSES_ENDPOINT_PATH };
+  }
+  return undefined;
 }
 
 interface CopilotModelOptions {
@@ -420,7 +437,7 @@ class GithubAdapter extends OpenAICompatibleAdapter {
       if (cacheKey !== undefined) this.#cacheAutoDecision(cacheKey, autoDecision);
     }
     const selectedModelId = autoDecision.modelId;
-    let route = await githubModelRoute(selectedModelId, credential);
+    let route = autoDecision.route ?? await githubModelRoute(selectedModelId, credential);
     if (route === undefined) {
       // dynamic-import: discovery module is only loaded when the first
       // request routes to a model id not in the bundled roster; off the hot
@@ -539,11 +556,13 @@ class GithubAdapter extends OpenAICompatibleAdapter {
       Number.isFinite(responsePayload.expires_at)
         ? responsePayload.expires_at
         : 0;
+    const route = routeFromAutoModel(responsePayload.selected_model);
     return {
       modelId: responsePayload.selected_model.id.trim(),
       sessionToken: responsePayload.session_token.trim(),
       expiresAt,
       hasImage,
+      ...(route === undefined ? {} : { route }),
     };
   }
 
