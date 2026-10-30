@@ -116,5 +116,5 @@ export const DEFAULT_BOUNDS = {
    * matters because the gateway is designed to run several processes behind
    * `reusePort` — see `assertPoolFitsServerCapacity`.
    */
-  maxPostgresPoolSize: 20,
+  maxPostgresPoolSize: 8,
 } as const;

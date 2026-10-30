@@ -66,6 +66,8 @@ const ENV_EXAMPLE_ONLY_KEYS: Readonly<Record<string, true>> = {
   NODE_ENV: true,
   LOG_LEVEL: true,
   DATABASE_URL: true,
+  DATABASE_POOL_MAX: true,
+  DATABASE_POOL_IDLE_FLOOR: true,
   REDIS_URL: true,
   CARTETHYIA_DATA_DIR: true,
   CARTETHYIA_TELEMETRY_PAYLOAD_DIR: true,

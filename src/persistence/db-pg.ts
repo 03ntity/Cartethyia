@@ -108,6 +108,44 @@ export function poolMaxFromEnv(): number {
   return value;
 }
 
+/** Target number of idle connections the pool shrinks to (default 2). */
+export function poolIdleFloorFromEnv(): number {
+  const raw = process.env.DATABASE_POOL_IDLE_FLOOR ?? "2";
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`DATABASE_POOL_IDLE_FLOOR must be a non-negative integer (got "${raw}")`);
+  }
+  return value;
+}
+
+/**
+ * Periodically closes idle clients above the floor so a low-traffic process
+ * does not hold `DATABASE_POOL_MAX` backends open for nothing. node-postgres
+ * only closes an idle client after `idleTimeoutMillis` (60s here); this gives
+ * the pool a faster, explicit shrink path while still keeping the floor warm.
+ */
+export function startPoolShrinker(pool: Pool, floor: number): () => void {
+  const interval = setInterval(() => {
+    try {
+      const idle = pool.idleCount;
+      const excess = idle - floor;
+      if (excess <= 0) return;
+      // Close the excess idle clients in order; `release(true)` destroys the
+      // client instead of returning it to the pool.
+      for (let index = 0; index < excess; index += 1) {
+        pool
+          .connect()
+          .then((client) => client.release(true))
+          .catch(() => undefined);
+      }
+    } catch {
+      // The pool is best-effort; a failed shrink must never crash a request.
+    }
+  }, 30_000);
+  interval.unref();
+  return () => clearInterval(interval);
+}
+
 declare global {
   // eslint-disable-next-line no-var -- globalThis augmentation requires `var`
   var __cartethyiaPool: Pool | undefined;
@@ -147,6 +185,10 @@ export function getPool(): Pool {
   pool.on("error", (err) => {
     log.error("[postgres] pool error (idle client)", err);
   });
+  // Idle-floor shrinker: keeps the pool warm at the floor instead of parking
+  // a full `max` worth of backends. Tied to the pool's lifetime, so a hot
+  // reload that replaces the pool re-registers it.
+  startPoolShrinker(pool, poolIdleFloorFromEnv());
   globalThis.__cartethyiaPool = pool;
   return pool;
 }
