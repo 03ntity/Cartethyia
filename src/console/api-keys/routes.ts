@@ -13,7 +13,12 @@ import { ConsoleDomainError, errorResponse, requireTenantScope } from "../shared
 import { literalUnion } from "../shared/elysia-schema";
 import { API_KEY_MODES, API_KEY_MODEL_ACCESS_MODES, type ShareLinkKind } from "../../persistence/schema";
 import type { ApiKeyConfig, ApiKeyResponse, UpdateApiKeyResponse } from "./contracts";
-import type { ApiKeyPatch, ApiKeyRecord } from "../../persistence/stores/api-key-store";
+import type {
+  ApiKeyPatch,
+  ApiKeyRecord,
+  SharedChildSortColumn,
+  SharedChildrenPageOptions,
+} from "../../persistence/stores/api-key-store";
 import {
   generateApiKeySecret,
   isDefaultGatewayApiKey,
@@ -33,6 +38,39 @@ import {
 } from "./contracts";
 import type { SharedKeyActivityDetail, SharedKeySummary } from "../share/share-usage";
 import { popupImageBytes } from "./share-popup-image";
+
+const SHARED_CHILD_SORT_COLUMNS = new Set<SharedChildSortColumn>([
+  "createdAt",
+  "label",
+  "keyPrefix",
+  "issuedClientIp",
+  "revokedAt",
+  "enabled",
+]);
+
+/** Parses and bounds the paginated share-child list query. */
+function parseSharedChildrenQuery(query: URLSearchParams): SharedChildrenPageOptions {
+  const limitRaw = query.get("limit");
+  const offsetRaw = query.get("offset");
+  const sortRaw = query.get("sort");
+  const orderRaw = query.get("order");
+  const statusRaw = query.get("status");
+  const limit = limitRaw === null ? 50 : Number(limitRaw);
+  const offset = offsetRaw === null ? 0 : Number(offsetRaw);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+    throw new ConsoleDomainError("invalid_request", 400, "limit must be an integer between 1 and 500");
+  }
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new ConsoleDomainError("invalid_request", 400, "offset must be a non-negative integer");
+  }
+  const sortBy = (sortRaw ?? "createdAt") as SharedChildSortColumn;
+  if (!SHARED_CHILD_SORT_COLUMNS.has(sortBy)) {
+    throw new ConsoleDomainError("invalid_request", 400, `unsupported sort column: ${String(sortBy)}`);
+  }
+  const order = orderRaw === "asc" ? "asc" : "desc";
+  const status = statusRaw === "active" || statusRaw === "revoked" ? statusRaw : "all";
+  return { limit, offset, sortBy, order, status };
+}
 
 export function createApiKeyOperations(config: ApiKeyConfig) {
   const operations = {
@@ -643,7 +681,14 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
     async listSharedKeys(
       access: AccessDecision | undefined,
       parentKeyId: string,
-    ): Promise<readonly SharedKeySummary[]> {
+      query: URLSearchParams,
+    ): Promise<{
+      rows: readonly SharedKeySummary[];
+      total: number;
+      active: number;
+      revoked: number;
+      consumed: number;
+    }> {
       const authorized = requireTenantScope(access, "dashboard:read");
       const activity = config.shareActivity;
       if (!activity)
@@ -652,8 +697,14 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
       if (!parent || parent.revokedAt !== undefined ||
           parent.keyMode !== "share" || parent.parentKeyId !== undefined)
         throw new ConsoleDomainError("key_not_found", 404, "Share template not found");
-      const children = await config.store.listChildren(authorized.tenantId, parentKeyId);
-      return activity.getSharedKeySummaries(authorized.tenantId, children, parentKeyId);
+      const options = parseSharedChildrenQuery(query);
+      const page = await config.store.listChildrenPage(authorized.tenantId, parentKeyId, options);
+      const rows = await activity.getSharedKeySummaries(
+        authorized.tenantId,
+        page.rows,
+        parentKeyId,
+      );
+      return { rows, total: page.total, active: page.active, revoked: page.revoked, consumed: page.consumed };
     },
     async getSharedKeyActivity(
       access: AccessDecision | undefined,
@@ -668,8 +719,9 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
       if (!parent || parent.revokedAt !== undefined ||
           parent.keyMode !== "share" || parent.parentKeyId !== undefined)
         throw new ConsoleDomainError("key_not_found", 404, "Share template not found");
-      const children = await config.store.listChildren(authorized.tenantId, parentKeyId);
-      if (!children.some((child) => child.id === childKeyId))
+      // Membership is one indexed row read, not a scan of the whole family.
+      const child = await config.store.get(authorized.tenantId, childKeyId);
+      if (!child || child.parentKeyId !== parentKeyId)
         throw new ConsoleDomainError("key_not_found", 404, "Shared API key not found");
       return activity.getSharedKeyDetail(authorized.tenantId, childKeyId);
     },
@@ -798,7 +850,11 @@ export function createApiKeyRoutes(config: ApiKeyConfig): Elysia {
     })
     .get("/:keyId/shared-keys", async ({ request, params, set }) => {
       try {
-        return await factory.listSharedKeys(config.accessResolver(request), params.keyId);
+        return await factory.listSharedKeys(
+          config.accessResolver(request),
+          params.keyId,
+          new URL(request.url).searchParams,
+        );
       } catch (error) {
         return errorResponse(error, set, "API-key operation failed");
       }

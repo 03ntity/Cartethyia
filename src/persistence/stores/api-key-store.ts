@@ -1,12 +1,38 @@
 // Persisted API-key store: the console API-key domain and gateway authentication both consume this boundary.
 
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { nextSortIndex, reorderSortIndex, type SortOrderDb } from "../sort-order";
 import { getDbHandle } from "../boot";
 import type { CartethyiaDatabase } from "../db-handle";
 import { lockRows } from "../dialect";
 import { apiKeys, shareLinks, sharePopups, type ApiKeyMode, type ApiKeyModelAccessMode } from "../schema";
 import type { AccessScope } from "../../security/access-control";
+
+/** Sortable columns for the paged share-child listing (api_keys columns only). */
+export type SharedChildSortColumn =
+  | "createdAt"
+  | "label"
+  | "keyPrefix"
+  | "issuedClientIp"
+  | "revokedAt"
+  | "enabled";
+
+export interface SharedChildrenPageOptions {
+  readonly limit: number;
+  readonly offset: number;
+  readonly sortBy: SharedChildSortColumn;
+  readonly order: "asc" | "desc";
+  readonly status: "all" | "active" | "revoked";
+}
+
+export interface SharedChildrenPage {
+  readonly rows: readonly ApiKeyRecord[];
+  readonly total: number;
+  readonly active: number;
+  readonly revoked: number;
+  /** Family-wide `lifetime_tokens_consumed` sum, independent of the page. */
+  readonly consumed: number;
+}
 
 /** Persisted API key. Only its one-way hash authenticates; plaintext is never stored. */
 export interface ApiKeyRecord {
@@ -49,6 +75,23 @@ export interface ApiKeyRecord {
   readonly revokedAt?: Date;
   readonly tokensConsumed: number;
 }
+
+type SharedChildSortColumnRef =
+  | typeof apiKeys.createdAt
+  | typeof apiKeys.label
+  | typeof apiKeys.keyPrefix
+  | typeof apiKeys.issuedClientIp
+  | typeof apiKeys.revokedAt
+  | typeof apiKeys.enabled;
+
+const SHARED_CHILD_SORT_COLUMNS: Readonly<Record<SharedChildSortColumn, SharedChildSortColumnRef>> = {
+  createdAt: apiKeys.createdAt,
+  label: apiKeys.label,
+  keyPrefix: apiKeys.keyPrefix,
+  issuedClientIp: apiKeys.issuedClientIp,
+  revokedAt: apiKeys.revokedAt,
+  enabled: apiKeys.enabled,
+};
 
 /**
  * Partial key update. Nullable policy fields clear their values; `undefined`
@@ -182,6 +225,11 @@ export interface ApiKeyStore {
   list(tenantId: string): Promise<readonly ApiKeyRecord[]>;
   get(tenantId: string, keyId: string): Promise<ApiKeyRecord | undefined>;
   listChildren(tenantId: string, parentKeyId: string): Promise<readonly ApiKeyRecord[]>;
+  listChildrenPage(
+    tenantId: string,
+    parentKeyId: string,
+    options: SharedChildrenPageOptions,
+  ): Promise<SharedChildrenPage>;
   create(record: ApiKeyRecord): Promise<void>;
   /** Rewrites list order for one tenant; `keyIds` is the full desired order. */
   reorder(tenantId: string, keyIds: readonly string[]): Promise<void>;
@@ -314,6 +362,50 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
       )
       .orderBy(apiKeys.createdAt, apiKeys.id);
     return this.withPopups(this.db, rows);
+  }
+
+  async listChildrenPage(
+    tenantId: string,
+    parentKeyId: string,
+    options: SharedChildrenPageOptions,
+  ): Promise<SharedChildrenPage> {
+    const column = SHARED_CHILD_SORT_COLUMNS[options.sortBy];
+    const direction = options.order === "desc" ? desc(column) : asc(column);
+    const statusFilter =
+      options.status === "active"
+        ? isNull(apiKeys.revokedAt)
+        : options.status === "revoked"
+          ? isNotNull(apiKeys.revokedAt)
+          : undefined;
+    const where = and(
+      eq(apiKeys.tenantId, tenantId),
+      eq(apiKeys.parentKeyId, parentKeyId),
+      statusFilter,
+    );
+    // The page query and the count query run together; the counts feed the
+    // modal's header ("active users") without a second round trip per page.
+    const [rows, counts] = await Promise.all([
+      this.db.select().from(apiKeys).where(where).orderBy(direction, apiKeys.createdAt, apiKeys.id)
+        .limit(options.limit)
+        .offset(options.offset),
+      this.db
+        .select({
+          total: count(),
+          active: sql<number>`count(*) filter (where ${apiKeys.revokedAt} is null)`,
+          revoked: sql<number>`count(*) filter (where ${apiKeys.revokedAt} is not null)`,
+          consumed: sql<number>`coalesce(sum(${apiKeys.lifetimeTokensConsumed}), 0)`,
+        })
+        .from(apiKeys)
+        .where(where),
+    ]);
+    const summary = counts[0]!;
+    return {
+      rows: await this.withPopups(this.db, rows),
+      total: Number(summary.total),
+      active: Number(summary.active),
+      revoked: Number(summary.revoked),
+      consumed: Number(summary.consumed),
+    };
   }
   async create(record: ApiKeyRecord): Promise<void> {
     // Append to the end of the tenant's list rather than relying on creation

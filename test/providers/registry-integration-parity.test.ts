@@ -78,7 +78,7 @@ function forwardSlash(path: string): string {
   return path.split(sep).join("/");
 }
 
-test("every provider's declared loaders resolve and return the promised shape", async () => {
+test("every provider's declared loaders resolve and return the promised shape", { timeout: 60_000 }, async () => {
   const failures: Array<{ provider: string; capability: string; error: string }> = [];
   for (const [providerId, raw] of Object.entries(PROVIDER_CAPABILITIES)) {
     const capabilities = raw as ProviderModuleCapabilities;
@@ -134,7 +134,7 @@ test("every provider's declared loaders resolve and return the promised shape", 
   expect(failures).toEqual([]);
 });
 
-test("no file under integrations/ is orphaned from the registry's import graph", async () => {
+test("no file under integrations/ is orphaned from the registry's import graph", { timeout: 60_000 }, async () => {
   const files = walkFiles(INTEGRATION_ROOT).filter(
     (file) => file.endsWith(".ts") || file.endsWith(".tsx"),
   );

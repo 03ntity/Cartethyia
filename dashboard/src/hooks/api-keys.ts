@@ -4,8 +4,9 @@ import type {
   CreateApiKeyRequest,
   CreateApiKeyResponse,
   ShareKeyResponse,
-  SharedKeySummary,
   SharedKeyActivityDetail,
+  SharedKeyPage,
+  SharedChildSortColumn,
   UpdateApiKeyResponse,
 } from "../data/contracts";
 import { queryKeys } from "../data/query-keys";
@@ -160,15 +161,31 @@ export function useApiKeys() {
   });
 }
 
+export interface SharedKeysPageParams {
+  readonly limit: number;
+  readonly offset: number;
+  readonly sortBy: SharedChildSortColumn;
+  readonly order: "asc" | "desc";
+  readonly status: "all" | "active" | "revoked";
+}
+
 /** Lists child credentials and safe usage aggregates for one share template. */
-export function useSharedKeys(parentKeyId: string | null) {
+export function useSharedKeys(parentKeyId: string | null, params: SharedKeysPageParams) {
   return useQuery({
-    queryKey: queryKeys.apiKeys.sharedKeys(parentKeyId ?? ""),
-    queryFn: (context) =>
-      consoleRequest<SharedKeySummary[]>(
-        `/api-keys/${encodeURIComponent(parentKeyId ?? "")}/shared-keys`,
+    queryKey: [...queryKeys.apiKeys.sharedKeys(parentKeyId ?? ""), params],
+    queryFn: (context) => {
+      const search = new URLSearchParams({
+        limit: String(params.limit),
+        offset: String(params.offset),
+        sort: params.sortBy,
+        order: params.order,
+        status: params.status,
+      });
+      return consoleRequest<SharedKeyPage>(
+        `/api-keys/${encodeURIComponent(parentKeyId ?? "")}/shared-keys?${search}`,
         { signal: querySignal(context) },
-      ),
+      );
+    },
     enabled: parentKeyId !== null,
     refetchInterval: POLL.live,
     refetchIntervalInBackground: false,

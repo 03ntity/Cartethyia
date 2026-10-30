@@ -1,4 +1,4 @@
-import { Ban, ChevronDown, ChevronRight, Eye, EyeOff, Link2, RefreshCw, RotateCw } from "lucide-react";
+import { ArrowDown, ArrowUp, Ban, ChevronDown, ChevronRight, ChevronsUpDown, Eye, EyeOff, Link2, RefreshCw, RotateCw } from "lucide-react";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { Button } from "./ui/button";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,6 +22,7 @@ import {
   useSharedKeyActivity,
   useSharedKeys,
 } from "../hooks/api-keys";
+import type { SharedChildSortColumn } from "../data/contracts";
 
 const count = (n: number | null | undefined) => (n ?? 0).toLocaleString();
 const stamp = (s: string | null | undefined) => (s ? new Date(s).toLocaleString() : "—");
@@ -181,18 +182,8 @@ function BudgetBar({
  */
 const BULK_REVOKE_CONCURRENCY = 6;
 
-/** Active recipient count: child keys that have not been revoked. */
-function activeChildCount(children: readonly SharedKeySummary[]): number {
-  return children.filter((child) => child.revokedAt === null).length;
-}
-
-/**
- * Total tokens spent across all recipients (active or revoked): the parent's
- * global consumption, matching the quota the gateway enforces per request.
- */
-function childrenTotal(children: readonly SharedKeySummary[]): number {
-  return children.reduce((sum, child) => sum + child.allTime.totalTokens, 0);
-}
+/** Rows per page in the recipients table; the endpoint caps at 500. */
+const PAGE_SIZE = 25;
 
 /**
  * Parent-level quota bar: consumed vs budget, with the remaining pill.
@@ -362,8 +353,13 @@ export function ShareManagementContent({
   const [expanded, setExpanded] = useState<string | null>(null);
   // Revoked recipients stay listed for their usage history, so an unfiltered
   // list grows without bound; defaulting to active is the view an operator
-  // acts on.
+  // acts on. The filter is applied server-side — the family can hold hundreds
+  // of thousands of children, so the client must never pull them all to
+  // filter locally.
   const [statusFilter, setStatusFilter] = useState<"active" | "revoked">("active");
+  const [page, setPage] = useState(0);
+  const [sortBy, setSortBy] = useState<SharedChildSortColumn>("createdAt");
+  const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [confirmingBulk, setConfirmingBulk] = useState<"all" | "unused" | null>(null);
   const queryClient = useQueryClient();
   const share = useShareApiKey();
@@ -374,12 +370,19 @@ export function ShareManagementContent({
   // A personal key has no recipients: `/shared-keys` is a share-template route
   // and answers 404 for it, so the query stays disabled instead of rendering an
   // error box over the key's own usage.
-  const summary = useSharedKeys(isPersonal ? null : parent.id);
-  const children = summary.data ?? [];
-  const visibleChildren =
-    statusFilter === "active"
-      ? children.filter((child) => child.revokedAt === null)
-      : children.filter((child) => child.revokedAt !== null);
+  const summary = useSharedKeys(isPersonal ? null : parent.id, {
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
+    sortBy,
+    order,
+    status: statusFilter,
+  });
+  const pageData = summary.data;
+  const children = pageData?.rows ?? [];
+  const total = pageData?.total ?? 0;
+  const activeTotal = pageData?.active ?? 0;
+  // Rows arrive pre-filtered by `status`; this is the current page's set.
+  const visibleChildren = children;
   /**
    * Recipients that never spent a token. Revoking these is safe in a way
    * "revoke all" is not: nobody has used them, so no client holding the key
@@ -389,6 +392,44 @@ export function ShareManagementContent({
   const unusedChildren = children.filter(
     (child) => child.revokedAt === null && child.allTime.totalTokens === 0,
   );
+
+  const toggleSort = (column: SharedChildSortColumn) => {
+    if (sortBy === column) {
+      setOrder((current) => (current === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(column);
+      setOrder("asc");
+    }
+  };
+
+  const SortHeader = ({ column, children: label }: { column: SharedChildSortColumn; children: ReactNode }) => {
+    const active = sortBy === column;
+    return (
+      <th scope="col">
+        <button
+          type="button"
+          onClick={() => toggleSort(column)}
+          className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-inherit text-inherit hover:text-text-primary"
+          aria-label={`Sort by ${String(column)}`}
+        >
+          {label}
+          {active ? (
+            order === "asc" ? <ArrowUp size={12} aria-hidden="true" /> : <ArrowDown size={12} aria-hidden="true" />
+          ) : (
+            <ChevronsUpDown size={12} aria-hidden="true" className="text-text-tertiary" />
+          )}
+        </button>
+      </th>
+    );
+  };
+
+  // A page change can leave `page` past the end when a filter or revoke
+  // shrinks the total; clamp back onto the last full page.
+  useEffect(() => {
+    if (page > 0 && total > 0 && page * PAGE_SIZE >= total) {
+      setPage(Math.max(0, Math.floor((total - 1) / PAGE_SIZE)));
+    }
+  }, [total, page]);
 
   useEffect(() => {
     setExpanded(null);
@@ -539,7 +580,7 @@ export function ShareManagementContent({
               <strong className="text-caption">Total quota</strong>
             </div>
             <ParentQuotaBar
-              consumed={childrenTotal(children)}
+              consumed={pageData?.consumed ?? 0}
               budget={parent.lifetimeTokenBudget}
             />
           </section>
@@ -550,7 +591,7 @@ export function ShareManagementContent({
                 for its usage history, but it can no longer be used, so folding
                 it into "active" would overstate who can still call the gateway. */}
             <span className="mr-2 ml-auto text-caption text-text-tertiary tabular-nums">
-              Active users: {activeChildCount(children)}
+              Active users: {activeTotal.toLocaleString()}
             </span>
             <div className="inline-flex items-center gap-1 rounded-chip border border-inner-border p-0.5" role="group" aria-label="Filter recipients by status">
               {(["active", "revoked"] as const).map((value) => (
@@ -558,7 +599,10 @@ export function ShareManagementContent({
                   key={value}
                   type="button"
                   aria-pressed={statusFilter === value}
-                  onClick={() => setStatusFilter(value)}
+                  onClick={() => {
+                    setPage(0);
+                    setStatusFilter(value);
+                  }}
                   className={`rounded-chip border-0 px-3 py-1 text-badge font-semibold capitalize cursor-pointer ${
                     statusFilter === value
                       ? "bg-surface-1 text-text-primary"
@@ -600,8 +644,8 @@ export function ShareManagementContent({
               disabled={unusedChildren.length === 0 || revoke.isPending}
               title={
                 unusedChildren.length === 0
-                  ? "No active recipient has spent zero tokens"
-                  : `Revoke ${unusedChildren.length} recipient${unusedChildren.length === 1 ? "" : "s"} that never spent a token`
+                  ? "No active recipient on this page has spent zero tokens"
+                  : `Revoke ${unusedChildren.length} recipient${unusedChildren.length === 1 ? "" : "s"} on this page that never spent a token`
               }
               onClick={() => setConfirmingBulk("unused")}
               icon={<Ban size={13} />}
@@ -614,8 +658,8 @@ export function ShareManagementContent({
               disabled={visibleChildren.length === 0 || revoke.isPending}
               title={
                 visibleChildren.length === 0
-                  ? "Nothing to revoke in this view"
-                  : `Revoke all ${visibleChildren.length} listed recipient${visibleChildren.length === 1 ? "" : "s"}`
+                  ? "Nothing to revoke on this page"
+                  : `Revoke all ${visibleChildren.length} recipient${visibleChildren.length === 1 ? "" : "s"} on this page`
               }
               onClick={() => setConfirmingBulk("all")}
               icon={<Ban size={13} />}
@@ -661,11 +705,12 @@ export function ShareManagementContent({
                 <thead>
                   <tr>
                     <th scope="col" className="w-12" aria-label="Expand" />
-                    <th scope="col">Key</th>
-                    <th scope="col">Status</th>
+                    <SortHeader column="label">Key</SortHeader>
+                    <SortHeader column="revokedAt">Status</SortHeader>
                     <th scope="col">Today</th>
                     <th scope="col">Lifetime</th>
                     <th scope="col">Last activity</th>
+                    <SortHeader column="createdAt">Created</SortHeader>
                     <th scope="col" className="text-right whitespace-nowrap">
                       Actions
                     </th>
@@ -698,6 +743,7 @@ export function ShareManagementContent({
                           <td>{compactTokens(child.today.totalTokens)}</td>
                           <td>{compactTokens(child.allTime.totalTokens)}</td>
                           <td>{stamp(child.lastUsedAt)}</td>
+                          <td>{stamp(child.createdAt)}</td>
                           <td className="text-right whitespace-nowrap">
                             <Button
                               variant="danger"
@@ -719,7 +765,7 @@ export function ShareManagementContent({
                         </tr>
                         {open ? (
                           <tr>
-                            <td colSpan={7} className="p-0">
+                            <td colSpan={8} className="p-0">
                               <ChildDetail parentId={parent.id} childId={child.id} />
                             </td>
                           </tr>
@@ -731,6 +777,33 @@ export function ShareManagementContent({
               </table>
             </div>
           )}
+          {summary.isError || summary.isPending && !summary.data ? null : total > 0 ? (
+            <div className="flex items-center justify-between gap-4 border-t border-inner-border pt-3">
+              <span className="text-caption text-text-tertiary tabular-nums">
+                {total === 0
+                  ? "0 recipients"
+                  : `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, total)} of ${total.toLocaleString()}`}
+              </span>
+              <div className="inline-flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={page === 0 || summary.isFetching}
+                  onClick={() => setPage((current) => Math.max(0, current - 1))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={(page + 1) * PAGE_SIZE >= total || summary.isFetching}
+                  onClick={() => setPage((current) => current + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          ) : null}
           </section>
         </>
       )}

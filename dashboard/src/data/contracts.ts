@@ -133,12 +133,26 @@ export type {
   ShareKeyResponse,
 } from "../../../src/console/api-keys/contracts";
 
+import type { SharedKeySummary } from "../../../src/console/share/share-usage";
+
 export type {
   SharedKeySummary,
   SharedKeyActivityDetail,
   SharedKeyModelUsage,
   SharedKeyRequestEvent,
 } from "../../../src/console/share/share-usage";
+
+/** Paged response of the share-child list endpoint. */
+export interface SharedKeyPage {
+  readonly rows: readonly SharedKeySummary[];
+  readonly total: number;
+  readonly active: number;
+  readonly revoked: number;
+  /** Family-wide lifetime tokens consumed, independent of the page. */
+  readonly consumed: number;
+}
+
+export type { SharedChildSortColumn } from "../../../src/persistence/stores/api-key-store";
 
 // Backup export returns the payload itself (it is the file the operator
 // downloads); import returns the per-table counts plus the router-import
