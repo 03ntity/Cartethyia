@@ -157,7 +157,7 @@ describe("client version monitor snapshot", () => {
     expect(VERSION_SOURCES.workbuddyCnClient.sources[0]?.url).toBe(
       "https://www.workbuddy.cn/v2/update?platform=workbuddy-win32-x64-user",
     );
-    expect(VERSION_SOURCES.workbuddyCnClient.fallback).toBe("5.8.3.41334564");
+    expect(VERSION_SOURCES.workbuddyCnClient.fallback).toBe("5.9.3.42398134");
     await expect(
       VERSION_SOURCES.workbuddyCnClient.sources[0]?.extract?.(
         new Response(JSON.stringify({ productVersion: "5.7.7.40774747" })),
@@ -172,13 +172,13 @@ describe("client version monitor snapshot", () => {
   });
 
   test("uses current client feeds for Claude Code and Kiro", async () => {
-    expect(VERSION_SOURCES.claudeCli.fallback).toBe("2.1.302");
+    expect(VERSION_SOURCES.claudeCli.fallback).toBe("2.1.314");
     expect(VERSION_SOURCES.claudeCli.sources[0]?.url).toBe(
       "https://registry.npmjs.org/@anthropic-ai/claude-code/latest",
     );
     expect(VERSION_SOURCES.claudeSdk.fallback).toBe("0.128.0");
     expect(VERSION_SOURCES.claudeSdk.sources).toEqual([]);
-    expect(VERSION_SOURCES.kiro.fallback).toBe("1.3.11");
+    expect(VERSION_SOURCES.kiro.fallback).toBe("1.4.62");
     expect(VERSION_SOURCES.kiro.sources[0]?.url).toBe(
       "https://formulae.brew.sh/api/cask/kiro.json",
     );

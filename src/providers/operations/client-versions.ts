@@ -46,6 +46,17 @@ async function traeVersion(response: Response): Promise<string | null> {
       /"insert":"((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s*\d{4}\s*\([^)]*\))\\n"/g;
     for (const match of text.matchAll(heading)) {
       const window = text.slice(match.index ?? 0, (match.index ?? 0) + 900);
+      // A release line may name a *range* ("TRAE v3.6.1 ~ 3.6.4 are released"),
+      // and the newest entry is the newest build in it. Taking the first number
+      // reported 3.6.1 while 3.6.4 was already shipping — and on an entry whose
+      // heading carried no version at all the old pattern matched nothing, so
+      // discovery fell through to the next (older) entry and the pin drifted
+      // backwards on every refresh.
+      const range = window.match(/(\d+\.\d+\.\d+)\s*[~–-]\s*(\d+\.\d+\.\d+)/);
+      if (range) {
+        const high = range[2] ?? range[1];
+        if (high && isSemverish(high)) return high.trim();
+      }
       const found = window.match(/TraeCode\s+v?(\d+\.\d+\.\d+)|v?(\d+\.\d+\.\d+)\s+is\s+released/i);
       const version = found?.[1] ?? found?.[2];
       if (version && isSemverish(version)) return version.trim();
@@ -221,7 +232,7 @@ const KIRO_NODE_VERSION = "24.18.0";
 export const VERSION_SOURCES = {
   antigravity: {
     key: "antigravity",
-    fallback: "2.24.0",
+    fallback: "2.28.2",
     sources: [
       {
         url: "https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml",
@@ -231,7 +242,7 @@ export const VERSION_SOURCES = {
   },
   qoder: {
     key: "qoder",
-    fallback: "1.1.74",
+    fallback: "1.1.81",
     sources: [
       {
         url: "https://registry.npmjs.org/@qoder-ai/qodercli/latest",
@@ -243,18 +254,21 @@ export const VERSION_SOURCES = {
     key: "opencode",
     // The v1 package (`opencode-ai`) stopped at 1.18. The v2 line publishes
     // under `@opencode/cli`, and this feed is what its own installer reads.
-    fallback: "2.0.32",
+    fallback: "2.2.2",
     minVersion: "2.0.0",
     sources: [{ url: "https://opencode.ai/update/api/latest/cli/npm" }],
   },
   commandcode: {
     key: "commandcode",
-    fallback: "1.84.0",
+    // npm `command-code` latest as of 2026-10-30. The CLI sends this as
+    // `x-command-code-version`, so a stale fallback presents a client build
+    // the upstream no longer ships — raise it whenever the package moves.
+    fallback: "1.88.2",
     sources: [{ url: "https://registry.npmjs.org/command-code/latest" }],
   },
   grok: {
     key: "grok",
-    fallback: "1.0.62",
+    fallback: "1.0.70",
     sources: [
       { url: "https://storage.googleapis.com/grok-build-public-artifacts/cli/stable" },
       { url: "https://registry.npmjs.org/@xai-official/grok/latest" },
@@ -262,7 +276,7 @@ export const VERSION_SOURCES = {
   },
   clineClient: {
     key: "cline-client",
-    fallback: "4.1.25",
+    fallback: "4.1.26",
     minVersion: "4.1.23",
     sources: [
       {
@@ -273,22 +287,22 @@ export const VERSION_SOURCES = {
   },
   clineSdk: {
     key: "cline-sdk",
-    fallback: "0.0.95",
+    fallback: "0.2.0",
     sources: [{ url: "https://registry.npmjs.org/@cline/sdk/latest", extract: clineSdkVersion }],
   },
   clineCli: {
     key: "cline-cli",
-    fallback: "3.0.73",
+    fallback: "3.0.74",
     sources: [{ url: "https://registry.npmjs.org/cline/latest", extract: clineSdkVersion }],
   },
   codex: {
     key: "codex",
-    fallback: "0.163.0",
+    fallback: "0.166.0",
     sources: [{ url: "https://registry.npmjs.org/@openai/codex/latest" }],
   },
   workbuddyClient: {
     key: "workbuddy-client",
-    fallback: "5.8.4.41366630",
+    fallback: "5.9.4.42593613",
     sources: [
       {
         url: "https://www.workbuddy.ai/v2/update?platform=workbuddy-win32-x64-user",
@@ -302,7 +316,7 @@ export const VERSION_SOURCES = {
   },
   workbuddyCnClient: {
     key: "workbuddy-cn-client",
-    fallback: "5.8.3.41334564",
+    fallback: "5.9.3.42398134",
     sources: [
       {
         url: "https://www.workbuddy.cn/v2/update?platform=workbuddy-win32-x64-user",
@@ -316,7 +330,7 @@ export const VERSION_SOURCES = {
   },
   workbuddyCli: {
     key: "workbuddy",
-    fallback: "2.169.0",
+    fallback: "2.178.1",
     sources: [
       { url: "https://registry.npmjs.org/@tencent-ai/codebuddy-code/latest" },
       { url: "https://registry.npmmirror.com/@tencent-ai/codebuddy-code/latest" },
@@ -329,7 +343,7 @@ export const VERSION_SOURCES = {
   },
   kiro: {
     key: "kiro",
-    fallback: "1.3.11",
+    fallback: "1.4.62",
     sources: [
       {
         // Kiro's downloads page exposes no stable version string. Homebrew
@@ -343,7 +357,7 @@ export const VERSION_SOURCES = {
   },
   codebuddy: {
     key: "codebuddy",
-    fallback: "2.169.0",
+    fallback: "2.178.1",
     sources: [
       { url: "https://registry.npmjs.org/@tencent-ai/codebuddy-code/latest" },
       { url: "https://registry.npmmirror.com/@tencent-ai/codebuddy-code/latest" },
@@ -366,7 +380,7 @@ export const VERSION_SOURCES = {
     // Current `@anthropic-ai/claude-code` release, so the billing
     // `cc_version=` suffix and the `claude-cli/` User-Agent stay on what
     // upstream ships.
-    fallback: "2.1.302",
+    fallback: "2.1.314",
     sources: [{ url: "https://registry.npmjs.org/@anthropic-ai/claude-code/latest" }],
   },
   claudeSdk: {
@@ -393,20 +407,21 @@ export const VERSION_SOURCES = {
   },
   kilo: {
     key: "kilo-code",
-    fallback: "7.8.14",
+    fallback: "7.8.25",
     sources: [{ url: "https://open-vsx.org/api/kilocode/kilo-code" }],
   },
   muse: {
     key: "muse-code",
-    fallback: "1.4.10-R6427.1",
+    fallback: "1.4.14-R7309.1",
     sources: [{ url: "https://api.meta.ai/muse-code/channels/muse-stable" }],
   },
   trae: {
     key: "trae",
-    // Fallback = the donor's last observed client version. Discovery replaces
-    // it within one monitor tick; it is only what a cold process sends before
+    // Fallback = the newest release the changelog names, which is the *high*
+    // end of its newest line ("TRAE v3.6.1 ~ 3.6.4"). Discovery replaces it
+    // within one monitor tick; it is only what a cold process sends before
     // the first successful fetch.
-    fallback: "3.6.2",
+    fallback: "3.6.4",
     sources: [
       {
         url: "https://docs.trae.ai/ide/changelog?_lang=en",
@@ -419,7 +434,7 @@ export const VERSION_SOURCES = {
     // Fallback = the last observed wire version. Discovery replaces it within
     // one monitor tick; it is only what a cold process sends before the first
     // successful fetch.
-    fallback: "cli-2026.10.19-6bbf2c4",
+    fallback: "cli-3.27.22-b1aa50c",
     sources: [
       {
         url: "https://cursor.com/api/download?platform=win32-x64-user&releaseTrack=stable",
@@ -433,7 +448,7 @@ export const VERSION_SOURCES = {
     // comment this replaced claimed no semver existed and pinned a date tag
     // (`v2026.9.24`) as the version — a tag, not a release, and not the
     // identity the client sends.
-    fallback: "0.22.2",
+    fallback: "0.22.5",
     sources: [
       {
         url: "https://api.github.com/repos/NousResearch/hermes-agent/releases/latest",
