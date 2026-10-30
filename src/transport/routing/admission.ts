@@ -17,15 +17,25 @@ import type {
 /**
  * The admission bucket one candidate draws from.
  *
+ * Bucket identity is `provider:model[:account][:ownerTenant]`:
+ * - A candidate with no account (credential-less provider) buckets per
+ *   provider:model.
+ * - A **shared** account (`owner_tenant_id` null) is one bucket across all
+ *   tenants — the account is pool-wide, so its concurrency ceiling is global.
+ * - A **tenant-owned** account is scoped to its owner tenant, so two tenants
+ *   cannot drain each other's ceiling on an account only one of them owns.
+ *
  * Exported so the router can order candidates by the same counters admission
  * enforces against: a second copy of this format would drift and quietly
  * deprioritize the wrong accounts.
  */
 export function admissionKey(candidate: RouteCandidate): string {
   const base = `${candidate.provider_id}:${candidate.model_id}`;
-  return candidate.provider_account_id === undefined
-    ? base
-    : `${base}:${candidate.provider_account_id}`;
+  if (candidate.provider_account_id === undefined) return base;
+  const account = `${base}:${candidate.provider_account_id}`;
+  return candidate.owner_tenant_id === undefined || candidate.owner_tenant_id === null
+    ? account
+    : `${account}:${candidate.owner_tenant_id}`;
 }
 
 /**

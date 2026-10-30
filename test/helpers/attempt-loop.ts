@@ -81,6 +81,7 @@ export function attemptLeaseSource(
       requested_model: requestedModel,
       resolved_model: requestedModel,
       provider_id: candidates[0]?.provider_id ?? "unknown",
+      decisions: new Map(),
     },
   };
 }

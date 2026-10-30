@@ -670,6 +670,8 @@ class RouteCatalogRepository {
                 ...(model.outputLimit == null ? {} : { output_limit: model.outputLimit }),
                 capability_profile: capabilityProfile,
                 tenant_id: tId,
+                // Public credential-less candidates have no account to own them.
+                owner_tenant_id: null,
                 requires_account: false as const,
                 network_pool_ids: tenantPools.ids,
                 network_pool_required: true,
@@ -696,6 +698,8 @@ class RouteCatalogRepository {
           ...(model.outputLimit == null ? {} : { output_limit: model.outputLimit }),
           capability_profile: capabilityProfile,
           tenant_id: providerTenantId,
+          // Public credential-less candidates have no account to own them.
+          owner_tenant_id: null,
           ...(providerRequiresAccount
             ? { health_status: "disabled" as const }
             : { requires_account: false as const }),
@@ -738,6 +742,9 @@ class RouteCatalogRepository {
           ...(routeUserAgent === undefined ? {} : { user_agent: routeUserAgent }),
           tenant_id: rowTenantId,
           provider_account_id: account.id,
+          // The account's owning tenant (null = shared pool-wide) — the bucket
+          // key for admission, distinct from the requesting tenant.
+          owner_tenant_id: account.tenantId ?? null,
           // The plan gate is per (account, model): the model may be refused on
           // a free plan and the account may be on one. Both ride here because
           // `plan()` sees the candidate and nothing else.

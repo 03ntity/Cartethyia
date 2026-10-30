@@ -2,6 +2,7 @@ import { GatewayError } from "../../protocol/gateway-error";
 import type { CanonicalRequest, ServiceKind } from "../../protocol/canonical-model";
 import { toolResultParts } from "../../protocol/canonical-model";
 import type { ApiKeyAdmissionService } from "../../security/admission/service";
+import type { CallerIdentity } from "../../security/access-control";
 import type { RouteCandidate as RouteCandidate, InMemoryRouteSnapshotService, RoutePlan } from "../routing/route-model";
 import type { RouteContinuationAffinity } from "../routing/route-model";
 import { resolveAliasTarget, type RoutingEngine } from "../routing/router";
@@ -149,6 +150,8 @@ export interface PreparedProxyRequest {
    * second account and pool slot.
    */
   readonly continuationAffinity?: RouteContinuationAffinity;
+  /** Single "who is speaking" identity, derived at auth. */
+  readonly caller: CallerIdentity;
   readonly estimatedInputTokens: number;
   readonly estimatedOutputTokens: number;
   readonly deadlineMs: number;
@@ -419,6 +422,7 @@ export class ProxyRequestPreparer {
       degradedCapabilities: degraded,
       plan,
       ...(continuationAffinity === undefined ? {} : { continuationAffinity }),
+      caller: authorization.caller,
       estimatedInputTokens,
       estimatedOutputTokens,
       deadlineMs: input.deadlineMs,

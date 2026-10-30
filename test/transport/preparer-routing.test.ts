@@ -29,6 +29,11 @@ function authorization(
     tenantId: "tenant-1",
     scopes: ["routing:invoke"],
     snapshot,
+    caller: {
+      apiKeyId: "key-1",
+      admissionIdentity: "key-1",
+      tenantId: "tenant-1",
+    },
   };
 }
 

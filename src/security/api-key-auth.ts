@@ -6,7 +6,7 @@ import { DrizzleApiKeyStore } from "../persistence/stores/api-key-store";
 import { GatewayError } from "../protocol/gateway-error";
 import { hashSecret } from "./crypto";
 import { AUTH_CACHE_TTL_MS, createApiKeyAuthorizationCache } from "./api-key-auth-cache";
-import type { AccessScope } from "./access-control";
+import type { AccessScope, CallerIdentity } from "./access-control";
 import type { ApiKeyModelAccessMode } from "../persistence/schema";
 
 // ── Authorization cache ──────────────────────────────────────────────────────
@@ -222,6 +222,12 @@ export interface ResolvedApiKey {
   readonly modelPrefix?: string;
   /** Share-template id whose remote CLI mappings are inherited by this child. */
   readonly cliMappingOwnerId?: string;
+  /**
+   * Single "who is speaking" identity derived at auth. Carried through
+   * planning, admission, pool selection, and telemetry so every gate reasons
+   * about the same caller.
+   */
+  readonly caller: CallerIdentity;
 }
 
 /**
@@ -398,6 +404,13 @@ export async function resolveApiKeyAuthorization(
     snapshot,
     ...(policy.modelPrefix ? { modelPrefix: policy.modelPrefix } : {}),
     ...(parent?.keyMode === "share" ? { cliMappingOwnerId: parent.id } : {}),
+    caller: {
+      apiKeyId: row.id,
+      // The admission identity is the family owner for a share child — the
+      // same id every counter/lease in the system keys against.
+      admissionIdentity: snapshot.admission_identity ?? row.id,
+      tenantId: row.tenantId,
+    },
   };
   authorizationCache.rememberPositive(hash, value.id, value, Date.now());
   // Shared copy for peer processes, keyed by the token hash so a lookup can

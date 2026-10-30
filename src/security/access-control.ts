@@ -1,6 +1,25 @@
 // Shared authorization primitives: closed scope model and immutable access decisions.
 
 /**
+ * The single identity of "who is speaking" — resolved once at auth and carried
+ * through planning, admission, pool selection, and telemetry so every layer
+ * reasons about the same caller.
+ *
+ * - `apiKeyId` — the credential that authenticated.
+ * - `admissionIdentity` — the quota/concurrency owner (the share parent for a
+ *   child key; otherwise the key itself).
+ * - `tenantId` — the tenant the request runs as.
+ *
+ * Provider/account/model are added by the candidate, not here: the caller
+ * identity is stable regardless of what serves the request.
+ */
+export interface CallerIdentity {
+  readonly apiKeyId: string;
+  readonly admissionIdentity: string;
+  readonly tenantId: string;
+}
+
+/**
  * Closed set of authorization scopes.
  * - `routing:invoke`: May call only /v1/* gateway routes within holder's tenant.
  * - `routing:cli_mapping`: May use persisted CLI source→target model mappings.

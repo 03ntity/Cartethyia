@@ -1,6 +1,9 @@
 // Routing contracts and snapshots.
 import { GatewayError } from "../../protocol/gateway-error";
 import { type ServiceKind, type WireFamily } from "../../protocol/canonical-model";
+import type { CallerIdentity } from "../../security/access-control";
+
+export type { CallerIdentity };
 
 
 export type RoutingRevision = number;
@@ -57,6 +60,14 @@ export interface RouteCandidate {
   readonly network_pool_provider_limit?: number;
   /** `null`/`undefined` = globally routable; a tenant id = routable only for that tenant's requests (BYOK). */
   readonly tenant_id?: string | null;
+  /**
+   * The tenant that owns this candidate's account (`provider_accounts.tenant_id`),
+   * or null for a shared pool-wide account. Distinct from `tenant_id` (the
+   * requesting tenant). Used to scope the admission bucket: a shared account
+   * is one bucket across tenants; a tenant-owned account is scoped to its
+   * owner so two tenants cannot drain each other's ceiling.
+   */
+  readonly owner_tenant_id?: string | null;
   /** `false` only for a genuinely credential-less provider (e.g. OpenCode
    * Free) dispatched with zero `provider_accounts` rows — the handler skips
    * `resolveCredentialForAccount` and dispatches with a `"none"` credential.
@@ -80,6 +91,11 @@ export interface RouteCandidate {
    * "free": guessing free here would defeat the gate it exists to serve.
    */
   readonly account_plan?: string | null;
+  /** Usage-floor ceiling from Routing Strategy; read live at plan time. */
+  readonly usage_floor?: number;
+  readonly usage_floor_unit?: "credit" | "percent";
+  /** Live quota windows (cache) the floor check evaluates. */
+  readonly quota_windows?: readonly unknown[];
 }
 
 /**
@@ -181,6 +197,33 @@ export interface RoutePlan {
   readonly requested_model: string;
   readonly resolved_model: string;
   readonly provider_id: string;
+  /**
+   * The system decision behind each candidate, keyed by the candidate's
+   * admission bucket. Written once at plan time; every later layer (dispatch,
+   * telemetry) reads this instead of re-deriving its own ordering.
+   */
+  readonly decisions: ReadonlyMap<string, RoutingDecision>;
+}
+
+/** How eligible a candidate is and why — written once, read by every layer. */
+export const ROUTING_RANK = {
+  FRESH: 0,
+  SLOW: 1,
+  COOLING: 2,
+  SATURATED: 3,
+} as const;
+export type RoutingRank = (typeof ROUTING_RANK)[keyof typeof ROUTING_RANK];
+
+export interface RoutingDecision {
+  readonly eligible: boolean;
+  readonly rank: RoutingRank;
+  readonly reason: string;
+  readonly health_status?: string;
+  readonly cooldown_until?: number;
+  readonly floor_blocked?: boolean;
+  readonly plan_gate_blocked?: boolean;
+  readonly capability_blocked?: boolean;
+  readonly saturated?: boolean;
 }
 
 import type { ComboStrategy, PoolRoutingStrategy, ProviderRoutingStrategy } from "../../persistence/schema";
