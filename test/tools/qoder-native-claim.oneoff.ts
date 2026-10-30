@@ -66,7 +66,7 @@ async function refresh(account: (typeof doc.accounts)[number], identity: ReturnT
         machine_id: account.authState?.machineId ?? identity.machineToken,
         machine_token: identity.machineToken,
       }),
-      proxy,
+      ...(proxy === undefined ? {} : { proxy }),
       signal: AbortSignal.timeout(20_000),
     });
     const j = (await res.json()) as Record<string, unknown>;
@@ -100,7 +100,7 @@ async function attempt(account: (typeof doc.accounts)[number]): Promise<void> {
 
   const g = await fetch(`${BASE}/sash/api/v1/me/campaigns`, {
     headers: headersFor(credential, identity),
-    proxy,
+    ...(proxy === undefined ? {} : { proxy }),
     signal: AbortSignal.timeout(20_000),
   });
   const raw = await g.text();
@@ -138,7 +138,7 @@ async function attempt(account: (typeof doc.accounts)[number]): Promise<void> {
     method: "POST",
     headers: { ...headersFor(credential, identity), "Content-Type": "application/json" },
     body: "{}",
-    proxy,
+    ...(proxy === undefined ? {} : { proxy }),
     signal: AbortSignal.timeout(20_000),
   });
   const claimRaw = await claimRes.text();

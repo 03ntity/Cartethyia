@@ -25,7 +25,7 @@ const previousDataDir = process.env.CARTETHYIA_DATA_DIR;
 process.env.CARTETHYIA_DATA_DIR = sandbox;
 
 const { createShareStatsPort, SHARE_STATS_CACHE_TTL_SECONDS } = await import("../../src/console/share/share-stats");
-const { telemetryEvents, tenants } = await import("../../src/persistence/schema");
+const { telemetryEvents, tenants, apiKeys } = await import("../../src/persistence/schema");
 const { createSqliteDatabase, applySqliteMigrations, buildSqliteHandle } = await import("../../src/persistence/db-sqlite");
 
 // The port reads telemetry_events (the SQL record), so this needs a migrated
@@ -40,6 +40,18 @@ async function createTenant(id: string): Promise<void> {
   await db
     .insert(tenants)
     .values({ id, name: `share-${id}`, slug: `share-${id}`, status: "active" } as never);
+}
+
+/**
+ * Creates the `api_keys` row behind a telemetry key id: the family rollup
+ * scopes by the template key through `api_keys`, so a fixture key must exist
+ * for its telemetry to be counted.
+ */
+async function createKey(tenantId: string, keyId: string): Promise<void> {
+  await db
+    .insert(apiKeys)
+    .values({ id: keyId, tenantId, keyMode: "personal", keyHash: `hash-${keyId}`, label: keyId.slice(0, 8), scopes: ["routing:invoke"] } as never)
+    .onConflictDoNothing();
 }
 
 interface Recorded {
@@ -78,6 +90,7 @@ async function writeEvent(
 ): Promise<void> {
   const requestId = crypto.randomUUID();
   await createTenant(tenantId).catch(() => undefined);
+  await createKey(tenantId, apiKeyId);
   await db.insert(telemetryEvents).values({
     id: requestId,
     requestId,
@@ -128,13 +141,13 @@ describe("createShareStatsPort — the Redis tier", () => {
     const { client, recorded } = fakeClient(stored);
     const port = createShareStatsPort({ db, redis: client as never });
 
-    const first = await port.getFamilyStats(tenantId, [keyId], RECIPIENTS);
+    const first = await port.getFamilyStats(tenantId, { templateKeyId: keyId, memberCount: 1 }, RECIPIENTS);
 
     // A third event arrives after the first read. A recompute would include it;
     // a cache hit returns the value computed before it existed.
     await writeEvent(tenantId, keyId, { inputTokens: 999_999, outputTokens: 0 });
 
-    const second = await port.getFamilyStats(tenantId, [keyId], RECIPIENTS);
+    const second = await port.getFamilyStats(tenantId, { templateKeyId: keyId, memberCount: 1 }, RECIPIENTS);
 
     expect(second).toEqual(first);
     expect(first.totals.requests).toBe(1);
@@ -161,8 +174,8 @@ describe("createShareStatsPort — the Redis tier", () => {
     const { client, recorded } = fakeClient(stored);
     const port = createShareStatsPort({ db, redis: client as never });
 
-    const first = await port.getFamilyStats(tenantId, [keyId], { total: 1, active: 1 });
-    const second = await port.getFamilyStats(tenantId, [keyId], { total: 9, active: 4 });
+    const first = await port.getFamilyStats(tenantId, { templateKeyId: keyId, memberCount: 1 }, { total: 1, active: 1 });
+    const second = await port.getFamilyStats(tenantId, { templateKeyId: keyId, memberCount: 1 }, { total: 9, active: 4 });
 
     expect(first.recipients).toEqual({ total: 1, active: 1 });
     expect(second.recipients).toEqual({ total: 9, active: 4 });
@@ -181,8 +194,8 @@ describe("createShareStatsPort — the Redis tier", () => {
     const cached = await createShareStatsPort({
       db,
       redis: fakeClient(new Map()).client as never,
-    }).getFamilyStats(tenantId, [keyId], RECIPIENTS);
-    const direct = await createShareStatsPort({ db }).getFamilyStats(tenantId, [keyId], RECIPIENTS);
+    }).getFamilyStats(tenantId, { templateKeyId: keyId, memberCount: 1 }, RECIPIENTS);
+    const direct = await createShareStatsPort({ db }).getFamilyStats(tenantId, { templateKeyId: keyId, memberCount: 1 }, RECIPIENTS);
 
     expect(cached).toEqual(direct);
     expect(direct.totals.requests).toBe(2);
@@ -196,7 +209,7 @@ describe("createShareStatsPort — the Redis tier", () => {
     const { client } = fakeClient(new Map(), { failGet: true });
     const port = createShareStatsPort({ db, redis: client as never });
 
-    const stats = await port.getFamilyStats(tenantId, [keyId], RECIPIENTS);
+    const stats = await port.getFamilyStats(tenantId, { templateKeyId: keyId, memberCount: 1 }, RECIPIENTS);
     expect(stats.totals.requests).toBe(1);
   });
 
@@ -207,7 +220,7 @@ describe("createShareStatsPort — the Redis tier", () => {
     const { client } = fakeClient(new Map(), { failSet: true });
     const port = createShareStatsPort({ db, redis: client as never });
 
-    const stats = await port.getFamilyStats(tenantId, [keyId], RECIPIENTS);
+    const stats = await port.getFamilyStats(tenantId, { templateKeyId: keyId, memberCount: 1 }, RECIPIENTS);
     expect(stats.totals.requests).toBe(1);
   });
 
@@ -216,7 +229,7 @@ describe("createShareStatsPort — the Redis tier", () => {
     // must not touch Redis at all.
     const { client, recorded } = fakeClient(new Map());
     const port = createShareStatsPort({ db, redis: client as never });
-    const stats = await port.getFamilyStats(crypto.randomUUID(), [], RECIPIENTS);
+    const stats = await port.getFamilyStats(crypto.randomUUID(), { templateKeyId: "", memberCount: 0 }, RECIPIENTS);
     expect(stats.totals.requests).toBe(0);
     expect(recorded.reads).toHaveLength(0);
     expect(recorded.writes).toHaveLength(0);
@@ -233,15 +246,16 @@ describe("createShareStatsPort — the Redis tier", () => {
     const { client, recorded } = fakeClient(stored);
     const port = createShareStatsPort({ db, redis: client as never });
 
-    await port.getFamilyStats(tenantId, [a], RECIPIENTS);
-    await port.getFamilyStats(tenantId, [b], RECIPIENTS);
-    await port.getFamilyStats(tenantId, [a], RECIPIENTS, ["claude-sonnet-4-6"]);
-    // Key order must not split one family across entries.
-    await port.getFamilyStats(tenantId, [a, b], RECIPIENTS);
-    await port.getFamilyStats(tenantId, [b, a], RECIPIENTS);
+    await port.getFamilyStats(tenantId, { templateKeyId: a, memberCount: 1 }, RECIPIENTS);
+    await port.getFamilyStats(tenantId, { templateKeyId: b, memberCount: 1 }, RECIPIENTS);
+    await port.getFamilyStats(tenantId, { templateKeyId: a, memberCount: 1 }, RECIPIENTS, ["claude-sonnet-4-6"]);
+    // A member minted between reads must not fold into the smaller family's
+    // entry: the covered-key count is part of the key.
+    await port.getFamilyStats(tenantId, { templateKeyId: a, memberCount: 2 }, RECIPIENTS);
+    await port.getFamilyStats(tenantId, { templateKeyId: b, memberCount: 2 }, RECIPIENTS);
 
     const keys = new Set(bodyKeys(recorded.reads));
-    expect(keys.size).toBe(4);
+    expect(keys.size).toBe(5);
     for (const key of keys) expect(key.startsWith(`share:v1:stats:${tenantId}:`)).toBe(true);
   });
 });

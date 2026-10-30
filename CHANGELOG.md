@@ -65,11 +65,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Telemetry reads no longer break the PostgreSQL wire at six-figure id
+  sets.** Family-wide share reads expanded every minted child key into one
+  bind parameter each (~90k params on `api_key_id IN (…)`), which passed the
+  65,535-parameter Bind cap and ended in `08P01 bind message has N parameter
+  formats but 0 parameters` — a crash systemd restarted into a loop. Every
+  id-set membership filter is now sent as a single `= ANY($n::uuid[])`
+  parameter (chunks of individual placeholders on SQLite), deduplicated, and
+  guarded at 200k distinct ids with a handled `TelemetryQueryInputError`
+  instead of an unbounded wire write. A filter is never silently skipped for
+  being too large.
+- **Share family reads scale with the result, not the family.** Family
+  statistics, shared-key summaries, per-key token sums, and share-link
+  recipient counts resolved the whole key family in TypeScript — enumerating
+  tens of thousands of child rows and building multi-megabyte cache keys on
+  every share-page view — which grew memory and dashboard lag the longer the
+  server lived. A family is now addressed by its template key and rendered as
+  a constant-wire `EXISTS` against `api_keys`, recipient counts are one SQL
+  aggregate, and the stats cache key hashes `templateKeyId#memberCount` rather
+  than every family id.
+- **An unhandled promise rejection no longer kills the gateway.** A rejected
+  promise nothing awaited (a sweep, a cache warm, a ballooned query) was
+  fatal by default; the listener now logs it and stays up instead of handing
+  systemd another restart.
 - **Qoder daily check-in could answer "unavailable" for an account whose grant
   was live.** The campaign probe raced its own enumeration: with a bound
   identity the check-in now tries it first, falls back only on its error, and
   settles the winning env slot atomically — a repeat run reuses the identity
   that already won instead of re-rolling through one that had been consumed.
+
 ## [2.7.2] - 2026-10-29
 
 ### Added

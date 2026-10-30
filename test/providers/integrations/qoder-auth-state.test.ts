@@ -45,7 +45,7 @@ test("userinfo fallback cannot mask a missing poll user_id when profile also fai
   // EMPTY profile (fetchUserInfo failure) + no poll user_id → userId would be
   // "" — the login must treat that as a hard failure, not store an empty id.
   const empty = readQoderUserInfo({});
-  const resolved = String(undefined ?? empty.id);
+  const resolved = empty.id;
   expect(resolved).toBe("");
 });
 

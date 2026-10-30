@@ -169,6 +169,17 @@ if (boot) {
     globalThis.__cartethyiaSignalsRegistered = true;
     process.on("SIGINT", () => shutdown("SIGINT"));
     process.on("SIGTERM", () => shutdown("SIGTERM"));
+    // A rejected promise nothing awaited (a sweep, a cache warm, a read whose
+    // parameters a bug elsewhere ballooned) must not kill the listener: the
+    // default is fatal exit, which turned one query fault into a systemd
+    // restart loop. Logged and absorbed — the failure stays visible, the
+    // process stays up.
+    process.on("unhandledRejection", (reason) => {
+      log.error(
+        "[process] unhandled rejection (kept alive)",
+        reason instanceof Error ? reason : new Error(String(reason)),
+      );
+    });
     // An in-place update signals SIGUSR2 before swapping the image so the old
     // process drains with the `update` reason and its callers are told the
     // replacement is seconds away instead of seeing a generic shutdown. Not

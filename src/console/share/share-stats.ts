@@ -81,6 +81,14 @@ export interface ShareFamilyStats {
 /** Read-only family rollup for one share link. */
 export interface ShareStatsPort {
   /**
+   * The family is addressed by its template key (`templateKeyId`) plus the
+   * number of keys it covers at call time (`memberCount`), not by an id list:
+   * a family grows with every key the link mints, and enumerating its ids to
+   * build a query — or a cache key — scaled both with the family instead of
+   * with the request. `memberCount` keeps the cache key sensitive to minting:
+   * a newly issued child starts a fresh entry rather than being folded into
+   * the previous one for a full TTL.
+   *
    * `allowedModels`, when supplied, restricts the top-models table to the names
    * the link actually grants. A rejected request still writes a telemetry row
    * (with the requested name), so without this the table would rank models the
@@ -90,7 +98,7 @@ export interface ShareStatsPort {
    */
   getFamilyStats(
     tenantId: string,
-    keyIds: readonly string[],
+    family: { readonly templateKeyId: string; readonly memberCount: number },
     recipients: { readonly total: number; readonly active: number },
     allowedModels?: readonly string[],
   ): Promise<ShareFamilyStats>;
@@ -244,19 +252,21 @@ const HOURS_WINDOW = 24;
 export const SHARE_STATS_CACHE_TTL_SECONDS = 10;
 
 /**
- * Cache key for one family's rollup. Both inputs change the payload — `keyIds`
- * selects the family and `allowedModels` filters the model table — so both are
- * hashed in; the key ids are sorted so key order cannot split one family across
- * two entries.
+ * Cache key for one family's rollup. The family is named by its template key
+ * and the number of keys it covers — both change the payload — and
+ * `allowedModels` filters the model table, so all three are hashed in.
+ * (The key used to hash the sorted list of every family id; on a family with
+ * tens of thousands of minted children that built and sorted a multi-megabyte
+ * string on every page view, before the cache could even answer.)
  */
 function shareFamilyStatsKey(
   tenantId: string,
-  keyIds: readonly string[],
+  family: { readonly templateKeyId: string; readonly memberCount: number },
   allowedModels: readonly string[] | undefined,
 ): string {
   const models = allowedModels === undefined ? "*" : [...allowedModels].sort().join(",");
   const hash = createHash("sha256")
-    .update([...keyIds].sort().join(",") + "|" + models)
+    .update(`${family.templateKeyId}#${family.memberCount}|${models}`)
     .digest("hex");
   return `share:v1:stats:${tenantId}:${hash}`;
 }
@@ -271,12 +281,12 @@ interface ShareStatsPortDeps {
 
 export function createShareStatsPort(deps: ShareStatsPortDeps): ShareStatsPort {
   return {
-    async getFamilyStats(tenantId, keyIds, recipients, allowedModels) {
-      if (keyIds.length === 0) return emptyStats(recipients);
+    async getFamilyStats(tenantId, family, recipients, allowedModels) {
+      if (family.templateKeyId.length === 0) return emptyStats(recipients);
       const cached = await cachedRead<Omit<ShareFamilyStats, "recipients">>(
         deps.redis,
-        shareFamilyStatsKey(tenantId, keyIds, allowedModels),
-        () => computeFamilyStatsBody(deps.db, tenantId, keyIds, allowedModels),
+        shareFamilyStatsKey(tenantId, family, allowedModels),
+        () => computeFamilyStatsBody(deps.db, tenantId, family.templateKeyId, allowedModels),
         SHARE_STATS_CACHE_TTL_SECONDS,
       );
       return { ...cached, recipients };
@@ -288,7 +298,7 @@ export function createShareStatsPort(deps: ShareStatsPortDeps): ShareStatsPort {
 async function computeFamilyStatsBody(
   db: CartethyiaDatabase,
   tenantId: string,
-  keyIds: readonly string[],
+  templateKeyId: string,
   allowedModels: readonly string[] | undefined,
 ): Promise<Omit<ShareFamilyStats, "recipients">> {
   // A share that grants a fixed set ranks only that set. Telemetry keeps the
@@ -317,7 +327,7 @@ async function computeFamilyStatsBody(
   // cannot pull the whole table.
   const page = await querySqlEvents(db, {
     tenantId,
-    apiKeyIds: [...keyIds],
+    familyApiKeyId: templateKeyId,
     limit: MAX_FAMILY_EVENTS,
   });
   const events = page.events;

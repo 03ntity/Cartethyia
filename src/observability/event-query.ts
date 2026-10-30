@@ -17,9 +17,9 @@
  *   latency arrays are never returned to JavaScript;
  * - `isGatewayError()` semantics live in one shared SQL predicate.
  */
-import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, or, sql, type SQL } from "drizzle-orm";
 import type { CartethyiaDatabase } from "../persistence/db-handle";
-import { telemetryEvents } from "../persistence/schema";
+import { apiKeys, telemetryEvents } from "../persistence/schema";
 import type { TelemetryEventRecord } from "./event-log";
 import { gatewayErrorSql } from "./telemetry-status";
 
@@ -52,6 +52,17 @@ export interface EventListQuery {
   readonly until?: Date;
   readonly apiKeyIds?: readonly string[];
   readonly accountIds?: readonly string[];
+  /**
+   * The share-template key whose family (the template itself plus every child
+   * key it issued) scopes the read. Rendered as an `EXISTS` subquery against
+   * `api_keys` rather than an id list: a family is minted by the tenant and
+   * can grow to whatever size the tenant drives it to, so enumerating its ids
+   * in JavaScript to feed a bind list would scale the query's wire size with
+   * the family instead of with the result. The subquery keeps the same
+   * membership semantics — template id or any child of it — for any family
+   * size.
+   */
+  readonly familyApiKeyId?: string;
   readonly requestId?: string;
   /** Several request ids at once — the backup restore's "already present" check. */
   readonly requestIds?: readonly string[];
@@ -232,6 +243,92 @@ function scoped(tenantId: string, since?: Date) {
 }
 
 /**
+ * Thrown when a membership filter outruns the guard below. This is a handled
+ * query error, not a protocol fault: callers surface it as a request failure
+ * instead of crashing the process with a PostgreSQL wire error that systemd
+ * would only restart into.
+ */
+export class TelemetryQueryInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TelemetryQueryInputError";
+  }
+}
+
+/**
+ * The deduplicated id count a list membership filter accepts before refusing.
+ *
+ * `idMembershipFilter` binds the whole set as one array parameter, so even a
+ * six-figure set is wire-safe; this guard is not a protocol necessity but a
+ * runaway-collector tripwire — a bug elsewhere (an unbounded accumulator, a
+ * vanished scope) must fail as a query error instead of materializing an
+ * unbounded parameter. Families larger than this must use the `familyApiKeyId`
+ * filter, which never materializes ids.
+ */
+const MAX_MEMBERSHIP_IDS = 200_000;
+
+/**
+ * The chunk size for the SQLite rendering of a list membership filter.
+ *
+ * SQLite has no array parameters, so the set has to come back as individual
+ * placeholders; 500 per chunk sits far below every build's
+ * SQLITE_MAX_VARIABLE_NUMBER while keeping the OR of chunks — semantically
+ * the identical membership test — to a handful of clauses for realistic sets.
+ */
+const SQLITE_IDS_PER_CHUNK = 500;
+
+/**
+ * Membership of `column` in a caller-supplied id set, safe at any set size.
+ *
+ * Expanding the members into one bind placeholder each breaks the wire twice
+ * over: PostgreSQL caps a Bind message at 65,535 parameters, and node-postgres
+ * miscounts long placeholder lists anyway (`08P01 bind message has N parameter
+ * formats but 0 parameters` — the shape that crash-looped the dev deployment,
+ * whose share family carried ~90k minted child keys). Instead the set is
+ * deduplicated and handed to the server as a single array parameter
+ * (`= ANY(…::uuid[])`), or, on SQLite, to chunks of individual placeholders;
+ * membership semantics are unchanged in both renderings.
+ */
+function idMembershipFilter(
+  db: CartethyiaDatabase,
+  column: typeof telemetryEvents.apiKeyId | typeof telemetryEvents.accountId | typeof telemetryEvents.requestId,
+  values: readonly string[],
+  cast: "uuid[]" | "text[]",
+): SQL {
+  const unique = [...new Set(values)];
+  if (unique.length > MAX_MEMBERSHIP_IDS) {
+    throw new TelemetryQueryInputError(
+      `telemetry filter exceeds ${MAX_MEMBERSHIP_IDS} distinct ids (got ${unique.length}); scope the read by family or tenant instead`,
+    );
+  }
+  if (unique.length === 0) return sql`false`;
+  if (isPostgres(db)) {
+    return sql`${column} = ANY(${unique}::${sql.raw(cast)})`;
+  }
+  if (unique.length <= SQLITE_IDS_PER_CHUNK) return inArray(column, unique);
+  const chunks: SQL[] = [];
+  for (let start = 0; start < unique.length; start += SQLITE_IDS_PER_CHUNK) {
+    chunks.push(inArray(column, unique.slice(start, start + SQLITE_IDS_PER_CHUNK)));
+  }
+  return or(...chunks) as SQL;
+}
+
+/**
+ * Membership of `api_key_id` in the family of one share template — the
+ * template itself plus every key it issued.
+ *
+ * The predicate is an `EXISTS` against `api_keys`, so the query's wire size is
+ * constant no matter how large the family grew; the calls that used to expand
+ * tens of thousands of minted child keys into a bind list are what broke the
+ * PostgreSQL wire (see {@link idMembershipFilter}). The tenant predicate is
+ * carried by every read already, so a child in another tenant still cannot
+ * match.
+ */
+function familyKeyCondition(templateKeyId: string): SQL {
+  return sql`exists (select 1 from ${apiKeys} where ${apiKeys.id} = ${telemetryEvents.apiKeyId} and (${apiKeys.id} = ${templateKeyId} or ${apiKeys.parentKeyId} = ${templateKeyId}))`;
+}
+
+/**
  * Bounded detail/list read — the only place rows are materialized.
  *
  * Keyset pagination on `(created_at DESC, id DESC)`: `created_at` has
@@ -249,16 +346,19 @@ export async function queryTelemetryEvents(
     conditions.push(sql`${telemetryEvents.createdAt} < ${query.until}`);
   }
   if (query.apiKeyIds !== undefined) {
-    conditions.push(inArray(telemetryEvents.apiKeyId, [...query.apiKeyIds]));
+    conditions.push(idMembershipFilter(db, telemetryEvents.apiKeyId, query.apiKeyIds, "uuid[]"));
+  }
+  if (query.familyApiKeyId !== undefined) {
+    conditions.push(familyKeyCondition(query.familyApiKeyId));
   }
   if (query.accountIds !== undefined) {
-    conditions.push(inArray(telemetryEvents.accountId, [...query.accountIds]));
+    conditions.push(idMembershipFilter(db, telemetryEvents.accountId, query.accountIds, "uuid[]"));
   }
   if (query.requestId !== undefined) {
     conditions.push(eq(telemetryEvents.requestId, query.requestId));
   }
   if (query.requestIds !== undefined) {
-    conditions.push(inArray(telemetryEvents.requestId, [...query.requestIds]));
+    conditions.push(idMembershipFilter(db, telemetryEvents.requestId, query.requestIds, "text[]"));
   }
   if (query.id !== undefined) {
     conditions.push(eq(telemetryEvents.id, query.id));
@@ -638,14 +738,23 @@ export async function healthTelemetry(
 export async function sumTelemetryTokens(
   db: CartethyiaDatabase,
   tenantId: string,
-  filters: { readonly apiKeyIds?: readonly string[]; readonly since: Date; readonly until?: Date },
+  filters: {
+    readonly apiKeyIds?: readonly string[];
+    /** The share-template family filter; see {@link EventListQuery.familyApiKeyId}. */
+    readonly familyKeyId?: string;
+    readonly since: Date;
+    readonly until?: Date;
+  },
 ): Promise<number> {
   const conditions = [scoped(tenantId, filters.since)];
   if (filters.until !== undefined) {
     conditions.push(sql`${telemetryEvents.createdAt} < ${filters.until}`);
   }
   if (filters.apiKeyIds !== undefined && filters.apiKeyIds.length > 0) {
-    conditions.push(inArray(telemetryEvents.apiKeyId, [...filters.apiKeyIds]));
+    conditions.push(idMembershipFilter(db, telemetryEvents.apiKeyId, filters.apiKeyIds, "uuid[]"));
+  }
+  if (filters.familyKeyId !== undefined) {
+    conditions.push(familyKeyCondition(filters.familyKeyId));
   }
   const [row] = await db
     .select({

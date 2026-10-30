@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import { decryptCredentialToString } from "../../src/security/crypto";
-import { requireEncryptionKeyEnv } from "../../src/config/security";
 
 // Load .env dari repo root (jangan print nilainya).
 for (const line of readFileSync(new URL("../../.env", import.meta.url), "utf8").split(/\r?\n/)) {

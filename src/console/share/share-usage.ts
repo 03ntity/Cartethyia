@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import type { ApiKeyRecord } from "../../persistence/stores/api-key-store";
 import { CachedPreferencesReader, DrizzlePreferencesReader } from "../../persistence/tenant-preferences";
@@ -9,7 +9,7 @@ import { isGatewayError } from "../../observability/telemetry-status";
 import type { RedisClient } from "../../persistence/redis";
 import { cachedRead } from "../shared/read-through-cache";
 import { SHARE_STATS_CACHE_TTL_SECONDS } from "./share-stats";
-import { telemetryUsageTotals } from "../../persistence/schema";
+import { apiKeys, telemetryUsageTotals } from "../../persistence/schema";
 import { shouldMaskClientIp } from "../shared/ip-privacy";
 import { utcDayStart } from "../shared/day";
 
@@ -66,9 +66,16 @@ export interface SharedKeyActivityDetail {
 
 /** Read-only share-recipient telemetry; payloads and credential material never cross this boundary. */
 export interface ShareActivityPort {
+  /**
+   * `familyTemplateKeyId` is the share template the children were issued from:
+   * the telemetry reads scope to the whole family through it (an `EXISTS`
+   * against `api_keys`, constant-wire) rather than through an id list, so the
+   * read is the same no matter how many keys the template has minted.
+   */
   getSharedKeySummaries(
     tenantId: string,
     children: readonly ApiKeyRecord[],
+    familyTemplateKeyId: string,
   ): Promise<readonly SharedKeySummary[]>;
   getSharedKeyDetail(tenantId: string, childKeyId: string): Promise<SharedKeyActivityDetail>;
 }
@@ -133,15 +140,20 @@ export function createShareUsagePort(deps: ShareUsagePortDeps): ShareActivityPor
   const { db, redis } = deps;
   const preferences = new CachedPreferencesReader(new DrizzlePreferencesReader(db));
   return {
-    async getSharedKeySummaries(tenantId, children) {
+    async getSharedKeySummaries(tenantId, children, familyTemplateKeyId) {
       if (children.length === 0) return [];
-      const childIds = children.map((child) => child.id);
       const todayStart = utcDayStart(new Date());
+      /** Family membership of the entity the totals/events row is attributed to. */
+      const familyMembership = (entityId: typeof apiKeys.id | typeof telemetryUsageTotals.entityId) =>
+        sql`exists (select 1 from ${apiKeys} where ${apiKeys.id} = ${entityId} and (${apiKeys.id} = ${familyTemplateKeyId} or ${apiKeys.parentKeyId} = ${familyTemplateKeyId}))`;
       const [todayEvents, lifetimeRows, hideClientIp] = await Promise.all([
         // Today's per-key totals as one GROUP BY instead of reading every
         // event of the family. `addEventUsage` needs per-event fields, so the
-        // groups are projected into the same shape the loop consumes.
-        querySqlEvents(db, { tenantId, apiKeyIds: childIds, since: todayStart, limit: MAX_SUMMARY_EVENTS }).then(
+        // groups are projected into the same shape the loop consumes. The
+        // family filter is the template key, not an id list: a family with
+        // tens of thousands of minted children must not expand them into bind
+        // parameters on every dashboard poll.
+        querySqlEvents(db, { tenantId, familyApiKeyId: familyTemplateKeyId, since: todayStart, limit: MAX_SUMMARY_EVENTS }).then(
           (page) => page.events,
         ),
         db
@@ -158,7 +170,7 @@ export function createShareUsagePort(deps: ShareUsagePortDeps): ShareActivityPor
             and(
               eq(telemetryUsageTotals.tenantId, tenantId),
               eq(telemetryUsageTotals.identityType, "api_key"),
-              inArray(telemetryUsageTotals.entityId, childIds),
+              familyMembership(telemetryUsageTotals.entityId),
             ),
           ),
         shouldMaskClientIp(preferences, tenantId),

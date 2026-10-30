@@ -99,14 +99,6 @@ const ALLOW_LIST: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     // operator is debugging the cursor transport.
     CARTETHYIA_CURSOR_HEARTBEAT_MS: "cursor transport heartbeat override",
   },
-  "src/providers/integrations/qoder/qoder-umid.ts": {
-    // Qoder native-identity bridge override: point at an extracted
-    // `runtime-info` binary. The check-in integration is the only reader.
-    CARTETHYIA_QODER_UMID_DIR: "qoder umid binary override, integration-local",
-    // Run the vendored Linux ELF through WSL (Windows dev/test hosts), which
-    // is the non-VM identity path for daily claims.
-    CARTETHYIA_QODER_UMID_WSL: "use WSL to run the vendored ELF bridge, integration-local",
-  },
 };
 
 /** Walk a directory, yielding every .ts/.tsx file path relative to repo root. */

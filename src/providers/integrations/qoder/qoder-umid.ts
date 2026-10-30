@@ -147,15 +147,6 @@ function wsl(script: string, timeout = 120_000): string {
 }
 
 /** Run the bridge inside WSL under flock; returns the identity or null. */
-function runWslElf(): QoderNativeIdentity | null {
-  ensureWslStaged();
-  const out = wsl(
-    `exec 9>${WSL_LOCK}; flock 9; ${WSL_BIN} ${ENV_CODE}`,
-  );
-  const identity = parseBridgeLine(out);
-  if (!identity) log.warn("[qoder] wsl bridge returned no usable identity");
-  return identity;
-}
 
 function seedPath(): string {
   if (process.platform === "win32") return WSL_SEED;

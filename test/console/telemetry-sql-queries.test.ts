@@ -216,6 +216,112 @@ describe("canonical SQL telemetry reader", () => {
     }
   });
 
+  test("a large id set still filters (no skipped filter, no parameter overflow)", async () => {
+    // The 08P01 production failure: tens of thousands of ids expanded into one
+    // bind placeholder each. The array-parameter (or chunked) rendering must
+    // keep the exact membership semantics at any size — the filter is never
+    // dropped.
+    const fx = await fixture();
+    try {
+      await insertEvent(fx, { inputTokens: 7, outputTokens: 0 });
+      // 1,200 distinct ids — large enough to cross the SQLite chunk boundary
+      // (the chunked path is what a small backend exercises here) — containing
+      // the fixture key exactly once.
+      const ids: string[] = Array.from({ length: 1_200 }, () => crypto.randomUUID());
+      ids[600] = fx.apiKeyId;
+      const page = await queryTelemetryEvents(fx.db, {
+        tenantId: fx.tenantId,
+        apiKeyIds: ids,
+        since: new Date(0),
+      });
+      expect(page.events).toHaveLength(1);
+      expect(page.events[0]?.apiKeyId).toBe(fx.apiKeyId);
+      const spend = await sumTelemetryTokens(fx.db, fx.tenantId, { apiKeyIds: ids, since: new Date(0) });
+      expect(spend).toBe(7);
+      // Duplicate entries in the caller's set must not change the result.
+      const duplicated = [...ids, fx.apiKeyId, fx.apiKeyId];
+      const dupPage = await queryTelemetryEvents(fx.db, {
+        tenantId: fx.tenantId,
+        apiKeyIds: duplicated,
+        since: new Date(0),
+      });
+      expect(dupPage.events).toHaveLength(1);
+    } finally {
+      fx.cleanup();
+    }
+  });
+
+  test("an oversized id set is a handled query error, not a wire fault", async () => {
+    // The guard turns a runaway collector into a thrown TelemetryQueryInputError
+    // the caller can handle — never an unbounded bind that once crash-looped
+    // the process.
+    const fx = await fixture();
+    try {
+      const ids = Array.from({ length: 201_000 }, () => crypto.randomUUID());
+      expect(() =>
+        queryTelemetryEvents(fx.db, { tenantId: fx.tenantId, apiKeyIds: ids, since: new Date(0) }),
+      ).toThrow();
+      let caught: unknown;
+      try {
+        await queryTelemetryEvents(fx.db, { tenantId: fx.tenantId, apiKeyIds: ids, since: new Date(0) });
+      } catch (error) {
+        caught = error;
+      }
+      expect((caught as Error).name).toBe("TelemetryQueryInputError");
+    } finally {
+      fx.cleanup();
+    }
+  });
+
+  test("the family filter scopes to the template and its children", async () => {
+    const fx = await fixture();
+    try {
+      // The template key is the fixture key; a child of it, and an unrelated
+      // sibling key of the same tenant.
+      const [child] = await fx.db
+        .insert(apiKeys)
+        .values({
+          tenantId: fx.tenantId,
+          keyMode: "personal",
+          keyHash: "hash-child",
+          label: "child",
+          scopes: ["routing:invoke"],
+        })
+        .returning({ id: apiKeys.id });
+      await fx.db.insert(apiKeys).values({
+        tenantId: fx.tenantId,
+        keyMode: "personal",
+        keyHash: "hash-stranger",
+        label: "stranger",
+        scopes: ["routing:invoke"],
+      });
+      await insertEvent(fx, { inputTokens: 10, outputTokens: 0 }); // template key
+      await fx.db.insert(telemetryEvents).values({
+        id: crypto.randomUUID(),
+        tenantId: fx.tenantId,
+        requestId: crypto.randomUUID(),
+        createdAt: new Date(),
+        sourceSurface: "chat",
+        apiKeyId: child?.id,
+        status: "completed",
+      });
+      const page = await queryTelemetryEvents(fx.db, {
+        tenantId: fx.tenantId,
+        familyApiKeyId: fx.apiKeyId,
+        since: new Date(0),
+      });
+      expect(page.events).toHaveLength(1);
+      expect(page.events[0]?.apiKeyId).toBe(fx.apiKeyId);
+      const spend = await sumTelemetryTokens(fx.db, fx.tenantId, {
+        familyKeyId: fx.apiKeyId,
+        since: new Date(0),
+      });
+      expect(spend).toBe(10);
+    } finally {
+      fx.cleanup();
+    }
+  });
+
   test("keyset pagination is newest-first and never repeats or skips tied rows", async () => {
     // Ten rows written in the same second: a created_at-only cursor would be
     // ambiguous, so the cursor carries (createdAt, id).

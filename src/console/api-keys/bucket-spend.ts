@@ -20,7 +20,12 @@ import { utcDayStart, utcMonthStart } from "../shared/day";
  *
  * A share template's recipients admit under the parent id, and their spend is
  * attributed to their own child row, so the family is summed — otherwise
- * seeding a template would miss everything its recipients already used.
+ * seeding a template would miss everything its recipients already used. The
+ * family is passed to the reader as the template's id, which the query
+ * resolves with an `EXISTS` against `api_keys`: a family that has minted tens
+ * of thousands of children must not expand them into bind parameters on the
+ * key-creation path, which is where an old id-list version crashed the
+ * process.
  */
 export async function familyBucketSpend(
   db: CartethyiaDatabase,
@@ -36,15 +41,10 @@ export async function familyBucketSpend(
     .limit(1);
   const tenantId = parent?.tenantId;
   if (tenantId === undefined) return { daily: 0, monthly: 0 };
-  const children = await db
-    .select({ id: apiKeys.id })
-    .from(apiKeys)
-    .where(eq(apiKeys.parentKeyId, keyId));
-  const keyIds = [keyId, ...children.map((child) => child.id)];
   // Two SQL sums instead of reading every event of the family: the bucket
   // spend only needs a total, and this runs on the key-creation path.
   const spentSince = async (start: Date): Promise<number> =>
-    sumTelemetryTokens(db, tenantId, { apiKeyIds: keyIds, since: start });
+    sumTelemetryTokens(db, tenantId, { familyKeyId: keyId, since: start });
   const [daily, monthly] = await Promise.all([
     spentSince(utcDayStart(now)),
     spentSince(utcMonthStart(now)),

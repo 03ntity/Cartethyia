@@ -28,7 +28,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { pgHandleFromPool } from "../../src/persistence/db-pg";
-import { telemetryEvents } from "../../src/persistence/schema";
+import { apiKeys, telemetryEvents } from "../../src/persistence/schema";
 import { createRunId, dbDescribe, getTestPool, requireDatabase } from "../helpers/database";
 import { createTenant } from "../helpers/fixtures";
 
@@ -99,6 +99,18 @@ async function writeRows(
   rows: readonly (typeof telemetryEvents.$inferInsert)[],
 ): Promise<void> {
   if (rows.length === 0) return;
+  // The family rollup scopes by a key template through `api_keys`, so every
+  // key id that carried traffic must have its row; explicit `createFamily`
+  // calls ran earlier for tests that need parent links, and their rows win
+  // the conflict. Matching the production shape: a minted key always exists
+  // until it is deleted.
+  const seen = new Set<string>();
+  for (const entry of rows) {
+    const keyId = entry.apiKeyId;
+    if (typeof keyId !== "string" || seen.has(keyId)) continue;
+    seen.add(keyId);
+    await createKey(entry.tenantId, keyId);
+  }
   // The share page reads telemetry_events (the durable SQL record), so rows go
   // in as inserts — the raw file is a mirror now, not the read source.
   await shareDb.insert(telemetryEvents).values(
@@ -122,6 +134,47 @@ function row(
     status: "completed",
     ...overrides,
   };
+}
+
+/**
+ * Creates the `api_keys` row behind a telemetry key id.
+ *
+ * The family rollup scopes by the template key through an `EXISTS` against
+ * `api_keys` (the relation "issued by this template" lives there), so a
+ * fixture key must exist for its telemetry to be counted — matching the
+ * production shape, where a key that minted traffic always has a row until it
+ * is deleted.
+ */
+async function createKey(
+  tenantId: string,
+  keyId: string,
+  options: { parentKeyId?: string } = {},
+): Promise<void> {
+  // A child of a share template carries the canonical IP stamp the
+  // `api_keys_mode_shape_check` constraint requires of issued keys — the same
+  // columns an enrollment write fills.
+  const issuedIp = options.parentKeyId === undefined ? null : "203.0.113.7";
+  const issuedIpKey = issuedIp === null ? null : `ip:${issuedIp}`;
+  await shareDb
+    .insert(apiKeys)
+    .values({
+      id: keyId,
+      tenantId,
+      keyMode: options.parentKeyId === undefined ? "personal" : "share",
+      keyHash: `hash-${keyId}`,
+      label: keyId.slice(0, 8),
+      scopes: ["routing:invoke"],
+      ...(options.parentKeyId === undefined
+        ? {}
+        : { parentKeyId: options.parentKeyId, issuedClientIp: issuedIp, issuedClientIpKey: issuedIpKey }),
+    } as never)
+    .onConflictDoNothing();
+}
+
+/** Creates a family: `template` itself plus every listed issued child. */
+async function createFamily(tenantId: string, template: string, children: readonly string[] = []): Promise<void> {
+  await createKey(tenantId, template);
+  for (const child of children) await createKey(tenantId, child, { parentKeyId: template });
 }
 
 const EMPTY_RECIPIENTS = { total: 0, active: 0 } as const;
@@ -184,7 +237,7 @@ dbDescribe("createShareStatsPort — an empty family", () => {
     const port = createShareStatsPort({ db: shareDb });
     const stats = await port.getFamilyStats(
       crypto.randomUUID(),
-      [],
+      { templateKeyId: "", memberCount: 0 },
       { total: 3, active: 1 },
     );
     expect(stats.totals).toEqual({
@@ -211,7 +264,7 @@ dbDescribe("createShareStatsPort — an empty family", () => {
       const port = createShareStatsPort({ db: shareDb });
       const stats = await port.getFamilyStats(
         scope.tenantId,
-        [crypto.randomUUID()],
+        { templateKeyId: crypto.randomUUID(), memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.totals.requests).toBe(0);
@@ -244,7 +297,7 @@ dbDescribe("createShareStatsPort — family scoping", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [mine],
+        { templateKeyId: mine, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.totals.requests).toBe(1);
@@ -264,6 +317,7 @@ dbDescribe("createShareStatsPort — family scoping", () => {
     try {
       const first = crypto.randomUUID();
       const second = crypto.randomUUID();
+      await createFamily(scope.tenantId, first, [second]);
       await writeRows([
         row(scope.tenantId, first, { inputTokens: 100, outputTokens: 0 }),
         row(scope.tenantId, second, { inputTokens: 200, outputTokens: 0 }),
@@ -271,7 +325,7 @@ dbDescribe("createShareStatsPort — family scoping", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [first, second],
+        { templateKeyId: first, memberCount: 2 },
         { total: 2, active: 2 },
       );
       expect(stats.totals.requests).toBe(3);
@@ -294,7 +348,7 @@ dbDescribe("createShareStatsPort — family scoping", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.totals.requests).toBe(2);
@@ -328,7 +382,7 @@ dbDescribe("createShareStatsPort — error counting", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.totals.requests).toBe(7);
@@ -352,7 +406,7 @@ dbDescribe("createShareStatsPort — error counting", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.totals.errors).toBe(1);
@@ -401,7 +455,7 @@ dbDescribe("createShareStatsPort — time windows", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       // `dayStart - 1ms` is inside the month only when the day is not the 1st.
@@ -430,7 +484,7 @@ dbDescribe("createShareStatsPort — time windows", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.totals.requests).toBe(4);
@@ -458,7 +512,7 @@ dbDescribe("createShareStatsPort — time windows", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.hourly).toHaveLength(24);
@@ -495,7 +549,11 @@ dbDescribe("createShareStatsPort — time windows", () => {
         // A different hour, so its tokens must not land in the first bucket.
         row(scope.tenantId, key, { createdAt: new Date(now - 3 * HOUR_MS), inputTokens: 9_000, outputTokens: 1_000 }),
       ]);
-      const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(scope.tenantId, [key], EMPTY_RECIPIENTS);
+      const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
+        scope.tenantId,
+        { templateKeyId: key, memberCount: 1 },
+        EMPTY_RECIPIENTS,
+      );
       const withTokens = stats.hourly.filter((bucket) => bucket.tokens > 0);
       expect(withTokens).toHaveLength(2);
       expect(withTokens.map((bucket) => bucket.tokens).sort((a, b) => a - b)).toEqual([10_000, 2_000_000]);
@@ -519,7 +577,7 @@ dbDescribe("createShareStatsPort — top models", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.models.map((entry) => entry.modelId)).toEqual([
@@ -551,7 +609,7 @@ dbDescribe("createShareStatsPort — top models", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       const entry = stats.models[0];
@@ -574,7 +632,7 @@ dbDescribe("createShareStatsPort — top models", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.models[0]?.avgTokensPerSec).toBeNull();
@@ -596,7 +654,7 @@ dbDescribe("createShareStatsPort — top models", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.models.map((entry) => entry.modelId)).toEqual(["claude-sonnet-4-6"]);
@@ -619,7 +677,7 @@ dbDescribe("createShareStatsPort — model allowlist filtering", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
         undefined,
       );
@@ -638,7 +696,7 @@ dbDescribe("createShareStatsPort — model allowlist filtering", () => {
       await writeRows([row(scope.tenantId, key, { requestedModel: "claude-sonnet-4-6" })]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
         [],
       );
@@ -665,7 +723,7 @@ dbDescribe("createShareStatsPort — model allowlist filtering", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
         ["deepseek-v4.1-flash"],
       );
@@ -690,7 +748,7 @@ dbDescribe("createShareStatsPort — model allowlist filtering", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
         ["opencode-go/deepseek-v4.1-flash"],
       );
@@ -723,7 +781,7 @@ dbDescribe("createShareStatsPort — model allowlist filtering", () => {
       await writeRows(probes);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
         ["claude-sonnet-4-6"],
       );
@@ -756,7 +814,7 @@ dbDescribe("createShareStatsPort — model allowlist filtering", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
         ["model_1", "model-a"],
       );
@@ -780,7 +838,7 @@ dbDescribe("createShareStatsPort — client addresses are always masked", () => 
       await writeRows([row(scope.tenantId, key, { clientIp: "203.0.113.42" })]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.clientIps).toHaveLength(1);
@@ -800,7 +858,7 @@ dbDescribe("createShareStatsPort — client addresses are always masked", () => 
       await writeRows([row(scope.tenantId, key, { clientIp: "2001:db8:85a3::8a2e:370:7334" })]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       const entry = stats.clientIps[0];
@@ -823,7 +881,7 @@ dbDescribe("createShareStatsPort — client addresses are always masked", () => 
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(JSON.stringify(stats)).not.toContain(address);
@@ -855,7 +913,7 @@ dbDescribe("createShareStatsPort — client addresses are always masked", () => 
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.clientIps).toHaveLength(2);
@@ -881,7 +939,7 @@ dbDescribe("createShareStatsPort — client addresses are always masked", () => 
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.clientIps).toHaveLength(1);
@@ -910,7 +968,7 @@ dbDescribe("createShareStatsPort — payload bounds", () => {
       await writeRows(rows);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.models.length).toBeLessThanOrEqual(50);
@@ -932,7 +990,11 @@ dbDescribe("createShareStatsPort — many keys stay one family", () => {
     // the single response.
     const scope = await familyScope("share-many-keys");
     try {
-      const keys = Array.from({ length: 5 }, () => crypto.randomUUID());
+      const template = crypto.randomUUID();
+      const children = Array.from({ length: 4 }, () => crypto.randomUUID());
+      const keys = [template, ...children];
+      // One template with four issued children: the keys of one link.
+      await createFamily(scope.tenantId, template, children);
       await writeRows(
         keys.flatMap((key) => [
           row(scope.tenantId, key, { requestedModel: "claude-sonnet-4-6" }),
@@ -941,7 +1003,7 @@ dbDescribe("createShareStatsPort — many keys stay one family", () => {
       );
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        keys,
+        { templateKeyId: template, memberCount: keys.length },
         EMPTY_RECIPIENTS,
       );
       expect(stats.totals.requests).toBe(10);
@@ -968,7 +1030,7 @@ dbDescribe("createShareStatsPort — a share whose keys were deleted", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [live],
+        { templateKeyId: live, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.totals.requests).toBe(1);
@@ -990,7 +1052,7 @@ dbDescribe("createShareStatsPort — numeric coercion", () => {
       await writeRows([row(scope.tenantId, key, { inputTokens: 100, outputTokens: 50 })]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       for (const value of Object.values(stats.totals)) {
@@ -1016,7 +1078,7 @@ dbDescribe("createShareStatsPort — numeric coercion", () => {
       ]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.totals.totalTokens).toBe(3_000_000_000);
@@ -1041,8 +1103,8 @@ dbDescribe("createShareStatsPort — concurrent reads", () => {
       ]);
       const port = createShareStatsPort({ db: shareDb });
       const [a, b] = await Promise.all([
-        port.getFamilyStats(first.tenantId, [firstKey], EMPTY_RECIPIENTS),
-        port.getFamilyStats(second.tenantId, [secondKey], EMPTY_RECIPIENTS),
+        port.getFamilyStats(first.tenantId, { templateKeyId: firstKey, memberCount: 1 }, EMPTY_RECIPIENTS),
+        port.getFamilyStats(second.tenantId, { templateKeyId: secondKey, memberCount: 1 }, EMPTY_RECIPIENTS),
       ]);
       expect(a.totals.inputTokens).toBe(111);
       expect(b.totals.inputTokens).toBe(222);
@@ -1065,7 +1127,7 @@ dbDescribe("createShareStatsPort — recipient counts pass through untouched", (
       const recipients = { total: 7, active: 3 } as const;
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         recipients,
       );
       expect(stats.recipients).toEqual({ total: 7, active: 3 });
@@ -1085,7 +1147,7 @@ dbDescribe("createShareStatsPort — hourly window alignment", () => {
       await writeRows([row(scope.tenantId, key)]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       const first = new Date(stats.hourly[0]?.hour ?? "");
@@ -1116,7 +1178,7 @@ dbDescribe("createShareStatsPort — SQL injection safety", () => {
       await writeRows([row(scope.tenantId, key, { requestedModel: hostile })]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        [key],
+        { templateKeyId: key, memberCount: 1 },
         EMPTY_RECIPIENTS,
         [hostile],
       );

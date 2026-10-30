@@ -5,7 +5,7 @@ import { globalOrOwnedBy } from "../../persistence/tenant-scope";
 // client IP. The child bearer is returned only by the successful issue call.
 
 import { Elysia } from "elysia";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import { apiKeys, models, providers } from "../../persistence/schema";
 import { PublicModelCatalogStore } from "../providers/catalog/public-model-store";
@@ -227,12 +227,20 @@ async function resolveFamilyStats(
   if (resolved === null) return null;
   const templateId = resolved.key.id;
   const tenantId = resolved.key.tenantId;
-  const children = await db
-    .select({ id: apiKeys.id, revokedAt: apiKeys.revokedAt })
+  // Recipient counts come back as one aggregate row: a family minted by the
+  // tenant can carry tens of thousands of children, and materializing their
+  // ids only to count them made every share-page view pay for the family's
+  // size. The fingerprint/quote keys the rollup needs are addressed by the
+  // template id (`familyApiKeyId`), which scopes in SQL without any id list.
+  const [counts] = await db
+    .select({
+      total: sql<number>`count(*)`,
+      active: sql<number>`sum(case when ${apiKeys.revokedAt} is null then 1 else 0 end)`,
+    })
     .from(apiKeys)
     .where(eq(apiKeys.parentKeyId, templateId));
-  const active = children.filter((child) => child.revokedAt === null).length;
-  const keyIds = [templateId, ...children.map((child) => child.id)];
+  const total = Number(counts?.total ?? 0);
+  const active = Number(counts?.active ?? 0);
   // Rank only the models this link grants. A refused request still writes a
   // telemetry row carrying the name the client asked for, so an unfiltered
   // top-models table would list the very names the grant excludes. An
@@ -244,7 +252,12 @@ async function resolveFamilyStats(
     configured !== null && configured.length > 0
       ? await modelsForShare(db, resolved.key)
       : undefined;
-  return stats.getFamilyStats(tenantId, keyIds, { total: children.length, active }, allowedModels);
+  return stats.getFamilyStats(
+    tenantId,
+    { templateKeyId: templateId, memberCount: total + 1 },
+    { total, active },
+    allowedModels,
+  );
 }
 
 /** Creates the public enrollment page and one-time shared-key issuance route. */

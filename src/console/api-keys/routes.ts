@@ -653,7 +653,7 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
           parent.keyMode !== "share" || parent.parentKeyId !== undefined)
         throw new ConsoleDomainError("key_not_found", 404, "Share template not found");
       const children = await config.store.listChildren(authorized.tenantId, parentKeyId);
-      return activity.getSharedKeySummaries(authorized.tenantId, children);
+      return activity.getSharedKeySummaries(authorized.tenantId, children, parentKeyId);
     },
     async getSharedKeyActivity(
       access: AccessDecision | undefined,

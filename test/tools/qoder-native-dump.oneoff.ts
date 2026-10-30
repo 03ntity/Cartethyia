@@ -19,7 +19,7 @@ for (const account of doc.accounts) {
       "Cosy-Version": "1.1.64",
       ...qoderMachineHeaders(identity),
     },
-    proxy,
+    ...(proxy === undefined ? {} : { proxy }),
     signal: AbortSignal.timeout(20_000),
   });
   const raw = await res.text();
