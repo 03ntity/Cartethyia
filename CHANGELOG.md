@@ -12,6 +12,92 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Inject System Prompt — tenant-scoped, three precedence levels.** A new
+  Overview panel lets a tenant append (or override) a custom system prompt
+  globally, per provider, or per exact model, resolved most-specific-wins with
+  a follow-global/custom toggle on every provider. Append is idempotent and
+  lands after all existing system content; override replaces only the caller's
+  system content, never the provider's own mandatory identity prompt. Providers
+  whose upstream validates their fixed system prompt as a channel identity
+  (CodeBuddy, CodeBuddy CN, WorkBuddy) receive the tenant text wrapped in
+  `<cartethyia:system-prompt>` markers after their identity prompt — appended
+  in the same turn, which the upstream accepts. Settings persist in a dedicated
+  `tenant_system_prompts` table (migration `0031_tenant_system_prompts` for
+  both Postgres and SQLite; 5 MB text cap per scope), read through the
+  revision-keyed cache so edits are live on the next request, with console
+  routes (`GET/PUT/DELETE /system-prompt`) and per-scope append/override,
+  `.txt`/`.json` import, and search in the dashboard. Design record:
+  `documentation/proposals/inject-system-prompt.md`.
+- **Invoke kill switch moved into API Credentials.** The tenant-wide
+  "deny all keys" breaker is now a Disable/Enable Invoke button in the API
+  Credentials header instead of a standalone Overview card, confirm-gated:
+  disabling refuses every `/v1` request with 503 while the dashboard stays
+  reachable to re-enable.
+- **Content-derived dashboard build ID.** Every production build fingerprints
+  its emitted assets and embeds the ID as a `cartethyia-dashboard-build` meta
+  tag; the server echoes it as `X-Cartethyia-Dashboard-Build` on HTML
+  responses. Comparing that ID (plus the content-hashed CSS URL) tells you
+  exactly which build a deployment serves.
+- **GitHub Copilot Auto routes from the selection itself.** The `/auto`
+  selection response names the model *and* its supported endpoints, so the
+  adapter picks the Responses-vs-Chat wire from the selection and drops the
+  follow-up `/models` round trip on the hot path (older responders without
+  endpoints still fall back to the roster lookup).
+
+### Changed
+
+- **Adaptive Postgres pool.** The pool defaults to 8 connections with a
+  30-second shrinker that trims idle connections down to a configurable floor
+  (`DATABASE_POOL_IDLE_FLOOR`, default 2), so a burst of dashboard or proxy
+  load no longer leaves a hundred idle sockets pinned forever.
+- **Routing: one CallerIdentity, one RoutingDecision per candidate.** The
+  layered re-filtering in route planning (usage floor → slow lane → health →
+  plan gate → capability, each with its own re-sort) is merged into a single
+  per-candidate decision and one rank sort (fresh → slow → cooling →
+  saturated). Provider rotation now only reorders within the same rank, so a
+  cooling account can never float back to the front. Candidates carry the
+  account's owning tenant, and admission buckets scope shared accounts
+  globally while tenant-owned accounts are scoped per owner — two tenants can
+  no longer drain each other's concurrency ceiling on an account only one of
+  them owns.
+- **Overview polish.** The Compression panel's transforms render as contained
+  sub-cards with active/off badges and use the shared banner primitive for the
+  quality warning; the gateway-endpoint, remote-support, and status blurbs
+  read like an operator wrote them.
+
+### Fixed
+
+- **Cursor continuations survive a model switch.** A continuation pinned to an
+  account that no longer serves the (translated) model used to fail with a
+  strict 400. Pin-empty continuations that carry complete history are now
+  rebaseable: they fall through to normal routing and start a fresh Run, while
+  live pending calls stay hard-pinned so nothing leaks across accounts.
+- **A changed model cooldown invalidates the route snapshot.** Cooldown
+  overrides took effect on the next snapshot rebuild rather than the next
+  request; a cooldown mutation now invalidates the snapshot immediately.
+- **Share links can mint at most one child key per canonical client IP.**
+  Enrollment links are public and IP rotation previously let one attacker mint
+  unbounded children; dedupe now keys on the canonical client address.
+- **Share usage accounting survives key deletion.** Revoked or deleted child
+  keys kept their spend counted in family totals (template counter + telemetry
+  sums), quota windows render distinct resets, and a template can cap its
+  active children (`max_children`, migration `0030`) with recipients listed
+  server-side paginated/sortable and a batched bulk-revoke endpoint.
+- **Share template policy is no longer duplicated into children.** Children
+  inherit policy at resolution time instead of carrying a copied row
+  (migration `0029` nulls the duplicated columns; restore normalizes), and the
+  API key list orders parents before their share children.
+- **The chat wire emits only its selected token-limit field.** A request
+  carrying `max_completion_tokens` echoed that alias alongside the bounded
+  `max_tokens`, and a strict upstream refused the double field; the alias is
+  now deleted in either direction.
+- **DeepSeek-style reasoning replay stays present on resold models.** Models
+  served through a DeepSeek-family upstream kept their reasoning replay
+  marker even when the canonical surface stripped it, avoiding upstream
+  rejections on follow-up turns.
+- **The OAuth browser dialog no longer completes on a stale account
+  snapshot.** (pre-2.7.2 carry-over, recorded here for completeness.)
+
 - **Qoder native machine identity, bound per account.** The daily 100-credit
   campaign grant is only revealed to a *native device identity* (UMID), so
   pooled accounts now own one: `provider_accounts.native_identity` (migrations
