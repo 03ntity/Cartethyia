@@ -40,6 +40,16 @@ provider, case-insensitive against existing labels, so pasting five keys into
 one provider yields `dcint-key-1 … dcint-key-5` instead of five identical
 "<providerId> account" rows.
 
+## Qoder identity, campaigns, and claim surfaces
+
+Qoder's identity mint (`P1gA…` genuine tokens, seeds, umidpack bridge), the
+daily-credit campaign probe, the activity-claim family, and the proven-dead
+`pro-upgrade` trial surface are
+[`references/qoder-identity-and-claims.md`](references/qoder-identity-and-claims.md).
+Read it before touching `src/providers/integrations/qoder/**` — it records the
+COSY empty-body GET trap, the already-tested provision matrix, and the claim
+safety rule (never claim without an explicit `CLAIMABLE`).
+
 ## Fetch a Buddy model catalog
 
 CodeBuddy and WorkBuddy (including WorkBuddy CN) expose two different catalog

@@ -183,6 +183,31 @@ export const providers = pgTable(
 // tenant-owned/BYOK. The concurrency ceiling lives in provider routing
 // (`provider_routing_settings.max_inflight`) and network pools
 // (`network_pools.max_inflight`); there is no per-account override.
+/**
+ * A Qoder native machine identity (UMID) bound to one account.
+ *
+ * The device identity is a deterministic function of a seed file
+ * (`~/.config/.locale_cfg`): the `runtime-info` bridge reads that seed and
+ * derives `machineToken`/`machineType`/`machineCode`. The server gates the
+ * daily 100-credit campaign on a *genuine, non-VM* device identity, so each
+ * account gets its own minted seed (a distinct "device").
+ *
+ * `seed` is the exact seed-file content the identity was minted from, stored
+ * so the same device identity can be replayed (restore seed → bridge → same
+ * token). It is not a credential, but it is the per-account device material
+ * and must never be shared between accounts. `machineToken` is the unique
+ * device key: two accounts sharing a token are the same device to the server.
+ */
+export interface NativeIdentityRecord {
+  readonly machineToken: string;
+  readonly machineType: string;
+  readonly machineCode: string;
+  /** The seed-file content this identity was minted from, if captured. */
+  readonly seed?: string;
+  /** How this identity was produced: the genuine SG bridge or the fallback. */
+  readonly source?: "runtime-info" | "generated";
+}
+
 export const providerAccounts = pgTable("provider_accounts", {
   id: uuid("id").primaryKey().defaultRandom(),
   providerId: text("provider_id")
@@ -270,6 +295,18 @@ export const providerAccounts = pgTable("provider_accounts", {
    */
   quotaPlan: text("quota_plan"),
 
+  /**
+   * Qoder native machine identity bound to this account, as one JSON object
+   * (see {@link NativeIdentityRecord}). `null` means the account has no bound
+   * identity: the check-in mints one on first use.
+   *
+   * Deliberately a dedicated column, not a key inside `auth_state`: the
+   * device token is queryable ("which device is taken by whom") and enforced
+   * unique by the partial index below, and it must survive backup/restore
+   * like any other non-secret column.
+   */
+  nativeIdentity: jsonb("native_identity").$type<NativeIdentityRecord | null>(),
+
   },
   (table) => [
     uniqueIndex("provider_accounts_identity_uidx").on(
@@ -290,6 +327,17 @@ export const providerAccounts = pgTable("provider_accounts", {
     // predicate that does not constrain `provider_id`. This one matches the
     // hot listing path.
     index("provider_accounts_tenant_id_idx").on(table.tenantId),
+    // One Qoder device identity per account: the partial unique index on the
+    // extracted `machineToken` guarantees two accounts never share a device,
+    // which is what makes the daily 100-credit grant reusable per account
+    // instead of colliding on a device identity. `NULL` rows (unbound
+    // accounts) are excluded so the uniqueness only applies to bound
+    // identities. The Postgres migration spells the expression
+    // `(native_identity ->> 'machineToken')`; the SQLite migration spells it
+    // `json_extract(native_identity, '$.machineToken')`.
+    uniqueIndex("provider_accounts_native_identity_token_uidx")
+      .on(sql`(${table.nativeIdentity} ->> 'machineToken')`)
+      .where(sql`${table.nativeIdentity} IS NOT NULL`),
   ],
 );
 

@@ -17,6 +17,18 @@
  * the console surface treat Qoder like any other daily-grant provider.
  */
 import { QODER_REALMS, qoderRealmForProvider } from "./qoder-realm";
+import { getQoderVersion } from "../../operations/client-versions";
+import {
+  qoderMachineHeaders,
+  type QoderNativeIdentity,
+} from "./qoder-umid";
+import {
+  allocateQoderNativeIdentity,
+  ensureQoderNativeIdentity,
+  type QoderNativeIdentityStore,
+} from "./qoder-native-identity-store";
+import type { NativeIdentityRecord } from "../../../persistence/schema";
+import { log } from "../../../observability/logger";
 
 /** Structural fetch bound; Bun's own fetch type carries extra host props. */
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -36,6 +48,36 @@ const CHECKIN_STATUS_PATH = "/sash/api/v1/me/daily-check-in/status";
 const CHECKIN_CLAIM_PATH = "/sash/api/v1/me/daily-check-in/claim";
 const CAMPAIGNS_PATH = "/sash/api/v1/me/campaigns";
 const CAMPAIGN_CLAIM_PATH = "/sash/api/v1/me/campaigns/%s/claim";
+
+/**
+ * Headers the official desktop client sends to the `/sash` campaign surface.
+ * Without these — notably `cosy-clienttype`, `cosy-version`, and the `Qoder`
+ * user agent — the upstream hides the campaign list entirely
+ * (`showCampaign:false`), so the daily grant never appears. Verified live:
+ * the bare Authorization+Accept request returns an empty list, the desktop
+ * header set returns `showCampaign:true` with the campaigns populated.
+ *
+ * `native` optionally carries the UMID machine headers (see `qoder-umid`);
+ * when present they unlock the daily 100-credit campaign, which the server
+ * otherwise silently filters out.
+ */
+export function buildCampaignHeaders(
+  credential: string,
+  native?: Record<string, string>,
+): Record<string, string> {
+  return {
+    Authorization: `Bearer ${credential}`,
+    Accept: "application/json",
+    "User-Agent": "Qoder",
+    "Cosy-ClientType": "10",
+    "Cosy-Version": getQoderVersion(),
+    ...(native ?? {}),
+  };
+}
+
+function campaignHeaders(credential: string): Record<string, string> {
+  return buildCampaignHeaders(credential);
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== "object" || value === null) return null;
@@ -80,19 +122,32 @@ function asState(state: string, today: string, lastClaimedAt: unknown): { active
   return { active, todayCheckedIn: claimedToday };
 }
 
-/** GET campaign list; returns `null` when the surface is unreachable/unauthorized. */
-async function fetchCampaigns(
+/**
+ * Normalizes one upstream campaign row to the snake_case shape the claim loop
+ * consumes. The API returns camelCase keys (`campaignId`, `actionType`,
+ * `claimStatus`); the fixtures and the donor hub use snake_case — accept both.
+ */
+function normalizeCampaign(raw: Record<string, unknown>): Record<string, unknown> {
+  const benefit = asRecord(raw["benefit"]);
+  return {
+    campaign_id: String(raw["campaignId"] ?? raw["campaign_id"] ?? ""),
+    campaign_key: String(raw["campaignKey"] ?? raw["campaign_key"] ?? ""),
+    action_type: String(raw["actionType"] ?? raw["action_type"] ?? ""),
+    claim_status: String(raw["claimStatus"] ?? raw["claim_status"] ?? ""),
+    ...(benefit !== null ? { benefit } : {}),
+  };
+}
+
+/** GET campaign list once with given headers; `null` when unreachable/unauthorized. */
+async function getCampaigns(
   base: string,
-  credential: string,
+  headers: Record<string, string>,
   fetcher: Fetcher,
 ): Promise<Record<string, unknown>[] | null> {
   try {
     const response = await fetcher(`${base}${CAMPAIGNS_PATH}`, {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${credential}`,
-        Accept: "application/json",
-      },
+      headers,
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (response.status === 401 || response.status === 403) return null;
@@ -100,10 +155,92 @@ async function fetchCampaigns(
     const payload: unknown = await response.json().catch(() => null);
     const rec = asRecord(payload);
     const list = Array.isArray(rec?.["campaigns"]) ? rec!["campaigns"] : Array.isArray(payload) ? payload : null;
-    return Array.isArray(list) ? (list as Record<string, unknown>[]) : null;
+    if (!Array.isArray(list)) return null;
+    return (list as Record<string, unknown>[]).map(normalizeCampaign);
   } catch {
     return null;
   }
+}
+
+/**
+ * One attempted claim across a header set, returning the same result shape as
+ * `claimCampaign` (already-claimed grants resolve to `already_claimed`).
+ */
+async function tryClaimDaily(
+  base: string,
+  headers: Record<string, string>,
+  fetcher: Fetcher,
+): Promise<{ state: DailyCheckinState; amount: number; error: string | null }> {
+  const campaigns = await getCampaigns(base, headers, fetcher);
+  if (campaigns === null) {
+    return { state: "error", amount: 0, error: "Campaign list unavailable." };
+  }
+  for (const campaign of campaigns) {
+    const benefit = asRecord(campaign["benefit"]);
+    const kind = String(benefit?.["kind"] ?? "").toUpperCase();
+    if (kind !== "CREDITS" && kind !== "") continue;
+    const actionType = String(campaign["action_type"] ?? "");
+    if (actionType !== "" && actionType !== "CLAIM_BENEFIT") continue;
+    const claimStatus = String(campaign["claim_status"] ?? "").toUpperCase();
+    if (claimStatus === "CLAIMED") return { state: "already_claimed", amount: 0, error: null };
+    if (claimStatus !== "CLAIMABLE") continue;
+    const campaignId = String(campaign["campaign_id"] ?? "");
+    if (!campaignId) continue;
+    const claim = await claimWithHeaders(base, campaignId, headers, fetcher);
+    if (claim.state === "claimed") {
+      const amount = asNumber(benefit?.["amount"]) ?? claim.amount;
+      return { state: "claimed", amount, error: null };
+    }
+    if (claim.state === "already_claimed") return { state: "already_claimed", amount: 0, error: null };
+    if (claim.state === "not_eligible") return { state: "not_eligible", amount: 0, error: null };
+    return { state: "error", amount: 0, error: "Campaign claim failed." };
+  }
+  return { state: "unavailable", amount: 0, error: "No daily CREDITS campaign claimable." };
+}
+
+/**
+ * Probes the daily CREDITS grant under a native device identity.
+ *
+ * The server binds the grant to the device identity and hides it once a
+ * device claimed today, so an account claims under its own persisted device
+ * (minted seed). A bound identity that resolves to `claimed`/`already_claimed`
+ * is terminal; one that resolves to `unavailable`/`not_eligible` is honest
+ * (the device is spent for the day or the person is blocked) and is also
+ * terminal — the account must not move to a different device, because that is
+ * how devices are re-spun. Only an *error* (stored identity stopped working)
+ * falls back to a freshly minted identity.
+ *
+ * Returns `{ result, identity }` where `identity` is the device that produced
+ * a terminal `claimed`/`already_claimed` outcome (or `null`).
+ */
+async function probeDailyClaim(
+  base: string,
+  credential: string,
+  fetcher: Fetcher,
+  options: {
+    readonly bound?: QoderNativeIdentity | null;
+    readonly alt?: QoderNativeIdentity | null;
+  } = {},
+): Promise<{ result: { state: DailyCheckinState; amount: number; error: string | null }; identity: QoderNativeIdentity | null }> {
+  const basic = await tryClaimDaily(base, campaignHeaders(credential), fetcher);
+  if (basic.state === "claimed" || basic.state === "already_claimed") {
+    return { result: basic, identity: null };
+  }
+  if (basic.state === "unavailable") {
+    const identities = [options.bound, options.alt].filter((i): i is QoderNativeIdentity => i !== null && i !== undefined);
+    for (const identity of identities) {
+      const headers = { ...campaignHeaders(credential), ...qoderMachineHeaders(identity) };
+      const result = await tryClaimDaily(base, headers, fetcher);
+      if (result.state === "claimed" || result.state === "already_claimed") {
+        return { result, identity };
+      }
+      // Only an error falls through to the next identity (e.g. the bound one
+      // stopped working). Any honest outcome (unavailable/not_eligible) is
+      // terminal.
+      if (result.state !== "error") return { result, identity };
+    }
+  }
+  return { result: basic, identity: null };
 }
 
 /**
@@ -113,10 +250,10 @@ async function fetchCampaigns(
  * same-person block (not a failure of this account's day), and anything else
  * is an error.
  */
-async function claimCampaign(
+async function claimWithHeaders(
   base: string,
   campaignId: string,
-  credential: string,
+  headers: Record<string, string>,
   fetcher: Fetcher,
 ): Promise<{ state: DailyCheckinState; amount: number }> {
   const url = base + CAMPAIGN_CLAIM_PATH.replace("%s", encodeURIComponent(campaignId));
@@ -124,11 +261,7 @@ async function claimCampaign(
   try {
     response = await fetcher(url, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${credential}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
+      headers: { ...headers, "Content-Type": "application/json" },
       body: "{}",
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
@@ -233,6 +366,16 @@ export async function fetchQoderDailyCheckin(args: {
   readonly credential: string;
   readonly fetcher: Fetcher;
   readonly now?: () => Date;
+  /**
+   * The account's persisted native device identity. When absent and
+   * `nativeIdentityStore` is provided, the first check-in mints one and
+   * persists it (see `allocateQoderNativeIdentity`). When the store is absent
+   * too (tests), `identities` supplies the identities to probe.
+   */
+  readonly nativeIdentity?: NativeIdentityRecord | null;
+  readonly nativeIdentityStore?: QoderNativeIdentityStore;
+  /** Test-only: override the identity list (defaults to bridge-minted). */
+  readonly identities?: readonly QoderNativeIdentity[];
 }): Promise<DailyCheckinResult> {
   const { providerId, accountId, credential, fetcher } = args;
   const baseResult = baseOutcome(providerId, accountId);
@@ -258,46 +401,76 @@ export async function fetchQoderDailyCheckin(args: {
     };
   }
 
-  // Legacy surface absent: campaign fallback.
-  const campaigns = await fetchCampaigns(base, credential, fetcher);
-  if (campaigns === null) {
-    return { ...baseResult, state: "error", error: "Check-in surface unavailable (legacy 404 and campaign list failed)." };
+  // Legacy surface absent: campaign fallback. Prefer the account's persisted
+  // device (loaded from the store); on first check-in with no stored device,
+  // mint one before probing so the account claims under the same identity
+  // every day.
+  const store = args.nativeIdentityStore;
+  let bound: QoderNativeIdentity | null = null;
+  let boundRecord: NativeIdentityRecord | null = args.nativeIdentity ?? null;
+  if (store) {
+    boundRecord = (await store.get(providerId, accountId)) ?? boundRecord;
   }
-  let alreadySeen = false;
-  for (const campaign of campaigns) {
-    const rec = asRecord(campaign);
-    if (!rec) continue;
-    const benefit = asRecord(rec["benefit"]);
-    const kind = String(benefit?.["kind"] ?? "").toUpperCase();
-    if (kind !== "CREDITS" && kind !== "") continue;
-    const actionType = String(rec["action_type"] ?? "");
-    if (actionType !== "" && actionType !== "CLAIM_BENEFIT") continue;
-    const claimStatus = String(rec["claim_status"] ?? "").toUpperCase();
-    if (claimStatus === "CLAIMED") {
-      alreadySeen = true;
-      continue;
+  if (boundRecord) {
+    // Ensure the stored device is active on this host (replay its seed).
+    const active = store ? await ensureQoderNativeIdentity(store, providerId, accountId) : true;
+    if (active) {
+      bound = {
+        machineToken: boundRecord.machineToken,
+        machineType: boundRecord.machineType,
+        machineCode: boundRecord.machineCode,
+        isVm: false,
+        source: "runtime-info",
+      };
     }
-    if (claimStatus !== "CLAIMABLE") continue;
-    const campaignId = String(rec["campaign_id"] ?? "");
-    if (!campaignId) continue;
-    const result = await claimCampaign(base, campaignId, credential, fetcher);
-    if (result.state === "claimed") {
-      const amount = asNumber(benefit?.["amount"]) ?? result.amount;
-      return { ...baseResult, state: "claimed", credit: amount, streakDays: null };
+  }
+  if (!bound && store) {
+    const minted = await allocateQoderNativeIdentity(store, providerId, accountId);
+    if (minted) {
+      boundRecord = minted;
+      bound = {
+        machineToken: minted.machineToken,
+        machineType: minted.machineType,
+        machineCode: minted.machineCode,
+        isVm: false,
+        source: "runtime-info",
+      };
     }
-    if (result.state === "already_claimed") {
-      alreadySeen = true;
-      continue;
+  }
+
+  const alt = args.identities?.[0] ?? null;
+  const probe = await probeDailyClaim(base, credential, fetcher, {
+    bound,
+    alt,
+  });
+  const probed = probe.result;
+
+  // If a non-bound identity won (the bound one errored), persist it as the
+  // account's device — but only when its token is actually free, so the
+  // one-device-per-account invariant holds.
+  if (store && probe.identity !== null && probe.identity.machineToken !== bound?.machineToken) {
+    const occupied = await store.occupied(accountId);
+    if (!occupied.has(probe.identity.machineToken)) {
+      try {
+        await store.bind(providerId, accountId, {
+          machineToken: probe.identity.machineToken,
+          machineType: probe.identity.machineType,
+          machineCode: probe.identity.machineCode,
+        });
+      } catch (error) {
+        log.warn(`[qoder] could not bind native identity for account=${accountId}`, error as Error);
+      }
     }
-    if (result.state === "error") {
-      return { ...baseResult, state: "error", error: "Campaign claim failed." };
-    }
-    // not_eligible (same-person block): stop trying further campaigns.
+  }
+
+  if (probed.state === "claimed") {
+    return { ...baseResult, state: "claimed", credit: probed.amount, streakDays: null };
+  }
+  if (probed.state === "already_claimed") {
+    return { ...baseResult, state: "already_claimed", streakDays: null };
+  }
+  if (probed.state === "not_eligible") {
     return { ...baseResult, state: "not_eligible", error: "Same-person claim already used today." };
   }
-  return {
-    ...baseResult,
-    state: alreadySeen ? "already_claimed" : "unavailable",
-    error: alreadySeen ? null : "No daily CREDITS campaign claimable.",
-  };
+  return { ...baseResult, state: probed.state, error: probed.error };
 }

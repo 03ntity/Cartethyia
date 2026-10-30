@@ -43,6 +43,10 @@ import {
   fetchQoderDailyCheckin,
   isQoderCheckinProvider,
 } from "../../providers/integrations/qoder/qoder-checkin";
+import {
+  DrizzleQoderNativeIdentityStore,
+  type QoderNativeIdentityStore,
+} from "../../providers/integrations/qoder/qoder-native-identity-store";
 import { buddyAccountUid } from "../../providers/integrations/buddy/buddy-oauth-shared";
 import {
   supportsAccountReset,
@@ -108,6 +112,7 @@ async function runAccountCheckin(
   account: { id: string; providerId: string },
   credential: string,
   forceClaim: boolean,
+  nativeIdentityStore?: QoderNativeIdentityStore,
 ): Promise<DailyCheckinResult> {
   if (isQoderCheckinProvider(account.providerId)) {
     return fetchQoderDailyCheckin({
@@ -115,6 +120,7 @@ async function runAccountCheckin(
       accountId: account.id,
       credential,
       fetcher: globalThis.fetch,
+      ...(nativeIdentityStore ? { nativeIdentityStore } : {}),
     });
   }
   return fetchDailyCheckin({
@@ -202,6 +208,7 @@ async function runDailyGrowthForAccount(
           accountId: account.id,
           credential,
           fetcher,
+          nativeIdentityStore: new DrizzleQoderNativeIdentityStore(refreshDeps.db),
         })
       : await fetchDailyCheckin({
           providerId,
@@ -884,7 +891,7 @@ export function registerAccountQuotaTenantRoutes(
           account.providerId as ProviderId,
           account.id,
         );
-        result = await runAccountCheckin(account, credential, true);
+        result = await runAccountCheckin(account, credential, true, new DrizzleQoderNativeIdentityStore(db));
       } catch (error) {
         result = {
           providerId: account.providerId,

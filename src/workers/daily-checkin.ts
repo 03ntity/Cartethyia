@@ -33,6 +33,7 @@ import {
   fetchQoderDailyCheckin,
   isQoderCheckinProvider,
 } from "../providers/integrations/qoder/qoder-checkin";
+import { DrizzleQoderNativeIdentityStore } from "../providers/integrations/qoder/qoder-native-identity-store";
 
 export { DAILY_CHECKIN_PROVIDER_IDS, checkinDayKey };
 export type { DailyCheckinResult };
@@ -433,6 +434,7 @@ export async function attemptDailyGrowthPass(args: {
           accountId,
           credential,
           fetcher,
+          ...(db ? { nativeIdentityStore: new DrizzleQoderNativeIdentityStore(db) } : {}),
         })
       : await fetchDailyCheckin({
           providerId,

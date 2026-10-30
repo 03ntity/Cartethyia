@@ -232,7 +232,9 @@ export function qoderMachineIdForAccount(accountId: string): string {
  * directly as the COSY identity's oauth token; the user id and machine id
  * come from the `auth_state` the login persisted. Fails closed with a
  * reconnect prompt when the identity is absent (e.g. an account created
- * before `auth_state` existed) instead of signing with a guessed id.
+ * before `auth_state` existed, or an import that dropped the field) instead
+ * of signing with a guessed id. The message names the missing field so an
+ * operator can fix the export instead of re-logging blind.
  */
 export function qoderOAuthAuth(
   secret: string,
@@ -240,11 +242,11 @@ export function qoderOAuthAuth(
   accountId: string | undefined,
 ): QoderAuth {
   const state = parseQoderOAuthState(authState);
-  if (state === undefined || !state.userId) {
+  if (state === undefined) {
     throw new GatewayError(
       "authentication_failed",
       401,
-      "Qoder OAuth account is missing its user identity; sign in again",
+      "Qoder OAuth account is missing its user identity (auth_state.userId/machineId absent or empty — re-login, or re-export with authState included); sign in again",
     );
   }
   return {

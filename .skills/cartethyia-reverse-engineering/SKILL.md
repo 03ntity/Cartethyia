@@ -88,6 +88,22 @@ rejected by `/responses`.
 nothing about the body. Stop and mark the contract unknown.
 - Inference-only headers belong in the adapter's request-time path, not in a
 constant shared with OAuth and catalog calls.
+- **Grep by surrounding context, not by name.** Minified bundles scramble names
+(`Ldn={ACTIVITY:"/algo/..."}` says nothing), but string literals survive —
+search for a known literal (`sash/api`, a message text, a base64 salt) and pull
+±400-character windows, then chase the private constant at its call sites. This
+found an entire undocumented claim-API family no public source described
+(Qoder's activity endpoints, 2026-10).
+- **Capture the real request when the guess grid 403s.** Once the wire rejects
+every signature variant, stop mutating guesses — grids burn calls and prove
+nothing — and dump the client's own request: a one-line `https.request`/
+`http.request` wrapper prepended to the shared-process/main-process bundle,
+appending host/method/path/headers to a scratch file. Check the client's own
+`logs/**/network.log` too. Back up the file and restore it byte-for-byte
+afterward — a reverse session is not entitled to change the installed build.
+Qoder's gateway signature turned out to hash the *content-length string*, a
+shape no amount of guessing would have yielded (method and findings in
+[`documentation/research/qoder-trial-activity-endpoints.md`](../../documentation/research/qoder-trial-activity-endpoints.md)).
 
 Keep an evidence ledger: question, source and version, observed result, and
 what is still unknown. Turn only the verified rows into a Cartethyia change,

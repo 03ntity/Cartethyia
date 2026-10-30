@@ -4,9 +4,13 @@
  */
 import { expect, test } from "bun:test";
 import {
+  buildCampaignHeaders,
   fetchQoderDailyCheckin,
   isQoderCheckinProvider,
 } from "../../../src/providers/integrations/qoder/qoder-checkin";
+import type { QoderNativeIdentityStore } from "../../../src/providers/integrations/qoder/qoder-native-identity-store";
+import type { QoderNativeIdentity } from "../../../src/providers/integrations/qoder/qoder-umid";
+import type { NativeIdentityRecord } from "../../../src/persistence/schema";
 
 const BASE = "https://openapi.qoder.sh";
 const STATUS_URL = `${BASE}/sash/api/v1/me/daily-check-in/status`;
@@ -30,21 +34,40 @@ function statusBody(overrides: Record<string, unknown> = {}): string {
 
 function fakeFetcher(routes: Array<{ url: string; method: string; status: number; body: string }>) {
   const calls: string[] = [];
+  const requests: Array<{ method: string; url: string; headers: Record<string, string> | undefined }> = [];
   const fetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
     calls.push(`${method} ${url}`);
+    requests.push({ method, url, headers: init?.headers as Record<string, string> | undefined });
     const route = routes.find((r) => r.url === url && r.method === method);
     if (!route) return new Response("unexpected request", { status: 500 });
     return new Response(route.body, { status: route.status });
   };
-  return { fetcher, calls };
+  return { fetcher, calls, requests };
 }
 
 test("isQoderCheckinProvider covers both realms", () => {
   expect(isQoderCheckinProvider("qoder")).toBe(true);
   expect(isQoderCheckinProvider("qodercn")).toBe(true);
   expect(isQoderCheckinProvider("cb")).toBe(false);
+});
+
+test("campaign headers carry the desktop identity, plus native UMID when provided", () => {
+  const base = buildCampaignHeaders("tok");
+  expect(base["Authorization"]).toBe("Bearer tok");
+  expect(base["Cosy-ClientType"]).toBe("10");
+  expect(base["User-Agent"]).toBe("Qoder");
+  expect(base["Cosy-Version"]).toBeTruthy();
+  expect(base["cosy-machinetoken"]).toBeUndefined();
+
+  const native = buildCampaignHeaders("tok", {
+    "cosy-machinetoken": "native-token",
+    "cosy-machineos": "x86_64_win32",
+  });
+  expect(native["cosy-machinetoken"]).toBe("native-token");
+  expect(native["cosy-machineos"]).toBe("x86_64_win32");
+  expect(native["Cosy-ClientType"]).toBe("10");
 });
 
 test("already claimed today short-circuits before any claim POST", async () => {
@@ -98,15 +121,15 @@ test("legacy 404 falls back to the CREDITS campaign claim", async () => {
   const campaignList = JSON.stringify({
     campaigns: [
       {
-        campaign_id: "camp-1",
-        campaign_key: "daily-credits",
-        claim_status: "CLAIMABLE",
-        action_type: "CLAIM_BENEFIT",
+        campaignId: "camp-1",
+        campaignKey: "daily-credits",
+        claimStatus: "CLAIMABLE",
+        actionType: "CLAIM_BENEFIT",
         benefit: { kind: "CREDITS", amount: 100 },
       },
     ],
   });
-  const { fetcher, calls } = fakeFetcher([
+  const { fetcher, calls, requests } = fakeFetcher([
     { url: STATUS_URL, method: "GET", status: 404, body: "" },
     { url: CAMPAIGNS_URL, method: "GET", status: 200, body: campaignList },
     { url: CAMPAIGN_CLAIM_URL, method: "POST", status: 200, body: JSON.stringify({ status: "CLAIMED", benefit: { amount: 100 } }) },
@@ -120,6 +143,16 @@ test("legacy 404 falls back to the CREDITS campaign claim", async () => {
   expect(result.state).toBe("claimed");
   expect(result.credit).toBe(100);
   expect(calls).toContain(`POST ${CAMPAIGN_CLAIM_URL}`);
+
+  // The campaign surface requires the desktop client headers; without them the
+  // upstream hides the list (showCampaign=false) and the grant never appears.
+  const campaignGet = requests.find((r) => r.url === CAMPAIGNS_URL && r.method === "GET");
+  expect(campaignGet?.headers?.["Cosy-ClientType"]).toBe("10");
+  expect(campaignGet?.headers?.["User-Agent"]).toBe("Qoder");
+  expect(campaignGet?.headers?.["Cosy-Version"]).toBeTruthy();
+  const claimPost = requests.find((r) => r.url === CAMPAIGN_CLAIM_URL && r.method === "POST");
+  expect(claimPost?.headers?.["Cosy-ClientType"]).toBe("10");
+  expect(claimPost?.headers?.["Content-Type"]).toBe("application/json");
 });
 
 test("legacy 404 with no claimable campaign reports unavailable", async () => {
@@ -160,3 +193,200 @@ test("missing credential fails closed", async () => {
   });
   expect(result.state).toBe("error");
 });
+
+/** In-memory store double recording bind calls, with a pre-seeded record. */
+function fakeStore(seed?: NativeIdentityRecord): QoderNativeIdentityStore & { readonly bound: NativeIdentityRecord[] } {
+  const bound: NativeIdentityRecord[] = [];
+  let current = seed;
+  return {
+    bound,
+    get: async () => current,
+    occupied: async () => new Set<string>(),
+    bind: async (_providerId, _accountId, record) => {
+      current = record;
+      bound.push(record);
+    },
+  };
+}
+
+const STORED_3: NativeIdentityRecord = {
+  machineToken: "stored-token",
+  machineType: "x86_64_linux",
+  machineCode: "stored-code",
+};
+
+test("bound identity is tried first and its claim is persisted as the slot", async () => {
+  // Legacy surface absent; the bare headers see no campaign, while the bound
+  // identity (machine token `stored-token`) exposes the claimable CREDITS one.
+  const claimable = JSON.stringify({
+    campaigns: [
+      {
+        campaignId: "camp-1",
+        campaignKey: "daily-credits",
+        claimStatus: "CLAIMABLE",
+        actionType: "CLAIM_BENEFIT",
+        benefit: { kind: "CREDITS", amount: 100 },
+      },
+    ],
+  });
+  const calls: Array<{ method: string; url: string; headers?: Record<string, string> }> = [];
+  const fetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    const headers = init?.headers as Record<string, string> | undefined;
+    calls.push({ method, url, ...(headers !== undefined ? { headers } : {}) });
+    const native = headers?.["cosy-machinetoken"];
+    if (url === STATUS_URL) return new Response("", { status: 404 });
+    if (url === CAMPAIGNS_URL) {
+      const body = native === STORED_3.machineToken ? claimable : JSON.stringify({ campaigns: [] });
+      return new Response(body, { status: 200 });
+    }
+    if (url === CAMPAIGN_CLAIM_URL) {
+      return new Response(JSON.stringify({ status: "CLAIMED", benefit: { amount: 100 } }), { status: 200 });
+    }
+    return new Response("unexpected request", { status: 500 });
+  };
+  const store = fakeStore(STORED_3);
+  const result = await fetchQoderDailyCheckin({
+    providerId: "qoder",
+    accountId: "a8",
+    credential: "tok",
+    fetcher,
+    nativeIdentity: STORED_3,
+    nativeIdentityStore: store,
+  });
+  expect(result.state).toBe("claimed");
+  expect(result.credit).toBe(100);
+  // The claim was made under the stored machine token.
+  const claimPost = calls.find((c) => c.method === "POST" && c.url === CAMPAIGN_CLAIM_URL);
+  expect(claimPost?.headers?.["cosy-machinetoken"]).toBe("stored-token");
+  // Already bound → no new bind call.
+  expect(store.bound).toEqual([]);
+});
+
+test("a bound identity that already claimed today is terminal and reused", async () => {
+  // Bare headers see no campaign (unavailable); the bound identity's campaign
+  // is already claimed — terminal, no enumeration fallback, no re-bind.
+  const claimed = JSON.stringify({
+    campaigns: [
+      {
+        campaignId: "camp-1",
+        claimStatus: "CLAIMED",
+        actionType: "CLAIM_BENEFIT",
+        benefit: { kind: "CREDITS", amount: 100 },
+      },
+    ],
+  });
+  const campaignGets: Array<Record<string, string> | undefined> = [];
+  const fetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = String(input);
+    const headers = init?.headers as Record<string, string> | undefined;
+    if (url === STATUS_URL) return new Response("", { status: 404 });
+    if (url === CAMPAIGNS_URL) {
+      campaignGets.push(headers);
+      const native = headers?.["cosy-machinetoken"];
+      return new Response(native === STORED_3.machineToken ? claimed : JSON.stringify({ campaigns: [] }), { status: 200 });
+    }
+    return new Response("unexpected request", { status: 500 });
+  };
+  const store = fakeStore(STORED_3);
+  const result = await fetchQoderDailyCheckin({
+    providerId: "qoder",
+    accountId: "a9",
+    credential: "tok",
+    fetcher,
+    nativeIdentity: STORED_3,
+    nativeIdentityStore: store,
+  });
+  expect(result.state).toBe("already_claimed");
+  // Two probes: the basic one and the bound one. No enumeration fallback.
+  expect(campaignGets.length).toBe(2);
+  expect(campaignGets[1]?.["cosy-machinetoken"]).toBe("stored-token");
+  expect(store.bound).toEqual([]);
+});
+
+test("a bound identity reporting unavailable is honest and does not steal another slot", async () => {
+  const campaignGets: Array<Record<string, string> | undefined> = [];
+  const fetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = String(input);
+    const headers = init?.headers as Record<string, string> | undefined;
+    if (url === STATUS_URL) return new Response("", { status: 404 });
+    if (url === CAMPAIGNS_URL) {
+      campaignGets.push(headers);
+      return new Response(JSON.stringify({ campaigns: [] }), { status: 200 });
+    }
+    return new Response("unexpected request", { status: 500 });
+  };
+  const store = fakeStore(STORED_3);
+  const result = await fetchQoderDailyCheckin({
+    providerId: "qoder",
+    accountId: "a10",
+    credential: "tok",
+    fetcher,
+    nativeIdentity: STORED_3,
+    nativeIdentityStore: store,
+  });
+  expect(result.state).toBe("unavailable");
+  // Two probes: basic, then the bound identity — and no enumeration fallback,
+  // so the account keeps its slot instead of stealing another's.
+  expect(campaignGets.length).toBe(2);
+  expect(campaignGets[1]?.["cosy-machinetoken"]).toBe("stored-token");
+  expect(store.bound).toEqual([]);
+});
+
+test("a bound identity that errors falls back to the alternative identity, and the winner is persisted", async () => {
+  const claimable = JSON.stringify({
+    campaigns: [
+      {
+        campaignId: "camp-1",
+        campaignKey: "daily-credits",
+        claimStatus: "CLAIMABLE",
+        actionType: "CLAIM_BENEFIT",
+        benefit: { kind: "CREDITS", amount: 100 },
+      },
+    ],
+  });
+  const calls: Array<{ method: string; url: string; headers?: Record<string, string> }> = [];
+  const fetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    const headers = init?.headers as Record<string, string> | undefined;
+    calls.push({ method, url, ...(headers !== undefined ? { headers } : {}) });
+    const native = headers?.["cosy-machinetoken"];
+    if (url === STATUS_URL) return new Response("", { status: 404 });
+    if (url === CAMPAIGNS_URL) {
+      if (native === STORED_3.machineToken) return new Response("", { status: 500 });
+      if (native === "fb-token") return new Response(claimable, { status: 200 });
+      return new Response(JSON.stringify({ campaigns: [] }), { status: 200 });
+    }
+    if (url === CAMPAIGN_CLAIM_URL) {
+      return new Response(JSON.stringify({ status: "CLAIMED", benefit: { amount: 100 } }), { status: 200 });
+    }
+    return new Response("unexpected request", { status: 500 });
+  };
+  const store = fakeStore(STORED_3);
+  const fallbackIdentity: QoderNativeIdentity = {
+    machineToken: "fb-token",
+    machineType: "x86_64_linux",
+    machineCode: "fb-code",
+    isVm: false,
+    source: "runtime-info",
+  };
+  const result = await fetchQoderDailyCheckin({
+    providerId: "qoder",
+    accountId: "a11",
+    credential: "tok",
+    fetcher,
+    nativeIdentity: STORED_3,
+    nativeIdentityStore: store,
+    identities: [fallbackIdentity],
+  });
+  expect(result.state).toBe("claimed");
+  // The fallback identity's token was used for the claim.
+  const claimPost = calls.find((c) => c.method === "POST" && c.url === CAMPAIGN_CLAIM_URL);
+  expect(claimPost?.headers?.["cosy-machinetoken"]).toBe("fb-token");
+  // The winning fallback identity was persisted as the new device.
+  expect(store.bound).toEqual([{ machineToken: "fb-token", machineType: "x86_64_linux", machineCode: "fb-code" }]);
+});
+
+

@@ -335,10 +335,19 @@ export class QoderOAuthClient extends OAuthDeviceFlow {
     const expireTime = parseQoderExpiry(body?.expires_at, body?.expires_in);
     const info = await this.fetchUserInfo(accessToken);
     const label = info.name || info.email || undefined;
-    // The token response does not always name the user id; the profile
-    // endpoint does, so it is the fallback before giving up on the identity
-    // dispatch needs for COSY signing.
+    // The poll body carries user_id; the profile endpoint is only a fallback.
+    // Dispatch needs the id for COSY signing, and an empty one would store an
+    // account that 401s on every request ("missing its user identity") — so a
+    // login that cannot resolve the id fails loudly here instead, while the
+    // user is still in front of the approval screen and can just retry.
     const resolvedUserId = nonEmptyTrimmedString(body?.user_id) ?? info.id;
+    if (resolvedUserId === "") {
+      return {
+        status: "failed",
+        reason:
+          "Qoder login could not resolve the user id (poll had no user_id and the profile lookup returned none); try again",
+      };
+    }
     const result: OAuthExchangeResult = {
       access: accessToken,
       // No refresh grant exists, so the upstream refresh token (when present)

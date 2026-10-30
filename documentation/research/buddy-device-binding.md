@@ -28,7 +28,7 @@ Per-provider payload profiles (same SDK, distinct product identity — tokens
 differ between providers):
 
 | Provider | channelId | productName | productVersion |
-|---|---|---|---|
+|---|---|---|
 | WorkBuddy | 400111 | WorkBuddy AI | 5.8.4 |
 | CodeBuddy | 400111 | CodeBuddy | 4.12.1 |
 
