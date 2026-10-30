@@ -29,7 +29,7 @@
  *   idempotent. There is no unique constraint to lean on: `telemetry_events`
  *   has a random PK, so the natural key is checked explicitly.
  */
-import { and, eq, gt, or, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, or, sql } from "drizzle-orm";
 import { gzipSync, gunzipSync, createGzip } from "node:zlib";
 import { differsFrom } from "../../persistence/dialect";
 import { TELEMETRY_EVENT_DIR, type TelemetryEventRecord } from "../../observability/event-log";
@@ -988,6 +988,40 @@ async function insertRows(
 }
 
 /**
+ * Nulls the 11 nullable policy columns on share children owned by `tenantId`.
+ *
+ * Auth resolves policy from the parent (`policy = parent ?? row`), so child
+ * copies of notes/limits/model_list/denylist are pure bloat. Migration 0029
+ * clears them once at boot; restore does not re-run numbered migrations, so
+ * an old backup that still carries populated children would reintroduce the
+ * bloat unless this runs inside the same restore transaction. Keep the SET
+ * list identical to migration 0029
+ * (`0029_null_share_child_policy_columns.sql` in both backends) and the write
+ * path in `issueSharedApiKey` (which no longer copies them).
+ */
+export async function normalizeShareChildPolicy(
+  db: CartethyiaDatabase,
+  tenantId: string,
+): Promise<void> {
+  await db
+    .update(apiKeys)
+    .set({
+      notesTitle: null,
+      notesSubtitle: null,
+      notesBody: null,
+      requestsPerMinute: null,
+      dailyTokenLimit: null,
+      monthlyTokenLimit: null,
+      lifetimeTokenBudget: null,
+      maxConcurrentRequests: null,
+      modelPrefix: null,
+      modelList: null,
+      clientRouterDenylist: null,
+    })
+    .where(and(eq(apiKeys.tenantId, tenantId), isNotNull(apiKeys.parentKeyId)));
+}
+
+/**
  * Applies a pre-validated restore inside one transaction.
  *
  * `order` is children-before-parents for the config tables. The tenant row is
@@ -1119,6 +1153,13 @@ export async function applyRestore(
       } else {
         restored[tableName(table)] = await insertRows(scoped, table, entry.rows, { tenantId });
       }
+    }
+
+    // Restore writes api_keys rows verbatim and does not re-run migration
+    // 0029. An old backup can therefore reintroduce populated child policy
+    // columns; re-apply the null-out for this tenant before committing.
+    if (replaceTables.includes(apiKeys)) {
+      await normalizeShareChildPolicy(scoped, tenantId);
     }
   });
 

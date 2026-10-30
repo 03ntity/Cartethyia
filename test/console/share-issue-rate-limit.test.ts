@@ -36,10 +36,18 @@ beforeAll(async () => {
   const tid = await ensureTenant();
   const pool = await getTestPool();
   token = randomUUID().replace(/-/g, "").repeat(2).slice(0, 64);
+  // Parent carries a full policy so the issue path's "do not copy" contract
+  // is observable: a regression that re-copies would leave these non-NULL on
+  // the child.
   const key = await pool.query<{ id: string }>(
     `insert into api_keys
-       (tenant_id, key_hash, key_mode, label, scopes, model_access_mode, enabled, revoked_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
+       (tenant_id, key_hash, key_mode, label, scopes, model_access_mode,
+        notes_title, notes_subtitle, notes_body, requests_per_minute,
+        daily_token_limit, monthly_token_limit, lifetime_token_budget,
+        max_concurrent_requests, model_prefix, model_list,
+        client_router_denylist, enabled, revoked_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+             $16::jsonb, $17::jsonb, $18, $19) returning id`,
     [
       tid,
       null,
@@ -47,6 +55,17 @@ beforeAll(async () => {
       "share template",
       JSON.stringify(["routing:invoke"]),
       "whitelist",
+      "Welcome",
+      "Subtitle",
+      "Body text",
+      60,
+      1000,
+      10_000,
+      100_000,
+      4,
+      "gpt-",
+      JSON.stringify(["gpt-4o"]),
+      JSON.stringify(["blocked-router"]),
       true,
       null,
     ],
@@ -117,5 +136,69 @@ dbDescribe("share issue — one child key per canonical IP", () => {
       }),
     );
     expect(res.status).toBe(201);
+  });
+
+  test("a minted child does not copy the template's policy columns", async () => {
+    // Third IP so this mint is independent of the earlier rate-limit cases.
+    const childRouter = createShareRouter({
+      db: getDb(),
+      shareStore: new DrizzleShareLinkStore(getDb()),
+      resolveClientIp: () => "203.0.113.50",
+    });
+    const res = await childRouter.handle(
+      new Request(`https://x/share/${token}/issue`, {
+        method: "POST",
+        body: JSON.stringify({ nameHint: "slim" }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { keyId?: string };
+    expect(typeof body.keyId).toBe("string");
+
+    const pool = await getTestPool();
+    const row = await pool.query<{
+      notes_title: string | null;
+      notes_subtitle: string | null;
+      notes_body: string | null;
+      requests_per_minute: number | null;
+      daily_token_limit: number | null;
+      monthly_token_limit: number | null;
+      lifetime_token_budget: number | null;
+      max_concurrent_requests: number | null;
+      model_prefix: string | null;
+      model_list: unknown;
+      client_router_denylist: unknown;
+      model_access_mode: string;
+      scopes: unknown;
+      label: string;
+      parent_key_id: string;
+    }>(
+      `select notes_title, notes_subtitle, notes_body, requests_per_minute,
+              daily_token_limit, monthly_token_limit, lifetime_token_budget,
+              max_concurrent_requests, model_prefix, model_list,
+              client_router_denylist, model_access_mode, scopes, label,
+              parent_key_id
+         from api_keys where id = $1`,
+      [body.keyId],
+    );
+    const child = row.rows[0]!;
+    expect(child.parent_key_id).toBe(parentKeyId);
+    expect(child.notes_title).toBeNull();
+    expect(child.notes_subtitle).toBeNull();
+    expect(child.notes_body).toBeNull();
+    expect(child.requests_per_minute).toBeNull();
+    expect(child.daily_token_limit).toBeNull();
+    expect(child.monthly_token_limit).toBeNull();
+    expect(child.lifetime_token_budget).toBeNull();
+    expect(child.max_concurrent_requests).toBeNull();
+    expect(child.model_prefix).toBeNull();
+    expect(child.model_list).toBeNull();
+    expect(child.client_router_denylist).toBeNull();
+    // NOT NULL default — never copied from parent, always the schema default.
+    expect(child.model_access_mode).toBe("whitelist");
+    // scopes stays populated (restore-required + NOT NULL).
+    expect(child.scopes).toEqual(["routing:invoke"]);
+    expect(child.label.length).toBeGreaterThan(0);
   });
 });

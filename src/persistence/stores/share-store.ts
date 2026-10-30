@@ -525,6 +525,12 @@ export class DrizzleShareLinkStore implements ShareLinkStore {
       const suffix = randomInt(1000, 10_000).toString();
       const label =
         hint.length === 0 ? `key-${suffix}` : `${hint}-${suffix}`.slice(0, 12);
+      // Child rows carry identity + scopes only. Auth resolves every policy
+      // field from the parent (`policy = parent ?? row`), so copying notes,
+      // limits, model_list, denylist, etc. was pure write-amplification.
+      // Nullable policy columns stay NULL; `model_access_mode` takes its
+      // NOT NULL default ('whitelist'). Keep in sync with migration 0029 and
+      // `normalizeShareChildPolicy` in `src/console/backup/store.ts`.
       const [child] = await tx
         .insert(apiKeys)
         .values({
@@ -538,18 +544,6 @@ export class DrizzleShareLinkStore implements ShareLinkStore {
           scopes: parent.scopes,
           keyPrefix: material.keyPrefix,
           keyEncrypted: null,
-          notesTitle: parent.notesTitle,
-          notesSubtitle: parent.notesSubtitle,
-          notesBody: parent.notesBody,
-          requestsPerMinute: parent.requestsPerMinute,
-          dailyTokenLimit: parent.dailyTokenLimit,
-          monthlyTokenLimit: parent.monthlyTokenLimit,
-          lifetimeTokenBudget: parent.lifetimeTokenBudget,
-          maxConcurrentRequests: parent.maxConcurrentRequests,
-          modelPrefix: parent.modelPrefix,
-          modelAccessMode: parent.modelAccessMode,
-          modelList: parent.modelList,
-          clientRouterDenylist: parent.clientRouterDenylist,
           lifetimeTokensConsumed: 0,
         })
         .returning({ id: apiKeys.id, tenantId: apiKeys.tenantId, createdAt: apiKeys.createdAt });
