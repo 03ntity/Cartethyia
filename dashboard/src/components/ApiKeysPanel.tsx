@@ -23,6 +23,8 @@ import { toast } from "../lib/toast";
 import { getErrorMessage } from "../data/api";
 import { compactTokens, limitLabel } from "../lib/format/tokens";
 import { useClipboard } from "../hooks/use-clipboard";
+import { useRuntimeSettings, useUpdateRuntimeSettings } from "../hooks/settings";
+import { PowerOff } from "lucide-react";
 import type { ApiKeyResponse } from "../data/contracts";
 import {
   useApiKeys,
@@ -49,6 +51,10 @@ export function ApiKeysPanel(): ReactNode {
   const revealKey = useRevealApiKey();
   const reorderKeys = useReorderApiKeys();
   const { copy } = useClipboard();
+  const settings = useRuntimeSettings();
+  const updateSettings = useUpdateRuntimeSettings();
+  const invokeDisabled = settings.data?.invokeDisabled === true;
+  const [invokeConfirmOpen, setInvokeConfirmOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<ApiKeyResponse | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyResponse | null>(null);
@@ -86,6 +92,25 @@ export function ApiKeysPanel(): ReactNode {
   // personal path is offered from the row.
   const rotateWarning = regenerateWarning(true);
 
+  // Global invoke kill switch. This is the tenant-wide "deny all keys"
+  // breaker: when invoke is off, every /v1/* request is refused with 503 and
+  // nothing upstream is dialed. The toggle is confirm-gated because the off
+  // state takes the whole tenant's credentials offline.
+  const flipInvoke = (next: boolean) => {
+    updateSettings.mutate(
+      { invokeDisabled: !next },
+      {
+        onSuccess: () =>
+          toast.success(
+            next
+              ? "Invoke enabled — routing has resumed."
+              : "Invoke disabled — every API key is now refused (503).",
+          ),
+        onError: (err) => toast.error(err instanceof Error ? err.message : "Could not save the setting"),
+      },
+    );
+  };
+
   return (
     <Card>
       <CardHeader
@@ -93,7 +118,16 @@ export function ApiKeysPanel(): ReactNode {
         subtitle="Manage tenant API keys, model access, budgets, and sharing."
         icon={<KeyRound size={16} />}
         action={
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Button
+              variant={invokeDisabled ? "primary" : "secondary"}
+              size="sm"
+              loading={settings.isLoading || updateSettings.isPending}
+              onClick={() => setInvokeConfirmOpen(true)}
+              icon={<PowerOff size={13} />}
+            >
+              {invokeDisabled ? "Enable Invoke" : "Disable Invoke"}
+            </Button>
             <Button
               variant="primary"
               size="sm"
@@ -379,6 +413,21 @@ export function ApiKeysPanel(): ReactNode {
         danger
       />
 
+      <ConfirmDialog
+        open={invokeConfirmOpen}
+        onClose={() => setInvokeConfirmOpen(false)}
+        onConfirm={async () => {
+          flipInvoke(invokeDisabled);
+        }}
+        title={invokeDisabled ? "Enable Invoke?" : "Disable Invoke?"}
+        message={
+          invokeDisabled
+            ? "Allow this tenant's API keys to invoke /v1/* routes again. Traffic resumes immediately."
+            : "Disable invocation for every API key in this tenant? All /v1/* requests will be refused with 503, and nothing upstream is dialed. No keys, accounts, or models are deleted — the dashboard stays reachable so you can re-enable."
+        }
+        confirmLabel={invokeDisabled ? "Enable Invoke" : "Disable Invoke"}
+        danger={!invokeDisabled}
+      />
 
       <ApiKeySecretDialog secret={revealedSecret} onClose={() => setRevealedSecret(null)} />
 
