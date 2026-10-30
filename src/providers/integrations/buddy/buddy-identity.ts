@@ -108,9 +108,16 @@ export function buddyEnterprise(context?: ProviderDispatchContext): string | und
  *
  * Resolution order:
  * 1. `auth_state.qimei36` — explicit operator-set binding (imported or edited).
- * 2. Determinstic derivation from the internal account id (sha256 → 32 hex).
+ * 2. Derived deterministically from the internal account id (sha256 → 32 hex).
  *    This keeps the binding stable across restarts without a database write,
  *    and gives each freshly-added account its own id automatically.
+ *
+ * IMPORTANT — the derived fallback is **not portable across instances**:
+ * export/import mints a NEW account id, so the derived binding changes and the
+ * upstream channel check (11128) rejects the re-imported account. The export
+ * path therefore materializes the raw result of this resolver into
+ * `auth_state.qimei36` whenever an account relies on the derivation, so a
+ * re-import carries the exact same device identity.
  *
  * Returns `undefined` only when no account id is available (unauthenticated).
  */
@@ -120,4 +127,18 @@ export function resolveBuddyDeviceBinding(context?: ProviderDispatchContext): st
   const accountId = context?.credential.account_id;
   if (accountId === undefined || accountId.length === 0) return undefined;
   return createHash("sha256").update(`wb2a:qimei36:${accountId}`).digest("hex").slice(0, 32);
+}
+
+/** Materializes the portable binding for an account into a stored auth-state
+ * map, when the account does not already pin one explicitly. Used by the
+ * export path so a re-import keeps the exact qimei36 device identity. */
+export function materializeBuddyDeviceBinding(
+  accountId: string,
+  authState: Readonly<Record<string, unknown>> | undefined,
+): Record<string, unknown> | undefined {
+  const existing = authState?.["qimei36"];
+  if (typeof existing === "string" && existing.trim().length > 0) return undefined;
+  if (accountId.length === 0) return undefined;
+  const derived = createHash("sha256").update(`wb2a:qimei36:${accountId}`).digest("hex").slice(0, 32);
+  return { ...(authState ?? {}), qimei36: derived };
 }

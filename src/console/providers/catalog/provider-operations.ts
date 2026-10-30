@@ -25,6 +25,7 @@ import type { OAuthLoginField } from "../../../providers/authentication/oauth-fl
 import { providerCredentialHint, providerCredentialUrl, providerDisplayName, providerHasAdapterUserAgent, providerOperatorNotice, providerServiceKinds, type CompatibilityProfile } from "../../../providers/provider-metadata";
 import type { AccountHealthEventRecord } from "../../../providers/operations/account-health-service";
 import { healthEventBuffer } from "../../../persistence/health-event-flush";
+import { materializeBuddyDeviceBinding } from "../../../providers/integrations/buddy/buddy-identity";
 import { CREDENTIAL_MODES, PROVIDER_READ_SCOPES, PROVIDER_WRITE_SCOPES, type BuddyGrowthTaskLedgerEntry } from "./contracts";
 import { enqueueCheckin } from "../../../workers/daily-checkin";
 import {
@@ -695,8 +696,22 @@ export function createProviderCatalogOperations(config: ProviderCatalogConfig) {
               // refresh and dispatch are addressed by.
               ...(() => {
                 const authState = authStates[account.id];
-                return authState !== undefined && Object.keys(authState).length > 0
-                  ? { authState }
+                // Buddy providers bind a per-account device identity
+                // (qimei36) that is normally derived from the INTERNAL account
+                // id. Export must materialize that raw binding into the
+                // exported auth state — otherwise a re-import mints a new
+                // account id, the derived binding changes, and the upstream
+                // channel check (11128) rejects the imported account.
+                const materialized =
+                  account.providerId === "cb" ||
+                  account.providerId === "cbcn" ||
+                  account.providerId === "workbuddy" ||
+                  account.providerId === "workbuddycn"
+                    ? materializeBuddyDeviceBinding(account.id, authState)
+                    : undefined;
+                const effectiveAuthState = materialized ?? authState;
+                return effectiveAuthState !== undefined && Object.keys(effectiveAuthState).length > 0
+                  ? { authState: effectiveAuthState }
                   : {};
               })(),
               ...(account.inflight === undefined ? {} : { inflight: account.inflight }),
