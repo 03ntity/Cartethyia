@@ -1,4 +1,4 @@
-import { Check, Copy, Globe, Loader2, PowerOff, RadioTower, TriangleAlert } from "lucide-react";
+import { Check, Copy, Globe, Loader2, RadioTower } from "lucide-react";
 import { useState } from "react";
 import { useEffect } from "react";
 import { type ReactNode } from "react";
@@ -8,13 +8,13 @@ import { Switch } from "../../components/ui/switch";
 import { Stack } from "../../components/ui/stack";
 import { ApiKeysPanel } from "../../components/ApiKeysPanel";
 import { CompressionPanel } from "../../components/CompressionPanel";
+import { InjectSystemPromptPanel } from "../../components/InjectSystemPromptPanel";
 import { useClipboard } from "../../hooks/use-clipboard";
 import {
   useRemoteSupport,
   useStartRemoteSupport,
   useStopRemoteSupport,
 } from "../../hooks/remote-support";
-import { useRuntimeSettings, useUpdateRuntimeSettings } from "../../hooks/settings";
 import type { RemoteSupportTool } from "../../data/contracts";
 import { toast } from "../../lib/toast";
 
@@ -204,75 +204,11 @@ function ApiEndpointCard() {
             </Button>
           </div>
           <p className="text-caption leading-normal text-text-secondary">
-            Point any SDK, CLI, or agent (e.g. OpenCode, Pi, OMP, Kilo, Cline, Droid and more clients) to this same-origin base URL.
+            Point any SDK, CLI, or coding agent — OpenCode, Pi, OMP, Kilo, Cline, Droid, and more — at this same-origin base URL.
             <span className="mt-1 block text-text-tertiary">
-              You may not put <code className="font-mono">/v1</code> on Claude Code — the CLI appends it itself.
+              For Claude Code, leave off <code className="font-mono">/v1</code> — its CLI appends it automatically.
             </span>
           </p>
-        </Stack>
-      </CardBody>
-    </Card>
-  );
-}
-
-
-/**
- * Global kill switch: stops every invoke and route for this tenant.
- *
- * Read as "invoke enabled" and stored as `invokeDisabled` because an absent
- * preference means on. A switch whose off position is the destructive one is
- * easy to misread, so the UI shows the positive state the operator is choosing
- * and inverts on write.
- */
-function InvokeKillSwitchCard() {
-  const settings = useRuntimeSettings();
-  const update = useUpdateRuntimeSettings();
-  const disabled = settings.data?.invokeDisabled === true;
-  const flip = (next: boolean) => {
-    update.mutate(
-      { invokeDisabled: !next },
-      {
-        onSuccess: () =>
-          toast.success(
-            next
-              ? "Invoke enabled — routing has resumed."
-              : "Invoke disabled — every request now returns 503 and nothing upstream is dialed.",
-          ),
-        onError: (err) => toast.error(err instanceof Error ? err.message : "Could not save the setting"),
-      },
-    );
-  };
-  return (
-    <Card>
-      <CardHeader
-        title="Invoke Switch"
-        subtitle="Stop every request without deleting anything"
-        icon={<PowerOff size={16} />}
-      />
-      <CardBody>
-        <Stack gap="10px">
-          <div className="flex items-center justify-between gap-4">
-            <p className="min-w-0 text-caption leading-normal text-text-secondary">
-              Off refuses every <code className="font-mono">/v1/*</code> request with 503. Nothing
-              is dispatched upstream, and no account, key, or model is changed — the dashboard stays
-              reachable so you can turn it back on.
-            </p>
-            <Switch
-              checked={!disabled}
-              disabled={settings.isLoading || update.isPending}
-              onChange={(next) => flip(next)}
-              aria-label="Toggle invoke for every request"
-            />
-          </div>
-          {disabled ? (
-            <p className="flex items-start gap-2 text-caption leading-normal text-warning">
-              <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
-              <span>
-                Invoke is off. Every API request is being refused, and any client pointed at this
-                gateway will keep failing until you switch it back on.
-              </span>
-            </p>
-          ) : null}
         </Stack>
       </CardBody>
     </Card>
@@ -309,14 +245,14 @@ function RemoteSupportCard() {
             <p className="text-badge leading-normal text-red-primary">{status.data?.message}</p>
           ) : null}
           <p className="text-caption leading-normal text-text-secondary">
-            Either way the gateway still sees the tunnel&apos;s address as the client, so set{" "}
-            <code className="font-mono">TRUSTED_PROXY_CIDRS</code> to the edge that forwards to
-            it — otherwise every remote caller is recorded as the loopback address.
+            No matter which tunnel you pick, the gateway sees the tunnel&apos;s address as the
+            client. Add the forwarding edge to{" "}
+            <code className="font-mono">TRUSTED_PROXY_CIDRS</code> so remote callers aren&apos;t
+            recorded as loopback.
           </p>
           <p className="text-badge leading-normal text-text-tertiary">
-            cloudflared and Tailscale are not installed by Cartethyia — install either one
-            yourself first. The tunnel is launched detached from this process, so it survives a
-            gateway restart.
+            Cartethyia doesn&apos;t install cloudflared or Tailscale for you — set up either one
+            yourself. Tunnels run detached from the gateway, so they keep working across restarts.
           </p>
         </Stack>
       </CardBody>
@@ -329,9 +265,9 @@ export default function Overview(): ReactNode {
   return (
     <Stack gap="16px">
       <ApiEndpointCard />
-      <InvokeKillSwitchCard />
       <RemoteSupportCard />
       <CompressionPanel />
+      <InjectSystemPromptPanel />
       <ApiKeysPanel />
     </Stack>
   );
