@@ -96,4 +96,7 @@ export const queryKeys = {
     summary: ["console", "inferhub", "summary"] as const,
     models: (prefix?: string) => ["console", "inferhub", "models", prefix ?? "all"] as const,
   },
+  systemPrompt: {
+    config: ["console", "system-prompt"] as const,
+  },
 } as const;

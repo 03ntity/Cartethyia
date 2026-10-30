@@ -51,12 +51,18 @@ export interface RemoteSupportStartResponse extends RemoteSupportStatus {
 }
 
 /** Human-readable install guidance, keyed by tool. Never an installer. */
-export const REMOTE_SUPPORT_INSTALL_HINT: Readonly<Record<RemoteSupportTool, string>> = {
-  cloudflared:
-    "cloudflared is not installed. Install it yourself (winget install Cloudflare.cloudflared) and try again.",
-  tailscale:
-    "tailscale is not installed. Install it yourself (winget install Tailscale.Tailscale), run `tailscale up` once, then try again.",
-};
+export function remoteSupportInstallHint(tool: RemoteSupportTool): string {
+  // Cross-OS install hint: pick the host's package manager. A Windows-only
+  // hint on Linux/macOS would be nonsense (and vice versa).
+  const win = process.platform === "win32";
+  const mac = process.platform === "darwin";
+  const installCommand = (pkg: string): string =>
+    win ? `winget install ${pkg}` : mac ? `brew install ${pkg}` : `sudo apt-get install -y ${pkg}`;
+  if (tool === "cloudflared") {
+    return `cloudflared is not installed. Install it yourself (${installCommand("cloudflared")}) and try again.`;
+  }
+  return `tailscale is not installed. Install it yourself (${installCommand("tailscale")}), run \`tailscale up\` once, then try again.`;
+}
 
 export function isRemoteSupportTool(value: unknown): value is RemoteSupportTool {
   return typeof value === "string" && (REMOTE_SUPPORT_TOOLS as readonly string[]).includes(value);

@@ -18,7 +18,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, write
 import { join } from "node:path";
 import { resolveUserConfigDir } from "../../config/package-paths";
 import {
-  REMOTE_SUPPORT_INSTALL_HINT,
+  remoteSupportInstallHint,
   REMOTE_SUPPORT_TOOLS,
   type RemoteSupportBlocker,
   type RemoteSupportStatus,
@@ -430,7 +430,7 @@ export function createRemoteSupportService(config: RemoteSupportServiceConfig): 
           active: null,
           url: null,
           blocker: "not_installed",
-          message: REMOTE_SUPPORT_INSTALL_HINT[tool],
+          message: remoteSupportInstallHint(tool),
           port,
           installed: await detectInstalled(),
         };
