@@ -15,6 +15,7 @@ import {
 import { useDeployRelay } from "../hooks/network";
 import { getErrorMessage } from "../data/api";
 import { toast } from "../lib/toast";
+import { isSessionInvalidatedError } from "./relay-deploy-settle";
 
 /** Human labels and per-target fields for the deploy form. */
 const TARGET_META: Record<
@@ -58,6 +59,8 @@ const REGION_OPTIONS = RELAY_REGION_GROUPS.flatMap((group) =>
   group.regions.map((entry) => ({ value: entry.id, label: `${group.label} — ${entry.label}` })),
 );
 
+
+
 /**
  * Deploy a hosted relay (Cloudflare Workers / Vercel / Deno Deploy) and register
  * it as an outbound network pool.
@@ -70,6 +73,11 @@ const REGION_OPTIONS = RELAY_REGION_GROUPS.flatMap((group) =>
  *
  * Rendered as a modal launched from the Proxy Pool header, so it lives with the
  * pools it creates rather than as a separate always-on card.
+ *
+ * A settled deploy closes the modal: the relay is already registered as a pool,
+ * so what is left to do with it lives on the pool list behind this dialog, and
+ * the URL the operator may still want is carried by the toast and the audit
+ * entry rather than by a dialog left open.
  */
 export function RelayDeployModal({
   onClose,
@@ -105,8 +113,21 @@ export function RelayDeployModal({
           setLastUrl(result.relayUrl);
           setToken("");
           toast.success(`Relay deployed to ${result.relayUrl} and registered as a pool.`);
+          // A succeeded deploy is finished work: the pool exists and the list
+          // behind this dialog now shows it. Holding the modal open left the
+          // operator staring at a form whose job was already done — and the
+          // cleared token made a second deploy from here impossible anyway.
+          onClose();
         },
-        onError: (error) => toast.error(getErrorMessage(error, "Relay deploy failed.")),
+        onError: (error) => {
+          toast.error(getErrorMessage(error, "Relay deploy failed."));
+          // A failure that invalidates the session (a revoked or mistyped
+          // Cloudflare token answers as an authentication error) cannot be
+          // fixed inside this form, so it closes too. An ordinary failure stays
+          // open: the operator is one corrected field away from a retry, and
+          // discarding what they typed would be the wrong trade.
+          if (isSessionInvalidatedError(error)) onClose();
+        },
       },
     );
   };

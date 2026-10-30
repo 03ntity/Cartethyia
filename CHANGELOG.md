@@ -65,6 +65,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **A settled relay deploy closes its dialog.** Deploying a relay left the
+  modal open after it succeeded, so the operator stared at a form whose job
+  was already done (and whose token had been cleared, so a second deploy
+  from there was impossible anyway). A success now closes it: the relay is
+  registered as a pool and the list behind the dialog shows it. A failure
+  that invalidates the session — a revoked or mistyped Cloudflare token,
+  which signs the console out behind it — closes too, since retrying inside
+  the form can only repeat it. An ordinary failure stays open, because a
+  taken project name or a transient error is one edited field from
+  succeeding.
 - **Glass surfaces keep their blur on a built dashboard.** Every glass surface
   is driven at runtime by the Customization sliders (`--blur-cards`,
   `--blur-cards-depth`) through `backdrop-filter: blur(calc(…))`, which no
