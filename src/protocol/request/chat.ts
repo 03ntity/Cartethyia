@@ -549,6 +549,7 @@ export function canonicalToChatPayload(
     ...(options.maxOutputTokens === undefined ? {} : { maxOutputTokens: options.maxOutputTokens }),
   });
   delete payload["max_tokens"];
+  delete payload["max_completion_tokens"];
   if (bounded !== undefined) payload[tokenLimitField] = bounded;
   return payload;
 }

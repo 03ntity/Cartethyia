@@ -26,10 +26,40 @@ describe("output-token bounds — the caller's stated limit is never invented ov
     expect(canonicalToChatPayload(request({ max_tokens: 5_000 }))["max_tokens"]).toBe(5_000);
   });
 
+  test("chat emits only its selected token-limit field", () => {
+    const fromCompletionTokens = canonicalToChatPayload(request({ max_completion_tokens: 5_000 }));
+    expect(fromCompletionTokens["max_tokens"]).toBe(5_000);
+    expect(fromCompletionTokens).not.toHaveProperty("max_completion_tokens");
+
+    const withBothAliases = canonicalToChatPayload(request({
+      max_tokens: 5_000,
+      max_completion_tokens: 5_000,
+    }));
+    expect(withBothAliases["max_tokens"]).toBe(5_000);
+    expect(withBothAliases).not.toHaveProperty("max_completion_tokens");
+
+    const completionTokenField = canonicalToChatPayload(
+      request({ max_tokens: 5_000, max_completion_tokens: 5_000 }),
+      { tokenLimitField: "max_completion_tokens" },
+    );
+    expect(completionTokenField["max_completion_tokens"]).toBe(5_000);
+    expect(completionTokenField).not.toHaveProperty("max_tokens");
+  });
+
   test("responses forwards a stated limit verbatim", () => {
     expect(canonicalToResponsesPayload(request({ max_tokens: 5_000 }))["max_output_tokens"]).toBe(
       5_000,
     );
+  });
+
+  test("responses normalizes aliases to a single output-token field", () => {
+    const payload = canonicalToResponsesPayload(request({
+      max_tokens: 5_000,
+      max_completion_tokens: 5_000,
+    }));
+    expect(payload["max_output_tokens"]).toBe(5_000);
+    expect(payload).not.toHaveProperty("max_tokens");
+    expect(payload).not.toHaveProperty("max_completion_tokens");
   });
 
   test("chat forwards a limit above the old global ceiling", () => {
