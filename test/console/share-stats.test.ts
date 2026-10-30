@@ -26,7 +26,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { pgHandleFromPool } from "../../src/persistence/db-pg";
 import { apiKeys, telemetryEvents } from "../../src/persistence/schema";
 import { createRunId, dbDescribe, getTestPool, requireDatabase } from "../helpers/database";
@@ -113,8 +113,25 @@ async function writeRows(
   }
   // The share page reads telemetry_events (the durable SQL record), so rows go
   // in as inserts — the raw file is a mirror now, not the read source.
+  // Production stamps `family_template_key_id` at write time; the fixture must
+  // do the same so family reads behave like production (including after a key
+  // row is deleted).
+  const withFamily = await Promise.all(
+    rows.map(async (row) => {
+      if (typeof row.apiKeyId === "string" && row.apiKeyId.length > 0) {
+        const keyRow = await shareDb
+          .select({ parentKeyId: apiKeys.parentKeyId })
+          .from(apiKeys)
+          .where(eq(apiKeys.id, row.apiKeyId))
+          .limit(1);
+        const parent = keyRow[0]?.parentKeyId ?? null;
+        if (parent !== null) row.familyTemplateKeyId = parent;
+      }
+      return row;
+    }),
+  );
   await shareDb.insert(telemetryEvents).values(
-    rows.map((row) => ({ ...row, id: row.requestId })),
+    withFamily.map((row) => ({ ...row, id: row.requestId })),
   );
 }
 
@@ -464,6 +481,49 @@ dbDescribe("createShareStatsPort — time windows", () => {
       expect(stats.totals.monthTokens).toBe(yesterdayIsInThisMonth ? 3_000 : 1_000);
       // The all-time figure is unaffected by either boundary.
       expect(stats.totals.totalTokens).toBe(7_000);
+    } finally {
+      await scope.cleanup();
+    }
+  });
+
+  test("lifetime, daily, and monthly are distinct windows, not one number", async () => {
+    // The symptom that started this work: the Share page showed Lifetime,
+    // Daily, and Monthly all identical. Each window must be computed from its
+    // own boundary — all-time vs today vs this month — so a link with history
+    // older than a day or a month reports different values.
+    const scope = await familyScope("share-windows-distinct");
+    try {
+      const key = crypto.randomUUID();
+      const now = new Date();
+      const dayStart = new Date(now);
+      dayStart.setUTCHours(0, 0, 0, 0);
+      const monthStart = new Date(now);
+      monthStart.setUTCDate(1);
+      monthStart.setUTCHours(0, 0, 0, 0);
+      await writeRows([
+        // This month, before today.
+        row(scope.tenantId, key, {
+          createdAt: new Date(dayStart.getTime() - 1),
+          inputTokens: 2_000,
+          outputTokens: 0,
+        }),
+        // Before this month (all-time only).
+        row(scope.tenantId, key, {
+          createdAt: new Date(monthStart.getTime() - 1),
+          inputTokens: 4_000,
+          outputTokens: 0,
+        }),
+      ]);
+      const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
+        scope.tenantId,
+        { templateKeyId: key, memberCount: 1 },
+        EMPTY_RECIPIENTS,
+      );
+      // All three windows are distinct because the rows straddle both boundaries.
+      expect(stats.totals.totalTokens).toBe(6_000);
+      expect(stats.totals.monthTokens).toBeGreaterThanOrEqual(2_000);
+      expect(stats.totals.monthTokens).toBeLessThan(6_000);
+      expect(stats.totals.todayTokens).toBe(0);
     } finally {
       await scope.cleanup();
     }
@@ -1016,25 +1076,32 @@ dbDescribe("createShareStatsPort — many keys stay one family", () => {
 });
 
 dbDescribe("createShareStatsPort — a share whose keys were deleted", () => {
-  test("telemetry rows for a removed key stop being counted", async () => {
-    // A revoked recipient's traffic must leave the recipient's own view: the
-    // scope is the key ids the link still issues, so a deleted key drops out
-    // even though its telemetry rows remain.
-    const scope = await familyScope("share-revoked-key");
+  test("usage outlives a deleted child: the family total keeps its history", async () => {
+    // Usage accounting must not depend on the key row surviving: when the
+    // owner deletes a child key (hard delete), its past spend still belongs to
+    // the share family. The denormalized `family_template_key_id` on each
+    // telemetry row is what keeps the total intact after the key row is gone.
+    const scope = await familyScope("share-deleted-child");
     try {
-      const live = crypto.randomUUID();
-      const revoked = crypto.randomUUID();
+      const template = crypto.randomUUID();
+      const child = crypto.randomUUID();
+      await createFamily(scope.tenantId, template, [child]);
       await writeRows([
-        row(scope.tenantId, live, { inputTokens: 100, outputTokens: 0 }),
-        row(scope.tenantId, revoked, { inputTokens: 9_000, outputTokens: 0 }),
+        row(scope.tenantId, child, { inputTokens: 9_000, outputTokens: 500 }),
       ]);
+      // Hard-delete the child key row: `api_keys` row goes away, telemetry row
+      // stays. The family total must still see the child's spend.
+      const pool = await getTestPool();
+      await pool.query("delete from api_keys where id = $1", [child]);
       const stats = await createShareStatsPort({ db: shareDb }).getFamilyStats(
         scope.tenantId,
-        { templateKeyId: live, memberCount: 1 },
+        { templateKeyId: template, memberCount: 1 },
         EMPTY_RECIPIENTS,
       );
       expect(stats.totals.requests).toBe(1);
-      expect(stats.totals.inputTokens).toBe(100);
+      expect(stats.totals.totalTokens).toBe(9_500);
+      // The template's own key still exists, so its rows count as before.
+      expect(stats.totals.inputTokens).toBe(9_000);
     } finally {
       await scope.cleanup();
     }

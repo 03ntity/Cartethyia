@@ -102,7 +102,7 @@ dbDescribe("default gateway API key", () => {
       expect((await operations.listKeys(owner(tenant.tenantId))).find((item) => item.id === key.id)?.isDefault)
         .toBe(false);
       // Revoke succeeds because it is not flagged as default.
-      await operations.revokeKey(owner(tenant.tenantId), key.id);
+      await operations.deleteKey(owner(tenant.tenantId), key.id);
     });
   });
 
@@ -185,7 +185,7 @@ dbDescribe("default gateway API key", () => {
         admissionService: { purgeKey: async () => undefined },
       });
 
-      await expect(operations.revokeKey(owner(tenant.tenantId), defaultKey.id)).rejects.toThrow(
+      await expect(operations.deleteKey(owner(tenant.tenantId), defaultKey.id)).rejects.toThrow(
         /cannot be deleted/i,
       );
 
@@ -197,7 +197,7 @@ dbDescribe("default gateway API key", () => {
       expect(after.rows[0]?.revoked_at).toBeNull();
 
       // A key that is not the default still revokes normally.
-      await operations.revokeKey(owner(tenant.tenantId), ordinary.id);
+      await operations.deleteKey(owner(tenant.tenantId), ordinary.id);
       const revoked = await client.query<{ revoked_at: Date | null }>(
         `select revoked_at from api_keys where id = $1`,
         [ordinary.id],
@@ -254,7 +254,7 @@ dbDescribe("default gateway API key", () => {
       expect((await operations.listKeys(owner(tenant.tenantId))).find((key) => key.id === created.id)?.keyPrefix)
         .toBe(DEFAULT_API_KEY_PREFIX);
 
-      await operations.revokeKey(owner(tenant.tenantId), created.id);
+      await operations.deleteKey(owner(tenant.tenantId), created.id);
     });
   });
 

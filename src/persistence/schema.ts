@@ -1277,6 +1277,14 @@ export const telemetryEvents = pgTable(
     networkPoolId: uuid("network_pool_id"),
     endpoint: text("endpoint"),
     apiKeyId: uuid("api_key_id"),
+    /**
+     * The share-template key this event belongs to (the template itself, or
+     * the parent of the child key that carried the request). Denormalized at
+     * write time so family rollups survive the key row being deleted — an
+     * `EXISTS` join against `api_keys` tied history to key lifetime. NULL for
+     * requests that ran under no share template.
+     */
+    familyTemplateKeyId: uuid("family_template_key_id"),
     userAgent: text("user_agent"),
     clientIp: text("client_ip"),
     latencyMs: integer("latency_ms"),
@@ -1365,6 +1373,14 @@ export const telemetryEvents = pgTable(
       desc(table.createdAt),
       desc(table.id),
     ),
+    // Share-family rollup: equality on the denormalized template, keyset
+    // range+order. Backs both the family totals and the hourly chart reads.
+    index("telemetry_events_tenant_family_created_id_idx").on(
+      table.tenantId,
+      table.familyTemplateKeyId,
+      desc(table.createdAt),
+      desc(table.id),
+    ),
     index("telemetry_events_request_id_idx").on(table.requestId),
     index("telemetry_events_tenant_account_created_idx").on(
       table.tenantId,
@@ -1421,6 +1437,13 @@ export const telemetryUsageTotals = pgTable(
     tenantId: tenantRefRequired(),
     identityType: text("identity_type").$type<TelemetryUsageIdentityType>().notNull(),
     entityId: uuid("entity_id").notNull(),
+    /**
+     * For `api_key` identities, the share-template key this key belongs to
+     * (the template itself, or the parent of a minted child). Denormalized so
+     * family reads do not depend on the key row surviving; NULL for `account`
+     * identities and for keys outside a share family.
+     */
+    familyTemplateKeyId: uuid("family_template_key_id"),
     requests: bigint("requests", { mode: "number" }).notNull().default(0),
     errors: bigint("errors", { mode: "number" }).notNull().default(0),
     inputTokens: bigint("input_tokens", { mode: "number" }).notNull().default(0),
@@ -1436,6 +1459,10 @@ export const telemetryUsageTotals = pgTable(
     check(
       "telemetry_usage_totals_identity_type_check",
       sql`${table.identityType} IN ('account', 'api_key')`,
+    ),
+    index("telemetry_usage_totals_tenant_family_idx").on(
+      table.tenantId,
+      table.familyTemplateKeyId,
     ),
   ],
 );

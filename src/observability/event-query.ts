@@ -317,15 +317,17 @@ function idMembershipFilter(
  * Membership of `api_key_id` in the family of one share template — the
  * template itself plus every key it issued.
  *
- * The predicate is an `EXISTS` against `api_keys`, so the query's wire size is
- * constant no matter how large the family grew; the calls that used to expand
- * tens of thousands of minted child keys into a bind list are what broke the
- * PostgreSQL wire (see {@link idMembershipFilter}). The tenant predicate is
- * carried by every read already, so a child in another tenant still cannot
- * match.
+ * The primary predicate is the denormalized `family_template_key_id` column:
+ * an event is in the family when it was stamped with the template at write
+ * time. That makes the read independent of the key row surviving — a revoked
+ * or removed key keeps its history. Events written before the column existed
+ * (or whose key was hard-deleted before the backfill) fall back to an
+ * `EXISTS` against `api_keys`, so the migration window is still counted when
+ * the key row is present. The tenant predicate is carried by every read
+ * already, so a child in another tenant still cannot match.
  */
 function familyKeyCondition(templateKeyId: string): SQL {
-  return sql`exists (select 1 from ${apiKeys} where ${apiKeys.id} = ${telemetryEvents.apiKeyId} and (${apiKeys.id} = ${templateKeyId} or ${apiKeys.parentKeyId} = ${templateKeyId}))`;
+  return sql`(${telemetryEvents.familyTemplateKeyId} = ${templateKeyId} or (${telemetryEvents.familyTemplateKeyId} is null and exists (select 1 from ${apiKeys} where ${apiKeys.id} = ${telemetryEvents.apiKeyId} and (${apiKeys.id} = ${templateKeyId} or ${apiKeys.parentKeyId} = ${templateKeyId}))))`;
 }
 
 /**

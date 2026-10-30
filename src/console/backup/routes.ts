@@ -48,7 +48,7 @@ export interface BackupRoutesConfig {
   /**
    * The tenant's API keys, read after a restore so their admission counters can
    * be purged. A restore replaces `api_keys` wholesale, so a key that was
-   * revoked after the backup — and had its counters purged by `revokeKey` — can
+   * revoked after the backup — and had its counters purged by `deleteKey` — can
    * come back with `revoked_at = NULL`; without purging, its lifetime counter
    * is re-seeded from the restored total, granting a fresh full budget on top
    * of everything already spent. Optional so a host that never restores keys
@@ -225,7 +225,7 @@ export function createBackupRoutes(config: BackupRoutesConfig): Elysia {
         // snapshot must be rebuilt before the next `/v1/*` dispatch.
         await config.snapshotInvalidator?.invalidate();
         // A restore can re-insert keys the tenant revoked after the backup, and
-        // `revokeKey` purged their counters when they went away. Drop the whole
+        // `deleteKey` purged their counters when they went away. Drop the whole
         // auth cache (the restore is rare, and a stale entry for any key must
         // not survive it) and purge admission state for every key the tenant
         // now has, so a resurrected key cannot start with a fresh budget.

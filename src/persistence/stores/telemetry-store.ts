@@ -1,9 +1,10 @@
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { affectedRows, currentTimestamp, laterOf } from "../dialect";
 import type { CartethyiaDatabase } from "../db-handle";
 import {
+  apiKeys,
   telemetryEvents,
   telemetryPayloads,
   telemetryUsageTotals,
@@ -118,6 +119,31 @@ export class DrizzleTelemetryStore {
   }
 
   /**
+   * Resolves the share-template key for each distinct api key in a batch.
+   *
+   * The template is the key itself when it is a top-level template, or its
+   * parent when it is a minted child. The column is denormalized onto the
+   * event so family rollups do not depend on the key row surviving.
+   */
+  private async resolveFamilyTemplateIds(
+    rows: readonly (typeof telemetryEvents.$inferInsert)[],
+  ): Promise<Map<string, string>> {
+    const ids = [
+      ...new Set(
+        rows
+          .map((row) => row.apiKeyId)
+          .filter((id): id is string => typeof id === "string" && id.length > 0),
+      ),
+    ];
+    if (ids.length === 0) return new Map();
+    const resolved = await this.db
+      .select({ id: apiKeys.id, parentKeyId: apiKeys.parentKeyId })
+      .from(apiKeys)
+      .where(inArray(apiKeys.id, ids));
+    return new Map(resolved.map((row) => [row.id, row.parentKeyId ?? row.id]));
+  }
+
+  /**
    * Applies usage deltas inside an enclosing transaction.
    *
    * Takes the transaction handle, not this.db: `insertEvents` runs the event
@@ -137,11 +163,34 @@ export class DrizzleTelemetryStore {
       left.tenantId.localeCompare(right.tenantId)
       || left.identityType.localeCompare(right.identityType)
       || left.entityId.localeCompare(right.entityId));
+    // Resolve the share-template key for each api_key identity in the batch so
+    // the durable totals row carries it — family reads then survive the key
+    // row being deleted.
+    const apiKeyIds = [
+      ...new Set(
+        ordered
+          .filter((delta) => delta.identityType === "api_key")
+          .map((delta) => delta.entityId),
+      ),
+    ];
+    const familyTemplates = new Map<string, string>();
+    if (apiKeyIds.length > 0) {
+      const keyRows = await tx
+        .select({ id: apiKeys.id, parentKeyId: apiKeys.parentKeyId })
+        .from(apiKeys)
+        .where(inArray(apiKeys.id, apiKeyIds));
+      for (const row of keyRows) {
+        familyTemplates.set(row.id, row.parentKeyId ?? row.id);
+      }
+    }
     const now = new Date();
     await tx
       .insert(telemetryUsageTotals)
       .values(ordered.map((delta) => ({
         ...delta,
+        ...(delta.identityType === "api_key" && familyTemplates.has(delta.entityId)
+          ? { familyTemplateKeyId: familyTemplates.get(delta.entityId) }
+          : {}),
         requests: delta.requests,
         errors: delta.errors,
         inputTokens: delta.inputTokens,
@@ -171,6 +220,13 @@ export class DrizzleTelemetryStore {
     // The file accepts anything, so a malformed row would be written and then
     // retried forever without ever failing. Rejecting it here keeps the buffer's
     // drop-and-count contract: one bad row fails the batch, once.
+    const familyTemplates = await this.resolveFamilyTemplateIds(rows);
+    for (const row of rows) {
+      if (typeof row.apiKeyId === "string" && row.apiKeyId.length > 0) {
+        const template = familyTemplates.get(row.apiKeyId);
+        if (template !== undefined) row.familyTemplateKeyId = template;
+      }
+    }
     const unique: Array<typeof telemetryEvents.$inferInsert> = [];
     const ids = new Set<string>();
     for (const row of rows) {

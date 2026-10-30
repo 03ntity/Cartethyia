@@ -376,7 +376,7 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
       });
       return { ...sanitizeApiKeyResponse(updated), ...(secret === undefined ? {} : { secret }) };
     },
-    async revokeKey(access: AccessDecision | undefined, keyId: string): Promise<{ success: true }> {
+    async deleteKey(access: AccessDecision | undefined, keyId: string): Promise<{ success: true }> {
       const authorized = requireTenantScope(access, "dashboard:write");
       const target = await config.store.get(authorized.tenantId, keyId);
       if (!target)
@@ -401,7 +401,7 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
       ]);
       await config.auditSink?.record({
         access: authorized,
-        action: "api_key.revoked",
+        action: "api_key.deleted",
         target: keyId,
       });
       return { success: true };
@@ -846,7 +846,7 @@ export function createApiKeyRoutes(config: ApiKeyConfig): Elysia {
     })
     .delete("/:keyId", async ({ request, params, set }) => {
       try {
-        return await factory.revokeKey(config.accessResolver(request), params.keyId);
+        return await factory.deleteKey(config.accessResolver(request), params.keyId);
       } catch (error) {
         return errorResponse(error, set, "API-key operation failed");
       }

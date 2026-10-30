@@ -143,9 +143,14 @@ export function createShareUsagePort(deps: ShareUsagePortDeps): ShareActivityPor
     async getSharedKeySummaries(tenantId, children, familyTemplateKeyId) {
       if (children.length === 0) return [];
       const todayStart = utcDayStart(new Date());
-      /** Family membership of the entity the totals/events row is attributed to. */
+      /**
+       * Family membership of the entity the totals/events row is attributed to.
+       * Primary predicate is the denormalized template column (so history
+       * survives key deletion); the `EXISTS` fallback covers rows written
+       * before the column existed.
+       */
       const familyMembership = (entityId: typeof apiKeys.id | typeof telemetryUsageTotals.entityId) =>
-        sql`exists (select 1 from ${apiKeys} where ${apiKeys.id} = ${entityId} and (${apiKeys.id} = ${familyTemplateKeyId} or ${apiKeys.parentKeyId} = ${familyTemplateKeyId}))`;
+        sql`(${telemetryUsageTotals.familyTemplateKeyId} = ${familyTemplateKeyId} or (${telemetryUsageTotals.familyTemplateKeyId} is null and exists (select 1 from ${apiKeys} where ${apiKeys.id} = ${entityId} and (${apiKeys.id} = ${familyTemplateKeyId} or ${apiKeys.parentKeyId} = ${familyTemplateKeyId}))))`;
       const [todayEvents, lifetimeRows, hideClientIp] = await Promise.all([
         // Today's per-key totals as one GROUP BY instead of reading every
         // event of the family. `addEventUsage` needs per-event fields, so the

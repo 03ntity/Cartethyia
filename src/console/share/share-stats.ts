@@ -13,7 +13,10 @@
 import { createHash } from "node:crypto";
 import { maskClientIp } from "../../observability/redaction";
 import { type TelemetryEventRecord } from "../../observability/event-log";
-import { queryTelemetryEvents as querySqlEvents } from "../../observability/event-query";
+import {
+  queryTelemetryEvents as querySqlEvents,
+  sumTelemetryTokens,
+} from "../../observability/event-query";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import { isGatewayError } from "../../observability/telemetry-status";
 import type { RedisClient } from "../../persistence/redis";
@@ -314,20 +317,24 @@ async function computeFamilyStatsBody(
   const lastHourStart = new Date(now.getTime() - HOUR_MS);
   const windowStart = new Date(hourStart.getTime() - (HOURS_WINDOW - 1) * HOUR_MS);
 
-  // Rank only names the grant actually authorizes. Telemetry keeps the
-  // requested name even when the request was refused, so an unfiltered table
-  // would list exactly the invalid names an abuser probed. Filtering before
-  // the top-50 cut means refused names cannot hide a model the recipient may
-  // use.
-  //
-  // Bounded by the retention floor, not by the oldest counter: `totalTokens`
-  // is all-time, so cutting at `monthStart` would silently drop the rows that
-  // make it differ from `monthTokens`. Retention already caps the window, and
-  // the rows are read newest-first under a page cap, so a very large family
-  // cannot pull the whole table.
+  // All-time and today's/month's spend come from SQL aggregates, not from the
+  // bounded page below. The page is capped so a very large family cannot pull
+  // the whole table, which means it cannot carry the all-time total. Lifetime,
+  // daily, and monthly are therefore separate bounded sums over the retained
+  // SQL window (each is a single `SUM` aggregate, not a row materialization).
+  // The page's events feed only the hourly chart and the two ranked tables.
+  const [totalTokens, todayTokens, monthTokens] = await Promise.all([
+    sumTelemetryTokens(db, tenantId, { familyKeyId: templateKeyId, since: new Date(0) }),
+    sumTelemetryTokens(db, tenantId, { familyKeyId: templateKeyId, since: dayStart }),
+    sumTelemetryTokens(db, tenantId, { familyKeyId: templateKeyId, since: monthStart }),
+  ]);
+
+  // The hourly chart covers the last 24 hours, so the page only needs events
+  // in that window — not the whole retained history. Bounded and small.
   const page = await querySqlEvents(db, {
     tenantId,
     familyApiKeyId: templateKeyId,
+    since: windowStart,
     limit: MAX_FAMILY_EVENTS,
   });
   const events = page.events;
@@ -338,6 +345,12 @@ async function computeFamilyStatsBody(
     windowStart: windowStart.getTime(),
     allowed: allowedSet,
   });
+  rollup.totals = {
+    ...rollup.totals,
+    totalTokens,
+    todayTokens,
+    monthTokens,
+  };
 
   // Fill the 24 buckets in JS: only hours that saw traffic are present, and
   // a chart drawn from sparse rows would silently compress the axis.
