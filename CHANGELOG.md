@@ -97,6 +97,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   rejections on follow-up turns.
 - **The OAuth browser dialog no longer completes on a stale account
   snapshot.** (pre-2.7.2 carry-over, recorded here for completeness.)
+- **Buddy device binding survives account export/import.** The buddy family
+  (CodeBuddy, CodeBuddy CN, WorkBuddy, WorkBuddy CN) binds a per-account
+  device identity (`qimei36`, sent as `X-Device-Id-List`) that defaults to a
+  derivation from the internal account id. Export/import mints a new account
+  id, so a re-imported account silently changed device identity and the
+  upstream channel check (11128) rejected it. The export now materializes the
+  resolved binding into the exported auth state whenever the account does not
+  already pin one, so a re-import presents the exact same device.
+- **The dashboard's glass blur now survives production builds.** The standard
+  `backdrop-filter` is declared after its `-webkit-` counterpart in every
+  glass surface, so a compliant browser applies the standard declaration last
+  instead of the prefixed one; a cascade test locks the ordering on both
+  stylesheets. (This is the build-blur fix, formerly diagnosed as a cache
+  issue.)
 
 - **Qoder native machine identity, bound per account.** The daily 100-credit
   campaign grant is only revealed to a *native device identity* (UMID), so

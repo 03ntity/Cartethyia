@@ -82,6 +82,25 @@ describe("glass cascade", () => {
     expect(offenders).toEqual([]);
   });
 
+  test("keeps the standard filter last so production retains it", () => {
+    for (const sheet of ["base.css", "app.css"]) {
+      const css = readFileSync(join(STYLES, sheet), "utf8");
+      const block = /([^{}]+)\{([^{}]*)\}/g;
+      let match: RegExpExecArray | null;
+      while ((match = block.exec(css)) !== null) {
+        const body = match[2] ?? "";
+        const prefixedIndex = body.indexOf("-webkit-backdrop-filter:");
+        const standardMatch = /(?<!-webkit-)backdrop-filter\s*:/.exec(body);
+        if (prefixedIndex < 0 || standardMatch === null) continue;
+
+        expect(
+          standardMatch.index,
+          `${sheet}: ${(match[1] ?? "").trim()} must put the standard property last`,
+        ).toBeGreaterThan(prefixedIndex);
+      }
+    }
+  });
+
   test("the locked glass rules still exist", () => {
     // Guards the guard: if a rule is renamed or moved, the suite above would
     // pass vacuously on an empty file set.

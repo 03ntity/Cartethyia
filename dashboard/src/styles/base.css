@@ -190,8 +190,8 @@ html[data-glass-enabled="true"] .card-solid {
    * (already `!important`) still paints, which is why the failure looked like
    * "the transparency value is ignored" rather than "the blur never applied".
    */
-  backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
   -webkit-backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
+  backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
   border: 1px solid var(--inner-border);
   box-shadow: var(--shadow-card);
 }
@@ -210,8 +210,8 @@ html[data-glass-enabled="true"] .card-solid .nested-panel {
 }
 .card-solid .card-solid {
   background: color-mix(in srgb, var(--surface-1) calc(40% + var(--blur-cards, 30) * 0.55%), transparent) !important;
-  backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 .glass {
@@ -219,8 +219,8 @@ html[data-glass-enabled="true"] .card-solid .nested-panel {
   /* `!important` for the same cascade reason as the card surfaces above:
      `@layer utilities` is declared after `@layer base` and would otherwise
      win, leaving the sidebar and topbar with no blur on a real build. */
-  backdrop-filter: blur(calc(10px + (var(--card-glass-depth, 1) * 4px))) !important;
   -webkit-backdrop-filter: blur(calc(10px + (var(--card-glass-depth, 1) * 4px))) !important;
+  backdrop-filter: blur(calc(10px + (var(--card-glass-depth, 1) * 4px))) !important;
 }
 
 
@@ -242,15 +242,15 @@ html[data-glass-enabled="true"] .card-solid .nested-panel {
 .app-topbar,
 .app-topbar-popover {
   background: color-mix(in srgb, var(--surface-1) calc(40% + var(--blur-chrome, 30) * 0.55%), transparent) !important;
-  backdrop-filter: blur(calc((100 - var(--blur-chrome, 30)) * var(--blur-chrome-depth, 30) * 0.01px)) !important;
   -webkit-backdrop-filter: blur(calc((100 - var(--blur-chrome, 30)) * var(--blur-chrome-depth, 30) * 0.01px)) !important;
+  backdrop-filter: blur(calc((100 - var(--blur-chrome, 30)) * var(--blur-chrome-depth, 30) * 0.01px)) !important;
 }
 
 html[data-blur-cards-on="false"] .card-solid,
 html[data-blur-cards-on="false"] .card-glass {
   background: var(--surface-1) !important;
-  backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 html[data-blur-chrome-on="false"] .app-sidebar,
@@ -260,8 +260,8 @@ html[data-blur-cards-on="false"] .user-card-content,
 html[data-blur-cards-on="false"] .composer-glass {
 
   background: var(--surface-1) !important;
-  backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 
@@ -750,8 +750,8 @@ main > .state-viewport {
   /* The key art shows through the card. A flat shadow only â€” the shared card
      shadow carries a colored glow that reads as a halo over the art. */
   background: color-mix(in srgb, var(--surface-1) 78%, transparent);
-  backdrop-filter: blur(16px) saturate(120%);
   -webkit-backdrop-filter: blur(16px) saturate(120%);
+  backdrop-filter: blur(16px) saturate(120%);
   box-shadow: 0 18px 40px -20px rgba(0, 0, 0, 0.5);
 }
 

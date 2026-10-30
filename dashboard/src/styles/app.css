@@ -375,8 +375,8 @@
   background: color-mix(in srgb, var(--surface-1) calc(40% + var(--blur-cards, 30) * 0.55%), transparent);
   /* `!important` — see the card surfaces in `base.css`: this rule sits in
      `@layer base` and would otherwise lose to Tailwind's utilities layer. */
-  backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
   -webkit-backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
+  backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
 }
 
 .user-avatar {
@@ -1510,8 +1510,8 @@ html[data-app="landing"] .landing-story-visual {
   background: color-mix(in srgb, var(--surface-1) calc(40% + var(--blur-cards, 30) * 0.55%), transparent);
   /* `!important` — as with every surface above, this lands in `@layer base`
      and is otherwise beaten by Tailwind's utilities layer. */
-  backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
   -webkit-backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
+  backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
 }
 
 @media (max-width: 640px) {
