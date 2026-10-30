@@ -10,6 +10,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [2.7.3] - 2026-10-30
 
+> **Instalasi ulang.** `2.7.3` di-registri npm telah diperbarui sekali setelah rilis
+> pertama (tarball baru memuat perbaikan qimei36 dan glass-blur). Jika instalasi
+> yang sudah ada bermasalah setelah `npm update` — terutama error integritas
+> (`shasum`/`integrity` mismatch) saat `npm install` — **uninstall dulu lalu
+> install ulang**:
+>
+> ```sh
+> npm uninstall -g cartethyia
+> npm install -g cartethyia
+> ```
+>
+> Data aman: konfigurasi, database, dan state tersimpan di direktori data
+> gateway (`~/.config/cartethyia` / `~/.cartethyia`), bukan di dalam paket,
+> sehingga uninstall/reinstall tidak menghapus apa pun.
+
 ### Added
 
 - **Inject System Prompt — tenant-scoped, three precedence levels.** A new
