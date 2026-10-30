@@ -138,7 +138,11 @@ export function workbuddyPrePayload(
   const messages = payload["messages"];
   if (Array.isArray(messages)) {
     const normalizedMessages = messages as Array<Record<string, unknown>>;
-    applyBuddySystemPrompt(normalizedMessages, WORKBUDDY_SYSTEM_PROMPT);
+    applyBuddySystemPrompt(
+      normalizedMessages,
+      WORKBUDDY_SYSTEM_PROMPT,
+      context?.tenant_system_prompt,
+    );
     restoreHistoricalToolDefinitions(payload, normalizedMessages);
   }
   normalizeBuddyToolNames(payload);

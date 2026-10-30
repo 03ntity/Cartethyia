@@ -1,6 +1,9 @@
 import { isBundledProviderId } from "../../providers/provider-contracts";
 import type { ProviderDispatchContext, ProviderId, ProviderAdapter } from "../../providers/provider-contracts";
 import { GatewayError } from "../../protocol/gateway-error";
+import { isWrappedInjectionProvider } from "../../console/system-prompt/contracts";
+import { resolveTenantSystemPrompt } from "../request/system-prompt-injection";
+import { readTenantSystemPromptsForDispatch } from "../request/tenant-preferences";
 import type { CanonicalEvent } from "../../protocol/canonical-model";
 import { resolveCredentialForAccount } from "../../providers/operations/provider-credential-service";
 import type { ByokUpstreamHost } from "../../providers/operations/provider-catalog-service";
@@ -115,6 +118,26 @@ export async function handleProviderProxyRequest(
   if (!prepared)
     throw new GatewayError("admission_unavailable", 503, "The request was not prepared, so no route can be dialed. Resend the request.");
   const canonicalRequest = await applyTenantPreferences(prepared, deps.db);
+  // Tenant system-prompt injection, resolved once per request. For providers
+  // whose upstream validates the fixed system prompt as a channel identity
+  // (the buddy family), the text cannot ride the canonical `system` array —
+  // the adapter replaces it — so it travels through dispatch context and the
+  // adapter folds it into its fixed turn, wrapped in the gateway's markers.
+  // `override` degrades to wrapped append there: stripping the identity would
+  // have the upstream refuse the request outright.
+  const candidateForPrompt = prepared.candidate;
+  const tenantSystemPromptText = isWrappedInjectionProvider(candidateForPrompt.provider_id)
+    ? resolveTenantSystemPrompt(
+        await readTenantSystemPromptsForDispatch(
+          deps.db,
+          prepared.authorization.snapshot.tenant_id,
+        ),
+        {
+          providerId: candidateForPrompt.provider_id,
+          modelId: candidateForPrompt.model_id,
+        },
+      )?.text
+    : undefined;
   // Per-tenant timeout, applied as soon as the tenant is known. The deadline
   // was armed at admission with the deployment default; this re-arms it.
   await applyTenantDeadlineOverride(
@@ -236,6 +259,7 @@ export async function handleProviderProxyRequest(
           ? {}
           : { imageClampMaxBytes: state.imageClampMaxBytes }),
         ...(conversationAffinity ? { conversationAffinity } : {}),
+        ...(tenantSystemPromptText === undefined ? {} : { tenantSystemPrompt: tenantSystemPromptText }),
         ...(candidate.user_agent === undefined ? {} : { userAgent: candidate.user_agent }),
         ...(deps.networkBindingFactory
           ? {

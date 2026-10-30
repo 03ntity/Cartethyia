@@ -173,7 +173,11 @@ export async function buddyGenerateImage(
   buddyPrePayloadCommon(payload, undefined, "intl", context);
   const messages = payload["messages"];
   if (Array.isArray(messages)) {
-    applyBuddySystemPrompt(messages as Array<Record<string, unknown>>, config.systemPrompt);
+    applyBuddySystemPrompt(
+      messages as Array<Record<string, unknown>>,
+      config.systemPrompt,
+      context?.tenant_system_prompt,
+    );
   }
   const headers: Record<string, string> = {
     "content-type": "application/json",

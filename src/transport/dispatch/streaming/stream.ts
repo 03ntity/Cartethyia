@@ -50,7 +50,9 @@ import {
   resolveCaptureModeForRequest,
   shouldCaptureProviderBodyForRequest,
 } from "../capture-policy";
-import { resolveTenantImageClampMaxBytes } from "../../request/tenant-preferences";
+import { resolveTenantImageClampMaxBytes, readTenantSystemPromptsForDispatch } from "../../request/tenant-preferences";
+import { resolveTenantSystemPrompt } from "../../request/system-prompt-injection";
+import { isWrappedInjectionProvider } from "../../../console/system-prompt/contracts";
 import { proxySuccessHeaders, buildUpstreamDispatchContext } from "../upstream";
 import type { AttemptLeaseOwnership } from "../leases";
 import type { ProviderContinuationScope } from "../../../providers/provider-contracts";
@@ -217,6 +219,19 @@ export async function dispatchStreamingAttempt(input: StreamingDispatchInput): P
       ? {}
       : { imageClampMaxBytes: state.imageClampMaxBytes }),
     ...(conversationAffinity ? { conversationAffinity } : {}),
+    // Same wrapped-injection text the non-streaming path carries: providers
+    // whose upstream validates the fixed system prompt as a channel identity
+    // (the buddy family) receive the tenant prompt through dispatch context
+    // so the adapter can fold it into its fixed turn. `override` degrades to
+    // wrapped append there; stripping the identity would be refused outright.
+    ...(await (async () => {
+      if (!isWrappedInjectionProvider(candidate.provider_id)) return {};
+      const text = resolveTenantSystemPrompt(
+        await readTenantSystemPromptsForDispatch(deps.db, prepared.authorization.snapshot.tenant_id),
+        { providerId: candidate.provider_id, modelId: candidate.model_id },
+      )?.text;
+      return text === undefined ? {} : { tenantSystemPrompt: text };
+    })()),
     ...(candidate.user_agent === undefined ? {} : { userAgent: candidate.user_agent }),
     ...(wrappedOutboundFetch ? { outboundFetch: wrappedOutboundFetch } : {}),
     ...(outboundFetch ? { outboundAttachmentFetch: outboundFetch } : {}),

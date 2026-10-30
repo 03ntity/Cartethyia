@@ -155,6 +155,14 @@ export interface ProviderDispatchContext {
    * and hold no database handle.
    */
   readonly image_clamp_max_bytes?: number | undefined;
+  /**
+   * Tenant system-prompt text resolved once per request (append/override
+   * injection). The buddy adapters fold it into their fixed system turn after
+   * serialization, wrapped in the gateway's marker prefix/suffix, so the
+   * upstream's channel-identity validation still sees its prompt as the
+   * opener.
+   */
+  readonly tenant_system_prompt?: string | undefined;
   /** Opaque identity shared by retries of one logical gateway request. */
   readonly request_identity?: object | undefined;
   /**

@@ -84,7 +84,11 @@ function codeBuddyIntlPrePayload(
   if (!source) throw new GatewayError("invalid_request", 400, "CodeBuddy model is required");
   const messages = payload["messages"];
   if (Array.isArray(messages)) {
-    applyBuddySystemPrompt(messages as Array<Record<string, unknown>>, CODEBUDDY_SYSTEM_PROMPT);
+    applyBuddySystemPrompt(
+      messages as Array<Record<string, unknown>>,
+      CODEBUDDY_SYSTEM_PROMPT,
+      context?.tenant_system_prompt,
+    );
   }
   normalizeBuddyToolNames(payload);
   injectBuddyParallelToolCalls(payload, request);

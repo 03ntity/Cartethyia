@@ -30,6 +30,7 @@ import { BUDDY_CN_EFFORTS, BUDDY_INTL_EFFORTS, BUDDY_SHARED_RAW } from "./buddy-
 // cn-provider (which imports this module) resolves before any call.
 import { CODEBUDDY_CN_RAW } from "./codebuddy/cn-catalog";
 import { buddyAccountUid } from "./buddy-oauth-shared";
+import { SYSTEM_PROMPT_WRAPPER_PREFIX, SYSTEM_PROMPT_WRAPPER_SUFFIX } from "../../../console/system-prompt/contracts";
 import type { ProviderDispatchContext } from "../../provider-contracts";
 
 const BUDDY_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
@@ -1167,12 +1168,24 @@ export function finalizeBuddyMessages(
 export function applyBuddySystemPrompt(
   messages: Array<Record<string, unknown>>,
   systemPrompt: string,
+  extraSystemText?: string,
 ): void {
+  // Tenant injection (Inject System Prompt) rides AFTER the fixed prompt,
+  // inside the same system turn, framed by the gateway's marker prefix/suffix:
+  // the upstream validates the identity prompt as the channel opener, so the
+  // fixed text must stay first and byte-identical; the wrapped tail carries
+  // the tenant's directive without touching the identity. An override-mode
+  // tenant prompt degrades to this wrapped append (the caller decides via
+  // `isWrappedInjectionProvider` before passing the text).
+  const effectivePrompt =
+    extraSystemText === undefined || extraSystemText.length === 0
+      ? systemPrompt
+      : `${systemPrompt}\n\n${SYSTEM_PROMPT_WRAPPER_PREFIX}\n${extraSystemText}\n${SYSTEM_PROMPT_WRAPPER_SUFFIX}`;
   const source = messages.filter(
     (message) => message["role"] !== "system" && message["role"] !== "developer",
   );
   messages.length = 0;
-  messages.push({ role: "system", content: systemPrompt });
+  messages.push({ role: "system", content: effectivePrompt });
   for (const message of source) {
     if (message["role"] === "user" && typeof message["content"] === "string") {
       messages.push({
