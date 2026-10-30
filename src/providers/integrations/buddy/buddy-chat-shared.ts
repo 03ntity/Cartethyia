@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import { completeRequiredSchema } from "../../../protocol/codecs";
 import type { CanonicalRequest } from "../../../protocol/canonical-model";
 import { isRecord } from "../../../protocol/codecs";
-import { applyDeepSeekReasoning, applyOpenAIReasoning, backfillDeepSeekReasoningContent, clampedEffortOutputFloor } from "../../../protocol/reasoning";
+import { applyDeepSeekReasoning, applyOpenAIReasoning, backfillDeepSeekReasoningContent, clampedEffortOutputFloor, ensureChatReasoningReplayPresence } from "../../../protocol/reasoning";
 import { BUDDY_CN_EFFORTS, BUDDY_INTL_EFFORTS, BUDDY_SHARED_RAW } from "./buddy-catalog-shared";
 // Imported for the CN roster only: a CN-only id has no row in the shared
 // table, and without one `raiseOutputForRaisedEffort` silently no-ops, so a
@@ -408,6 +408,21 @@ export function scrubBuddyChannelIdentity(messages: Array<Record<string, unknown
     scrubBuddyMessageText(message, "reasoning_content");
   }
 }
+
+/**
+ * OpenAI-compatible adapters that need the DeepSeek reasoning-replay backfill
+ * on outbound chat payloads. The buddy family runs it inside
+ * `buddyPrePayloadCommon`; these adapters register here so the same rule
+ * reaches every reseller that serves a thinking model.
+ */
+export const clineReasoningReplayPrepares: readonly ((
+  payload: Record<string, unknown>,
+) => void)[] = [
+  (payload) => {
+    backfillDeepSeekReasoningContent(payload);
+    ensureChatReasoningReplayPresence(payload);
+  },
+];
 
 /**
  * Payload prefix shared by the buddy pre-payload hooks: force `stream=true`,

@@ -24,6 +24,7 @@ import type { CanonicalRequest } from "../../../protocol/canonical-model";
 import { OpenAICompatibleAdapter, withBearerAuthentication } from "../../adapters/compatible-adapter";
 import { providerBaseUrl } from "../../provider-metadata";
 import { decodeKiloCredential } from "../../../security/credential-codec";
+import { clineReasoningReplayPrepares } from "../buddy/buddy-chat-shared";
 
 export const KILO_PROVIDER_ID = "kilo" as const;
 export const KILO_BASE_URL = providerBaseUrl("kilo");
@@ -117,6 +118,9 @@ class KiloAdapter extends OpenAICompatibleAdapter {
         provider_id: KILO_PROVIDER_ID,
         base_url: KILO_BASE_URL,
         endpoint_paths_by_wire_family: { chat: KILO_ENDPOINT_PATH },
+        prePayload: (payload) => {
+          for (const prepare of clineReasoningReplayPrepares) prepare(payload);
+        },
         ...(fetchImpl ? { fetchImpl } : {}),
       }),
     );

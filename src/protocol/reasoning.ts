@@ -50,19 +50,83 @@ export function applyDeepSeekReasoning(payload: Record<string, unknown>): void {
     payload["reasoning_effort"] = "high";
 }
 
-/** Backfills DeepSeek assistant reasoning_content required for replayed turns. */
-export function backfillDeepSeekReasoningContent(payload: Record<string, unknown>): void {
-  const thinking = payload["thinking"];
-  const thinkingEnabled = isRecord(thinking) && thinking["type"] === "enabled";
+/**
+ * Model families whose Chat-compatible upstream enforces the DeepSeek replay
+ * rule: every prior assistant turn must carry `reasoning_content`, or the
+ * upstream refuses the whole request with
+ * `Missing required parameter: 'messages[N].reasoning_content'`. Seen on
+ * Cline's resold `reflection/beam-free` (2026-10-30) and on the buddy
+ * DeepSeek family. Cline, OpenRouter, Hermes, and Kilo share one chat wire,
+ * so the rule is stated once, keyed on the model family.
+ */
+const REASONING_REPLAY_MODEL_RE = /(?:deepseek|reflection\/beam)/i;
+
+/**
+ * Ensures every assistant turn carries `reasoning_content` for model families
+ * whose upstream enforces the DeepSeek replay rule. The rule demands the field
+ * on *every* earlier assistant message — presence, not content — and the
+ * upstream rejects an absent field with
+ * `Missing required parameter: 'messages[N].reasoning_content'` even when the
+ * turn genuinely has no trace to replay. Clients that already learned the rule
+ * send `reasoning_content: ""` for exactly those turns (see the chat surface
+ * parser), so an empty string is the honest value for a turn with nothing to
+ * replay. Existing values are never overwritten.
+ *
+ * Unlike `backfillDeepSeekReasoningContent`, this runs only for the
+ * OpenAI-compatible resellers (Cline/OpenRouter/Hermes/Kilo), not the buddy
+ * family, whose upstream rejects empty reasoning as "stripped" and drops it.
+ */
+export function ensureChatReasoningReplayPresence(payload: Record<string, unknown>): void {
+  const model = typeof payload["model"] === "string" ? payload["model"] : "";
+  if (!REASONING_REPLAY_MODEL_RE.test(model)) return;
   const messages = payload["messages"];
   if (!Array.isArray(messages)) return;
+  const thinking = payload["thinking"];
+  const thinkingEnabled = isRecord(thinking) && thinking["type"] === "enabled";
   const hasTrace = messages.some(
     (message) =>
       isRecord(message) &&
       ((typeof message["reasoning"] === "string" && message["reasoning"].length > 0) ||
         "reasoning_content" in message),
   );
+  // Same gate as the backfill: a request that never entered thinking mode and
+  // carries no reasoning anywhere has nothing the model could demand, so do
+  // not start marking its turns as thinking turns.
   if (!thinkingEnabled && !hasTrace) return;
+  for (const message of messages) {
+    if (!isRecord(message) || message["role"] !== "assistant") continue;
+    if (typeof message["reasoning_content"] === "string") continue;
+    message["reasoning_content"] = "";
+  }
+}
+
+/** Backfills DeepSeek assistant reasoning_content required for replayed turns. */
+export function backfillDeepSeekReasoningContent(payload: Record<string, unknown>): void {
+  const model = typeof payload["model"] === "string" ? payload["model"] : "";
+  const thinking = payload["thinking"];
+  const thinkingEnabled = isRecord(thinking) && thinking["type"] === "enabled";
+  const messages = payload["messages"];
+  if (!Array.isArray(messages)) return;
+  const requiresReplay = REASONING_REPLAY_MODEL_RE.test(model);
+  const hasTrace = messages.some(
+    (message) =>
+      isRecord(message) &&
+      ((typeof message["reasoning"] === "string" && message["reasoning"].length > 0) ||
+        "reasoning_content" in message),
+  );
+  if (!thinkingEnabled && !requiresReplay && !hasTrace) return;
+  // As an *input* (a caller replays a prior turn), the model's own `reasoning`
+  // key is the canonical record of a thinking turn. Without it there is no
+  // trace to replay, so an assistant turn stays bare even under the hard rule;
+  // fabricating `""` would be read by the upstream as "thinking mode with the
+  // reasoning stripped" and reject the request anyway.
+  const hasModelReasoning = messages.some(
+    (message) =>
+      isRecord(message) &&
+      typeof message["reasoning"] === "string" &&
+      message["reasoning"].length > 0,
+  );
+  if (requiresReplay && !thinkingEnabled && !hasModelReasoning && !hasTrace) return;
   for (const message of messages) {
     if (!isRecord(message) || message["role"] !== "assistant") continue;
     if (typeof message["reasoning_content"] === "string") continue;

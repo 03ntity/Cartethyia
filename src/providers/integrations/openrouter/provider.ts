@@ -5,6 +5,7 @@ import { providerBaseUrl } from "../../provider-metadata";
 import type { DiscoveryInput } from "../../discovery/discovery-types";
 import { defineModel } from "../../provider-model-definition";
 import { openrouterFreeRoster } from "../../discovery/openrouter-free-roster";
+import { clineReasoningReplayPrepares } from "../buddy/buddy-chat-shared";
 
 const OPENROUTER_PROVIDER_ID = "openrouter" as const;
 
@@ -112,6 +113,9 @@ export const OPENROUTER_SPEC: ApiKeyProviderSpec = {
   provider_id: OPENROUTER_PROVIDER_ID,
   endpoint_paths_by_wire_family: {},
   extra_headers: OPENROUTER_REQUIRED_HEADERS,
+  prePayload: (payload) => {
+    for (const prepare of clineReasoningReplayPrepares) prepare(payload);
+  },
 };
 
 export async function discoverOpenrouterModels(

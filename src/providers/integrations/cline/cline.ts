@@ -8,6 +8,7 @@ import { completeRequiredSchema, isRecord } from "../../../protocol/codecs";
 import { providerBaseUrl } from "../../provider-metadata";
 import { getCachedModelDiscovery } from "../../operations/model-discovery-cache";
 import { defineModel } from "../../provider-model-definition";
+import { clineReasoningReplayPrepares } from "../buddy/buddy-chat-shared";
 import { clinePlatform, clinePlatformVersion } from "../../operations/cli-platform";
 import {
   getClineCliVersion,
@@ -132,6 +133,12 @@ function clinePrePayload(
   payload["messages"] = hasSystem
     ? messages
     : [{ role: "system", content: "You are a helpful assistant." }, ...messages];
+
+  // 1.5) DeepSeek-replay backfill: Cline resells thinking models (deepseek,
+  // reflection/beam) whose upstream rejects the whole history when any prior
+  // assistant turn lacks `reasoning_content`. Same wire as OpenRouter/Hermes/
+  // Kilo, so the shared helper runs here too — it only mirrors a real trace.
+  for (const prepare of clineReasoningReplayPrepares) prepare(payload);
 
   // 2) Materialize deepseek-v4-flash non-stream quirk
   const model = typeof payload["model"] === "string" ? (payload["model"] as string) : candidate.model_id;

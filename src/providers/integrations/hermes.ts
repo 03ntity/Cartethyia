@@ -4,6 +4,7 @@ import type { ApiKeyProviderSpec } from "../configured-provider";
 import { isRecord } from "../../protocol/codecs";
 import { boundedUpstreamArray, boundedUpstreamNumber, sanitizeUpstreamLabel } from "../provider-sanitize";
 import { getHermesVersion } from "../operations/client-versions";
+import { clineReasoningReplayPrepares } from "./buddy/buddy-chat-shared";
 
 const HERMES_PROVIDER_ID = "hermes" as const;
 
@@ -110,7 +111,10 @@ export const HERMES_MODELS: readonly ModelDefinition[] = [
 export const HERMES_SPEC: ApiKeyProviderSpec = {
   provider_id: HERMES_PROVIDER_ID,
   endpoint_paths_by_wire_family: {},
-  prePayload: injectHermesTags,
+  prePayload: (payload, request, candidate) => {
+    injectHermesTags(payload, request, candidate);
+    for (const prepare of clineReasoningReplayPrepares) prepare(payload);
+  },
   // The origin sits behind Cloudflare, which answers a request carrying no
   // `user-agent` with 403 "Attention Required!" while the same request with any
   // non-empty UA answers 200 — measured directly against the API: an empty UA
