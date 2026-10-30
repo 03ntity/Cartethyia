@@ -1,15 +1,12 @@
 import { ArrowDown, ArrowUp, Ban, ChevronDown, ChevronRight, ChevronsUpDown, Eye, EyeOff, Link2, RefreshCw, RotateCw } from "lucide-react";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { Button } from "./ui/button";
-import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Dialog } from "./ui/dialog";
 import { EmptyState, ErrorState, LoadingState } from "./ui/state";
 import { ClipboardButton } from "./patterns/clipboard-button";
 import { toast } from "../lib/toast";
-import { mapWithConcurrency } from "../lib/concurrency";
 import { getErrorMessage } from "../data/api";
-import { queryKeys } from "../data/query-keys";
 import { quotaBarTone } from "../lib/format/quota";
 import { compactTokens } from "../lib/format/tokens";
 import type { ApiKeyResponse, SharedKeyActivityDetail, SharedKeySummary } from "../data/contracts";
@@ -17,6 +14,7 @@ import {
   useRegenerateApiKey,
   useRevealApiKey,
   useRevokeSharedKey,
+  useRevokeSharedScope,
   useShareApiKey,
   useShareLink,
   useSharedKeyActivity,
@@ -180,10 +178,10 @@ function BudgetBar({
  * call is one DELETE against the console, so six keeps the burst ordinary
  * without making the operator wait on the list.
  */
-const BULK_REVOKE_CONCURRENCY = 6;
-
-/** Rows per page in the recipients table; the endpoint caps at 500. */
+/** Rows loaded per fetch; grows on scroll, capped by the endpoint at 500. */
 const PAGE_SIZE = 25;
+const PAGE_GROWTH = 25;
+const MAX_SHARED_CHILD_LIMIT = 500;
 
 /**
  * Parent-level quota bar: consumed vs budget, with the remaining pill.
@@ -357,41 +355,37 @@ export function ShareManagementContent({
   // of thousands of children, so the client must never pull them all to
   // filter locally.
   const [statusFilter, setStatusFilter] = useState<"active" | "revoked">("active");
-  const [page, setPage] = useState(0);
+  const [limit, setLimit] = useState(PAGE_SIZE);
   const [sortBy, setSortBy] = useState<SharedChildSortColumn>("createdAt");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [confirmingBulk, setConfirmingBulk] = useState<"all" | "unused" | null>(null);
-  const queryClient = useQueryClient();
   const share = useShareApiKey();
   const regenerate = useRegenerateApiKey();
   const revoke = useRevokeSharedKey();
+  const revokeScope = useRevokeSharedScope();
   const link = useShareLink(parent.id);
   const isPersonal = parent.keyMode !== "share";
   // A personal key has no recipients: `/shared-keys` is a share-template route
   // and answers 404 for it, so the query stays disabled instead of rendering an
   // error box over the key's own usage.
   const summary = useSharedKeys(isPersonal ? null : parent.id, {
-    limit: PAGE_SIZE,
-    offset: page * PAGE_SIZE,
+    limit,
+    offset: 0,
     sortBy,
     order,
     status: statusFilter,
   });
   const pageData = summary.data;
   const children = pageData?.rows ?? [];
-  const total = pageData?.total ?? 0;
   const activeTotal = pageData?.active ?? 0;
-  // Rows arrive pre-filtered by `status`; this is the current page's set.
+  // Rows arrive pre-filtered by `status`; `children` is the set loaded so far
+  // (it grows as the operator scrolls, exactly like the usage page).
   const visibleChildren = children;
-  /**
-   * Recipients that never spent a token. Revoking these is safe in a way
-   * "revoke all" is not: nobody has used them, so no client holding the key
-   * loses anything. The point is list hygiene — a popular template accumulates
-   * issued-but-unused keys, and they crowd out the rows that matter.
-   */
-  const unusedChildren = children.filter(
-    (child) => child.revokedAt === null && child.allTime.totalTokens === 0,
-  );
+
+  const resetList = () => {
+    setExpanded(null);
+    setLimit(PAGE_SIZE);
+  };
 
   const toggleSort = (column: SharedChildSortColumn) => {
     if (sortBy === column) {
@@ -399,6 +393,18 @@ export function ShareManagementContent({
     } else {
       setSortBy(column);
       setOrder("asc");
+    }
+    resetList();
+  };
+
+  // Auto-pagination: near the bottom of the scroll container, load more rows
+  // (mirrors the requests table on the usage page).
+  const handleTableScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const target = event.currentTarget;
+    if (target.scrollHeight - target.scrollTop - target.clientHeight < 40) {
+      if (!summary.isFetching && children.length >= limit && limit < MAX_SHARED_CHILD_LIMIT) {
+        setLimit((current) => Math.min(current + PAGE_GROWTH, MAX_SHARED_CHILD_LIMIT));
+      }
     }
   };
 
@@ -423,51 +429,23 @@ export function ShareManagementContent({
     );
   };
 
-  // A page change can leave `page` past the end when a filter or revoke
-  // shrinks the total; clamp back onto the last full page.
-  useEffect(() => {
-    if (page > 0 && total > 0 && page * PAGE_SIZE >= total) {
-      setPage(Math.max(0, Math.floor((total - 1) / PAGE_SIZE)));
-    }
-  }, [total, page]);
-
   useEffect(() => {
     setExpanded(null);
   }, [parent.id]);
 
   /**
-   * Revokes every recipient in a chosen set, with a bounded number in flight.
-   *
-   * Was sequential, for a reason the old comment stated that the endpoint does
-   * not support: it claimed firing them together would race the parent's
-   * lifetime budget read. `revokeKey` never reads a budget — it revokes the
-   * child, purges admission for it, and audits. So the only cost of going
-   * parallel is the shape of the traffic, and unbounded `Promise.all` is that
-   * cost at its worst: a template with hundreds of recipients would send
-   * hundreds of deletes at once.
-   *
-   * `mapWithConcurrency` keeps a fixed number in flight and never lets one
-   * refusal abort the rest; the tally below reports partial failure rather than
-   * swallowing it behind one toast.
+   * Revokes every recipient in the chosen scope, server-side, so the operation
+   * spans the whole family (not just the rows currently loaded). The endpoint
+   * runs batched deletes; the response reports how many were revoked.
    */
-  const revokeBulk = async (targets: readonly SharedKeySummary[], noun: string): Promise<void> => {
-    const outcomes = await mapWithConcurrency(targets, BULK_REVOKE_CONCURRENCY, (child) =>
-      revoke.mutateAsync({
-        parentKeyId: parent.id,
-        childKeyId: child.id,
-        deferInvalidation: true,
-      }),
-    );
-    const done = outcomes.filter((outcome) => outcome.status === "fulfilled").length;
-    // One refetch for the whole run, not one per success: sixty recipients would
-    // otherwise refetch the list sixty times while it still had fifty-nine
-    // changes coming.
-    await queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.sharedKeys(parent.id) });
-    await queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.all });
-    await summary.refetch();
-    const failed = targets.length - done;
-    if (failed > 0) toast.error(`Revoked ${done} of ${targets.length} ${noun}; ${failed} failed.`);
-    else toast.success(`Revoked ${done} ${noun}.`);
+  const onRevokeScope = async (scope: "active" | "unused"): Promise<void> => {
+    try {
+      const result = await revokeScope.mutateAsync({ parentKeyId: parent.id, scope });
+      setLimit(PAGE_SIZE);
+      toast.success(`Revoked ${result.deleted.toLocaleString()} recipient${result.deleted === 1 ? "" : "s"}.`);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Could not revoke recipients."));
+    }
   };
 
   const busy = share.isPending || regenerate.isPending;
@@ -600,7 +578,7 @@ export function ShareManagementContent({
                   type="button"
                   aria-pressed={statusFilter === value}
                   onClick={() => {
-                    setPage(0);
+                    resetList();
                     setStatusFilter(value);
                   }}
                   className={`rounded-chip border-0 px-3 py-1 text-badge font-semibold capitalize cursor-pointer ${
@@ -617,18 +595,17 @@ export function ShareManagementContent({
               <span className="inline-flex items-center gap-2 rounded-chip border border-danger-border bg-surface-2 px-3 py-1">
                 <span className="text-badge text-text-secondary">
                   {confirmingBulk === "all"
-                    ? `Revoke ${visibleChildren.length}?`
-                    : `Revoke ${unusedChildren.length} unused?`}
+                    ? "Revoke all active recipients?"
+                    : "Revoke all active recipients that never spent a token?"}
                 </span>
                 <Button
                   variant="danger"
                   size="sm"
-                  loading={revoke.isPending}
+                  loading={revokeScope.isPending}
                   onClick={() => {
-                    const targets = confirmingBulk === "all" ? visibleChildren : unusedChildren;
-                    const noun = confirmingBulk === "all" ? "recipients" : "unused recipients";
+                    const scope = confirmingBulk === "all" ? "active" : "unused";
                     setConfirmingBulk(null);
-                    void revokeBulk(targets, noun);
+                    void onRevokeScope(scope);
                   }}
                 >
                   Confirm
@@ -641,11 +618,11 @@ export function ShareManagementContent({
             <Button
               variant="ghost"
               size="sm"
-              disabled={unusedChildren.length === 0 || revoke.isPending}
+              disabled={activeTotal === 0 || revokeScope.isPending}
               title={
-                unusedChildren.length === 0
-                  ? "No active recipient on this page has spent zero tokens"
-                  : `Revoke ${unusedChildren.length} recipient${unusedChildren.length === 1 ? "" : "s"} on this page that never spent a token`
+                activeTotal === 0
+                  ? "No active recipients"
+                  : `Revoke every active recipient (${activeTotal.toLocaleString()})`
               }
               onClick={() => setConfirmingBulk("unused")}
               icon={<Ban size={13} />}
@@ -655,11 +632,11 @@ export function ShareManagementContent({
             <Button
               variant="ghost"
               size="sm"
-              disabled={visibleChildren.length === 0 || revoke.isPending}
+              disabled={activeTotal === 0 || revokeScope.isPending}
               title={
-                visibleChildren.length === 0
-                  ? "Nothing to revoke on this page"
-                  : `Revoke all ${visibleChildren.length} recipient${visibleChildren.length === 1 ? "" : "s"} on this page`
+                activeTotal === 0
+                  ? "No active recipients"
+                  : `Revoke all active recipients (${activeTotal.toLocaleString()})`
               }
               onClick={() => setConfirmingBulk("all")}
               icon={<Ban size={13} />}
@@ -700,7 +677,7 @@ export function ShareManagementContent({
               }
             />
           ) : (
-            <div className="data-table-container max-h-[46vh]">
+            <div className="data-table-container max-h-[46vh]" onScroll={handleTableScroll}>
               <table className="data-table text-caption">
                 <thead>
                   <tr>
@@ -775,35 +752,18 @@ export function ShareManagementContent({
                   })}
                 </tbody>
               </table>
+              {summary.isFetching && children.length > 0 ? (
+                <div className="border-t border-inner-border py-2 text-center text-badge text-text-tertiary">
+                  Loading more…
+                </div>
+              ) : null}
+              {children.length > 0 && children.length >= limit && limit < MAX_SHARED_CHILD_LIMIT ? (
+                <div className="py-2 text-center text-badge text-text-tertiary">
+                  Scroll for more
+                </div>
+              ) : null}
             </div>
           )}
-          {summary.isError || summary.isPending && !summary.data ? null : total > 0 ? (
-            <div className="flex items-center justify-between gap-4 border-t border-inner-border pt-3">
-              <span className="text-caption text-text-tertiary tabular-nums">
-                {total === 0
-                  ? "0 recipients"
-                  : `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, total)} of ${total.toLocaleString()}`}
-              </span>
-              <div className="inline-flex items-center gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={page === 0 || summary.isFetching}
-                  onClick={() => setPage((current) => Math.max(0, current - 1))}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={(page + 1) * PAGE_SIZE >= total || summary.isFetching}
-                  onClick={() => setPage((current) => current + 1)}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
-          ) : null}
           </section>
         </>
       )}

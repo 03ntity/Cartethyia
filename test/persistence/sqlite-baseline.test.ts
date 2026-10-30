@@ -75,6 +75,7 @@ test("each backend has matching baseline and incremental migrations", () => {
     "0027_qoder_identity_genuine_seed.sql",
     "0028_add_family_template_key_telemetry.sql",
     "0029_null_share_child_policy_columns.sql",
+    "0030_add_api_key_max_children.sql",
   ];
   expect(postgres).toEqual(expected);
   expect(sqlite).toEqual(expected);

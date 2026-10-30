@@ -71,8 +71,36 @@ dbDescribe("api key shared page", () => {
     expect(page.total).toBe(3);
     expect(page.active).toBe(2);
     expect(page.revoked).toBe(1);
-    expect(page.consumed).toBe(60);
+    // Cumulative spend = template counter + family telemetry; this fixture has
+    // neither, so it is 0 (child columns are not part of the running total).
+    expect(page.consumed).toBe(0);
     expect(page.rows.map((row) => row.label)).toEqual(["mike", "alpha"]);
+  });
+
+  test("consumed is cumulative: template counter plus family telemetry", async () => {
+    const pool = await getTestPool();
+    // Seed a manual template counter, then a family telemetry total row.
+    await pool.query(
+      `update api_keys set lifetime_tokens_consumed = 1000 where id = $1`,
+      [templateId],
+    );
+    await pool.query(
+      `insert into telemetry_usage_totals
+         (tenant_id, identity_type, entity_id, family_template_key_id,
+          requests, errors, input_tokens, output_tokens, last_used_at)
+       values ($1, 'api_key', $2, $2, 5, 0, 2000, 500, now())`,
+      [tenantId, templateId],
+    );
+    const store = new DrizzleApiKeyStore(getDb());
+    const page = await store.listChildrenPage(tenantId, templateId, {
+      limit: 50,
+      offset: 0,
+      sortBy: "createdAt",
+      order: "asc",
+      status: "all",
+    });
+    // 1000 (counter) + (2000 + 500) telemetry = 3500.
+    expect(page.consumed).toBe(3500);
   });
 
   test("offset advances and status filter narrows", async () => {

@@ -328,6 +328,8 @@ export interface KeyFormInput {
   scopes: string[];
   requestsPerMinute?: number | null;
   maxConcurrentRequests?: number | null;
+  /** Share-template recipient slot cap; null/undefined = unlimited. */
+  maxChildren?: number | null;
   dailyTokenLimit?: number | null;
   monthlyTokenLimit?: number | null;
   lifetimeTokenBudget?: number | null;
@@ -404,6 +406,9 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
       : "recurring",
   );
   const [concurrent, setConcurrent] = useState(record?.maxConcurrentRequests?.toString() ?? "");
+  const [maxChildren, setMaxChildren] = useState(
+    (record as unknown as { maxChildren?: number | null })?.maxChildren?.toString() ?? "",
+  );
   const [scopes, setScopes] = useState<string[]>(() => initialApiKeyScopes(record));
   const [modelAccessMode, setModelAccessMode] = useState<"whitelist" | "blacklist">(
     (record as unknown as { modelAccessMode?: "whitelist" | "blacklist" | null })?.modelAccessMode ??
@@ -493,6 +498,7 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
       clientRouterDenylist: blockedRouters,
       requestsPerMinute: parseLimitOrNull(rpm),
       maxConcurrentRequests: parseLimitOrNull(concurrent),
+      maxChildren: keyMode === "share" ? parseLimitOrNull(maxChildren) : null,
       dailyTokenLimit: isOneTime ? null : (parseTokenLimit(daily) ?? null),
       monthlyTokenLimit: isOneTime ? null : (parseTokenLimit(monthly) ?? null),
       lifetimeTokenBudget: isOneTime ? (parseTokenLimit(lifetime) ?? null) : null,
@@ -664,6 +670,17 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose, actionsRef }: 
             placeholder="Unlimited…"
             disabled={busy}
           />
+          {keyMode === "share" ? (
+            <Input
+              label="Recipient slots (max children)"
+              type="number"
+              min="0"
+              value={maxChildren}
+              onChange={(e) => setMaxChildren(e.target.value)}
+              placeholder="Unlimited…"
+              disabled={busy}
+            />
+          ) : null}
         </div>
         {/*
           * The limit is the number a refusal names. The allowance above it is

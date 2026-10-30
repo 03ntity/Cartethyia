@@ -9,6 +9,11 @@ import type {
   SharedChildSortColumn,
   UpdateApiKeyResponse,
 } from "../data/contracts";
+
+export interface RevokeSharedScopeResponse {
+  readonly success: boolean;
+  readonly deleted: number;
+}
 import { queryKeys } from "../data/query-keys";
 import { assertApiKeys, querySignal } from "../data/assert";
 import { DASHBOARD_QUERY_OPTIONS, POLL } from "../data/query-policy";
@@ -189,6 +194,28 @@ export function useSharedKeys(parentKeyId: string | null, params: SharedKeysPage
     enabled: parentKeyId !== null,
     refetchInterval: POLL.live,
     refetchIntervalInBackground: false,
+  });
+}
+
+/** Revokes every active recipient of a template — or only the active ones that
+ * never spent a token — server-side, so the operation spans the whole family
+ * rather than the currently rendered page. */
+export function useRevokeSharedScope() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    RevokeSharedScopeResponse,
+    ApiErrorShape,
+    { parentKeyId: string; scope: "active" | "unused" }
+  >({
+    mutationFn: ({ parentKeyId, scope }) =>
+      consoleRequest<RevokeSharedScopeResponse>(
+        `/api-keys/${encodeURIComponent(parentKeyId)}/shared-keys/revoke-scope`,
+        { method: "POST", body: JSON.stringify({ scope }) },
+      ),
+    onSuccess: async (_result, { parentKeyId }) => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.sharedKeys(parentKeyId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.all });
+    },
   });
 }
 

@@ -160,6 +160,12 @@ export type SharedApiKeyIssueResult =
       readonly kind: "already_issued";
       readonly parentKeyId: string;
       readonly tenantId: string;
+    }
+  | {
+      readonly kind: "slot_full";
+      readonly parentKeyId: string;
+      readonly tenantId: string;
+      readonly limit: number;
     };
 
 type ApiKeyRow = typeof apiKeys.$inferSelect;
@@ -513,6 +519,26 @@ export class DrizzleShareLinkStore implements ShareLinkStore {
             kind: "already_issued",
             parentKeyId: parent.id,
             tenantId: parent.tenantId,
+          };
+        }
+      }
+
+      // Slot cap: a template may bound how many concurrently-active children
+      // exist. The public link is mint-able by anyone, so without this cap a
+      // bot rotating egress IPs (CDN edges, cloud egress, proxies) could mint
+      // without bound — observed: 331k children in three days. The count is
+      // live children only; revoked children free their slot for reuse.
+      if (parent.maxChildren !== null && parent.maxChildren !== undefined) {
+        const liveCount = await tx
+          .select({ value: sql<number>`count(*) filter (where ${apiKeys.revokedAt} is null)` })
+          .from(apiKeys)
+          .where(eq(apiKeys.parentKeyId, parent.id));
+        if (Number(liveCount[0]?.value ?? 0) >= parent.maxChildren) {
+          return {
+            kind: "slot_full",
+            parentKeyId: parent.id,
+            tenantId: parent.tenantId,
+            limit: parent.maxChildren,
           };
         }
       }

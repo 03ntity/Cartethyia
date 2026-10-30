@@ -138,6 +138,31 @@ dbDescribe("share issue — one child key per canonical IP", () => {
     expect(res.status).toBe(201);
   });
 
+  test("a template with a slot cap refuses once active children fill it", async () => {
+    // Set a cap of 1 on the existing template; it already has live children.
+    const pool = await getTestPool();
+    await pool.query("update api_keys set max_children = 1 where id = $1", [parentKeyId]);
+
+    const cappedRouter = createShareRouter({
+      db: getDb(),
+      shareStore: new DrizzleShareLinkStore(getDb()),
+      resolveClientIp: () => "198.51.100.77",
+    });
+    const res = await cappedRouter.handle(
+      new Request(`https://x/share/${token}/issue`, {
+        method: "POST",
+        body: JSON.stringify({ nameHint: "cap" }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    expect(res.status).toBe(429);
+    const payload = (await res.json()) as { error?: { code?: string } };
+    expect(payload.error?.code).toBe("template_slot_full");
+
+    // Reset to unlimited so sibling tests are unaffected.
+    await pool.query("update api_keys set max_children = null where id = $1", [parentKeyId]);
+  });
+
   test("a minted child does not copy the template's policy columns", async () => {
     // Third IP so this mint is independent of the earlier rate-limit cases.
     const childRouter = createShareRouter({

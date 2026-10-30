@@ -5,7 +5,7 @@ import { nextSortIndex, reorderSortIndex, type SortOrderDb } from "../sort-order
 import { getDbHandle } from "../boot";
 import type { CartethyiaDatabase } from "../db-handle";
 import { lockRows } from "../dialect";
-import { apiKeys, shareLinks, sharePopups, type ApiKeyMode, type ApiKeyModelAccessMode } from "../schema";
+import { apiKeys, shareLinks, sharePopups, telemetryUsageTotals, type ApiKeyMode, type ApiKeyModelAccessMode } from "../schema";
 import type { AccessScope } from "../../security/access-control";
 
 /** Sortable columns for the paged share-child listing (api_keys columns only). */
@@ -66,6 +66,8 @@ export interface ApiKeyRecord {
   readonly monthlyTokenLimit?: number;
   readonly lifetimeTokenBudget?: number;
   readonly maxConcurrentRequests?: number;
+  /** Share-template recipient slot cap; undefined = unlimited. */
+  readonly maxChildren?: number;
   readonly modelPrefix?: string;
   readonly modelAccessMode?: ApiKeyModelAccessMode;
   readonly modelList?: readonly string[];
@@ -125,6 +127,7 @@ export interface ApiKeyPatch
     | "monthlyTokenLimit"
     | "lifetimeTokenBudget"
     | "maxConcurrentRequests"
+    | "maxChildren"
   > {
   readonly keyHash?: string | null;
   readonly keyEncrypted?: Buffer | null;
@@ -143,6 +146,7 @@ export interface ApiKeyPatch
   readonly monthlyTokenLimit?: number | null;
   readonly lifetimeTokenBudget?: number | null;
   readonly maxConcurrentRequests?: number | null;
+  readonly maxChildren?: number | null;
 }
 
 interface PopupFields {
@@ -225,6 +229,14 @@ export interface ApiKeyStore {
   list(tenantId: string): Promise<readonly ApiKeyRecord[]>;
   get(tenantId: string, keyId: string): Promise<ApiKeyRecord | undefined>;
   listChildren(tenantId: string, parentKeyId: string): Promise<readonly ApiKeyRecord[]>;
+  revokeChildrenByScope(
+    tenantId: string,
+    parentKeyId: string,
+    scope: "active" | "unused",
+  ): Promise<number>;
+  /** Cumulative family spend: template counter + every telemetry total row ever
+   * recorded for the family (revoked/deleted children stay counted). */
+  sumFamilyTelemetryConsumed(tenantId: string, parentKeyId: string): Promise<number>;
   listChildrenPage(
     tenantId: string,
     parentKeyId: string,
@@ -293,6 +305,7 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
       ...(row.maxConcurrentRequests === null
         ? {}
         : { maxConcurrentRequests: row.maxConcurrentRequests }),
+      ...(row.maxChildren === null ? {} : { maxChildren: row.maxChildren }),
       ...(row.modelPrefix === null ? {} : { modelPrefix: row.modelPrefix }),
       modelAccessMode: row.modelAccessMode,
       ...(row.modelList === null ? {} : { modelList: row.modelList as string[] }),
@@ -384,7 +397,7 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
     );
     // The page query and the count query run together; the counts feed the
     // modal's header ("active users") without a second round trip per page.
-    const [rows, counts] = await Promise.all([
+    const [rows, counts, template] = await Promise.all([
       this.db.select().from(apiKeys).where(where).orderBy(direction, apiKeys.createdAt, apiKeys.id)
         .limit(options.limit)
         .offset(options.offset),
@@ -393,20 +406,79 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
           total: count(),
           active: sql<number>`count(*) filter (where ${apiKeys.revokedAt} is null)`,
           revoked: sql<number>`count(*) filter (where ${apiKeys.revokedAt} is not null)`,
-          consumed: sql<number>`coalesce(sum(${apiKeys.lifetimeTokensConsumed}), 0)`,
         })
         .from(apiKeys)
         .where(where),
+      this.db
+        .select({ lifetime: apiKeys.lifetimeTokensConsumed })
+        .from(apiKeys)
+        .where(eq(apiKeys.id, parentKeyId))
+        .limit(1),
     ]);
     const summary = counts[0]!;
+    // Cumulative family spend: the template's own counter plus every telemetry
+    // total row the family ever recorded (revoked/deleted children stay
+    // counted). Deleted children leave telemetry rows behind, so this is the
+    // number that survives cleanup — matching the overview and share page.
+    const familyTelemetry = await this.sumFamilyTelemetryConsumed(tenantId, parentKeyId);
     return {
       rows: await this.withPopups(this.db, rows),
       total: Number(summary.total),
       active: Number(summary.active),
       revoked: Number(summary.revoked),
-      consumed: Number(summary.consumed),
+      consumed: Number(template[0]?.lifetime ?? 0) + familyTelemetry,
     };
   }
+  /**
+   * Revokes every active child (or only the active children that never spent
+   * a token) of a share template, in bounded batches so one statement never
+   * exceeds the pool's statement timeout. A family can hold hundreds of
+   * thousands of recipients; the console's bulk actions target all of them,
+   * not just the currently rendered page.
+   */
+  async revokeChildrenByScope(
+    tenantId: string,
+    parentKeyId: string,
+    scope: "active" | "unused",
+  ): Promise<number> {
+    const condition = and(
+      eq(apiKeys.tenantId, tenantId),
+      eq(apiKeys.parentKeyId, parentKeyId),
+      isNull(apiKeys.revokedAt),
+      ...(scope === "unused" ? [eq(apiKeys.lifetimeTokensConsumed, 0)] : []),
+    );
+    let deleted = 0;
+    for (;;) {
+      const batch = await this.db
+        .select({ id: apiKeys.id })
+        .from(apiKeys)
+        .where(condition)
+        .orderBy(apiKeys.id)
+        .limit(5000);
+      if (batch.length === 0) return deleted;
+      const result = await this.db
+        .delete(apiKeys)
+        .where(inArray(apiKeys.id, batch.map((row) => row.id)));
+      deleted += result.rowCount ?? batch.length;
+    }
+  }
+
+  async sumFamilyTelemetryConsumed(tenantId: string, parentKeyId: string): Promise<number> {
+    const rows = await this.db
+      .select({
+        total: sql<number>`coalesce(sum(${telemetryUsageTotals.inputTokens} + ${telemetryUsageTotals.outputTokens}), 0)`,
+      })
+      .from(telemetryUsageTotals)
+      .where(
+        and(
+          eq(telemetryUsageTotals.tenantId, tenantId),
+          eq(telemetryUsageTotals.identityType, "api_key"),
+          sql`(${telemetryUsageTotals.familyTemplateKeyId} = ${parentKeyId} or (${telemetryUsageTotals.familyTemplateKeyId} is null and exists (select 1 from ${apiKeys} where ${apiKeys.id} = ${telemetryUsageTotals.entityId} and ${apiKeys.parentKeyId} = ${parentKeyId})))`,
+        ),
+      );
+    return Number(rows[0]?.total ?? 0);
+  }
+
   async create(record: ApiKeyRecord): Promise<void> {
     // Append to the end of the tenant's list rather than relying on creation
     // time, so a new key never displaces the existing rows' positions.
@@ -433,6 +505,7 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
       monthlyTokenLimit: record.monthlyTokenLimit ?? null,
       lifetimeTokenBudget: record.lifetimeTokenBudget ?? null,
       maxConcurrentRequests: record.maxConcurrentRequests ?? null,
+      maxChildren: record.maxChildren ?? null,
       modelPrefix: record.modelPrefix ?? null,
       modelAccessMode: record.modelAccessMode ?? "whitelist",
       modelList: record.modelList ?? null,
@@ -500,6 +573,7 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
           ...(patch.maxConcurrentRequests !== undefined
             ? { maxConcurrentRequests: patch.maxConcurrentRequests }
             : {}),
+          ...(patch.maxChildren !== undefined ? { maxChildren: patch.maxChildren } : {}),
           ...(patch.modelPrefix !== undefined ? { modelPrefix: patch.modelPrefix } : {}),
           ...(patch.modelAccessMode !== undefined ? { modelAccessMode: patch.modelAccessMode } : {}),
           ...(patch.modelList !== undefined ? { modelList: patch.modelList } : {}),

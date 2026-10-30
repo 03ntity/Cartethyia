@@ -815,6 +815,13 @@ export const apiKeys = pgTable(
       .default(0),
     maxConcurrentRequests: integer("max_concurrent_requests"),
     /**
+     * Slot cap for a share template: the maximum number of concurrently
+     * active child keys it may mint. `null` = unlimited (legacy behavior).
+     * Enforced at mint time in `issueSharedApiKey`; the console exposes it as
+     * the template's "slots".
+     */
+    maxChildren: integer("max_children"),
+    /**
      * `whitelist` = only the names in `modelList` may be used (empty = all);
      * `blacklist` = the names in `modelList` are refused (empty = none). One
      * list, one mode.

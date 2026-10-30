@@ -11,6 +11,7 @@
 // masked addresses. No request or response bodies cross this boundary.
 
 import { createHash } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { maskClientIp } from "../../observability/redaction";
 import { type TelemetryEventRecord } from "../../observability/event-log";
 import {
@@ -18,6 +19,7 @@ import {
   sumTelemetryTokens,
 } from "../../observability/event-query";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
+import { apiKeys } from "../../persistence/schema";
 import { isGatewayError } from "../../observability/telemetry-status";
 import type { RedisClient } from "../../persistence/redis";
 import { cachedRead } from "../shared/read-through-cache";
@@ -323,11 +325,22 @@ async function computeFamilyStatsBody(
   // daily, and monthly are therefore separate bounded sums over the retained
   // SQL window (each is a single `SUM` aggregate, not a row materialization).
   // The page's events feed only the hourly chart and the two ranked tables.
-  const [totalTokens, todayTokens, monthTokens] = await Promise.all([
+  const [totalTokens, todayTokens, monthTokens, template] = await Promise.all([
     sumTelemetryTokens(db, tenantId, { familyKeyId: templateKeyId, since: new Date(0) }),
     sumTelemetryTokens(db, tenantId, { familyKeyId: templateKeyId, since: dayStart }),
     sumTelemetryTokens(db, tenantId, { familyKeyId: templateKeyId, since: monthStart }),
+    db
+      .select({ lifetime: apiKeys.lifetimeTokensConsumed })
+      .from(apiKeys)
+      .where(eq(apiKeys.id, templateKeyId))
+      .limit(1),
   ]);
+  // Cumulative family spend: the template's own counter plus the telemetry
+  // total. The counter is a manually-configured seed (an operator limit), not
+  // traffic, and it is never reset; azmetry rows for revoked/deleted children
+  // likewise stay counted, so the running total is monotonic and consistent
+  // across the overview, the share dialog, and this page.
+  const templateLifetime = Number(template[0]?.lifetime ?? 0);
 
   // The hourly chart covers the last 24 hours, so the page only needs events
   // in that window — not the whole retained history. Bounded and small.
@@ -347,7 +360,10 @@ async function computeFamilyStatsBody(
   });
   rollup.totals = {
     ...rollup.totals,
-    totalTokens,
+    // The template counter is the seed on the running total, not a distinct
+    // bucket: daily/monthly windows are telemetry-only (the counter has no
+    // time axis), so those keep their own sums.
+    totalTokens: templateLifetime + totalTokens,
     todayTokens,
     monthTokens,
   };

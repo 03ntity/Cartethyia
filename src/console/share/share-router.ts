@@ -392,6 +392,14 @@ export function createShareRouter(options: ShareRouterOptions): Elysia {
         nameHint,
       });
       if (issued.kind === "link_unavailable") return notFound();
+      if (issued.kind === "slot_full") {
+        return json({
+          error: {
+            code: "template_slot_full",
+            message: "This template has reached its maximum number of recipients.",
+          },
+        }, 429);
+      }
       if (issued.kind === "already_issued") {
         // The recipient's IP already enrolled from this link. The original
         // bearer secret is not stored server-side, so it cannot be returned;
