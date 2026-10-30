@@ -36,6 +36,11 @@ export const DEFAULT_ENTRY_DOCUMENTS: Readonly<Record<string, string>> = {
   "/console": "index.html",
 };
 
+function dashboardBuildHeader(html: string): Record<string, string> {
+  const buildId = /<meta\s+name="cartethyia-dashboard-build"\s+content="([a-f0-9]{16})"\s*\/?>/i.exec(html)?.[1];
+  return buildId === undefined ? {} : { "x-cartethyia-dashboard-build": buildId };
+}
+
 /**
  * Open Graph / Twitter card values injected into a served document. The shared
  * index document ships the landing card, so the public share routes swap in
@@ -200,6 +205,7 @@ export function createStaticHandler(
         "cache-control": "no-store, no-cache, must-revalidate",
         pragma: "no-cache",
         expires: "0",
+        ...dashboardBuildHeader(html),
       },
     };
   };
@@ -274,6 +280,10 @@ export function createStaticHandler(
             // Regular assets without hash
             cacheControl = "public, max-age=3600";
           }
+          const buildHeaders =
+            mimeType.startsWith("text/html")
+              ? dashboardBuildHeader(new TextDecoder().decode(data))
+              : {};
 
           // A precompressed sibling is served when the client asked for gzip
           // and the build emitted one. The bytes were compressed at build time
@@ -293,6 +303,7 @@ export function createStaticHandler(
                 // client that never offered gzip: the URL is identical either
                 // way, so `accept-encoding` is the only thing that differs.
                 vary: "accept-encoding",
+                ...buildHeaders,
               },
             };
           }
@@ -300,7 +311,11 @@ export function createStaticHandler(
           return {
             status: 200,
             body: data,
-            headers: { "content-type": mimeType, "cache-control": cacheControl },
+            headers: {
+              "content-type": mimeType,
+              "cache-control": cacheControl,
+              ...buildHeaders,
+            },
           };
         }
       } catch {

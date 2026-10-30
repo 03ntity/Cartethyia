@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin, type UserConfig, type ConfigEnv, type ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import type { IncomingMessage } from "node:http";
 
@@ -77,7 +78,8 @@ function multiPageRouting(): Plugin {
  * served from disk for the lifetime of the deployment. `src/console/
  * dashboard-assets.ts` serves the `.gz` when the client offered gzip and falls
  * back to the plain file when it did not, so a build without this plugin still
- * works.
+ * works. The same pass fingerprints the emitted assets and puts the build ID
+ * in `index.html`, so a deployment's served version can be checked directly.
  */
 function precompressAssets(): Plugin {
   const COMPRESSED_EXTENSIONS = [".js", ".mjs", ".css", ".html", ".json", ".svg"];
@@ -95,6 +97,7 @@ function precompressAssets(): Plugin {
       // `dashboard/`, and `build.outDir` above is relative to it.
       const root = resolve(process.cwd(), "..", "dist", "dashboard");
       const stack: string[] = [root];
+      const files: Array<{ full: string; relative: string; source: Buffer }> = [];
       const written: string[] = [];
       while (stack.length > 0) {
         const dir = stack.pop();
@@ -106,14 +109,40 @@ function precompressAssets(): Plugin {
             stack.push(full);
             continue;
           }
-          // A `.gz` from an earlier build is not an input.
-          if (!COMPRESSED_EXTENSIONS.includes(extname(entry.name).toLowerCase())) continue;
-          const source = await readFile(full).catch(() => undefined);
-          if (source === undefined) continue;
-          await writeFile(`${full}.gz`, gzipSync(source, { level: 9 })).catch(() => undefined);
-          written.push(full.slice(root.length + 1));
+          if (entry.name.endsWith(".gz")) continue;
+          files.push({
+            full,
+            relative: full.slice(root.length + 1).replace(/\\/g, "/"),
+            source: await readFile(full),
+          });
         }
       }
+
+      const index = files.find((file) => file.relative === "index.html");
+      if (index === undefined) throw new Error("Dashboard build did not emit index.html");
+
+      const hash = createHash("sha256");
+      for (const file of files
+        .filter((candidate) => candidate !== index)
+        .sort((left, right) => left.relative.localeCompare(right.relative))) {
+        hash.update(file.relative);
+        hash.update("\0");
+        hash.update(file.source);
+      }
+
+      const buildId = hash.digest("hex").slice(0, 16);
+      const html = index.source.toString("utf8");
+      const marker = `<meta name="cartethyia-dashboard-build" content="${buildId}" />`;
+      if (!html.includes("</head>")) throw new Error("Dashboard entry document has no closing head tag");
+      index.source = Buffer.from(html.replace("</head>", `  ${marker}\n</head>`));
+      await writeFile(index.full, index.source);
+
+      for (const file of files) {
+        if (!COMPRESSED_EXTENSIONS.includes(extname(file.full).toLowerCase())) continue;
+        await writeFile(`${file.full}.gz`, gzipSync(file.source, { level: 9 })).catch(() => undefined);
+        written.push(file.relative);
+      }
+
       // The manifest is what makes the output inspectable: a deploy can assert
       // the `.gz` siblings exist instead of trusting that the plugin ran.
       await writeFile(

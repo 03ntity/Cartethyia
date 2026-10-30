@@ -40,9 +40,11 @@ function bodyText(result: { body?: unknown }): string {
 
 beforeAll(async () => {
   buildDir = await mkdtemp(join(tmpdir(), "cartethyia-assets-"));
+  const indexHtml =
+    "<!doctype html><html><head><meta name=\"cartethyia-dashboard-build\" content=\"0123456789abcdef\" /></head><body><div id=\"root\"></div></body></html>";
   await writeFile(
     join(buildDir, "index.html"),
-    "<!doctype html><html><body><div id=\"root\"></div></body></html>",
+    indexHtml,
   );
   await writeFile(join(buildDir, "assets.js"), "console.log('bundle')");
   await writeFile(join(buildDir, "styles.css"), "body{margin:0}");
@@ -222,6 +224,7 @@ describe("static assets — cache policy", () => {
     const result = await handler("/index.html");
     expect(result.status).toBe(200);
     expect(result.headers["cache-control"]).toBe("no-store, no-cache, must-revalidate");
+    expect(result.headers["x-cartethyia-dashboard-build"]).toBe("0123456789abcdef");
   });
 
   test("a directly-served index.html carries the legacy cache headers too", async () => {
@@ -236,6 +239,7 @@ describe("static assets — cache policy", () => {
     const fallback = await handler("/console/overview");
     expect(fallback.headers["pragma"]).toBe("no-cache");
     expect(fallback.headers["expires"]).toBe("0");
+    expect(fallback.headers["x-cartethyia-dashboard-build"]).toBe("0123456789abcdef");
   });
 
   test("an SPA fallback response is never cached either", async () => {

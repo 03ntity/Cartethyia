@@ -17,6 +17,11 @@ images are HTTPS-only. `connect-src` remains same-origin, so the dashboard canno
 call arbitrary third-party APIs. Chapter auto-scroll is disabled.
 - Public share links may include an owner-configured donation or information popup, click-opened from the Base URL card; its responsive dialog layout is utilities, not a stylesheet.
 Production serves the built files from `dist/dashboard`.
+Each production build embeds a content-derived dashboard ID in the entry
+document (`cartethyia-dashboard-build`) and returns the same value in the
+`X-Cartethyia-Dashboard-Build` response header. Compare that ID and the
+content-hashed CSS URL when verifying which dashboard build a deployment
+serves; the hash changes with the emitted dashboard assets.
 
 ## Verification
 
