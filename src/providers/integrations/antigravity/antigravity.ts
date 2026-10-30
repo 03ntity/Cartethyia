@@ -84,34 +84,31 @@ const antigravityModel = (
   });
 
 export const ANTIGRAVITY_MODELS: readonly ModelDefinition[] = [
-  // Claude via Antigravity (Anthropic-branded SKUs, Gemini wire)
+  // Claude via Antigravity (Anthropic-branded SKUs, Gemini wire). The 4.6
+  // rows are pinned at 64000 because Antigravity was observed rejecting
+  // anything higher on `daily-cloudcode-pa`; `out` is published metadata, not
+  // a request field (the envelope's `maxOutputTokens` comes from
+  // `ANTIGRAVITY_MODEL_WIRE_PROFILES`).
   antigravityModel("claude-sonnet-4-6", 250_000, 64_000, true),
   antigravityModel("claude-opus-4-6", 250_000, 64_000, true),
-  // The 5.5 generation. Anthropic's own model pages publish 1M context and
-  // 128k output for both, which is the same figure the Claude integration
-  // carries; Antigravity has no base-catalog rows of its own, so the numbers
-  // are stated here rather than resolved from a source that does not exist.
-  //
-  // `out` is published metadata, not a request field: the `maxOutputTokens` the
-  // envelope carries comes from `ANTIGRAVITY_MODEL_WIRE_PROFILES`, and an id
-  // absent from that table passes the caller's own value through. The 4.6 rows
-  // are pinned at 64000 because Antigravity was observed rejecting anything
-  // higher on `daily-cloudcode-pa`. The 5.5 cap is UNVERIFIED — no 5.5 request
-  // has been captured against that host — so if it turns out to carry the same
-  // 64000 ceiling, it needs its own profile entry; a catalog row cannot express
-  // it.
   antigravityModel("claude-sonnet-5-5", 1_000_000, 128_000, true),
   antigravityModel("claude-opus-5-5", 1_000_000, 128_000, true),
-  // Gemini
-  antigravityModel("gemini-2.5-flash", 1_048_576, 65_536, true),
-  antigravityModel("gemini-3-flash", 1_048_576, 65_536, true),
+  // Gemini text SKUs, as the Antigravity roster publishes them.
+  antigravityModel("gemini-2.5-flash", 1_000_000, 66_000, true),
+  antigravityModel("gemini-2.5-flash-thinking", 1_000_000, 66_000, true),
+  antigravityModel("gemini-3-flash", 1_000_000, 66_000, true),
+  antigravityModel("gemini-3.1-flash-lite", 1_000_000, 66_000, true),
+  antigravityModel("gemini-2.5-flash-lite", 1_000_000, 66_000, true),
+  antigravityModel("gemini-3.5-flash-lite", 1_000_000, 66_000, true),
+  antigravityModel("gemini-3.8-flash", 1_000_000, 66_000, true),
+  antigravityModel("gemini-4-argon", 1_000_000, 65_536, true),
+  antigravityModel("gemini-4-carbon", 1_000_000, 65_536, true),
+  // Tab (laptop-class) preview SKU.
+  antigravityModel("tab_flash_lite_preview", 16_000, 4_000, true),
+  // Gemini image generation. `gemini-3-pro-image` uses the same catalog
+  // limits/capabilities as the existing `gemini-3.1-flash-image` row.
   antigravityModel("gemini-3.1-flash-image", 200_000, 64_000, false, true),
-  antigravityModel("gemini-3.1-pro", 1_048_576, 65_535, true),
-  antigravityModel("gemini-3.6-flash", 1_048_576, 65_536, true),
-  antigravityModel("gemini-3.7-flash", 1_048_576, 65_536, true),
-  antigravityModel("gemini-3.8-flash", 1_048_576, 65_536, true),
-  // GPT-OSS
-  antigravityModel("gpt-oss-120b", 131_072, 32_768, true),
+  antigravityModel("gemini-3-pro-image", 200_000, 64_000, false, true),
 ];
 
 function normalizeAntigravityGrounding(data: unknown, maxResults: number): readonly WebSearchResult[] {

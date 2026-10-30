@@ -50,6 +50,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Antigravity's static catalog matches the roster.** The offline model list
+  is pruned to the ids the account actually serves — the Gemini text SKUs
+  (`gemini-2.5-flash`, `gemini-2.5-flash-thinking`, `gemini-3-flash`,
+  `gemini-2.5-flash-lite`, `gemini-3.1-flash-lite`,
+  `gemini-3.5-flash-lite`, `gemini-3.8-flash`, `gemini-4-argon`,
+  `gemini-4-carbon`), the Claude SKUs (`claude-sonnet-4-6`,
+  `claude-opus-4-6`, `claude-sonnet-5-5`, `claude-opus-5-5`), and the
+  `tab_flash_lite_preview` laptop-class SKU — plus the image-generation rows
+  `gemini-3.1-flash-image` and the new `gemini-3-pro-image` (same limits and
+  capabilities as its 3.1 sibling). Rows Antigravity no longer lists
+  (`gemini-3.1-pro`, `gemini-3.6-flash`, `gemini-3.7-flash`,
+  `gpt-oss-120b`) are gone; live discovery still finds any id not seeded here.
 - **Qoder check-in speaks the desktop identity.** Campaign requests now carry
   the desktop client's header set (`User-Agent: Qoder`, `cosy-clienttype: 10`,
   `cosy-version` from the shared version source); without them the server
