@@ -1181,6 +1181,26 @@ export const consoleSettings = pgTable("console_settings", {
   updatedAt: updatedAtColumn(),
 });
 
+// Tenant-scoped system prompt injection (append/override). One row per
+// tenant; `global` NULL means never configured, distinct from an explicit
+// disabled setting. Providers/models are JSON object maps keyed by
+// providerId and `providerId::modelId` respectively — see
+// `src/console/system-prompt/contracts.ts` for the value shapes and the
+// resolution rules implemented by the dispatch-path transform.
+export const tenantSystemPrompts = pgTable("tenant_system_prompts", {
+  tenantId: tenantRefPrimaryKey(),
+  global: jsonb("global").$type<import("../console/system-prompt/contracts").PromptSetting | null>(),
+  providers: jsonb("providers")
+    .notNull()
+    .default({})
+    .$type<Record<string, import("../console/system-prompt/contracts").ProviderPromptEntry>>(),
+  models: jsonb("models")
+    .notNull()
+    .default({})
+    .$type<Record<string, import("../console/system-prompt/contracts").PromptSetting>>(),
+  updatedAt: updatedAtColumn(),
+});
+
 // InferHub `config_read` key. One row for the whole deployment.
 //
 // Deliberately NOT `provider_accounts.auth_state`: that field is documented as

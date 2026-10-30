@@ -25,6 +25,7 @@ import { createNetworkPoolRoutes } from "./routing/pools/routes";
 import { DrizzleModelRoutingStore } from "./routing/model/store";
 import { DrizzleNetworkPoolStore } from "./routing/pools/store";
 import { createRuntimeSettingsRoutes } from "./settings/routes";
+import { createSystemPromptRoutes } from "./system-prompt/routes";
 import { createDataManagementRoutes } from "./data-management/routes";
 import { healthEventBuffer } from "../persistence/health-event-flush";
 import { countAllHealthEvents, deleteAllHealthEvents } from "../providers/operations/account-health-service";
@@ -306,6 +307,7 @@ export function registerConsoleDomains(
     relayFetch: createValidatedFetch({ policy: resolveSsrfPolicy() }),
   }));
   console.use(createRuntimeSettingsRoutes({ store: runtimeSettingsStore, accessResolver: ctx.accessResolver, auditSink: ctx.auditRecorder, snapshotInvalidator: ctx.routeSnapshotService }));
+  console.use(createSystemPromptRoutes({ db: ctx.db, accessResolver: ctx.accessResolver, auditSink: ctx.auditRecorder }));
   console.use(
     createDataManagementRoutes({
       telemetryDir: TELEMETRY_EVENT_DIR,

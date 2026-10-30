@@ -76,6 +76,7 @@ test("each backend has matching baseline and incremental migrations", () => {
     "0028_add_family_template_key_telemetry.sql",
     "0029_null_share_child_policy_columns.sql",
     "0030_add_api_key_max_children.sql",
+    "0031_tenant_system_prompts.sql",
   ];
   expect(postgres).toEqual(expected);
   expect(sqlite).toEqual(expected);
