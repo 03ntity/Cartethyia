@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { GatewayError } from "../../protocol/gateway-error";
 import { isLoopbackPeer, tokenMatches } from "../../transport/drain-endpoint";
 import { BACKUP_SECTIONS, tablesForSection } from "./contracts";
-import { exportBackup } from "./store";
+import { compressBackupStream, exportBackupStream } from "./store";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 
 export interface BackupExportDeps {
@@ -67,16 +67,13 @@ export function createBackupExportHandler(
     if (tenantId === null)
       throw new GatewayError("invalid_request", 409, "no tenant exists; run setup first");
 
-    const { payload, counts } = await exportBackup(
-      deps.db,
-      tablesForSection("config"),
-      tenantId,
-    );
-
-    // gzipSync matches what the console writes, so a CLI backup and a dashboard
-    // backup are the same file format and either can be restored by the other.
-    const json = JSON.stringify(payload);
-    const gzipped = Bun.gzipSync(new TextEncoder().encode(json));
+    // One gzip pass over the streamed document: a tenant with hundreds of
+    // thousands of rows is read page by page and only the compressed bytes
+    // land in the buffer — the same file format a console backup produces, so
+    // a CLI backup and a dashboard backup remain restorable by the other.
+    const stream = await exportBackupStream(deps.db, tablesForSection("config"), tenantId);
+    const gzipped = await compressBackupStream(stream.jsonChunks);
+    const counts = await stream.counts;
     const target = directory ?? downloadDirectory();
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const path = join(target, `cartethyia-backup-${stamp}.json.gz`);

@@ -39,7 +39,10 @@ test("native_identity travels through export and restore verbatim", async () => 
     });
 
     const service = new BackupService({ db, verifyPassword: async () => true });
-    const { payload } = await service.export({ tenantId, password: "pw" });
+    const exportStream = await service.export({ tenantId, password: "pw" });
+    let document = "";
+    for await (const chunk of exportStream.jsonChunks) document += chunk;
+    const payload = JSON.parse(document) as unknown;
 
     // The exported row carries the identity object under the column's own name.
     const config = (payload as { sections: { config: Record<string, readonly unknown[]> } }).sections.config;

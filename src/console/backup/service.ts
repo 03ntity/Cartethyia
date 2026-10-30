@@ -40,7 +40,8 @@ import {
   applyRestore,
   decompressBackup,
   deleteAll,
-  exportBackup,
+  exportBackupStream,
+  type BackupExportStream,
   type DeleteAllResult,
   type DeleteAllScope,
 } from "./store";
@@ -269,17 +270,16 @@ async function omitRowsForUnavailableProviders(
 export class BackupService {
   constructor(private readonly options: BackupServiceOptions) {}
 
-  async export(options: ExportOptions): Promise<{ payload: unknown; counts: Record<string, number> }> {
+  async export(options: ExportOptions): Promise<BackupExportStream> {
     if (!(await this.options.verifyPassword(options.password))) {
       throw new ConsoleDomainError("unauthorized", 401, "password is incorrect");
     }
     const sections = sectionsOrDefault(options.sections);
-    const { payload, counts } = await exportBackup(
+    return exportBackupStream(
       this.options.db,
       sections.flatMap((section) => tablesForSection(section)),
       options.tenantId,
     );
-    return { payload, counts };
   }
 
   /**
@@ -453,11 +453,16 @@ export class BackupService {
     sections: readonly BackupSection[] | undefined,
     tenantId: string,
   ): Promise<Record<string, number>> {
-    const { counts } = await exportBackup(
+    const stream = exportBackupStream(
       this.options.db,
       sectionsOrDefault(sections).flatMap((section) => tablesForSection(section)),
       tenantId,
     );
-    return counts;
+    // Walk the stream so the tally settles, discarding the bytes: a preview
+    // must not hold the payload either.
+    for await (const _chunk of stream.jsonChunks) {
+      // discard
+    }
+    return stream.counts;
   }
 }

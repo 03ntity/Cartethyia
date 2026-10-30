@@ -22,7 +22,7 @@ import { ConsoleDomainError, errorResponse, requireAnyScope } from "../shared/er
 import { NO_COMPRESS_HEADER } from "../response-compression";
 import { MAX_BACKUP_BYTES } from "./contracts";
 import type { BackupSection } from "./contracts";
-import { DELETE_ALL_SCOPES, compressBackup } from "./store";
+import { DELETE_ALL_SCOPES, compressBackupStream } from "./store";
 import type { BackupService } from "./service";
 import type { AuditRecorder } from "../auth/audit-recorder";
 
@@ -118,6 +118,27 @@ function parseSections(raw: string | undefined): readonly BackupSection[] | unde
     .filter((part) => part.length > 0) as readonly BackupSection[];
 }
 
+/**
+ * Streams the export document into the response body as it is written; one
+ * row-page of the tenant's data is in memory at a time.
+ */
+function payloadDocument(chunks: AsyncGenerator<string, void, void>): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await chunks.next();
+      if (next.done) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(encoder.encode(next.value));
+    },
+    async cancel() {
+      await chunks.return();
+    },
+  });
+}
+
 export function createBackupRoutes(config: BackupRoutesConfig): Elysia {
   return new Elysia({ prefix: "/backup" })
     .get("/export", { query: exportQuery }, async ({ request, query, set }) => {
@@ -129,7 +150,7 @@ export function createBackupRoutes(config: BackupRoutesConfig): Elysia {
         const backup = config.backupFor(request);
         const sections = parseSections(query.sections);
         const compressed = query.compressed === "1";
-        const { payload } = await backup.export({
+        const exportStream = await backup.export({
           password: query.password,
           tenantId: access.tenantId,
           compressed,
@@ -138,11 +159,22 @@ export function createBackupRoutes(config: BackupRoutesConfig): Elysia {
         const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
         set.headers["cache-control"] = "no-store";
         if (!compressed) {
-          set.headers["content-disposition"] = `attachment; filename="cartethyia_backup_${stamp}.json"`;
-          set.headers["content-type"] = "application/json; charset=utf-8";
-          return payload;
+          // The document is written through the stream, so a tenant with
+          // hundreds of thousands of rows is serialized here while only one
+          // row-page of it is ever in memory. The headers live on the
+          // Response itself: a native Response carries the stream, and the
+          // response wrapper would otherwise buffer it whole to gzip it —
+          // the same trade its ceiling path already made for large exports
+          // (rebuilt, uncompressed) — so this branch opts out of it.
+          const headers = new Headers({
+            "cache-control": "no-store",
+            "content-disposition": `attachment; filename="cartethyia_backup_${stamp}.json"`,
+            "content-type": "application/json; charset=utf-8",
+            [NO_COMPRESS_HEADER]: "1",
+          });
+          return new Response(payloadDocument(exportStream.jsonChunks), { headers });
         }
-        const bytes = compressBackup(payload);
+        const bytes = await compressBackupStream(exportStream.jsonChunks);
         set.headers["content-type"] = "application/json; charset=utf-8";
         // Opt out of the response wrapper's gzip rather than declaring
         // `content-encoding: gzip`: the bytes here are base64 of a gzip

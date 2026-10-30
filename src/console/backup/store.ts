@@ -29,10 +29,10 @@
  *   idempotent. There is no unique constraint to lean on: `telemetry_events`
  *   has a random PK, so the natural key is checked explicitly.
  */
-import { and, eq, sql } from "drizzle-orm";
-import { gzipSync, gunzipSync } from "node:zlib";
+import { and, eq, gt, or, sql } from "drizzle-orm";
+import { gzipSync, gunzipSync, createGzip } from "node:zlib";
 import { differsFrom } from "../../persistence/dialect";
-import { TELEMETRY_EVENT_DIR } from "../../observability/event-log";
+import { TELEMETRY_EVENT_DIR, type TelemetryEventRecord } from "../../observability/event-log";
 import { queryTelemetryEvents as querySqlEvents } from "../../observability/event-query";
 import { appendFile, mkdir } from "node:fs/promises";
 import { getTableColumns, type Column, type SQL, type Table } from "drizzle-orm";
@@ -241,90 +241,343 @@ function ownershipOwnerColumn(parent: Table): Column {
   );
 }
 
-/** Reads every row of one table that `tenantId` owns, encoded for JSON. */
-async function exportTable(
+/**
+ * Reads every row of one table that `tenantId` owns, encoded for JSON.
+ *
+ * Exports stream: the backup of a tenant can carry hundreds of thousands of
+ * rows (the dev deployment's `api_keys` held 331k minted share children), and
+ * materializing the whole table to JSON it in one gulp was what OOM-killed the
+ * process during a backup. Every reader is therefore paged.
+ */
+const EXPORT_PAGE_ROWS = 500;
+
+/**
+ * The composite keys of tables whose primary key is not declared column-wise.
+ * Row tables stream through a keyset walk, so the sort key must uniquely
+ * order rows — a truncated key would swallow tied rows at every page
+ * boundary.
+ */
+const COMPOSITE_KEYSETS: Partial<Record<string, readonly string[]>> = {
+  telemetry_usage_totals: ["tenantId", "identityType", "entityId"],
+  cli_tool_settings: ["tenantId", "apiKeyId", "toolId"],
+  provider_routing_settings: ["providerId", "tenantId"],
+};
+
+/**
+ * The key a keyset walk of `table` pages by, or `null` for a table whose rows
+ * are contract-bounded to a handful (per-tenant settings singletons) and are
+ * read in one statement.
+ */
+function keysetKey(table: Table): readonly Column[] | null {
+  const name = tableName(table);
+  const columns = getTableColumns(table) as Record<string, Column>;
+  const composite = COMPOSITE_KEYSETS[name];
+  if (composite !== undefined) {
+    return composite.map((key) => {
+      const column = columns[key];
+      if (column === undefined) throw new Error(`${name}: backup keyset names missing column ${key}`);
+      return column;
+    });
+  }
+  // Single keys: a uuid `id` first, then the per-table natural keys
+  // (`provider_oauth_states` → its account, `share_popups` → its template).
+  // `tenantId` is last: it is the primary key of nothing but the per-tenant
+  // settings singletons, so single-column `id` always wins where one exists.
+  for (const single of ["id", "providerAccountId", "apiKeyId", "tenantId"] as const) {
+    const column = columns[single];
+    if (column !== undefined) return [column];
+  }
+  return null;
+}
+
+/** Rows past the key of the previous page, in the key's own order. */
+function keysetAfter(key: readonly Column[], last: readonly unknown[]): SQL {
+  return or(
+    ...key.map((column, index) =>
+      and(...key.slice(0, index).map((prior, at) => eq(prior, last[at])), gt(column, last[index])),
+    ),
+  ) as SQL;
+}
+
+/** Yields the owned rows of `table` in key order, one statement per page. */
+async function* pagedRows(
   db: CartethyiaDatabase,
   table: Table,
   tenantId: string,
-): Promise<BackupRow[]> {
+): AsyncGenerator<Record<string, unknown>, void, void> {
+  const filter = ownedByFilter(table, tenantId);
+  const key = keysetKey(table);
+  if (key === null) {
+    const rows = (await db
+      .select()
+      .from(table)
+      .where(filter)
+      .limit(MAX_ROWS_PER_TABLE)) as Array<Record<string, unknown>>;
+    yield* rows;
+    return;
+  }
+  const entries = Object.entries(getTableColumns(table));
+  const keyNames = key.map((column) => {
+    const entry = entries.find(([, candidate]) => candidate === column);
+    if (entry === undefined) throw new Error(`${tableName(table)}: key column is not part of the table`);
+    return entry[0];
+  });
+  let last: unknown[] = [];
+  while (true) {
+    const where = last.length === 0 ? filter : and(filter, keysetAfter(key, last));
+    const rows = (await db
+      .select()
+      .from(table)
+      .where(where)
+      .orderBy(...key.map((column) => sql`${column} asc`))
+      .limit(EXPORT_PAGE_ROWS)) as Array<Record<string, unknown>>;
+    if (rows.length === 0) return;
+    yield* rows;
+    if (rows.length < EXPORT_PAGE_ROWS) return;
+    const tail = rows[rows.length - 1] as Record<string, unknown>;
+    last = keyNames.map((name) => tail[name]);
+  }
+}
+
+/** Encodes one read row for the payload. */
+function encodeRow(table: Table, row: Record<string, unknown>): BackupRow {
   const index = columnIndex(table);
   const sealed = sealedColumns(table);
-  const rows = (await db
-    .select()
-    .from(table)
-    .where(ownedByFilter(table, tenantId))
-    .limit(MAX_ROWS_PER_TABLE)) as Array<Record<string, unknown>>;
-  return rows.map((row) => {
-    const out: BackupRow = {};
-    for (const [name, { key, dataType }] of index) {
-      // A sealed column is written decrypted, under the name of the secret it
-      // holds — see `SEALED_COLUMNS` for why the column's own name would be a
-      // lie in a file that no longer carries its ciphertext.
-      out[payloadNameOf(table, name)] = sealed.has(name)
-        ? decodeSealedForPayload(row[key])
-        : encodeCell(row[key], dataType);
-    }
-    return out;
-  });
+  const out: BackupRow = {};
+  for (const [name, { key, dataType }] of index) {
+    // A sealed column is written decrypted, under the name of the secret it
+    // holds — see `SEALED_COLUMNS` for why the column's own name would be a
+    // lie in a file that no longer carries its ciphertext.
+    out[payloadNameOf(table, name)] = sealed.has(name)
+      ? decodeSealedForPayload(row[key])
+      : encodeCell(row[key], dataType);
+  }
+  return out;
+}
+
+/** Encodes one telemetry event row the way `exportEventFile` used to. */
+function telemetryRowOf(event: TelemetryEventRecord): BackupRow {
+  const row: BackupRow = {};
+  for (const [key, value] of Object.entries(event)) {
+    if (value === null || value === undefined) continue;
+    row[camelToSnake(key)] = key === "createdAt" ? { __date: String(value) } : value;
+  }
+  return row;
+}
+
+async function* pagedTelemetryEvents(
+  db: CartethyiaDatabase,
+  tenantId: string,
+): AsyncGenerator<TelemetryEventRecord, void, void> {
+  // The SQL table is the durable record now, and it is tenant-scoped and
+  // retained by the same rule as the raw files — so the export walks it
+  // newest-first through its own keyset cursor instead of scanning every raw
+  // file and filtering by tenant afterwards.
+  let cursor: string | undefined;
+  while (true) {
+    const page = await querySqlEvents(db, {
+      tenantId,
+      limit: EXPORT_PAGE_ROWS,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    yield* page.events;
+    if (page.nextCursor === undefined) return;
+    cursor = page.nextCursor;
+  }
 }
 
 /**
- * Snapshots the requested tables, grouped into their sections.
+ * Streams the payload document: the requested tables, grouped into their
+ * sections, written membrane-incrementally so the process never holds a table
+ * — let alone every table and a second JSON copy — in memory. Consumed
+ * chunks concatenated are exactly the JSON the buffered variant used to
+ * stringify in one piece.
+ */
+/**
+ * Streams the payload document: the requested tables, grouped into their
+ * sections, written incrementally so the process never holds a table — let
+ * alone every table and a second JSON copy — in memory. Consumed chunks
+ * concatenated are exactly the JSON the buffered variant used to stringify in
+ * one piece.
+ */
+async function* backupJsonChunks(
+  db: CartethyiaDatabase,
+  tables: readonly Table[],
+  tenantId: string,
+  finishCounts: (counts: Record<string, number>) => void,
+): AsyncGenerator<string, void, void> {
+  const counts: Record<string, number> = {};
+
+  const configSet = new Set<Table>([...CONFIG_TABLES]);
+  const telemetrySet = new Set<Table>(TELEMETRY_TABLES);
+  const configTables = tables.filter((table) => configSet.has(table));
+  const telemetryTables = tables.filter((table) => telemetrySet.has(table));
+  const outside = tables.filter((table) => !configSet.has(table) && !telemetrySet.has(table));
+
+  // The OAuth projection is derived from the accounts block itself, so those
+  // two tables materialize (both are operator-sized, dozens of rows) instead
+  // of being read twice.
+  const materialized = new Map<Table, readonly BackupRow[]>();
+  const materializedRows = async (table: Table): Promise<readonly BackupRow[]> => {
+    let rows: readonly BackupRow[] | undefined = materialized.get(table);
+    if (rows === undefined) {
+      const built: BackupRow[] = [];
+      for await (const source of pagedRows(db, table, tenantId)) {
+        built.push(encodeRow(table, source));
+      }
+      rows = built;
+      materialized.set(table, rows);
+    }
+    return rows;
+  };
+
+  /** Writes one table's array into the document, tracking the exported count. */
+  async function* writeTable(table: Table, sources?: readonly BackupRow[]): AsyncGenerator<string, void, void> {
+    const name = tableName(table);
+    let first = true;
+    let written = 0;
+    yield `"${name}":[`;
+    if (sources === undefined) {
+      for await (const source of pagedRows(db, table, tenantId)) {
+        if (written >= MAX_ROWS_PER_TABLE) break;
+        yield `${first ? "" : ","}${JSON.stringify(encodeRow(table, source))}`;
+        first = false;
+        written += 1;
+      }
+    } else {
+      for (const row of sources) {
+        yield `${first ? "" : ","}${JSON.stringify(row)}`;
+        first = false;
+        written += 1;
+      }
+    }
+    yield "]";
+    counts[name] = written;
+  }
+
+  try {
+    yield `{"app":${JSON.stringify(BACKUP_APP)},"version":${BACKUP_VERSION},"exportedAt":${JSON.stringify(new Date().toISOString())},"sections":{`;
+    if (configTables.length > 0) {
+      yield `"config":{`;
+      let configIndex = 0;
+      for (const table of configTables) {
+        const sources =
+          table === providerAccounts || table === providerOauthStates ? await materializedRows(table) : undefined;
+        yield configIndex > 0 ? "," : "";
+        yield* writeTable(table, sources);
+        configIndex += 1;
+      }
+      yield `}`;
+    }
+    if (telemetryTables.length > 0) {
+      let telemetryIndex = 0;
+      for (const table of telemetryTables) {
+        if (telemetryIndex === 0) {
+          yield `${configTables.length > 0 ? "," : ""}"telemetry":{`;
+        } else {
+          yield ",";
+        }
+        telemetryIndex += 1;
+        if (table === telemetryEvents) {
+          yield `"${tableName(table)}":[`;
+          let first = true;
+          let written = 0;
+          for await (const event of pagedTelemetryEvents(db, tenantId)) {
+            if (written >= MAX_ROWS_PER_TABLE) break;
+            yield `${first ? "" : ","}${JSON.stringify(telemetryRowOf(event))}`;
+            first = false;
+            written += 1;
+          }
+          yield "]";
+          counts[tableName(table)] = written;
+        } else {
+          yield* writeTable(table);
+        }
+      }
+      yield `}`;
+    }
+    yield `}`;
+    // Tables that belong to neither section (the tenant row) are counted but
+    // do not enter the payload — the same rule the buffered assembly kept.
+    for (const table of outside) {
+      let written = 0;
+      for await (const _source of pagedRows(db, table, tenantId)) {
+        written += 1;
+      }
+      counts[tableName(table)] = written;
+    }
+    // Always built: the row tables above now always carry the credentials
+    // decrypted, so the projection is always complete. It used to be
+    // conditional on the export being "raw", which made a plain JSON export
+    // carry a block of null tokens — a router migration from it produced
+    // accounts with no credential at all.
+    if (materialized.size > 0) {
+      const inputs: Record<string, readonly BackupRow[]> = {};
+      const accounts = materialized.get(providerAccounts);
+      const states = materialized.get(providerOauthStates);
+      if (accounts !== undefined) inputs["provider_accounts"] = accounts;
+      if (states !== undefined) inputs["provider_oauth_states"] = states;
+      const providerConnections = attachOauthSecrets(inputs);
+      if (providerConnections !== undefined) {
+        yield `,"providerConnections":${JSON.stringify(providerConnections)}`;
+      }
+    }
+    yield `}`;
+  } finally {
+    finishCounts(counts);
+  }
+}
+
+/**
+ * Snapshots the requested tables, grouped into their sections, as an
+ * incrementally-written JSON document.
  *
  * Only `tenantId`'s own rows are read. The shared rows a backup needs in order
  * to be restorable — the built-in providers and their catalog — are not carried
  * because the build already supplies them (see `seedBundledProviders` /
  * `seedBundledModels`), so a payload never contains another tenant's data.
  */
+export interface BackupExportStream {
+  /** Concatenated chunks are the payload document, one string at a row-page granularity. */
+  readonly jsonChunks: AsyncGenerator<string, void, void>;
+  /**
+   * Row counts per table, resolved once the document has been consumed to
+   * completion — a streamed export counts what it actually wrote.
+   */
+  readonly counts: Promise<Record<string, number>>;
+}
+
+export function exportBackupStream(
+  db: CartethyiaDatabase,
+  tables: readonly Table[],
+  tenantId: string,
+): BackupExportStream {
+  let resolveCounts!: (counts: Record<string, number>) => void;
+  const counts = new Promise<Record<string, number>>((resolve) => {
+    resolveCounts = resolve;
+  });
+  return {
+    jsonChunks: backupJsonChunks(db, tables, tenantId, resolveCounts),
+    counts,
+  };
+}
+
+/**
+ * The buffered form of {@link exportBackupStream}: builds the whole payload
+ * object in memory. Export callers stream; this remains for callers that need
+ * the payload as data — the backup round-trip tests use it to feed restores.
+ */
 export async function exportBackup(
   db: CartethyiaDatabase,
   tables: readonly Table[],
   tenantId: string,
 ): Promise<BackupExportResult> {
-  const config: Record<string, readonly BackupRow[]> = {};
-  const telemetry: Record<string, readonly BackupRow[]> = {};
-  const counts: Record<string, number> = {};
-  const configSet = new Set<Table>([...CONFIG_TABLES]);
-  const telemetrySet = new Set<Table>(TELEMETRY_TABLES);
-
-  // Table reads are independent tenant-scoped `SELECT`s plus one disk read for
-  // the event file; firing them concurrently cuts a many-table export from
-  // one round-trip-at-a-time to the single slowest query. The DB driver pools
-  // these; the table list is bounded by `CONFIG_TABLES + TELEMETRY_TABLES`
-  // (small and known), so fan-out is bounded without an extra limiter.
-  const reads = tables.map(async (table) =>
-    [
-      table,
-      table === telemetryEvents ? await exportEventFile(db, tenantId) : await exportTable(db, table, tenantId),
-    ] as const,
-  );
-  // Preserve the caller's `tables` order when writing into the output maps so
-  // the payload's key order is deterministic across runs.
-  const settled = await Promise.all(reads);
-  for (const [table, rows] of settled) {
-    const name = tableName(table);
-    counts[name] = rows.length;
-    if (configSet.has(table)) config[name] = rows;
-    else if (telemetrySet.has(table)) telemetry[name] = rows;
-  }
-  // Always built: the row tables above now always carry the credentials
-  // decrypted, so the projection is always complete. It used to be conditional
-  // on the export being "raw", which made a plain JSON export carry a block of
-  // null tokens — a router migration from it produced accounts with no
-  // credential at all.
-  const providerConnections = attachOauthSecrets(config);
-  const payload: BackupPayload = {
-    app: BACKUP_APP,
-    version: BACKUP_VERSION,
-    exportedAt: new Date().toISOString(),
-    sections: {
-      ...(Object.keys(config).length > 0 ? { config } : {}),
-      ...(Object.keys(telemetry).length > 0 ? { telemetry } : {}),
-    },
-    ...(providerConnections === undefined ? {} : { providerConnections }),
-  };
-  return { counts, payload };
+  const stream = exportBackupStream(db, tables, tenantId);
+  let document = "";
+  for await (const chunk of stream.jsonChunks) document += chunk;
+  return { counts: await stream.counts, payload: JSON.parse(document) as BackupPayload };
 }
+
 /**
  * Gzips a backup payload.
  *
@@ -335,6 +588,30 @@ export async function exportBackup(
  */
 export function compressBackup(payload: unknown): Buffer {
   return gzipSync(Buffer.from(JSON.stringify(payload), "utf8"));
+}
+
+/**
+ * Gzips a streamed payload assembly: one pass, no whole-document buffer of
+ * the raw JSON (the compressed document itself still fits one buffer, since
+ * the response contract wraps it as base64).
+ */
+export async function compressBackupStream(chunks: AsyncGenerator<string, void, void>): Promise<Buffer> {
+  const gzip = createGzip();
+  const parts: Buffer[] = [];
+  const finished = new Promise<"done" | Error>((resolve) => {
+    gzip.on("data", (chunk: Buffer) => parts.push(chunk));
+    gzip.on("error", (error: Error) => resolve(error));
+    gzip.on("end", () => resolve("done"));
+  });
+  for await (const chunk of chunks) {
+    await new Promise<void>((resolve, reject) => {
+      gzip.write(Buffer.from(chunk, "utf8"), (error) => (error === null ? resolve() : reject(error)));
+    });
+  }
+  gzip.end();
+  const outcome = await finished;
+  if (outcome !== "done") throw outcome;
+  return Buffer.concat(parts);
 }
 
 /** The gzip magic, so a file can be recognised without trusting its name. */
@@ -367,28 +644,6 @@ export function decompressBackup(bytes: Uint8Array): string {
       `that file is named or marked as gzip but could not be decompressed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-}
-
-/**
- * Exports per-request events from the file log, shaped like the table the
- * backup contract still names. The table is no longer written, so reading it
- * would export nothing.
- */
-async function exportEventFile(db: CartethyiaDatabase, tenantId: string): Promise<readonly BackupRow[]> {
-  // The SQL table is the durable record now, and it is tenant-scoped and
-  // retained by the same rule as the raw files — so the export reads it
-  // instead of scanning every raw file and filtering by tenant afterwards.
-  const page = await querySqlEvents(db, { tenantId, limit: MAX_ROWS_PER_TABLE });
-  return page.events
-    .slice(0, MAX_ROWS_PER_TABLE)
-    .map((event) => {
-      const row: BackupRow = {};
-      for (const [key, value] of Object.entries(event)) {
-        if (value === null || value === undefined) continue;
-        row[camelToSnake(key)] = key === "createdAt" ? { __date: String(value) } : value;
-      }
-      return row;
-    });
 }
 
 function camelToSnake(name: string): string {

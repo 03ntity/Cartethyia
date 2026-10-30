@@ -65,6 +65,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Backup export no longer buffers a whole tenant in memory.** An export read
+  every table into one array and stringified the document in one gulp; a
+  deployment whose `api_keys` held 331k minted share children was OOM-killed
+  during a routine backup. Every table is now read through a keyset-paged walk
+  (500 rows per page on its primary key; tables without a declared `id` page on
+  their composite natural key; contract-bounded singletons read in one capped
+  statement), telemetry events page through their own cursor, and the document
+  is assembled incrementally — the dashboard's plain download streams the body
+  frame by frame, and the compressed and `/admin/export-backup` paths gzip it
+  in a single pass. `MAX_ROWS_PER_TABLE` remains an explicit cap on every
+  table, not a size threshold, and the file a stream produces is the same
+  document the buffered export wrote.
 - **Telemetry reads no longer break the PostgreSQL wire at six-figure id
   sets.** Family-wide share reads expanded every minted child key into one
   bind parameter each (~90k params on `api_key_id IN (…)`), which passed the
