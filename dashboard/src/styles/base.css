@@ -85,7 +85,7 @@ html {
      kept the browser's own pull-to-refresh from ever firing, so neither `html`
      nor the shell column owns the scroll. `overflow-x` stays `visible`: setting
      it to `hidden` computes the vertical axis to `auto` as well, and that box
-     becomes the scroll container — which is exactly what breaks
+     becomes the scroll container â€” which is exactly what breaks
      `position: sticky` on the topbar and the sidebar. */
   overflow-x: visible;
   overflow-y: visible;
@@ -181,8 +181,17 @@ html[data-glass-depth="2"] {
 html[data-glass-enabled="true"] .card-solid {
   --card-glass-depth: var(--glass-depth, 1);
   background: color-mix(in srgb, var(--surface-1) calc(40% + var(--blur-cards, 30) * 0.55%), transparent) !important;
-  backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px));
-  -webkit-backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px));
+  /*
+   * `!important` on the filter for the same reason as the background right
+   * above it: this rule lands in `@layer base`, while every Tailwind utility
+   * lives in `@layer utilities`, which is declared last and therefore wins
+   * the cascade. Without it the filter is dropped on a real build and cards
+   * render with no blur at all â€” while the `color-mix` background above
+   * (already `!important`) still paints, which is why the failure looked like
+   * "the transparency value is ignored" rather than "the blur never applied".
+   */
+  backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
+  -webkit-backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
   border: 1px solid var(--inner-border);
   box-shadow: var(--shadow-card);
 }
@@ -207,8 +216,11 @@ html[data-glass-enabled="true"] .card-solid .nested-panel {
 
 .glass {
   background: var(--glass-bg);
-  backdrop-filter: blur(calc(10px + (var(--card-glass-depth, 1) * 4px)));
-  -webkit-backdrop-filter: blur(calc(10px + (var(--card-glass-depth, 1) * 4px)));
+  /* `!important` for the same cascade reason as the card surfaces above:
+     `@layer utilities` is declared after `@layer base` and would otherwise
+     win, leaving the sidebar and topbar with no blur on a real build. */
+  backdrop-filter: blur(calc(10px + (var(--card-glass-depth, 1) * 4px))) !important;
+  -webkit-backdrop-filter: blur(calc(10px + (var(--card-glass-depth, 1) * 4px))) !important;
 }
 
 
@@ -217,7 +229,7 @@ html[data-glass-enabled="true"] .card-solid .nested-panel {
  * `data-blur-*` on `<html>`. `frosted` is the plain blur this console shipped
  * with; `vibrancy` adds saturation so colour behind the surface stays alive
  * (the macOS look); `heavy` is the same treatment with a deeper blur for a
- * busy background. `none` is opaque on purpose — a transparent surface with no
+ * busy background. `none` is opaque on purpose â€” a transparent surface with no
  * blur is unreadable copy, not a style.
  *
  * Dialogs are deliberately absent. A modal must stay legible no matter what
@@ -433,7 +445,7 @@ html[data-blur-cards-on="false"] .composer-glass {
 .form-label {
   /* 13px (`--text-body`), a step above the 12px control text and the help text
      below it. At 12px the label, the control's own value, and the help text
-     were all the same size, so a field had no visual hierarchy — the three
+     were all the same size, so a field had no visual hierarchy â€” the three
      roles read as one undifferentiated block. */
   font-size: var(--text-body);
   font-weight: 600;
@@ -572,7 +584,7 @@ html[data-blur-cards-on="false"] .composer-glass {
    * buttons against this width, so a narrow row degrades gracefully instead of
    * overflowing the Actions column.
    *
-   * Deliberately NOT a scroller — the table's own container scrolls (via
+   * Deliberately NOT a scroller â€” the table's own container scrolls (via
    * `maxHeight`), which is what keeps the header row pinned while rows move. */
   container-type: inline-size;
   container-name: rule-row;
@@ -735,7 +747,7 @@ main > .state-viewport {
   width: min(100%, 420px);
   border-radius: var(--radius-card);
   padding: 36px 32px;
-  /* The key art shows through the card. A flat shadow only — the shared card
+  /* The key art shows through the card. A flat shadow only â€” the shared card
      shadow carries a colored glow that reads as a halo over the art. */
   background: color-mix(in srgb, var(--surface-1) 78%, transparent);
   backdrop-filter: blur(16px) saturate(120%);

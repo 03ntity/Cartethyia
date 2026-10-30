@@ -373,8 +373,10 @@
   border-radius: var(--radius-card);
   border: 1px solid var(--inner-border);
   background: color-mix(in srgb, var(--surface-1) calc(40% + var(--blur-cards, 30) * 0.55%), transparent);
-  backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px));
-  -webkit-backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px));
+  /* `!important` — see the card surfaces in `base.css`: this rule sits in
+     `@layer base` and would otherwise lose to Tailwind's utilities layer. */
+  backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
+  -webkit-backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
 }
 
 .user-avatar {
@@ -1506,8 +1508,10 @@ html[data-app="landing"] .landing-story-visual {
 /* Runtime clarity/depth arithmetic cannot be expressed by a fixed utility. */
 .composer-glass {
   background: color-mix(in srgb, var(--surface-1) calc(40% + var(--blur-cards, 30) * 0.55%), transparent);
-  backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px));
-  -webkit-backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px));
+  /* `!important` — as with every surface above, this lands in `@layer base`
+     and is otherwise beaten by Tailwind's utilities layer. */
+  backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
+  -webkit-backdrop-filter: blur(calc((100 - var(--blur-cards, 30)) * var(--blur-cards-depth, 30) * 0.01px)) !important;
 }
 
 @media (max-width: 640px) {

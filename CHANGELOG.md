@@ -65,6 +65,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Glass surfaces keep their blur on a built dashboard.** Every glass surface
+  is driven at runtime by the Customization sliders (`--blur-cards`,
+  `--blur-cards-depth`) through `backdrop-filter: blur(calc(…))`, which no
+  fixed utility can express — so those rules live in the authored sheets and
+  land in `@layer base`. Tailwind declares `@layer utilities` last, and a later
+  layer wins the cascade regardless of specificity, so the filter was dropped
+  on every real build: cards, the sidebar, and the composer rendered with no
+  blur at all, while their `color-mix` background (already `!important`) still
+  painted. That is why it read as "the transparency setting is ignored" rather
+  than "the blur never applied", and why it never reproduced under
+  `bun run dev`, whose CSS injection does not carry the production layer
+  order. The runtime blur declarations are now `!important` like the
+  backgrounds they sit beside, and `dashboard/test/glass-cascade.test.ts`
+  locks it: a rule that loses the cascade fails the suite.
 - **Backup export no longer buffers a whole tenant in memory.** An export read
   every table into one array and stringified the document in one gulp; a
   deployment whose `api_keys` held 331k minted share children was OOM-killed
