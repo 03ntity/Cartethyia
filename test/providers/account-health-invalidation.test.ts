@@ -11,9 +11,19 @@
  * These assert the gate, not the SQL: the classification's `routesVisible` flag
  * is the contract, and it is what the reporter reads.
  */
-import { describe, expect, test } from "bun:test";
-import { classifyAccountError } from "../../src/providers/operations/account-health-service";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+  classifyAccountError,
+  reportAttemptOutcome,
+} from "../../src/providers/operations/account-health-service";
 import { GatewayError } from "../../src/protocol/gateway-error";
+import { getDb } from "../../src/persistence/boot";
+import { providerAccounts } from "../../src/persistence/schema";
+import { eq } from "drizzle-orm";
+import { createDatabaseSnapshotBuilder } from "../../src/transport/routing/route-catalog";
+import { InMemoryRouteSnapshotService } from "../../src/transport/routing/route-model";
+import { createWorld, type GatewayWorld } from "../helpers/fixtures";
+import { requireDatabase } from "../helpers/database";
 
 /**
  * `routesVisible` is set by the caller that knows which columns it wrote, not
@@ -66,6 +76,67 @@ describe("account error classification", () => {
     // A rate limit mutates at provider scope too: the streak must advance or
     // the most common throttle never escalates.
     expect(classification.mutatesAccount).toBe(true);
+  });
+});
+
+requireDatabase();
+
+describe("model cooldown route snapshot invalidation", () => {
+  let world: GatewayWorld;
+  let routeService: InMemoryRouteSnapshotService;
+
+  beforeAll(async () => {
+    world = await createWorld({ modelId: "deepseek-v4.1-flash" });
+    routeService = new InMemoryRouteSnapshotService(createDatabaseSnapshotBuilder(getDb()));
+  });
+
+  afterAll(async () => {
+    routeService?.unsubscribe();
+    await world?.cleanup();
+  });
+
+  test("Qoder virtual model rate limits evict a cached route and then exclude only that pair", async () => {
+    const before = await routeService.getSnapshot();
+    const candidate = before.candidates.find(
+      (row) => row.provider_account_id === world.accountId && row.model_id === world.modelId,
+    );
+    expect(candidate).toBeDefined();
+
+    await reportAttemptOutcome(getDb(), {
+      accountId: world.accountId,
+      modelId: "deepseek-v4.1-flash",
+      error: new GatewayError("quota_exceeded", 429, "Qoder rate limit exceeded", {
+        providerId: "qoder",
+        providerStatus: 429,
+        providerCode: "rate_limit_exceeded",
+      }, "upstream"),
+      evidence: {
+        origin: "upstream",
+        scope: "provider",
+        providerId: "qoder",
+        statusCode: 429,
+      },
+      snapshotService: routeService,
+    });
+
+    const after = await routeService.getSnapshot();
+    const cooled = after.candidates.find(
+      (row) => row.provider_account_id === world.accountId && row.model_id === world.modelId,
+    );
+    expect(after.revision).toBeGreaterThan(before.revision);
+    const health = cooled as unknown as { health_status?: string; cooldown_until?: number } | undefined;
+    expect(health?.health_status).toBe("model_cooldown");
+    expect(health?.cooldown_until).toBeGreaterThan(Date.now());
+
+    const row = await getDb()
+      .select({ status: providerAccounts.status, modelCooldowns: providerAccounts.modelCooldowns })
+      .from(providerAccounts)
+      .where(eq(providerAccounts.id, world.accountId))
+      .limit(1);
+    expect(row[0]?.status).toBe("active");
+    // `toHaveProperty` splits on dots, and this model id carries dots; the
+    // array form treats the whole string as one key.
+    expect(row[0]?.modelCooldowns).toHaveProperty(["deepseek-v4.1-flash"]);
   });
 });
 

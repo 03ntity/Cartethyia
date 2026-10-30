@@ -147,13 +147,13 @@ export async function recordAccountFailure(
       // Monotonic: never move an in-force window earlier (see `latestDeadlineMs`).
       // A provider-stated deadline wins outright because it is already the later
       // of the two whenever the provider really parked the pair longer.
-      const nextUntil = new Date(
-        latestDeadlineMs(
-          effective.retryAt?.getTime(),
-          Date.now() + (unsupportedCooldownMs ?? escalatedCooldownMs),
-          existing[modelId] ? Date.parse(existing[modelId]!) : undefined,
-        ),
-      ).toISOString();
+      const previousDeadline = existing[modelId] === undefined ? undefined : Date.parse(existing[modelId]);
+      const nextDeadline = latestDeadlineMs(
+        effective.retryAt?.getTime(),
+        Date.now() + (unsupportedCooldownMs ?? escalatedCooldownMs),
+        previousDeadline,
+      );
+      const nextUntil = new Date(nextDeadline).toISOString();
       const previousUntil = existing[modelId];
       // A re-statement is not an event: what the audit row reports is the
       // *entry* into a cooling episode, and the deadline itself is not a
@@ -213,10 +213,10 @@ export async function recordAccountFailure(
           createdAt: now,
         });
       }
-      // `status` and `cooldownUntil` are untouched on this path — only the
-      // (account, model) pair backed off — so the snapshot is still accurate
-      // and must not be dropped.
-      return { ...classification, routesVisible: false };
+      // The route catalog projects modelCooldowns and stamps this candidate as
+      // model_cooldown. Invalidate when its deadline changes, or the cached
+      // snapshot keeps routing this pair until some unrelated write rebuilds it.
+      return { ...classification, routesVisible: previousDeadline !== nextDeadline };
     }
 
     await client
@@ -550,11 +550,9 @@ export async function reportAttemptOutcome(
     ...report.evidence,
     ...(report.modelId === undefined ? {} : { modelId: report.modelId }),
   }).catch(() => null);
-  // Gated on `routesVisible`, not on `mutatesAccount`: a failure that only
-  // cooled one (account, model) pair, or only advanced the streak, changed
-  // nothing routing reads. Invalidating for those rebuilt an 11-SELECT snapshot
-  // on the next request, and under a failure wave each rebuild fed the next
-  // invalidation.
+  // Gated on `routesVisible`, not on `mutatesAccount`: a model cooldown changes
+  // routing, while a repeated report with the same deadline or a streak-only
+  // write does not.
   if (classification?.routesVisible) await report.snapshotService?.invalidate();
 }
 

@@ -251,15 +251,13 @@ export interface AccountErrorClassification {
   /**
    * True when this write changed a field the routing snapshot actually reads.
    *
-   * The snapshot projects `provider_accounts.status` and
-   * `.cooldownUntil` and nothing else (`route-catalog.ts:286-287`), so only a
-   * write that moves one of those has to drop it. Everything else a failure
-   * persists — the failure streak, the error text, the category, a
-   * model-scoped cooldown — is invisible to routing, and invalidating for it
-   * forced the next request to rebuild an 11-SELECT snapshot for no reason.
+   * Routing reads account-wide `status`/`cooldownUntil` and the per-model
+   * `modelCooldowns` map (`route-catalog.ts`). Writes to any of those must drop
+   * the snapshot; failure streaks and diagnostic text remain invisible to
+   * routing.
    *
-   * That made a failure wave self-sustaining: N failed attempts produced N
-   * invalidations, and every following request paid the full rebuild.
+   * Only a changed deadline is routing-visible. Re-reporting the same active
+   * model cooldown must not rebuild the snapshot again.
    */
   readonly routesVisible: boolean;
   /**
