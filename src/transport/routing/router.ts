@@ -535,6 +535,75 @@ export class RoutingEngine {
   }
 
 
+  /**
+   * Applies continuation affinity as a hard pin (or a rebase pass-through).
+   *
+   * Returns a plan when the pinned account is present and eligible, `null`
+   * when the continuation is rebaseable and the pin is empty (so the caller
+   * continues with ordinary routing), and throws the strict 400 when the pin
+   * is a hard constraint with no matching candidate.
+   */
+  private resolveContinuationPlan(
+    affinity: RouteContinuationAffinity,
+    matching: readonly RouteCandidate[],
+    requestedModel: string,
+    resolvedModel: string,
+    snapshot: RouteSnapshot,
+  ): RoutePlan | null {
+    const pinned = matching.filter(
+      (candidate) =>
+        candidate.provider_id === affinity.providerId &&
+        candidate.provider_account_id === affinity.providerAccountId,
+    );
+    if (pinned.length === 0) {
+      if (affinity.rebaseable) return null;
+      throw new GatewayError(
+        "invalid_request",
+        400,
+        "This tool result belongs to a Cursor account that is no longer routable. Reconnect the account, or resend the complete conversation.",
+        {
+          providerId: affinity.providerId,
+          accountId: affinity.providerAccountId,
+        },
+      );
+    }
+    // The pinned account owns the live session, so it is the only correct
+    // target for this tool result — but health still applies. Forcing a
+    // session whose account is hard-cooling (quota exhausted) reproduces the
+    // refusal that cooled it, which is how "still hit a cooled-down account"
+    // leaked through continuation affinity. Evaluate the pin before
+    // returning: time-bounded cooling answers 429 with the real reset; an
+    // account that is disabled/locked answers a clear 400.
+    const pinnedDecisions = pinned.map((candidate) => this.eligibility.evaluate(candidate));
+    const blocked = pinnedDecisions.find((decision) => !decision.eligible);
+    if (blocked !== undefined) {
+      const reason = blocked.reason;
+      if (
+        reason === "cooldown_hard" ||
+        reason === "model_cooldown" ||
+        (reason === "quota_exhausted" && typeof blocked.cooldown_until === "number")
+      ) {
+        throw accountsRateLimitedError(requestedModel, resolvedModel, earliestResetMs(pinnedDecisions));
+      }
+      throw new GatewayError(
+        "invalid_request",
+        400,
+        "This tool result belongs to an account that is no longer routable. Reconnect the account, or resend the complete conversation.",
+        {
+          providerId: affinity.providerId,
+          accountId: affinity.providerAccountId,
+        },
+      );
+    }
+    return {
+      revision: snapshot.revision,
+      candidates: pinned,
+      requested_model: requestedModel,
+      resolved_model: resolvedModel,
+      provider_id: pinned[0]!.provider_id,
+    };
+  }
+
   async plan(
     requestedModel: string,
     snapshot: RouteSnapshot,
@@ -562,58 +631,32 @@ export class RoutingEngine {
     // or into a fresh turn that never asked for the call. So the candidate set
     // is restricted before any health, cooling, or rotation logic runs, and an
     // empty result is a refusal rather than a fallback to normal routing.
+    // Continuation affinity is applied first and absolutely.
+    //
+    // A request carrying a tool result for a provider session this process is
+    // holding MUST reach the exact live account that owns that session. Routing
+    // it anywhere else is not a degraded choice — it is a correctness failure:
+    // the result would be written onto a different account's upstream turn
+    // (corrupting both conversations and leaking the first account's context),
+    // or into a fresh turn that never asked for the call. So the candidate set
+    // is restricted before any health, cooling, or rotation logic runs, and an
+    // empty result is a refusal rather than a fallback to normal routing.
+    //
+    // The one exception is a *rebaseable* continuation: when the conversation
+    // is complete (every tool result is answered in the history) and the pinned
+    // account is no longer routable for the requested model, the request may
+    // fall through to normal routing so the adapter starts a fresh Run carrying
+    // the recorded history. This is what makes model switches across accounts
+    // work — see `resolveContinuationPlan` and `preparer.ts`.
     if (continuationAffinity !== undefined) {
-      const pinned = matching.filter(
-        (candidate) =>
-          candidate.provider_id === continuationAffinity.providerId &&
-          candidate.provider_account_id === continuationAffinity.providerAccountId,
+      const continuationPlan = this.resolveContinuationPlan(
+        continuationAffinity,
+        matching,
+        requestedModel,
+        resolved.model,
+        snapshot,
       );
-      if (pinned.length === 0) {
-        throw new GatewayError(
-          "invalid_request",
-          400,
-          "This tool result belongs to a Cursor account that is no longer routable. Reconnect the account, or resend the complete conversation.",
-          {
-            providerId: continuationAffinity.providerId,
-            accountId: continuationAffinity.providerAccountId,
-          },
-        );
-      }
-      // The pinned account owns the live session, so it is the only correct
-      // target for this tool result — but health still applies. Forcing a
-      // session whose account is hard-cooling (quota exhausted) reproduces the
-      // refusal that cooled it, which is how "still hit a cooled-down account"
-      // leaked through continuation affinity. Evaluate the pin before
-      // returning: time-bounded cooling answers 429 with the real reset; an
-      // account that is disabled/locked answers a clear 400.
-      const pinnedDecisions = pinned.map((candidate) => this.eligibility.evaluate(candidate));
-      const blocked = pinnedDecisions.find((decision) => !decision.eligible);
-      if (blocked !== undefined) {
-        const reason = blocked.reason;
-        if (
-          reason === "cooldown_hard" ||
-          reason === "model_cooldown" ||
-          (reason === "quota_exhausted" && typeof blocked.cooldown_until === "number")
-        ) {
-          throw accountsRateLimitedError(requestedModel, resolved.model, earliestResetMs(pinnedDecisions));
-        }
-        throw new GatewayError(
-          "invalid_request",
-          400,
-          "This tool result belongs to an account that is no longer routable. Reconnect the account, or resend the complete conversation.",
-          {
-            providerId: continuationAffinity.providerId,
-            accountId: continuationAffinity.providerAccountId,
-          },
-        );
-      }
-      return {
-        revision: snapshot.revision,
-        candidates: pinned,
-        requested_model: requestedModel,
-        resolved_model: resolved.model,
-        provider_id: pinned[0]!.provider_id,
-      };
+      if (continuationPlan !== null) return continuationPlan;
     }
     // `matching` non-empty but nothing eligible means every account serving
     // this model is currently unusable — NOT a missing model. Distinct from

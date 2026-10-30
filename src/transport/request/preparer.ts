@@ -80,6 +80,8 @@ export function resolveContinuationAffinity(
     apiKeyId: authorization.id,
   };
   let affinity: RouteContinuationAffinity | undefined;
+  let anyResolved = false;
+  let allResolved = true;
   for (const callId of ids) {
     // The registry resolves by tenant + API key + provider + account, so a call
     // id replayed from another key or tenant resolves nothing.
@@ -91,6 +93,7 @@ export function resolveContinuationAffinity(
       // through the ids that still resolve; when none do, the ordinary routing
       // path decides (a Cursor adapter may rebase the full history into a
       // fresh Run).
+      allResolved = false;
       continue;
     }
     if (affinity !== undefined && affinity.providerAccountId !== record.providerAccountId) {
@@ -101,12 +104,21 @@ export function resolveContinuationAffinity(
         { callIds: [...ids] },
       );
     }
+    anyResolved = true;
     affinity = {
       providerId: record.providerId,
       providerAccountId: record.providerAccountId,
+      rebaseable: false,
     };
   }
-  return affinity;
+  if (affinity !== undefined) {
+    // Rebaseable when every supplied call id resolved to a live pending call
+    // (so none is owed to another account) — or when none resolved and the
+    // whole history is present. In both cases the conversation is complete and
+    // may travel as history to a fresh Run.
+    return { ...affinity, rebaseable: anyResolved ? allResolved : true };
+  }
+  return undefined;
 }
 
 /** Looks up one pending call across every provider that records continuations. */

@@ -153,8 +153,13 @@ export async function handleProviderProxyRequest(
       estimatedOutputTokens: prepared.estimatedOutputTokens,
       authorizationSnapshot: prepared.authorization.snapshot,
       // A continuation borrows the held Cursor Run: one upstream turn must not
-      // occupy two account/pool concurrency slots.
-      ...(prepared.continuationAffinity === undefined ? {} : { borrowsHeldSession: true }),
+      // occupy two account/pool concurrency slots. A rebaseable continuation
+      // (complete history, pinned account no longer routable) does NOT borrow —
+      // it starts a fresh Run on a newly selected account, so it leases like a
+      // normal request.
+      ...(prepared.continuationAffinity === undefined || prepared.continuationAffinity.rebaseable
+        ? {}
+        : { borrowsHeldSession: true }),
     },
     candidates: attemptCandidates,
     tenantId: prepared.authorization.tenantId,

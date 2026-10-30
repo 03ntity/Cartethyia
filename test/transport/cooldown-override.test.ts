@@ -141,6 +141,7 @@ dbDescribe("forceDisableCooldown", () => {
         {
           providerId: String(candidate?.["provider_id"]),
           providerAccountId: accountId,
+          rebaseable: false,
         },
       );
     let thrown: { code?: string; status?: number } | undefined;
@@ -176,6 +177,7 @@ dbDescribe("forceDisableCooldown", () => {
       {
         providerId: String(candidate?.["provider_id"]),
         providerAccountId: accountId,
+        rebaseable: false,
       },
     );
     expect(plan.candidates.map((c) => c.provider_account_id)).toContain(accountId);
@@ -239,5 +241,41 @@ dbDescribe("forceDisableCooldown", () => {
     // No reset to quote: the window already closed, and the sweep is about to
     // recover the row.
     expect(candidate?.["cooldown_until"]).toBeUndefined();
+  });
+
+  test("a rebaseable continuation falls through to normal routing when the pin is absent", async () => {
+    // The conversation is complete (every tool result answered) and the pinned
+    // account is not a candidate for the requested model. The router must NOT
+    // refuse; it must fall through and pick whichever account serves the model,
+    // so a model switch across accounts starts a fresh Run with the recorded
+    // history.
+    await writePreferences({});
+    await getDb()
+      .update(providerAccounts)
+      .set({ status: "active", cooldownUntil: null })
+      .where(eq(providerAccounts.id, accountId));
+    const service = new InMemoryRouteSnapshotService(createDatabaseSnapshotBuilder(getDb()));
+    const snapshot = await service.getSnapshot();
+    const candidate = (snapshot.candidates ?? []).find(
+      (c) => c["provider_account_id"] === accountId,
+    ) as Record<string, unknown> | undefined;
+    expect(candidate).toBeDefined();
+    const engine = new RoutingEngine();
+    // Pin an account that is NOT in the candidate set (random UUID) with
+    // `rebaseable: true` → must not throw, must return a normal plan.
+    const plan = await engine.plan(
+      String(candidate?.["model_id"]),
+      snapshot,
+      world.tenantId,
+      undefined,
+      false,
+      undefined,
+      {
+        providerId: String(candidate?.["provider_id"]),
+        providerAccountId: "00000000-0000-0000-0000-000000000000",
+        rebaseable: true,
+      },
+    );
+    expect(plan.candidates.length).toBeGreaterThan(0);
   });
 });

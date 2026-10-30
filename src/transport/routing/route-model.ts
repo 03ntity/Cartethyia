@@ -163,6 +163,16 @@ export interface PoolRoutingSetting {
 export interface RouteContinuationAffinity {
   readonly providerId: string;
   readonly providerAccountId: string;
+  /**
+   * True when the request's tool-result ids are all already answered by the
+   * conversation history (a replay), so no call is still owed to the pinned
+   * account. In that case, if the pinned account is no longer routable for
+   * the requested model, the request may safely rebase to a fresh Run on an
+   * eligible account instead of being refused — the recorded exchange travels
+   * as history. When false, the pin is a hard constraint: a live pending call
+   * must reach the exact account that owns it.
+   */
+  readonly rebaseable: boolean;
 }
 
 export interface RoutePlan {
