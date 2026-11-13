@@ -24,7 +24,7 @@ import { useClipboard } from "../../hooks/use-clipboard";
 import { toast } from "../../lib/toast";
 import { useRuntimeSettings, useUpdateRuntimeSettings } from "../../hooks/settings";
 import type { ComboStrategy, ModelAliasRow, ModelComboRow, UpdateRuntimeSettingsRequest } from "../../data/contracts";
-import type { ScopePromptRef, SystemPromptPreset } from "../../../../src/console/system-prompt/contracts";
+import type { ScopePromptRef, SystemPromptPreset } from "../../../../src/protocol/system-prompt-contracts";
 import { COMBO_STRATEGY_OPTIONS } from "./combo-strategy";
 import {
   useCloneModelCombo,

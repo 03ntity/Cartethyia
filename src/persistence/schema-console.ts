@@ -232,31 +232,31 @@ export const consoleSettings = pgTable("console_settings", {
 // tenant; `global` NULL means never configured, distinct from an explicit
 // disabled setting. Providers/models/combos/aliases are JSON object maps
 // keyed by providerId, `providerId::modelId`, combo name, and alias name
-// respectively — see `src/console/system-prompt/contracts.ts` for the value
+// respectively — see `src/protocol/system-prompt-contracts.ts` for the value
 // shapes and the resolution rules implemented by the dispatch-path transform.
 export const tenantSystemPrompts = pgTable("tenant_system_prompts", {
   tenantId: tenantRefPrimaryKey(),
-  global: jsonb("global").$type<import("../console/system-prompt/contracts").ScopePromptRef | null>(),
+  global: jsonb("global").$type<import("../protocol/system-prompt-contracts").ScopePromptRef | null>(),
   presets: jsonb("presets")
     .notNull()
     .default({})
-    .$type<Record<string, import("../console/system-prompt/contracts").SystemPromptPreset>>(),
+    .$type<Record<string, import("../protocol/system-prompt-contracts").SystemPromptPreset>>(),
   providers: jsonb("providers")
     .notNull()
     .default({})
-    .$type<Record<string, import("../console/system-prompt/contracts").ScopePromptRef>>(),
+    .$type<Record<string, import("../protocol/system-prompt-contracts").ScopePromptRef>>(),
   models: jsonb("models")
     .notNull()
     .default({})
-    .$type<Record<string, import("../console/system-prompt/contracts").ScopePromptRef>>(),
+    .$type<Record<string, import("../protocol/system-prompt-contracts").ScopePromptRef>>(),
   combos: jsonb("combos")
     .notNull()
     .default({})
-    .$type<Record<string, import("../console/system-prompt/contracts").ScopePromptRef>>(),
+    .$type<Record<string, import("../protocol/system-prompt-contracts").ScopePromptRef>>(),
   aliases: jsonb("aliases")
     .notNull()
     .default({})
-    .$type<Record<string, import("../console/system-prompt/contracts").ScopePromptRef>>(),
+    .$type<Record<string, import("../protocol/system-prompt-contracts").ScopePromptRef>>(),
   updatedAt: updatedAtColumn(),
 });
 

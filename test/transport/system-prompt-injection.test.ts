@@ -9,13 +9,13 @@ import {
   SYSTEM_PROMPT_WRAPPER_PREFIX,
   SYSTEM_PROMPT_WRAPPER_SUFFIX,
   systemPromptModelKey,
-} from "../../src/console/system-prompt/contracts";
+} from "../../src/protocol/system-prompt-contracts";
 import {
   applyInjectSystemPrompt,
   resolveTenantSystemPrompt,
 } from "../../src/transport/request/system-prompt-injection";
 import { applyBuddySystemPrompt } from "../../src/providers/integrations/buddy/chat";
-import type { TenantSystemPrompts } from "../../src/console/system-prompt/contracts";
+import type { TenantSystemPrompts } from "../../src/protocol/system-prompt-contracts";
 
 function request(overrides: Partial<CanonicalRequest> = {}): CanonicalRequest {
   return {

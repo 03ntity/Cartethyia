@@ -20,10 +20,10 @@ import type {
   PromptSetting,
   ScopePromptRef,
   TenantSystemPrompts,
-} from "../../console/system-prompt/contracts";
+} from "../../protocol/system-prompt-contracts";
 import {
   systemPromptModelKey,
-} from "../../console/system-prompt/contracts";
+} from "../../protocol/system-prompt-contracts";
 
 /** The route facts the resolution needs. */
 export interface SystemPromptRoute {

@@ -46,7 +46,7 @@ import type { ProviderExchangeCapture } from "../attempt-finalize";
 import { resolveCaptureModeForRequest } from "../capture-policy";
 import { resolveTenantImageClampMaxBytes, readTenantSystemPromptsForDispatch } from "../../request/tenant-preferences";
 import { resolveTenantSystemPrompt } from "../../request/system-prompt-injection";
-import { isWrappedInjectionProvider } from "../../../console/system-prompt/contracts";
+import { isWrappedInjectionProvider } from "../../../protocol/system-prompt-contracts";
 import { proxySuccessHeaders, buildUpstreamDispatchContext, buildDispatchNetworkBindings } from "../upstream";
 import type { AttemptLeaseOwnership } from "../leases";
 import type { ProviderContinuationScope } from "../../../providers/provider-contracts";

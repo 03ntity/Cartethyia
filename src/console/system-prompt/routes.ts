@@ -36,7 +36,7 @@ import {
   type ScopePromptRef,
   type SystemPromptPreset,
   type TenantSystemPrompts,
-} from "./contracts";
+} from "../../protocol/system-prompt-contracts";
 
 /** Route-group context injected by the composition root. */
 interface SystemPromptRoutesConfig {

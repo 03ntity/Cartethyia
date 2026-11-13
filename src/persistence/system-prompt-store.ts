@@ -10,7 +10,7 @@ import type {
   ScopePromptRef,
   SystemPromptPreset,
   TenantSystemPrompts,
-} from "../console/system-prompt/contracts";
+} from "../protocol/system-prompt-contracts";
 import {
   EMPTY_TENANT_SYSTEM_PROMPTS,
   SYSTEM_PROMPT_ALIAS_LIMIT,
@@ -22,7 +22,7 @@ import {
   isScopePromptRef,
   isSystemPromptPreset,
   parseSystemPromptModelKey,
-} from "../console/system-prompt/contracts";
+} from "../protocol/system-prompt-contracts";
 import { bumpSettingsRevision } from "./settings-revision";
 
 /** The stored row, normalized. Absent row reads as the empty configuration. */

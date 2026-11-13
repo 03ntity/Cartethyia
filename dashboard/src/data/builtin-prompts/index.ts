@@ -7,7 +7,7 @@
  * overriding a tenant's own saved preset that happens to share an id, so once
  * an operator edits and saves a built-in, their version wins.
  */
-import type { SystemPromptPreset } from "../../../../src/console/system-prompt/contracts";
+import type { SystemPromptPreset } from "../../../../src/protocol/system-prompt-contracts";
 import jinhsiAgentRaw from "./jinhsi-agent.txt?raw";
 import jinhsiJGeneralRaw from "./jinhsi-jgeneral.txt?raw";
 import generalJBreakRaw from "./general-jbreak.txt?raw";

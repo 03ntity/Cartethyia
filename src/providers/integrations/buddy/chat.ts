@@ -52,7 +52,7 @@ import { BUDDY_CN_EFFORTS, BUDDY_INTL_EFFORTS, BUDDY_SHARED_RAW } from "./catalo
 // cn-provider (which imports this module) resolves before any call.
 import { CODEBUDDY_CN_RAW } from "./catalog";
 import { buddyAccountUid } from "./account";
-import { SYSTEM_PROMPT_WRAPPER_PREFIX, SYSTEM_PROMPT_WRAPPER_SUFFIX } from "../../../console/system-prompt/contracts";
+import { SYSTEM_PROMPT_WRAPPER_PREFIX, SYSTEM_PROMPT_WRAPPER_SUFFIX } from "../../../protocol/system-prompt-contracts";
 import type { ProviderDispatchContext } from "../../provider-contracts";
 
 

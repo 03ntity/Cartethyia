@@ -222,14 +222,14 @@ export type { RedisBackend } from "../../../src/persistence/redis";
 export {
   isWrappedInjectionProvider,
   EMPTY_TENANT_SYSTEM_PROMPTS,
-} from "../../../src/console/system-prompt/contracts";
+} from "../../../src/protocol/system-prompt-contracts";
 export type {
   PromptMode,
   PromptSetting,
   ScopePromptRef,
   SystemPromptPreset,
   TenantSystemPrompts,
-} from "../../../src/console/system-prompt/contracts";
+} from "../../../src/protocol/system-prompt-contracts";
 
 export type {
   FamilyState as InferhubFamilyState,

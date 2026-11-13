@@ -1,7 +1,7 @@
 import { isBundledProviderId } from "../../providers/provider-contracts";
 import type { ProviderDispatchContext, ProviderId, ProviderAdapter } from "../../providers/provider-contracts";
 import { GatewayError } from "../../protocol/gateway-error";
-import { isWrappedInjectionProvider } from "../../console/system-prompt/contracts";
+import { isWrappedInjectionProvider } from "../../protocol/system-prompt-contracts";
 import { resolveTenantSystemPrompt } from "../request/system-prompt-injection";
 import { readTenantSystemPromptsForDispatch } from "../request/tenant-preferences";
 import type { CanonicalEvent } from "../../protocol/canonical-model";
