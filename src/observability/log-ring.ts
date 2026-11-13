@@ -151,10 +151,3 @@ export function subscribeConsoleLogs(
     listeners.delete(listener);
   };
 }
-
-/** Test-only: reset the shared ring and drop all subscribers between tests. */
-export function resetConsoleLogsForTests(): void {
-  lines.length = 0;
-  ringStart = 0;
-  listeners.clear();
-}

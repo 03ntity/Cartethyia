@@ -36,11 +36,6 @@ export function beginConsoleActivity(): () => void {
   };
 }
 
-/** Live foreground-request count (console counter + proxy source if wired). */
-export function foregroundActivityCount(): number {
-  return consoleActivity + (proxyBusySource?.() === true ? 1 : 0);
-}
-
 /** True when any foreground work is in flight right now. */
 export function foregroundBusy(): boolean {
   return consoleActivity > 0 || (proxyBusySource?.() ?? false);

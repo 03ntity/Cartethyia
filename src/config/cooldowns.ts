@@ -114,28 +114,6 @@ export function resolveAccountAuthRejectedCooldownMs(): number {
 }
 
 /**
- * Base backoff for the buddy policy/channel block (default 5m).
- *
- * Deliberately a *base*, not the 24h flat penalty it replaced. `11140` has two
- * documented causes our classifier cannot separate from the response alone: the
- * user's prompt failed a safety review, **and** sending the wrong desktop
- * `User-Agent` brand (`codebuddy/shared.ts`). A flat 24h meant that after we
- * fixed a header regression every buddy account stayed dead for up to a further
- * day, and one unsafe prompt cost a whole account a day.
- *
- * As a base it escalates through the consecutive-failure ladder instead, which
- * distinguishes the two causes by what they do next: a genuinely blocked account
- * is refused again on its very next request and parks itself within minutes,
- * while a single bad prompt costs five minutes.
- */
-export function resolveAccountPolicyBlockCooldownMs(): number {
-  return cachedCooldownMs(
-    "CARTETHYIA_ACCOUNT_POLICY_BLOCK_COOLDOWN_MS",
-    CONFIG_SPEC.CARTETHYIA_ACCOUNT_POLICY_BLOCK_COOLDOWN_MS,
-  );
-}
-
-/**
  * How long an **automatically** disabled account stays out of rotation (default 24h).
  *
  * A credential rejected once — a revoked key, a definitively dead refresh grant —

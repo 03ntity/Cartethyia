@@ -36,8 +36,3 @@ export function subscribeRequestCompleted(listener: Listener): () => void {
     listeners.delete(listener);
   };
 }
-
-/** Test-only: clear all subscribers. */
-export function resetRequestNotifyForTests(): void {
-  listeners.clear();
-}
