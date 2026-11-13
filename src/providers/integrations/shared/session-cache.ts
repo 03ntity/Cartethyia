@@ -1,12 +1,13 @@
 // Shared session-cache estimation factory.
 //
-// The Kiro and Trae adapters both need to ESTIMATE prompt-cache hits locally
-// because their upstream surfaces never report them. Their logic is
+// The Kiro, Qoder, and Trae adapters all need to ESTIMATE prompt-cache hits
+// locally because their upstream surfaces never report them. Their logic is
 // byte-identical modulo the provider header comment, so it lives here once —
 // but the state must stay per-provider: a factory call creates a private Map
 // per integration, so cross-provider session-id collisions can never
 // contaminate each other's estimates. Call each provider's wrapper
-// (kiro-cache.ts / trae-cache.ts); do not import this module directly.
+// (kiro-cache.ts / qoder-cache.ts / trae-cache.ts); do not import this module
+// directly.
 
 import { createHash } from "node:crypto";
 import type { CanonicalMessage, UsageRecord } from "../../../protocol/canonical-model";
