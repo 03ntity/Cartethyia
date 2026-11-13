@@ -1,7 +1,7 @@
 // Tenant payload-capture policy resolved once and shared by dispatch attempts.
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import { resolvePayloadCapture } from "../../observability/payload-capture";
-import type { TelemetryPayloadDepth, TelemetryPayloadMode } from "../../console/settings/contracts";
+import type { TelemetryPayloadDepth, TelemetryPayloadMode } from "../../config/settings-vocabulary";
 
 /** The resolved payload-capture preference, memoized on the request state. */
 export type PayloadCapturePreference =

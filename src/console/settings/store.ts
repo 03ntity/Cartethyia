@@ -11,20 +11,22 @@ import { payloadRetentionMs } from "../../observability/payload-capture";
 import { IMAGE_CLAMP_MAX_BYTES } from "../../protocol/image-clamp";
 import {
   MODEL_PROBE_MODES,
+  TELEMETRY_PAYLOAD_DEPTHS,
+  TELEMETRY_PAYLOAD_MODES,
+  type ModelProbeMode,
+  type TelemetryPayloadDepth,
+  type TelemetryPayloadMode,
+} from "../../config/settings-vocabulary";
+import {
   PONYTAIL_LEVELS,
   RESPONSES_REASONING_SUMMARIES,
   RTK_LEVELS,
-  TELEMETRY_PAYLOAD_DEPTHS,
-  TELEMETRY_PAYLOAD_MODES,
   VISION_HANDOFF_MAX_MODELS,
   type PonyTailLevel,
   type ResponsesReasoningSummary,
   type RtkLevel,
   type RuntimeSettingsResponse,
   type RuntimeSettingsStore,
-  type TelemetryPayloadDepth,
-  type TelemetryPayloadMode,
-  type ModelProbeMode,
   type UpdateRuntimeSettingsRequest,
 } from "./contracts";
 

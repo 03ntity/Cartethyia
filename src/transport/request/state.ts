@@ -4,7 +4,7 @@ import type { ClientIdentity } from "../../security/abuse";
 import type { ResolvedApiKey } from "../../security/api-key-auth";
 import type { PreparedProxyRequest } from "./preparer";
 import type { PayloadCaptureState, TelemetryPayloadCapture } from "../../observability/payload-capture";
-import type { TelemetryPayloadDepth, TelemetryPayloadMode } from "../../console/settings/contracts";
+import type { TelemetryPayloadDepth, TelemetryPayloadMode } from "../../config/settings-vocabulary";
 import { log } from "../../observability/logger";
 import { fastPathname } from "../pathname";
 

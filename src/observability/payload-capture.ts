@@ -7,7 +7,7 @@ import { preferencesReaderFor } from "../persistence/tenant-preferences";
 import type {
   TelemetryPayloadDepth,
   TelemetryPayloadMode,
-} from "../console/settings/contracts";
+} from "../config/settings-vocabulary";
 type CaptureScope = "tenant" | "debug_session" | "operator_flag";
 
 /**

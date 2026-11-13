@@ -7,10 +7,10 @@ import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import { consoleSettings } from "../../persistence/schema";
 import type { CanonicalRequest, WireFamily } from "../../protocol/canonical-model";
 import type { ProbeModelRequest, ProbeMode } from "./discovery-types";
-import type { ModelProbeMode } from "../../console/settings/contracts";
+import type { ModelProbeMode } from "../../config/settings-vocabulary";
 import type { SourceSurface } from "../../protocol/canonical-model";
 import { payloadRetentionMs, resolvePayloadCapture } from "../../observability/payload-capture";
-import type { TelemetryPayloadDepth } from "../../console/settings/contracts";
+import type { TelemetryPayloadDepth } from "../../config/settings-vocabulary";
 
 /** The reasoning shape a Responses-wire probe carries. */
 export interface ProbeReasoning {

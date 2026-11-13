@@ -9,6 +9,14 @@ import type { RedisBackend } from "../../persistence/redis";
 import type { ConsoleSettingsPreferences } from "../../persistence/schema";
 import { RTK_LEVELS } from "../../transport/request/rtk/rtk-constants";
 import { PONYTAIL_LEVELS } from "../../transport/request/rtk/ponytail-prompt";
+import {
+  MODEL_PROBE_MODES,
+  TELEMETRY_PAYLOAD_DEPTHS,
+  TELEMETRY_PAYLOAD_MODES,
+  type ModelProbeMode,
+  type TelemetryPayloadDepth,
+  type TelemetryPayloadMode,
+} from "../../config/settings-vocabulary";
 
 export { RTK_LEVELS, PONYTAIL_LEVELS };
 
@@ -130,12 +138,6 @@ export interface RuntimeSettingsConfig extends ConsoleRouteConfig {
 export const RESPONSES_REASONING_SUMMARIES = ["auto", "concise", "detailed"] as const;
 /** Reasoning-summary verbosity accepted for the Responses surface. */
 export type ResponsesReasoningSummary = (typeof RESPONSES_REASONING_SUMMARIES)[number];
-export const TELEMETRY_PAYLOAD_MODES = ["full", "metadata", "none"] as const;
-/** Telemetry payload capture mode accepted by the runtime-settings PATCH. */
-export type TelemetryPayloadMode = (typeof TELEMETRY_PAYLOAD_MODES)[number];
-export const TELEMETRY_PAYLOAD_DEPTHS = ["minimum", "moderate", "maximum"] as const;
-/** Capture depth for `full` mode accepted by the runtime-settings PATCH. */
-export type TelemetryPayloadDepth = (typeof TELEMETRY_PAYLOAD_DEPTHS)[number];
 const PRIVACY_MODES = ["masked", "full"] as const;
 /** Provider/model label privacy accepted by the runtime-settings PATCH. */
 export type PrivacyMode = (typeof PRIVACY_MODES)[number];
@@ -143,10 +145,6 @@ export type PrivacyMode = (typeof PRIVACY_MODES)[number];
 export type PonyTailLevel = (typeof PONYTAIL_LEVELS)[number];
 /** RTK prune strength accepted by the runtime-settings PATCH. */
 export type RtkLevel = (typeof RTK_LEVELS)[number];
-
-export const MODEL_PROBE_MODES = ["fast", "detail"] as const;
-/** Modelprobe mode accepted by the runtime-settings PATCH and the probe route. */
-export type ModelProbeMode = (typeof MODEL_PROBE_MODES)[number];
 
 /** Upper bound on the number of ordered vision-handoff models. */
 export const VISION_HANDOFF_MAX_MODELS = 8;
