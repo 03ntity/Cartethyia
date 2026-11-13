@@ -1,6 +1,6 @@
 // Model routing control-plane HTTP routes. The only module that touches Elysia.
 import { Elysia, t, type AnyElysia } from "elysia";
-import { errorResponse } from "../../shared/errors";
+import { consoleErrorHandler } from "../../shared/errors";
 import { literalUnion } from "../../shared/elysia-schema";
 import { modelComboStrategy, type ComboStrategy } from "../../../persistence/schema";
 import {
@@ -10,9 +10,6 @@ import {
 } from "./contracts";
 import { createModelRoutingOperations } from "./operations";
 
-function modelRoutingErrorResponse(error: unknown, set: { status?: number | string }) {
-  return errorResponse(error, set, "Model routing operation failed");
-}
 // Compile-time parity: the combo validation schemas below must accept exactly
 // the canonical ComboStrategy. Adding a combo strategy to the schema enum
 // without updating these literals fails here.
@@ -44,93 +41,50 @@ const updateComboBody = t.Object({
 export function createModelRoutingRoutes(config: ModelRoutingConfig): AnyElysia {
   const factory = createModelRoutingOperations(config);
   return new Elysia({ prefix: "/routing" })
-    .get("/aliases", async ({ request, set }) => {
-      try {
-        return await factory.listAliases(config.accessResolver(request));
-      } catch (e) {
-        return modelRoutingErrorResponse(e, set);
-      }
+    .error(consoleErrorHandler("Model routing operation failed"))
+    .get("/aliases", async ({ request }) => {
+      return await factory.listAliases(config.accessResolver(request));
     })
     .post("/aliases", { body: createAliasBody }, async ({ request, body, set }) => {
-      try {
-        set.status = 201;
-        return await factory.createAlias(config.accessResolver(request), body);
-      } catch (e) {
-        return modelRoutingErrorResponse(e, set);
-      }
+      set.status = 201;
+      return await factory.createAlias(config.accessResolver(request), body);
     })
-    .patch("/aliases/:id", { body: updateAliasBody }, async ({ request, params, body, set }) => {
-      try {
-        return await factory.updateAlias(config.accessResolver(request), params.id, body);
-      } catch (e) {
-        return modelRoutingErrorResponse(e, set);
-      }
+    .patch("/aliases/:id", { body: updateAliasBody }, async ({ request, params, body }) => {
+      return await factory.updateAlias(config.accessResolver(request), params.id, body);
     })
-    .delete("/aliases/:id", async ({ request, params, set }) => {
-      try {
-        return await factory.deleteAlias(config.accessResolver(request), params.id);
-      } catch (e) {
-        return modelRoutingErrorResponse(e, set);
-      }
+    .delete("/aliases/:id", async ({ request, params }) => {
+      return await factory.deleteAlias(config.accessResolver(request), params.id);
     })
-    .post("/aliases/reorder", { body: reorderBody }, async ({ request, body, set }) => {
-      try {
-        await factory.reorderAliases(config.accessResolver(request), body.ids);
-        return { success: true };
-      } catch (e) {
-        return modelRoutingErrorResponse(e, set);
-      }
+    .post("/aliases/reorder", { body: reorderBody }, async ({ request, body }) => {
+      await factory.reorderAliases(config.accessResolver(request), body.ids);
+      return { success: true };
     })
-    .get("/combos", async ({ request, set }) => {
-      try {
-        return await factory.listCombos(config.accessResolver(request));
-      } catch (e) {
-        return modelRoutingErrorResponse(e, set);
-      }
+    .get("/combos", async ({ request }) => {
+      return await factory.listCombos(config.accessResolver(request));
     })
     .post("/combos", { body: createComboBody }, async ({ request, body, set }) => {
-      try {
-        set.status = 201;
-        return await factory.createCombo(
-          config.accessResolver(request),
-          body as ModelComboCreateInput,
-        );
-      } catch (e) {
-        return modelRoutingErrorResponse(e, set);
-      }
+      set.status = 201;
+      return await factory.createCombo(
+        config.accessResolver(request),
+        body as ModelComboCreateInput,
+      );
     })
-    .post("/combos/reorder", { body: reorderBody }, async ({ request, body, set }) => {
-      try {
-        await factory.reorderCombos(config.accessResolver(request), body.ids);
-        return { success: true };
-      } catch (e) {
-        return modelRoutingErrorResponse(e, set);
-      }
+    .post("/combos/reorder", { body: reorderBody }, async ({ request, body }) => {
+      await factory.reorderCombos(config.accessResolver(request), body.ids);
+      return { success: true };
     })
     .post("/combos/:id/clone", async ({ request, params, set }) => {
-      try {
-        set.status = 201;
-        return await factory.cloneCombo(config.accessResolver(request), params.id);
-      } catch (e) {
-        return modelRoutingErrorResponse(e, set);
-      }
+      set.status = 201;
+      return await factory.cloneCombo(config.accessResolver(request), params.id);
     })
-    .patch("/combos/:id", { body: updateComboBody }, async ({ request, params, body, set }) => {
-      try {
-        return await factory.updateCombo(
-          config.accessResolver(request),
-          params.id,
-          body as ModelComboPatchInput,
-        );
-      } catch (e) {
-        return modelRoutingErrorResponse(e, set);
-      }
+    .patch("/combos/:id", { body: updateComboBody }, async ({ request, params, body }) => {
+      return await factory.updateCombo(
+        config.accessResolver(request),
+        params.id,
+        body as ModelComboPatchInput,
+      );
     })
-    .delete("/combos/:id", async ({ request, params, set }) => {
-      try {
-        return await factory.deleteCombo(config.accessResolver(request), params.id);
-      } catch (e) {
-        return modelRoutingErrorResponse(e, set);
-      }
+    .delete("/combos/:id", async ({ request, params }) => {
+      return await factory.deleteCombo(config.accessResolver(request), params.id);
     });
 }

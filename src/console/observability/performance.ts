@@ -6,7 +6,7 @@
 // `platform:admin` like the other instance-level operations.
 
 import { Elysia, type AnyElysia } from "elysia";
-import { errorResponse, requireGlobalAdmin } from "../shared/errors";
+import { consoleErrorHandler, requireGlobalAdmin } from "../shared/errors";
 import { performanceMetricsSnapshot } from "../../observability/performance-metrics";
 import type { ConsoleAccessResolver } from "../auth/access";
 
@@ -16,12 +16,9 @@ export interface PerformanceConfig {
 
 export function createPerformanceRoutes(config: PerformanceConfig): AnyElysia {
   return new Elysia()
-    .get("/system/performance", ({ request, set }) => {
-      try {
-        requireGlobalAdmin(config.accessResolver(request));
-        return performanceMetricsSnapshot();
-      } catch (e) {
-        return errorResponse(e, set, "Performance operation failed");
-      }
+    .error(consoleErrorHandler("Performance operation failed"))
+    .get("/system/performance", ({ request }) => {
+      requireGlobalAdmin(config.accessResolver(request));
+      return performanceMetricsSnapshot();
     });
 }

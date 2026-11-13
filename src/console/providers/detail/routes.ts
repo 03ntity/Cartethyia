@@ -1,5 +1,5 @@
 import { Elysia, t, type AnyElysia } from "elysia";
-import { ConsoleDomainError, errorResponse, requireTenantScope } from "../../shared/errors";
+import { ConsoleDomainError, consoleErrorHandler, requireTenantScope } from "../../shared/errors";
 import { literalUnion } from "../../shared/elysia-schema";
 import type { AccessDecision } from "../../../security/access-control";
 import {
@@ -135,11 +135,6 @@ function createProviderDetailOperations(deps: ProviderDetailConfig) {
   return operations;
 }
 
-function providerDetailErrorResponse(error: unknown, set: { status?: number | string }) {
-  return errorResponse(error, set, "Provider detail operation failed", {
-    detailsPolicy: "include-if-present",
-  });
-}
 
 const updateRoutingBody = t.Object({
   strategy: t.Optional(literalUnion(ROUTING_STRATEGIES)),
@@ -172,33 +167,22 @@ const updateRoutingBody = t.Object({
 export function createProviderDetailRoutes(config: ProviderDetailConfig): AnyElysia {
   const factory = createProviderDetailOperations(config);
   return new Elysia({ prefix: "/providers" })
-    .get("/:providerId/routing", async ({ request, params, set }) => {
-      try {
-        return await factory.getRouting(config.accessResolver(request), params.providerId);
-      } catch (e) {
-        return providerDetailErrorResponse(e, set);
-      }
+    .error(consoleErrorHandler("Provider detail operation failed", { detailsPolicy: "include-if-present" }))
+    .get("/:providerId/routing", async ({ request, params }) => {
+      return await factory.getRouting(config.accessResolver(request), params.providerId);
     })
-    .get("/:providerId/account-inflight", async ({ request, params, set }) => {
-      try {
-        return await factory.accountInflight(config.accessResolver(request), params.providerId);
-      } catch (e) {
-        return providerDetailErrorResponse(e, set);
-      }
+    .get("/:providerId/account-inflight", async ({ request, params }) => {
+      return await factory.accountInflight(config.accessResolver(request), params.providerId);
     })
     .patch(
       "/:providerId/routing",
       { body: updateRoutingBody },
-      async ({ request, params, body, set }) => {
-        try {
-          return await factory.updateRouting(
-            config.accessResolver(request),
-            params.providerId,
-            body as UpdateProviderRoutingRequest,
-          );
-        } catch (e) {
-          return providerDetailErrorResponse(e, set);
-        }
+      async ({ request, params, body }) => {
+        return await factory.updateRouting(
+          config.accessResolver(request),
+          params.providerId,
+          body as UpdateProviderRoutingRequest,
+        );
       },
     )
 }

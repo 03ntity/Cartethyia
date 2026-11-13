@@ -4,7 +4,7 @@
 // surface stable for `domain-registration.ts` and the OAuth tests.
 
 import { Elysia, t, type AnyElysia } from "elysia";
-import { errorResponse } from "../../shared/errors";
+import { consoleErrorHandler } from "../../shared/errors";
 import {
   createOAuthLoginOperations,
   failurePage,
@@ -20,11 +20,6 @@ export {
 } from "./account-store";
 export { completeLogin, type OAuthLoginConfig } from "./operations";
 
-function oauthErrorResponse(error: unknown, set: { status?: number | string }) {
-  return errorResponse(error, set, "OAuth login operation failed", {
-    detailsPolicy: "always-include",
-  });
-}
 
 const startBody = t.Optional(
   t.Object({
@@ -49,21 +44,18 @@ const importBody = t.Object({
 export function createOAuthLoginRoutes(config: OAuthLoginConfig): AnyElysia {
   const factory = createOAuthLoginOperations(config);
   return new Elysia({ prefix: "/providers" })
+    .error(consoleErrorHandler("OAuth login operation failed", { detailsPolicy: "always-include" }))
     .post(
       "/:providerId/oauth/authorize",
       { body: startBody },
       async ({ request, params, body, set }) => {
-        try {
-          set.status = 201;
-          return await factory.beginAuthorize(
-            config.accessResolver(request),
-            params.providerId,
-            body?.accountLabel ?? params.providerId,
-            body?.parameters,
-          );
-        } catch (e) {
-          return oauthErrorResponse(e, set);
-        }
+        set.status = 201;
+        return await factory.beginAuthorize(
+          config.accessResolver(request),
+          params.providerId,
+          body?.accountLabel ?? params.providerId,
+          body?.parameters,
+        );
       },
     )
     .get("/:providerId/oauth/callback", async ({ params, query, request }) => {
@@ -90,50 +82,38 @@ export function createOAuthLoginRoutes(config: OAuthLoginConfig): AnyElysia {
       "/:providerId/oauth/device/start",
       { body: startBody },
       async ({ request, params, body, set }) => {
-        try {
-          set.status = 201;
-          return await factory.startDevice(
-            config.accessResolver(request),
-            params.providerId,
-            body?.accountLabel ?? params.providerId,
-            body?.parameters,
-          );
-        } catch (e) {
-          return oauthErrorResponse(e, set);
-        }
+        set.status = 201;
+        return await factory.startDevice(
+          config.accessResolver(request),
+          params.providerId,
+          body?.accountLabel ?? params.providerId,
+          body?.parameters,
+        );
       },
     )
     .post(
       "/:providerId/oauth/device/poll",
       { body: devicePollBody },
-      async ({ request, params, body, set }) => {
-        try {
-          return await factory.pollDevice(
-            config.accessResolver(request),
-            params.providerId,
-            body.deviceAuthId,
-          );
-        } catch (e) {
-          return oauthErrorResponse(e, set);
-        }
+      async ({ request, params, body }) => {
+        return await factory.pollDevice(
+          config.accessResolver(request),
+          params.providerId,
+          body.deviceAuthId,
+        );
       },
     )
     .post(
       "/:providerId/oauth/import",
       { body: importBody },
       async ({ request, params, body, set }) => {
-        try {
-          set.status = 201;
-          return await factory.importCredential(
-            config.accessResolver(request),
-            params.providerId,
-            body.accountLabel ?? params.providerId,
-            body.credential,
-            body.fields ?? {},
-          );
-        } catch (e) {
-          return oauthErrorResponse(e, set);
-        }
+        set.status = 201;
+        return await factory.importCredential(
+          config.accessResolver(request),
+          params.providerId,
+          body.accountLabel ?? params.providerId,
+          body.credential,
+          body.fields ?? {},
+        );
       },
     )
 }

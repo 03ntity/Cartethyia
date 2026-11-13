@@ -183,7 +183,10 @@ export function requireGlobalAdmin(access: AccessDecision | undefined): AccessDe
  * `fallbackMessage` is what any other throw reports as its 500 message, so a
  * failure still names the area instead of reading as a bare internal error.
  */
-export function consoleErrorHandler(fallbackMessage: string) {
+export function consoleErrorHandler(
+  fallbackMessage: string,
+  options: ErrorResponseOptions = {},
+) {
   return ({
     error,
     set,
@@ -195,6 +198,6 @@ export function consoleErrorHandler(fallbackMessage: string) {
       set.status = 422;
       return { error: `${fallbackMessage}: ${error.message}`, code: "invalid_request" };
     }
-    return errorResponse(error, set, fallbackMessage);
+    return errorResponse(error, set, fallbackMessage, options);
   };
 }

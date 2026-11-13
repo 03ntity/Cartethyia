@@ -1,7 +1,7 @@
 import type { ConsoleAccessResolver } from "../auth/access";
 import type { AuditSink } from "../audit/contracts";
 import { Elysia, t, type AnyElysia } from "elysia";
-import { errorResponse, requireTenantScope } from "../shared/errors";
+import { consoleErrorHandler, requireTenantScope } from "../shared/errors";
 import type { CliToolService } from "./service";
 import type { ApplyInput, CliMappingInput, CliModelMapping } from "./contracts";
 // ── api-routes.ts ──
@@ -153,143 +153,116 @@ export function createCliToolsRoutes(config: CliToolsRoutesConfig): AnyElysia {
   const { service, accessResolver, auditSink, snapshotInvalidator } = config;
 
   return new Elysia({ prefix: "/cli-tools" })
-    .get("/registry", async ({ request, set }) => {
-      try {
-        requireTenantScope(accessResolver(request), "dashboard:read");
-        return service.getRegistry();
-      } catch (e) {
-        return errorResponse(e, set, "CLI tool operation failed");
-      }
+    .error(consoleErrorHandler("CLI tool operation failed"))
+    .get("/registry", async ({ request }) => {
+      requireTenantScope(accessResolver(request), "dashboard:read");
+      return service.getRegistry();
     })
-    .get("/all-statuses", async ({ request, set }) => {
-      try {
-        requireTenantScope(accessResolver(request), "dashboard:read");
-        return await service.getAllStatuses();
-      } catch (e) {
-        return errorResponse(e, set, "CLI tool operation failed");
-      }
+    .get("/all-statuses", async ({ request }) => {
+      requireTenantScope(accessResolver(request), "dashboard:read");
+      return await service.getAllStatuses();
     })
     .get("/:toolId/mappings", async ({ request, params, query, set }) => {
-      try {
-        const a = requireTenantScope(accessResolver(request), "dashboard:read");
-        if (!service.isValidTool(params.toolId)) {
-          set.status = 404;
-          return { error: "CLI tool not found", code: "tool_not_found" };
-        }
-        const keyId = typeof query.keyId === "string" && query.keyId.length > 0 ? query.keyId : undefined;
-        if (!keyId) {
-          set.status = 422;
-          return { error: "keyId query parameter is required", code: "invalid_request" };
-        }
-        return await service.getMappings(a.tenantId, params.toolId, keyId);
-      } catch (e) {
-        return errorResponse(e, set, "CLI tool operation failed");
+      const a = requireTenantScope(accessResolver(request), "dashboard:read");
+      if (!service.isValidTool(params.toolId)) {
+        set.status = 404;
+        return { error: "CLI tool not found", code: "tool_not_found" };
       }
+      const keyId = typeof query.keyId === "string" && query.keyId.length > 0 ? query.keyId : undefined;
+      if (!keyId) {
+        set.status = 422;
+        return { error: "keyId query parameter is required", code: "invalid_request" };
+      }
+      return await service.getMappings(a.tenantId, params.toolId, keyId);
     })
     .post("/:toolId/mappings", { body: mappingBody }, async ({ request, params, body, set }) => {
+      const a = requireTenantScope(accessResolver(request), "dashboard:write");
+      if (!service.isValidTool(params.toolId)) {
+        set.status = 404;
+        return { error: "CLI tool not found", code: "tool_not_found" };
+      }
+      const input = parseMapping(body);
+      if (input === undefined) {
+        set.status = 422;
+        return { error: "Invalid mapping payload", code: "invalid_request" };
+      }
+      const keyId = typeof body.keyId === "string" && body.keyId.length > 0 ? body.keyId : undefined;
+      if (!keyId) {
+        set.status = 422;
+        return { error: "keyId is required", code: "invalid_request" };
+      }
       try {
-        const a = requireTenantScope(accessResolver(request), "dashboard:write");
-        if (!service.isValidTool(params.toolId)) {
-          set.status = 404;
-          return { error: "CLI tool not found", code: "tool_not_found" };
-        }
-        const input = parseMapping(body);
-        if (input === undefined) {
-          set.status = 422;
-          return { error: "Invalid mapping payload", code: "invalid_request" };
-        }
-        const keyId = typeof body.keyId === "string" && body.keyId.length > 0 ? body.keyId : undefined;
-        if (!keyId) {
-          set.status = 422;
-          return { error: "keyId is required", code: "invalid_request" };
-        }
-        try {
-          const result = await service.saveMappings(a.tenantId, params.toolId, keyId, input);
-          await auditSink?.record({
-            access: a,
-            action: "cli_tool.mappings_saved",
-            target: params.toolId,
-            detail: { count: input.mappings.length, enabled: input.enabled, keyId },
-          });
-          // Mapping saves are routing changes: invalidate the snapshot so the
-          // next `/v1/*` request routes through the newly saved source→target
-          // immediately instead of the previous revision.
-          await snapshotInvalidator?.invalidate();
-          return result;
-        } catch (error) {
-          set.status = 422;
-          return {
-            error: error instanceof Error ? error.message : "Failed to save mappings",
-            code: "invalid_request",
-          };
-        }
-      } catch (e) {
-        return errorResponse(e, set, "CLI tool operation failed");
+        const result = await service.saveMappings(a.tenantId, params.toolId, keyId, input);
+        await auditSink?.record({
+          access: a,
+          action: "cli_tool.mappings_saved",
+          target: params.toolId,
+          detail: { count: input.mappings.length, enabled: input.enabled, keyId },
+        });
+        // Mapping saves are routing changes: invalidate the snapshot so the
+        // next `/v1/*` request routes through the newly saved source→target
+        // immediately instead of the previous revision.
+        await snapshotInvalidator?.invalidate();
+        return result;
+      } catch (error) {
+        set.status = 422;
+        return {
+          error: error instanceof Error ? error.message : "Failed to save mappings",
+          code: "invalid_request",
+        };
       }
     })
     .post("/:toolId/mappings/reset", { body: t.Object({ keyId: t.String() }) }, async ({ request, params, body, set }) => {
-      try {
-        const a = requireTenantScope(accessResolver(request), "dashboard:write");
-        if (!service.isValidTool(params.toolId)) {
-          set.status = 404;
-          return { error: "CLI tool not found", code: "tool_not_found" };
-        }
-        const keyId = typeof body.keyId === "string" && body.keyId.length > 0 ? body.keyId : undefined;
-        if (!keyId) {
-          set.status = 422;
-          return { error: "keyId is required", code: "invalid_request" };
-        }
-        const result = await service.resetMappings(a.tenantId, params.toolId, keyId);
-        await auditSink?.record({
-          access: a,
-          action: "cli_tool.mappings_reset",
-          target: params.toolId,
-          detail: { keyId },
-        });
-        await snapshotInvalidator?.invalidate();
-        return result;
-      } catch (e) {
-        return errorResponse(e, set, "CLI tool operation failed");
+      const a = requireTenantScope(accessResolver(request), "dashboard:write");
+      if (!service.isValidTool(params.toolId)) {
+        set.status = 404;
+        return { error: "CLI tool not found", code: "tool_not_found" };
       }
+      const keyId = typeof body.keyId === "string" && body.keyId.length > 0 ? body.keyId : undefined;
+      if (!keyId) {
+        set.status = 422;
+        return { error: "keyId is required", code: "invalid_request" };
+      }
+      const result = await service.resetMappings(a.tenantId, params.toolId, keyId);
+      await auditSink?.record({
+        access: a,
+        action: "cli_tool.mappings_reset",
+        target: params.toolId,
+        detail: { keyId },
+      });
+      await snapshotInvalidator?.invalidate();
+      return result;
     })
     .get("/:toolId", async ({ request, params, set }) => {
-      try {
-        requireTenantScope(accessResolver(request), "dashboard:read");
-        const status = await service.getStatus(params.toolId);
-        if (status === null) {
-          set.status = 404;
-          return { error: "CLI tool not found", code: "tool_not_found" };
-        }
-        return status;
-      } catch (e) {
-        return errorResponse(e, set, "CLI tool operation failed");
+      requireTenantScope(accessResolver(request), "dashboard:read");
+      const status = await service.getStatus(params.toolId);
+      if (status === null) {
+        set.status = 404;
+        return { error: "CLI tool not found", code: "tool_not_found" };
       }
+      return status;
     })
     .post("/:toolId/download", { body: applyBody }, async ({ request, params, body, set }) => {
-      try {
-        const access = requireTenantScope(accessResolver(request), "dashboard:read");
-        if (!service.isValidTool(params.toolId)) {
-          set.status = 404;
-          return { error: "CLI tool not found", code: "tool_not_found" };
-        }
-        const parsed = parseApplyInput(body);
-        if (parsed === undefined) {
-          set.status = 422;
-          return {
-            error: "endpoint and keyId are required",
-            code: "invalid_request",
-          };
-        }
-        const input = await service.withResolvedSecret(access.tenantId, parsed);
-        const result = await service.downloadConfig(params.toolId, input);
-        if (result === null) {
-          set.status = 404;
-          return { error: "CLI tool not found", code: "tool_not_found" };
-        }
-        return result;
-      } catch (e) {
-        return errorResponse(e, set, "CLI tool operation failed");
+      const access = requireTenantScope(accessResolver(request), "dashboard:read");
+      if (!service.isValidTool(params.toolId)) {
+        set.status = 404;
+        return { error: "CLI tool not found", code: "tool_not_found" };
       }
+      const parsed = parseApplyInput(body);
+      if (parsed === undefined) {
+        set.status = 422;
+        return {
+          error: "endpoint and keyId are required",
+          code: "invalid_request",
+        };
+      }
+      const input = await service.withResolvedSecret(access.tenantId, parsed);
+      const result = await service.downloadConfig(params.toolId, input);
+      if (result === null) {
+        set.status = 404;
+        return { error: "CLI tool not found", code: "tool_not_found" };
+      }
+      return result;
     })
     /**
      * Writes the tool's config on this host and/or records a remote route.
@@ -300,46 +273,42 @@ export function createCliToolsRoutes(config: CliToolsRoutesConfig): AnyElysia {
      * write is not the one doing the work.
      */
     .post("/:toolId/apply", { body: applyBody }, async ({ request, params, body, set }) => {
-      try {
-        const access = requireTenantScope(accessResolver(request), "dashboard:write");
-        if (!service.isValidTool(params.toolId)) {
-          set.status = 404;
-          return { error: "CLI tool not found", code: "tool_not_found" };
-        }
-        const parsed = parseApplyInput(body);
-        if (parsed === undefined) {
-          set.status = 422;
-          return {
-            error: "endpoint and keyId are required",
-            code: "invalid_request",
-          };
-        }
-        const input = await service.withResolvedSecret(access.tenantId, parsed);
-        const result = await service.applyConfig(access.tenantId, params.toolId, parsed.mappingOwnerId ?? parsed.keyId, {
-          ...input,
-          ...(parsed.mode ? { mode: parsed.mode } : {}),
-        });
-        if (result === null) {
-          set.status = 404;
-          return { error: "CLI tool not found", code: "tool_not_found" };
-        }
-        await auditSink?.record({
-          access,
-          action: "cli_tool.applied",
-          target: params.toolId,
-          detail: {
-            outcome: result.outcome,
-            wroteFile: result.wroteFile,
-            savedRemoteRoute: result.savedRemoteRoute,
-            keyId: parsed.keyId,
-          },
-        });
-        // A remote route is a routing change: invalidate so the next `/v1/*`
-        // request picks it up without waiting for a restart.
-        if (result.savedRemoteRoute) await snapshotInvalidator?.invalidate();
-        return result;
-      } catch (e) {
-        return errorResponse(e, set, "CLI tool operation failed");
+      const access = requireTenantScope(accessResolver(request), "dashboard:write");
+      if (!service.isValidTool(params.toolId)) {
+        set.status = 404;
+        return { error: "CLI tool not found", code: "tool_not_found" };
       }
+      const parsed = parseApplyInput(body);
+      if (parsed === undefined) {
+        set.status = 422;
+        return {
+          error: "endpoint and keyId are required",
+          code: "invalid_request",
+        };
+      }
+      const input = await service.withResolvedSecret(access.tenantId, parsed);
+      const result = await service.applyConfig(access.tenantId, params.toolId, parsed.mappingOwnerId ?? parsed.keyId, {
+        ...input,
+        ...(parsed.mode ? { mode: parsed.mode } : {}),
+      });
+      if (result === null) {
+        set.status = 404;
+        return { error: "CLI tool not found", code: "tool_not_found" };
+      }
+      await auditSink?.record({
+        access,
+        action: "cli_tool.applied",
+        target: params.toolId,
+        detail: {
+          outcome: result.outcome,
+          wroteFile: result.wroteFile,
+          savedRemoteRoute: result.savedRemoteRoute,
+          keyId: parsed.keyId,
+        },
+      });
+      // A remote route is a routing change: invalidate so the next `/v1/*`
+      // request picks it up without waiting for a restart.
+      if (result.savedRemoteRoute) await snapshotInvalidator?.invalidate();
+      return result;
     });
 }

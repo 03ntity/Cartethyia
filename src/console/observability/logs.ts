@@ -9,7 +9,7 @@
 // that already reads request/response bodies on Usage.
 
 import { Elysia, t, type AnyElysia } from "elysia";
-import { ConsoleDomainError, errorResponse, requireScope } from "../shared/errors";
+import { ConsoleDomainError, consoleErrorHandler, requireScope } from "../shared/errors";
 import { parseQueryLimit } from "../shared/query";
 import type { ConsoleAccessResolver } from "../auth/access";
 import type { AccessDecision } from "../../security/access-control";
@@ -50,29 +50,18 @@ export function createLogRoutes(config: LogsConfig): AnyElysia {
   };
 
   return new Elysia()
-    .get("/logs", { query: logsQuery }, async ({ request, query, set }) => {
-      try {
-        return readLogs(config.accessResolver(request), query.level, query.limit);
-      } catch (e) {
-        return errorResponse(e, set, "Logs operation failed");
-      }
+    .error(consoleErrorHandler("Logs operation failed"))
+    .get("/logs", { query: logsQuery }, async ({ request, query }) => {
+      return readLogs(config.accessResolver(request), query.level, query.limit);
     })
-    .delete("/logs", async ({ request, set }) => {
-      try {
-        const access = requireScope(config.accessResolver(request), "dashboard:write");
-        clearConsoleLogs();
-        await config.auditSink?.record({ access, action: "console_logs.cleared", target: "console-logs" });
-        return { success: true };
-      } catch (e) {
-        return errorResponse(e, set, "Logs operation failed");
-      }
+    .delete("/logs", async ({ request }) => {
+      const access = requireScope(config.accessResolver(request), "dashboard:write");
+      clearConsoleLogs();
+      await config.auditSink?.record({ access, action: "console_logs.cleared", target: "console-logs" });
+      return { success: true };
     })
-    .get("/logs/stream", ({ request, set }) => {
-      try {
-        requireScope(config.accessResolver(request), "dashboard:read");
-      } catch (e) {
-        return errorResponse(e, set, "Logs operation failed");
-      }
+    .get("/logs/stream", ({ request }) => {
+      requireScope(config.accessResolver(request), "dashboard:read");
       return consoleSseResponse(
         createConsoleSseStream(request.signal, ({ send }) => {
           send("init", { lines: getConsoleLogSnapshot() });

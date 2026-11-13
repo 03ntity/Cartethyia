@@ -8,7 +8,7 @@
 // process-level; pool usage and health are filtered to the caller's tenant.
 
 import { Elysia, type AnyElysia } from "elysia";
-import { errorResponse, requireScope } from "../shared/errors";
+import { consoleErrorHandler, errorResponse, requireScope } from "../shared/errors";
 import type { ConsoleAccessResolver } from "../auth/access";
 /**
  * The slice of the request state store the live view reads. Declared here
@@ -88,87 +88,68 @@ function withPoolBytes<T extends { poolId: string; currentInflight?: number }>(
 
 export function createLiveRoutes(config: LiveConfig): AnyElysia {
   return new Elysia()
+    .error(consoleErrorHandler("Live operation failed"))
     .get("/live/requests/stream", ({ request, set }) => {
-      try {
-        const access = config.accessResolver(request);
-        requireScope(access, "dashboard:read");
-        const tenantId = access?.tenantId;
-        if (!tenantId) return errorResponse(new Error("Tenant required"), set, "Live operation failed");
-        // No `set.headers` writes here: this handler returns a `Response`, so
-        // Elysia discards `set` and `consoleSseResponse` below owns the SSE
-        // headers (content-type, cache-control, connection, buffering).
-        return consoleSseResponse(
-          createConsoleSseStream(request.signal, ({ send }) => {
-            return subscribeRequestCompleted((notice) => {
+      const access = config.accessResolver(request);
+      requireScope(access, "dashboard:read");
+      const tenantId = access?.tenantId;
+      if (!tenantId) return errorResponse(new Error("Tenant required"), set, "Live operation failed");
+      // No `set.headers` writes here: this handler returns a `Response`, so
+      // Elysia discards `set` and `consoleSseResponse` below owns the SSE
+      // headers (content-type, cache-control, connection, buffering).
+      return consoleSseResponse(
+        createConsoleSseStream(request.signal, ({ send }) => {
+          return subscribeRequestCompleted((notice) => {
+            if (notice.tenantId === tenantId) send("request_completed", notice);
+          });
+        }),
+      );
+    })
+    .get("/live/in-flight", ({ request }) => {
+      requireScope(config.accessResolver(request), "dashboard:read");
+      return config.stateStore?.inFlightSnapshot() ?? EMPTY_IN_FLIGHT;
+    })
+    .get("/live/in-flight/stream", ({ request }) => {
+      const access = requireScope(config.accessResolver(request), "dashboard:read");
+      const tenantId = access?.tenantId;
+      return consoleSseResponse(
+        createConsoleSseStream(request.signal, ({ send }) => {
+          const store = config.stateStore;
+          if (!store) {
+            send("count", EMPTY_IN_FLIGHT);
+            return () => {};
+          }
+          // The Usage page keeps one stream open for both the in-flight gauge
+          // and request-table invalidation, so this route also fans out
+          // `request_completed` events (tagged by kind) for the tenant,
+          // mirroring `/live/requests/stream`.
+          const unsubscribe = store.subscribeInFlight((snapshot) => send("count", snapshot));
+          let unsubscribeCompleted: (() => void) | undefined;
+          if (tenantId) {
+            unsubscribeCompleted = subscribeRequestCompleted((notice) => {
               if (notice.tenantId === tenantId) send("request_completed", notice);
             });
-          }),
-        );
-      } catch (e) {
-        return errorResponse(e, set, "Live operation failed");
-      }
+          }
+          send("count", store.inFlightSnapshot());
+          return () => {
+            unsubscribe();
+            unsubscribeCompleted?.();
+          };
+        }),
+      );
     })
-    .get("/live/in-flight", ({ request, set }) => {
-      try {
-        requireScope(config.accessResolver(request), "dashboard:read");
-        return config.stateStore?.inFlightSnapshot() ?? EMPTY_IN_FLIGHT;
-      } catch (e) {
-        return errorResponse(e, set, "Live operation failed");
-      }
+    .get("/live/pools", async ({ request }) => {
+      const access = requireScope(config.accessResolver(request), "dashboard:read");
+      const allowed = await tenantPoolIds(config.db, access.tenantId);
+      const pools = withPoolBytes(config.poolSelector?.snapshotPoolUsage() ?? []);
+      return { pools: allowed ? pools.filter((pool) => allowed.has(pool.poolId)) : pools };
     })
-    .get("/live/in-flight/stream", ({ request, set }) => {
-      try {
-        const access = requireScope(config.accessResolver(request), "dashboard:read");
-        const tenantId = access?.tenantId;
-        return consoleSseResponse(
-          createConsoleSseStream(request.signal, ({ send }) => {
-            const store = config.stateStore;
-            if (!store) {
-              send("count", EMPTY_IN_FLIGHT);
-              return () => {};
-            }
-            // The Usage page keeps one stream open for both the in-flight gauge
-            // and request-table invalidation, so this route also fans out
-            // `request_completed` events (tagged by kind) for the tenant,
-            // mirroring `/live/requests/stream`.
-            const unsubscribe = store.subscribeInFlight((snapshot) => send("count", snapshot));
-            let unsubscribeCompleted: (() => void) | undefined;
-            if (tenantId) {
-              unsubscribeCompleted = subscribeRequestCompleted((notice) => {
-                if (notice.tenantId === tenantId) send("request_completed", notice);
-              });
-            }
-            send("count", store.inFlightSnapshot());
-            return () => {
-              unsubscribe();
-              unsubscribeCompleted?.();
-            };
-          }),
-        );
-      } catch (e) {
-        return errorResponse(e, set, "Live operation failed");
-      }
-    })
-    .get("/live/pools", async ({ request, set }) => {
-      try {
-        const access = requireScope(config.accessResolver(request), "dashboard:read");
-        const allowed = await tenantPoolIds(config.db, access.tenantId);
-        const pools = withPoolBytes(config.poolSelector?.snapshotPoolUsage() ?? []);
-        return { pools: allowed ? pools.filter((pool) => allowed.has(pool.poolId)) : pools };
-      } catch (e) {
-        return errorResponse(e, set, "Live operation failed");
-      }
-    })
-    .get("/live/pools/stream", async ({ request, set }) => {
+    .get("/live/pools/stream", async ({ request }) => {
       let tenantId: string | null;
       let allowed: ReadonlySet<string> | undefined;
-      try {
-        const access = requireScope(config.accessResolver(request), "dashboard:read");
-        tenantId = access.tenantId;
-        allowed = await tenantPoolIds(config.db, tenantId);
-      } catch (e) {
-        return errorResponse(e, set, "Live operation failed");
-      }
+      const access = requireScope(config.accessResolver(request), "dashboard:read");
+      tenantId = access.tenantId;
+      allowed = await tenantPoolIds(config.db, tenantId);
       const selector = config.poolSelector;
       return consoleSseResponse(
         createConsoleSseStream(request.signal, ({ send }) => {

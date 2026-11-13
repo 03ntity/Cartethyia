@@ -7,7 +7,7 @@ import { Elysia, t, type AnyElysia } from "elysia";
 import { API_KEY_MODES, API_KEY_MODEL_ACCESS_MODES, API_KEY_CONCURRENCY_SCOPES } from "../../persistence/schema";
 import type { ApiKeyConfig } from "./contracts";
 import { literalUnion } from "../shared/elysia-schema";
-import { errorResponse } from "../shared/errors";
+import { consoleErrorHandler, errorResponse } from "../shared/errors";
 import { parseRequest } from "./contracts";
 import { popupImageBytes } from "./share-popup-image";
 import { createKeyOperations } from "./key-operations";
@@ -83,35 +83,20 @@ function jsonNull(): Response {
 export function createApiKeyRoutes(config: ApiKeyConfig): AnyElysia {
   const factory = createApiKeyOperations(config);
   return new Elysia({ prefix: "/api-keys" })
-    .get("/", async ({ request, set, query }) => {
-      try {
-        const includeChildren = query?.["includeChildren"] === "1" || query?.["includeChildren"] === "true";
-        return await factory.listKeys(config.accessResolver(request), includeChildren);
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .error(consoleErrorHandler("API-key operation failed"))
+    .get("/", async ({ request, query }) => {
+      const includeChildren = query?.["includeChildren"] === "1" || query?.["includeChildren"] === "true";
+      return await factory.listKeys(config.accessResolver(request), includeChildren);
     })
-    .get("/banned", async ({ request, set }) => {
-      try {
-        return await factory.listActiveBannedKeys(config.accessResolver(request));
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .get("/banned", async ({ request }) => {
+      return await factory.listActiveBannedKeys(config.accessResolver(request));
     })
-    .post("/reorder", { body: reorderKeysBody }, async ({ request, body, set }) => {
-      try {
-        await factory.reorderKeys(config.accessResolver(request), body.keyIds);
-        return { success: true };
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .post("/reorder", { body: reorderKeysBody }, async ({ request, body }) => {
+      await factory.reorderKeys(config.accessResolver(request), body.keyIds);
+      return { success: true };
     })
-    .get("/:keyId", async ({ request, params, set }) => {
-      try {
-        return await factory.getKeyDetail(config.accessResolver(request), params.keyId);
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .get("/:keyId", async ({ request, params }) => {
+      return await factory.getKeyDetail(config.accessResolver(request), params.keyId);
     })
     .get("/:keyId/share-popup-image", async ({ request, params, set }) => {
       try {
@@ -127,86 +112,54 @@ export function createApiKeyRoutes(config: ApiKeyConfig): AnyElysia {
         return errorResponse(error, set, "API key operation failed");
       }
     })
-    .get("/:keyId/shares", async ({ request, params, set }) => {
-      try {
-        return await factory.listShares(config.accessResolver(request), params.keyId);
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .get("/:keyId/shares", async ({ request, params }) => {
+      return await factory.listShares(config.accessResolver(request), params.keyId);
     })
-    .get("/:keyId/shared-keys", async ({ request, params, set }) => {
-      try {
-        return await factory.listSharedKeys(
-          config.accessResolver(request),
-          params.keyId,
-          new URL(request.url).searchParams,
-        );
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .get("/:keyId/shared-keys", async ({ request, params }) => {
+      return await factory.listSharedKeys(
+        config.accessResolver(request),
+        params.keyId,
+        new URL(request.url).searchParams,
+      );
     })
-    .get("/:keyId/shared-keys/:childKeyId/activity", async ({ request, params, set }) => {
-      try {
-        return await factory.getSharedKeyActivity(
-          config.accessResolver(request),
-          params.keyId,
-          params.childKeyId,
-        );
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .get("/:keyId/shared-keys/:childKeyId/activity", async ({ request, params }) => {
+      return await factory.getSharedKeyActivity(
+        config.accessResolver(request),
+        params.keyId,
+        params.childKeyId,
+      );
     })
     .post(
       "/:keyId/shared-keys/revoke-scope",
       { body: t.Object({ scope: t.Union([t.Literal("active"), t.Literal("unused")]) }) },
-      async ({ request, params, body, set }) => {
-        try {
-          return await factory.revokeSharedScope(
-            config.accessResolver(request),
-            params.keyId,
-            body.scope,
-          );
-        } catch (error) {
-          return errorResponse(error, set, "API-key operation failed");
-        }
+      async ({ request, params, body }) => {
+        return await factory.revokeSharedScope(
+          config.accessResolver(request),
+          params.keyId,
+          body.scope,
+        );
       },
     )
-    .delete("/:keyId/shares/:shareId", async ({ request, params, set }) => {
-      try {
-        return await factory.revokeShare(
-          config.accessResolver(request),
-          params.keyId,
-          params.shareId,
-        );
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .delete("/:keyId/shares/:shareId", async ({ request, params }) => {
+      return await factory.revokeShare(
+        config.accessResolver(request),
+        params.keyId,
+        params.shareId,
+      );
     })
     .post("/", { body: apiKeyBody }, async ({ request, body, set }) => {
-      try {
-        set.status = 201;
-        return await factory.createKey(config.accessResolver(request), parseRequest(body));
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+      set.status = 201;
+      return await factory.createKey(config.accessResolver(request), parseRequest(body));
     })
-    .patch("/:keyId", { body: apiKeyBody }, async ({ request, params, body, set }) => {
-      try {
-        return await factory.updateKey(
-          config.accessResolver(request),
-          params.keyId,
-          parseRequest(body),
-        );
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .patch("/:keyId", { body: apiKeyBody }, async ({ request, params, body }) => {
+      return await factory.updateKey(
+        config.accessResolver(request),
+        params.keyId,
+        parseRequest(body),
+      );
     })
-    .delete("/:keyId", async ({ request, params, set }) => {
-      try {
-        return await factory.deleteKey(config.accessResolver(request), params.keyId);
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .delete("/:keyId", async ({ request, params }) => {
+      return await factory.deleteKey(config.accessResolver(request), params.keyId);
     })
     .post(
       "/:keyId/ban",
@@ -219,58 +172,34 @@ export function createApiKeyRoutes(config: ApiKeyConfig): AnyElysia {
           minutes: t.Optional(t.Union([t.Number({ minimum: 1 }), t.Null()])),
         }),
       },
-      async ({ request, params, body, set }) => {
-        try {
-          return await factory.banKey(config.accessResolver(request), params.keyId, body);
-        } catch (error) {
-          return errorResponse(error, set, "API-key operation failed");
-        }
+      async ({ request, params, body }) => {
+        return await factory.banKey(config.accessResolver(request), params.keyId, body);
       },
     )
-    .post("/:keyId/unban", async ({ request, params, set }) => {
-      try {
-        return await factory.unbanKey(config.accessResolver(request), params.keyId);
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .post("/:keyId/unban", async ({ request, params }) => {
+      return await factory.unbanKey(config.accessResolver(request), params.keyId);
     })
-    .get("/:keyId/share", async ({ request, params, set }) => {
-      try {
-        const share = await factory.getShare(config.accessResolver(request), params.keyId, {
-          origin: new URL(request.url).origin,
-        });
-        return share ?? jsonNull();
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .get("/:keyId/share", async ({ request, params }) => {
+      const share = await factory.getShare(config.accessResolver(request), params.keyId, {
+        origin: new URL(request.url).origin,
+      });
+      return share ?? jsonNull();
     })
     .post("/:keyId/share", { body: t.Optional(apiKeyShareBody) }, async ({ request, params, body, set }) => {
-      try {
-        set.status = 201;
-        const input = (body ?? {}) as { expiresAt?: string | null; regenerate?: boolean };
-        return await factory.shareKey(config.accessResolver(request), params.keyId, {
-          ...pickDefined({ expiresAt: input.expiresAt }),
-          ...pickDefined({ regenerate: input.regenerate }),
-          origin: new URL(request.url).origin,
-        });
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+      set.status = 201;
+      const input = (body ?? {}) as { expiresAt?: string | null; regenerate?: boolean };
+      return await factory.shareKey(config.accessResolver(request), params.keyId, {
+        ...pickDefined({ expiresAt: input.expiresAt }),
+        ...pickDefined({ regenerate: input.regenerate }),
+        origin: new URL(request.url).origin,
+      });
     })
-    .post("/:keyId/reveal", async ({ request, params, set }) => {
-      try {
-        return await factory.revealKey(config.accessResolver(request), params.keyId);
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .post("/:keyId/reveal", async ({ request, params }) => {
+      return await factory.revealKey(config.accessResolver(request), params.keyId);
     })
-    .post("/:keyId/regenerate", async ({ request, params, set }) => {
-      try {
-        return await factory.regenerateKey(config.accessResolver(request), params.keyId, {
-          origin: new URL(request.url).origin,
-        });
-      } catch (error) {
-        return errorResponse(error, set, "API-key operation failed");
-      }
+    .post("/:keyId/regenerate", async ({ request, params }) => {
+      return await factory.regenerateKey(config.accessResolver(request), params.keyId, {
+        origin: new URL(request.url).origin,
+      });
     });
 }
