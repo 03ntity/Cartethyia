@@ -67,3 +67,4 @@ dashboard/visual/
 # carries access + refresh tokens in the clear; it belongs in scratch, never in
 # a commit.
 scripts/provider-probing/**/accounts*.json
+.wt/

@@ -65,27 +65,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   are not dropped at shutdown.
 - **Internal:** upstream error classification moved from `transport/` to
   `protocol/` so providers and protocol no longer import transport for
-  failure policy; cursor exec schemas, freebuff tool tables, catalog
-  contracts, and the default provider registry were split into focused
-  modules behind stable re-export facades.
-- **Internal:** the remaining >800-line files were split behind stable
-  facades — cursor adapter (run lifecycle, frame pump, state), probing
-  service (probe runner, discovery roster), route catalog (capability
-  helpers, snapshot repository), routing engine (alias resolution),
-  Claude Messages request builder (part projection), and codex (retry,
-  wire, session store).
-- **Internal:** second pass of >800-line splits — probe phases/runner
-  (resolve/request/stream/verdict/outbound/sweeps/byok), console catalog
-  stores (account queries/mutations, pool-accounts, model operations,
-  provider records, projections), dispatch/request internals
-  (capture-payload, continuation-affinity, vision-rewrite), observability
-  (event-query helpers/types, console store helpers), buddy account
-  (oauth/quota/usage/usage-store), and oauth/api-key surfaces
-  (account-store, key/share operations, family cache).
-- **Internal:** final round of >800-line splits — account health writes,
-  bundled provider manifest, antigravity adapter/models/envelope/session/
-  transport, route-catalog read assembly, cursor HTTP/2 framing/transport/
-  headers, pools store queries, and kiro social OAuth.
+  failure policy.
+- **Internal:** the >800-line files were split behind stable facades across
+  the codebase — cursor (exec schemas, adapter run lifecycle, frame pump,
+  state, HTTP/2 framing/transport/headers), probing (phases, runner,
+  discovery roster), route catalog (capability helpers, snapshot
+  repository), routing engine (alias resolution), Claude Messages request
+  builder (part projection), codex (retry, wire, session store), console
+  catalog stores (contracts, account queries/mutations, pool-accounts,
+  model operations, provider records, projections), dispatch/request
+  internals (capture-payload, continuation-affinity, vision-rewrite),
+  observability (event-query helpers/types, console store helpers), buddy
+  account (oauth/quota/usage/usage-store), oauth/api-key surfaces
+  (account-store, key/share operations, family cache), freebuff tool
+  tables, the default provider registry, bundled provider manifest,
+  antigravity (adapter/models/envelope/session/transport), account health
+  writes, pools store queries, and kiro social OAuth.
 
 ## [2.8.1] - 2026-11-13
 
