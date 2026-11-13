@@ -28,7 +28,7 @@ import {
   getGrokVersion,
 } from "../../operations/client-versions";
 import { resolveGrokTurnIndex } from "./grok-turn-index";
-import { getGrokInstallId } from "./grok-install-id";
+import { getOrCreateInstallId } from "../shared/install-id";
 
 export const GROK_PROVIDER_ID = "grok" as const;
 export const GROK_BASE_URL = providerBaseUrl("grok");
@@ -584,3 +584,14 @@ class GrokAdapter extends OpenAICompatibleAdapter {
 
 /** Dedicated Grok Build provider adapter. */
 export const grokAdapter: ProviderAdapter = new GrokAdapter();
+
+/**
+ * Grok's per-installation agent id.
+ *
+ * The persistence and failure handling live in the shared install-id module;
+ * this wrapper only names the id, so a failure to write it never escapes into
+ * dispatch and fails the request.
+ */
+export function getGrokInstallId(path?: string): Promise<string> {
+  return getOrCreateInstallId("grok", path);
+}

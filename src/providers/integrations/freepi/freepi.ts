@@ -24,7 +24,7 @@ import { abortGatewayError, createUpstreamDeadlineLifecycle } from "../../operat
 import { mapChatFinishReason } from "../shared/cli-client-kit";
 import { usageFromProvider } from "../../provider-usage";
 import { buildFreepiChatBody, parseFreepiSse, throwFreepiUpstreamError } from "./freepi-protocol";
-import { buildFreepiHeaders } from "./freepi-headers";
+import { buildFreepiHeaders } from "./freepi-protocol";
 import {
   FreepiSessionRegistry,
   freepiSessionOwner,

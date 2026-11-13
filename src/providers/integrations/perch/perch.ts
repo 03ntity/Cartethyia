@@ -40,7 +40,7 @@ import {
   PERCH_MODEL_ROOST_TIERS,
 } from "./perch-catalog";
 import { PERCH_APP_URL, PERCH_PROVIDER_ID } from "./perch-realm";
-import { parsePerchCredentialToken } from "./perch-credential";
+import { parsePerchCredentialToken } from "./perch-oauth";
 
 interface PerchAdapterOptions {
   readonly providerId?: string;

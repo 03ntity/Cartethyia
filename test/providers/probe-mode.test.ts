@@ -16,7 +16,7 @@ import {
   PROBE_FAST_SAMPLE_MAX_CHARS,
 } from "../../src/providers/discovery/probe-phases";
 import type { ProbeModelRequest } from "../../src/providers/discovery/discovery-types";
-import { PERCH_SAFFRON_SYSTEM_PROMPT } from "../../src/providers/integrations/perch/perch-system-prompt";
+import { PERCH_SAFFRON_SYSTEM_PROMPT } from "../../src/providers/integrations/perch/perch-protocol";
 
 /**
  * One console-settings row, injectable so the default and the override are

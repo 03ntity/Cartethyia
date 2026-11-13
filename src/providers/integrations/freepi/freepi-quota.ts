@@ -11,7 +11,7 @@ import type { FetchLike, ProviderQuotaResult, ProviderQuotaWindow } from "../../
 import { cleanError, percentWindow, text } from "../../quota/quota-contracts";
 import type { QuotaCollectionContext } from "../../quota/quota-support";
 import { quotaUnreadable, readJsonOk } from "../shared/cli-client-kit";
-import { buildFreepiHeaders } from "./freepi-headers";
+import { buildFreepiHeaders } from "./freepi-protocol";
 import { FREEPI_BASE_URL } from "./freepi-realm";
 
 /** Reads the account quota and returns a normalized result. */

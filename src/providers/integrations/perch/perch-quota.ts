@@ -12,7 +12,7 @@ import { cleanError, percentWindow, text } from "../../quota/quota-contracts";
 import type { QuotaCollectionContext } from "../../quota/quota-support";
 import { quotaUnreadable, readJsonOk } from "../shared/cli-client-kit";
 import { PERCH_APP_URL } from "./perch-realm";
-import { parsePerchCredentialToken } from "./perch-credential";
+import { parsePerchCredentialToken } from "./perch-oauth";
 
 const USD_WINDOW_KIND = "usd_monthly";
 

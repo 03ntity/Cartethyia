@@ -31,11 +31,11 @@
 
 import type { CanonicalEvent, CanonicalRequest } from "../../../protocol/canonical-model";
 import type { ProviderAdapter, ProviderDispatchContext, ProviderDispatchTarget } from "../../provider-contracts";
-import { CURSOR_PROVIDER_ID } from "./cursor-shared";
+import { CURSOR_PROVIDER_ID, resolveCursorWireModelId } from "./cursor-shared";
 import { rosterCacheForTests } from "./cursor-roster";
 import { CursorRunLifecycle } from "./cursor-run-lifecycle";
 import { createCursorAdapterState } from "./cursor-adapter-state";
-import { resolveCursorWireModelId } from "./cursor-run-model";
+
 
 // Public surface preserved: tests and callers import these from cursor.ts.
 export { RunFrameStream } from "./cursor-run-frames";

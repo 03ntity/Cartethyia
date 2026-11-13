@@ -15,7 +15,7 @@ import { GatewayError } from "../../../protocol/gateway-error";
 import type { CanonicalEvent, CanonicalRequest } from "../../../protocol/canonical-model";
 import type { ProviderDispatchContext, ProviderDispatchTarget } from "../../provider-contracts";
 import { readCredentialSecret } from "../../provider-contracts";
-import { CURSOR_PROVIDER_ID, RUN_IDLE_TTL_MS, isAllowedAgentHost } from "./cursor-shared";
+import { CURSOR_PROVIDER_ID, RUN_IDLE_TTL_MS, isAllowedAgentHost, resolveCursorWireModelId } from "./cursor-shared";
 import {
   buildCancelAction,
   buildMcpResult,
@@ -48,7 +48,7 @@ import {
   toolCallIds,
   type PendingToolResult,
 } from "./cursor-run-support";
-import { resolveCursorWireModelId } from "./cursor-run-model";
+
 import { CursorFramePump } from "./cursor-run-pump";
 import {
   cursorRequestCancelledError,
