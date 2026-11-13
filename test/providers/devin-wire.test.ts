@@ -16,7 +16,7 @@ import {
   decodeFrame,
   encodeFrame,
   parseTrailer,
-} from "../../src/providers/integrations/devin/protocol/framing";
+} from "../../src/providers/integrations/shared/connect";
 import {
   DEVIN_CLI_METADATA,
   DEVIN_DISCOVERY_METADATA,

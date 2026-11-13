@@ -9,7 +9,7 @@ import type { CanonicalRequest } from "../../src/protocol/canonical-model";
 import type { ProviderDispatchContext, ProviderDispatchTarget } from "../../src/providers/provider-contracts";
 import { devinAdapter } from "../../src/providers/integrations/devin/devin";
 import { DevinMessageTypes } from "../../src/providers/integrations/devin/protocol/devin-proto";
-import { CONNECT_END_STREAM_FLAG } from "../../src/providers/integrations/devin/protocol/framing";
+import { CONNECT_END_STREAM_FLAG } from "../../src/providers/integrations/shared/connect";
 
 function frame(payload: object, flags = 0): Buffer {
   const bytes = Buffer.from(DevinMessageTypes.GetChatMessageResponse.encode(payload).finish());

@@ -10,7 +10,7 @@
  * `ProviderAdapter` contract.
  */
 
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import type {
   CanonicalEvent,
@@ -29,9 +29,8 @@ import {
   CONNECT_END_STREAM_FLAG,
   ConnectFrameDecoder,
   encodeFrame,
-  newExecutionId,
   parseTrailer,
-} from "./protocol/framing";
+} from "../shared/connect";
 import { DevinEnums, DevinMessageTypes, fromEnum } from "./protocol/devin-proto";
 import { callDevinUnary } from "./devin-http";
 import {
@@ -44,6 +43,18 @@ import {
 } from "./devin-shared";
 
 const PROVIDER_ID = "devin";
+
+/** Request bodies at or above this size are gzip-compressed (devin policy). */
+const MIN_COMPRESSED_BODY_BYTES = 1024;
+
+/** Deterministic random UUID for Connect execution ids. */
+function newExecutionId(): string {
+  const bytes = randomBytes(16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 /** Cap on tool-call ids (OpenAI-routed models reject >40 chars). */
 const DEVIN_TOOL_CALL_ID_MAX_LENGTH = 40;
@@ -337,7 +348,7 @@ export const devinAdapter: ProviderAdapter = {
     const executionId = newExecutionId();
     const chatRequest = buildDevinChatRequest(request, apiKey, auth.userJwt, assignment, cascadeId, executionId);
     const body = DevinMessageTypes.GetChatMessageRequest.encode(chatRequest as object).finish();
-    const frame = encodeFrame(Buffer.from(body), true);
+    const frame = encodeFrame(Buffer.from(body), Buffer.byteLength(body) >= MIN_COMPRESSED_BODY_BYTES);
 
     let response: Response;
     try {

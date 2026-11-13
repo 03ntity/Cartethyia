@@ -2,8 +2,115 @@
 //
 // A Connect frame is a 5-byte envelope: 1 flag byte + 4-byte big-endian payload
 // length + payload. Flag bit 0 marks a gzip-compressed payload, bit 1 marks an
-// end-of-stream trailer. Compression and trailer semantics stay at the call
-// sites; this module owns only the envelope arithmetic.
+// end-of-stream trailer. This module owns the envelope arithmetic, the frame
+// encode/decode, the incremental decoder, and the end-of-stream trailer parse.
+// When to compress a body (the size threshold) is a per-surface policy and
+// stays at the call sites; `encodeFrame` compresses exactly when asked.
+
+import { gzipSync, gunzipSync } from "node:zlib";
+
+export const CONNECT_COMPRESSED_FLAG = 0x01;
+export const CONNECT_END_STREAM_FLAG = 0x02;
+
+/** Cap on one frame payload, guarding against a hostile length prefix. */
+export const MAX_CONNECT_FRAME_PAYLOAD = 16 * 1024 * 1024;
+
+export class ConnectFrameError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConnectFrameError";
+  }
+}
+
+export interface ConnectFrame {
+  readonly flags: number;
+  readonly payload: Uint8Array;
+  readonly compressed: boolean;
+}
+
+/** Encodes one payload into a Connect frame, gzip-compressing when `compress` is set. */
+export function encodeFrame(payload: Uint8Array, compress: boolean): Buffer {
+  const body = compress ? gzipSync(payload) : Buffer.from(payload);
+  const flags = compress ? CONNECT_COMPRESSED_FLAG : 0;
+  const header = Buffer.alloc(5);
+  header[0] = flags;
+  header.writeUInt32BE(body.length, 1);
+  return Buffer.concat([header, body]);
+}
+
+/** Decodes one frame from a buffer containing exactly one frame. */
+export function decodeFrame(buf: Buffer): ConnectFrame {
+  if (buf.length < 5) {
+    throw new ConnectFrameError(`frame shorter than 5-byte header (${buf.length})`);
+  }
+  const flags = buf[0]!;
+  const length = buf.readUInt32BE(1);
+  if (length > MAX_CONNECT_FRAME_PAYLOAD) {
+    throw new ConnectFrameError(`frame payload ${length} exceeds ${MAX_CONNECT_FRAME_PAYLOAD} cap`);
+  }
+  const payload = buf.subarray(5, 5 + length);
+  return {
+    flags,
+    payload,
+    compressed: (flags & CONNECT_COMPRESSED_FLAG) !== 0,
+  };
+}
+
+/** Decompresses a frame payload if its compressed flag is set. */
+export function deframe(payload: Uint8Array, compressed: boolean): Buffer {
+  return compressed ? gunzipSync(payload) : Buffer.from(payload);
+}
+
+/**
+ * Incremental frame reader over a byte stream. Consumes as many complete
+ * frames as the input holds; a trailing partial frame is buffered until more
+ * bytes arrive. Reassembly rides on {@link FrameBuffer} — appending into
+ * spare capacity keeps a frame that spans many reads O(n), where prepending
+ * the unconsumed tail to every chunk (`Buffer.concat([pending, chunk])`)
+ * copies the entire partial frame each time.
+ */
+export class ConnectFrameDecoder {
+  #frameBuffer = new FrameBuffer();
+
+  push(chunk: Uint8Array): ConnectFrame[] {
+    this.#frameBuffer.append(chunk);
+    const frames: ConnectFrame[] = [];
+    for (;;) {
+      const view = this.#frameBuffer.view();
+      if (view.length < 5) break;
+      const length = view.readUInt32BE(1);
+      if (length > MAX_CONNECT_FRAME_PAYLOAD) {
+        throw new ConnectFrameError(`frame payload ${length} exceeds ${MAX_CONNECT_FRAME_PAYLOAD} cap`);
+      }
+      if (view.length < 5 + length) break;
+      frames.push(decodeFrame(view.subarray(0, 5 + length)));
+      this.#frameBuffer.consume(5 + length);
+    }
+    return frames;
+  }
+
+  /** True when a partial frame is buffered (stream ended mid-frame). */
+  get hasPartial(): boolean {
+    return this.#frameBuffer.view().length > 0;
+  }
+}
+
+/** Parses the Connect end-of-stream trailer JSON: `{error:{code,message}}`. */
+export interface ConnectTrailer {
+  readonly error?: { readonly code?: string; readonly message?: string };
+  readonly details?: unknown;
+}
+
+export function parseTrailer(payload: Uint8Array): ConnectTrailer {
+  const text = new TextDecoder().decode(payload).trim();
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text) as ConnectTrailer;
+    return parsed;
+  } catch {
+    return {};
+  }
+}
 
 /** Initial allocation for a frame buffer that has not received a chunk yet. */
 const FRAME_BUFFER_MIN_BYTES = 4096;
