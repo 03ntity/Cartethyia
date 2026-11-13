@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { encryptCredential, setCredentialEncryptionKeyForTesting, snapshotCredentialEncryptionKeyForTesting } from "../../src/security/crypto";
 import { CONFIG_TABLES, droppedColumns, ownershipOf, tableName, tablesForSection } from "../../src/console/backup/contracts";
 import { isDefaultGatewayApiKey } from "../../src/console/api-keys/contracts";
-import { DELETE_ALL_SCOPES, type DeleteAllScope } from "../../src/console/backup/store";
+import { DELETE_ALL_SCOPES, type DeleteAllScope } from "../../src/console/backup/restore";
 import { validateRestorePayload } from "../../src/console/backup/validate";
 
 describe("backup contract coverage", () => {

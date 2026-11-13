@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { getDb } from "../../src/persistence/boot";
 import { BackupService } from "../../src/console/backup/service";
-import { exportBackup } from "../../src/console/backup/store";
+import { exportBackup } from "../../src/console/backup/export";
 import { tablesForSection, type BackupPayload } from "../../src/console/backup/contracts";
 import { dbDescribe, requireDatabase } from "../helpers/database";
 import { createWorld, type GatewayWorld } from "../helpers/fixtures";

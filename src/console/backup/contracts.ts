@@ -21,7 +21,7 @@
  */
 import { getTableColumns, getTableName, type Column, type Table } from "drizzle-orm";
 import type { BackupInspection } from "./service";
-import type { DeleteAllScope } from "./store";
+import type { DeleteAllScope } from "./restore";
 import { resolveMaxBodyBytes } from "../../config/runtime";
 import {
   apiKeys,

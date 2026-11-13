@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { GatewayError } from "../../protocol/gateway-error";
 import { requireLoopbackAdmin } from "../../transport/drain-endpoint";
 import { tablesForSection } from "./contracts";
-import { compressBackupStream, exportBackupStream } from "./store";
+import { compressBackupStream, exportBackupStream } from "./export";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 
 interface BackupExportDeps {

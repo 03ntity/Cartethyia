@@ -26,7 +26,8 @@ import { ConsoleDomainError, errorResponse, requireAnyScope } from "../shared/er
 import { NO_COMPRESS_HEADER } from "../response-compression";
 import { MAX_BACKUP_BYTES } from "./contracts";
 import type { BackupSection } from "./contracts";
-import { DELETE_ALL_SCOPES, compressBackupStream } from "./store";
+import { compressBackupStream } from "./export";
+import { DELETE_ALL_SCOPES } from "./restore";
 import type { BackupService } from "./service";
 import type { AuditRecorder } from "../auth/audit-recorder";
 

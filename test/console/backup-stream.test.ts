@@ -23,7 +23,7 @@ const sandbox = await mkdtemp(join(tmpdir(), "carte-backup-stream-"));
 const previousDataDir = process.env.CARTETHYIA_DATA_DIR;
 process.env.CARTETHYIA_DATA_DIR = sandbox;
 
-const { exportBackup, exportBackupStream } = await import("../../src/console/backup/store");
+const { exportBackup, exportBackupStream } = await import("../../src/console/backup/export");
 const { tablesForSection, TELEMETRY_TABLES } = await import("../../src/console/backup/contracts");
 const { fullSchema } = await import("../../src/persistence/db-handle");
 const { applySqliteMigrations, buildSqliteHandle, createSqliteDatabase } = await import("../../src/persistence/db-sqlite");

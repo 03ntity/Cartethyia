@@ -21,7 +21,7 @@ import type {
   ProviderAccountBulkActionResult,
 } from "./contracts";
 import type { StoreOperationsContext } from "./store-account-types";
-import { ownsAccount } from "./store-accounts";
+import { ownsAccount } from "./store-account-queries";
 
 export async function listAccountHealthEventsRow(
   ctx: StoreOperationsContext,

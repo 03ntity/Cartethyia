@@ -37,14 +37,11 @@ import type {
   ValidatedTable,
 } from "./contracts";
 import {
-  applyRestore,
   decompressBackup,
-  deleteAll,
   exportBackupStream,
   type BackupExportStream,
-  type DeleteAllResult,
-  type DeleteAllScope,
-} from "./store";
+} from "./export";
+import { applyRestore, deleteAll, type DeleteAllResult, type DeleteAllScope } from "./restore";
 import { detectFormat, restoreOrder, validateRestorePayload } from "./validate";
 import { convert9RouterBackup, type ImportReport } from "./nine-router";
 import { isRecord } from "../../protocol/codecs";

@@ -3,9 +3,9 @@
 // shared contexts, all built by this class:
 // - provider rows: `store-provider-records.ts`
 // - model rows + probing: `store-model-operations.ts`
-// - account reads: `store-account-queries.ts` (re-exported via `store-accounts.ts`)
-// - account writes: `store-account-mutations.ts` (re-exported via `store-accounts.ts`)
-// - pool-as-account reads: `store-pool-accounts.ts` (re-exported via `store-accounts.ts`)
+// - account reads: `store-account-queries.ts`
+// - account writes: `store-account-mutations.ts`
+// - pool-as-account reads: `store-pool-accounts.ts`
 // - account health / bulk actions: `store-operations.ts`
 import type { TelemetryBatchBuffer } from "../../../observability/telemetry-buffer";
 import type { RedisClient } from "../../../persistence/redis";
@@ -50,13 +50,13 @@ import {
   ownsAccount as ownsAccountRow,
   providerAccountCounts,
   providerModelCounts,
-  reorderAccounts,
-} from "./store-accounts";
+} from "./store-account-queries";
 import {
   createAccountBatch,
   createAccountRow,
+  reorderAccounts,
   updateAccountRow,
-} from "./store-accounts";
+} from "./store-account-mutations";
 import {
   deleteBannedRow,
   disableCooldownsRow,
