@@ -151,7 +151,7 @@ export interface UpdateApiKeyResponse extends ApiKeyResponse {
 export {
   API_KEY_BAN_REASONS,
   BAN_DURATION_CHOICES,
-} from "./ban-constants";
+} from "../shared/ban-constants";
 
 /** What a bare "ban this key" click uses: the shortest, most reversible choice. */
 export const DEFAULT_BAN_MINUTES: number = 60;

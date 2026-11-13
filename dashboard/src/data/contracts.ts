@@ -175,7 +175,7 @@ export type {
   ShareKeyResponse,
   SharedKeyPage,
 } from "../../../src/console/api-keys/contracts";
-export { API_KEY_BAN_REASONS } from "../../../src/console/api-keys/ban-constants";
+export { API_KEY_BAN_REASONS } from "../../../src/console/shared/ban-constants";
 
 export type {
   SharedKeySummary,
