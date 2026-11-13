@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { CartethyiaDatabase } from "../../src/persistence/db-handle";
 import { consoleLockouts, consoleUsers } from "../../src/persistence/schema";
-import { resetConsoleAuthState } from "../../src/console/auth/account-reset-store";
+import { resetConsoleAuthState } from "../../src/console/auth/account-reset";
 
 test("console recovery atomically removes lockouts as well as users", async () => {
   const deletedTables: unknown[] = [];

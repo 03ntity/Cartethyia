@@ -49,7 +49,7 @@ import { createTokenCountHandler } from "../transport/dispatch/token-count";
 import { createTransportPipeline } from "../transport/guards/pipeline";
 import { createDrainHandler, requireLoopbackAdmin } from "../transport/drain-endpoint";
 import { createConsoleAccountResetHandler } from "../console/auth/account-reset";
-import { resetConsoleAuthState } from "../console/auth/account-reset-store";
+import { resetConsoleAuthState } from "../console/auth/account-reset";
 import { createBackupExportHandler } from "../console/backup/export-endpoint";
 import { tenants } from "../persistence/schema";
 import { PublicModelCatalogStore, type AllowedModelEntry } from "../console/providers/catalog/public-model-store";

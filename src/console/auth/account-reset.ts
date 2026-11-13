@@ -22,6 +22,8 @@
  * deliberate speed bump: this is destructive and irreversible, and the TUI asks
  * the operator to type it rather than press Enter on a menu row.
  */
+import type { CartethyiaDatabase } from "../../persistence/db-handle";
+import { consoleLockouts, consoleUsers } from "../../persistence/schema";
 import { GatewayError } from "../../protocol/gateway-error";
 import { requireLoopbackAdmin } from "../../transport/drain-endpoint";
 
@@ -63,4 +65,16 @@ export function createConsoleAccountResetHandler(
       { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } },
     );
   };
+}
+
+/**
+ * Clears console lockouts and accounts atomically so a reset can be followed
+ * immediately by first-boot setup from the same client address.
+ */
+export function resetConsoleAuthState(db: CartethyiaDatabase): Promise<number> {
+  return db.transaction(async (tx) => {
+    await tx.delete(consoleLockouts);
+    const users = await tx.delete(consoleUsers);
+    return users.rowCount ?? 0;
+  });
 }
