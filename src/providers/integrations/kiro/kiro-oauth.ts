@@ -86,6 +86,8 @@ import {
   startKiroDeviceFlow,
 } from "./kiro-oidc";
 import type { DeviceFlowRegistration } from "./kiro-oidc";
+import { exchangeKiroSocialCode, refreshKiroSocialToken } from "./kiro-social-oauth";
+import { KiroOidcPendingError } from "./kiro-oidc";
 
 // The account-side contract and its helpers are owned by kiro-auth-shared.ts;
 // re-exported here so existing consumers of this module keep resolving.
@@ -103,30 +105,11 @@ export {
   validateMicrosoftTokenEndpoint,
 } from "./kiro-auth-shared";
 export type { KiroAuthMethod, KiroAuthState } from "./kiro-auth-shared";
+// The OIDC pending error belongs to the OIDC wire module; re-exported here so
+// consumers of this module keep resolving it from the same path.
+export { KiroOidcPendingError } from "./kiro-oidc";
 
 const DEFAULT_REGION: string = KIRO_DEFAULT_REGION;
-
-/**
- * Headers for the vendor's own sign-in and refresh service.
- *
- * A different host from the AWS SSO OIDC endpoints, with its own observed
- * client: that service is reached over plain HTTPS with no AWS SDK involved, so
- * the client identifies itself with the device marker alone and no
- * `aws-sdk-js/` segment. The device marker is included only when the credential
- * it belongs to is already known: the code exchange runs before an account
- * exists, and inventing an identity for that request would be worse than
- * sending none.
- */
-function socialServiceHeaders(machineId?: string): Record<string, string> {
-  const device = machineId === undefined ? "KiroIDE" : `KiroIDE-${getKiroVersion()}-${machineId}`;
-  return {
-    "content-type": "application/json",
-    accept: "application/json",
-    connection: "close",
-    "user-agent": device,
-    "x-amz-user-agent": device,
-  };
-}
 
 /**
  * How long an IdC/Builder-ID registration is kept for a pending phase-2 code
@@ -394,24 +377,12 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
       redirectUri !== undefined && loginOption !== undefined
         ? `${redirectUri}?login_option=${loginOption}`
         : redirectUri ?? KIRO_SOCIAL_REDIRECT_URI;
-    const response = await this.fetchFn(`${KIRO_AUTH_SERVICE}/oauth/token`, {
-      method: "POST",
-      headers: socialServiceHeaders(),
-      body: JSON.stringify({
-        code,
-        code_verifier: codeVerifier,
-        redirect_uri: redirectUriFinal,
-      }),
-    });
-    const payload = await readJsonResponse(response, "kiro social token exchange");
-    const raw = record(payload) ?? {};
-    const access = nonEmptyString(raw["accessToken"]);
-    if (access === undefined) {
-      const detail = nonEmptyString(raw["error_description"]) ?? nonEmptyString(raw["error"]);
-      throw new Error(`Kiro token exchange omitted accessToken${detail === undefined ? "" : `: ${detail}`}`);
-    }
-    const refresh = nonEmptyString(raw["refreshToken"]) ?? "";
-    const profileArn = nonEmptyString(raw["profileArn"]);
+    const { access, refresh, profileArn, expiresIn } = await exchangeKiroSocialCode(
+      this.fetchFn,
+      code,
+      codeVerifier,
+      redirectUriFinal,
+    );
     const authMethod: KiroAuthMethod = loginOption === "github" ? "github" : "google";
     const authState: KiroAuthState = {
       authMethod,
@@ -425,7 +396,7 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
     return {
       access,
       refresh,
-      expiresAt: this.#expiry(raw["expiresIn"]),
+      expiresAt: this.#expiry(expiresIn),
       accountLabel: label,
       auth_state: authStateOf(authState),
     };
@@ -764,54 +735,17 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
     signal?: AbortSignal,
     machineId?: string,
   ): Promise<{ readonly access: string; readonly refresh: string; readonly expiresAt: Date; readonly profileArn?: string }> {
-    const response = await this.fetchFn(`${KIRO_AUTH_SERVICE}/refreshToken`, {
-      method: "POST",
-      headers: socialServiceHeaders(machineId),
-      body: JSON.stringify({ refreshToken }),
-      ...(signal === undefined ? {} : { signal }),
-    });
-    const payload = record(await readJsonResponse(response, "kiro token refresh")) ?? {};
-    const access = nonEmptyString(payload["accessToken"]);
-    if (access === undefined) throw new Error("Kiro token refresh omitted accessToken");
-    const profileArn = nonEmptyString(payload["profileArn"]);
+    const refreshed = await refreshKiroSocialToken(this.fetchFn, refreshToken, signal, machineId);
     return {
-      access,
-      refresh: nonEmptyString(payload["refreshToken"]) ?? refreshToken,
-      expiresAt: this.#expiry(payload["expiresIn"]),
-      ...(profileArn === undefined ? {} : { profileArn }),
+      access: refreshed.access,
+      refresh: refreshed.refresh,
+      expiresAt: this.#expiry(refreshed.expiresIn),
+      ...(refreshed.profileArn === undefined ? {} : { profileArn: refreshed.profileArn }),
     };
   }
 
   #expiry(expiresIn: unknown): Date {
     return this.calculateExpiry(expiresIn);
-  }
-}
-
-/**
- * Signals that an OIDC portal callback needs a second browser leg: the portal
- * returns `login_option=builderid|awsidc` without a code, and the real
- * authorize URL for the regional AWS SSO OIDC service is attached so the route
- * can redirect the operator to it. Carries the fresh PKCE verifier and the
- * serialized registration so `completeLogin` can rewrite the pending flow
- * before sending the browser on — memory alone is not enough across gateways.
- */
-export class KiroOidcPendingError extends Error {
-  readonly authorizeUrl: string;
-  readonly codeVerifier: string;
-  readonly providerState: string;
-  readonly continueState: string;
-  constructor(
-    authorizeUrl: string,
-    codeVerifier: string,
-    providerState: string,
-    continueState: string,
-  ) {
-    super(`Kiro OIDC requires a second authorization step: ${authorizeUrl}`);
-    this.name = "KiroOidcPendingError";
-    this.authorizeUrl = authorizeUrl;
-    this.codeVerifier = codeVerifier;
-    this.providerState = providerState;
-    this.continueState = continueState;
   }
 }
 

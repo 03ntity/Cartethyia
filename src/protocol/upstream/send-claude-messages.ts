@@ -10,7 +10,7 @@ import { applyRouteUserAgent, type ProviderDispatchContext } from "../../provide
 import { abortGatewayError, createUpstreamDeadlineLifecycle } from '../../providers/operations/upstream-deadline';
 import { mapClaudeHttpError } from '../messages-errors';
 import { isRecord, toolAliasesFor } from '../codecs';
-import { upstreamMessageAsIs, MAX_UPSTREAM_ERROR_BYTES } from '.././failure-policy';
+import { upstreamMessageAsIs, MAX_UPSTREAM_ERROR_BYTES } from '../failure-policy';
 import { parseClaudeSseStream, claudeResponseToEvents } from '../response/messages';
 
 export async function* sendClaudeMessagesRequest(
@@ -21,6 +21,8 @@ export async function* sendClaudeMessagesRequest(
   request: CanonicalRequest,
   fetchFn: typeof fetch,
   isOAuth = false,
+  /** Optional guard for providers that report business errors inside an HTTP 200 JSON body. */
+  envelopeCheck?: (json: Record<string, unknown>) => GatewayError | undefined,
 ): AsyncIterable<CanonicalEvent> {
   applyRouteUserAgent(headers, context.credential, context.user_agent);
   const outboundFetch = context.outbound_fetch ?? fetchFn;
@@ -95,5 +97,10 @@ export async function* sendClaudeMessagesRequest(
       "upstream",
     );
   }
+  // A provider-specific envelope can turn a 2xx business error into the same
+  // GatewayError vocabulary the HTTP path uses; without this the body falls
+  // through to the Messages decoder and surfaces as an empty completion.
+  const envelopeError = envelopeCheck?.(json);
+  if (envelopeError) throw envelopeError;
   yield* claudeResponseToEvents(json, request, isOAuth);
 }

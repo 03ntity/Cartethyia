@@ -1,8 +1,11 @@
-// Drizzle-backed console persistence for network pools.
+// Drizzle-backed console persistence for network pools. The row layer — the
+// Drizzle statements and the row-to-record mapping — lives in
+// `store-queries.ts`; this module owns the store surface: orchestration,
+// probes, health checks, speed tests, and credential handling.
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { CartethyiaDatabase } from "../../../persistence/db-handle";
-import { networkPools, poolRoutingSettings, providerPoolAccounts } from "../../../persistence/schema";
+import { networkPools } from "../../../persistence/schema";
 import { providerRateLimitIsIpScoped } from "../../../providers/provider-metadata";
 import {
   DEFAULT_POOL_STRATEGY,
@@ -19,12 +22,9 @@ import { encryptCredential } from "../../../security/crypto";
 import { createValidatedFetch } from "../../../network/egress/fetch";
 import { classifyProviderProbeAnswer } from "./probe-verdict";
 import { buildProviderProbeRequest } from "../../../providers/provider-probe";
-import type { StoredProviderProbe } from "./contracts";
 import {
   createHttpProxyAgent,
   createSocks5Agent,
-  deriveKind,
-  splitEndpointConfig,
   type PoolAgent,
 } from "../../../network/pool/agent";
 import { DrizzleNetworkPoolLoader } from "../../../network/pool/loader";
@@ -37,6 +37,25 @@ import {
 } from "../../../network/pool/health";
 import { drainPoolByteDelta, recordPoolBytes } from "../../../network/pool/accounting";
 import * as poolCooldownStore from "../../../network/pool/cooldown-store";
+import {
+  deletePoolRow,
+  deletePoolRows,
+  insertPoolAccountRows,
+  insertPoolRows,
+  mapNetworkPoolRow,
+  selectPoolRow,
+  selectPoolRowId,
+  selectPoolRows,
+  selectPoolStrategy,
+  updatePoolRow,
+  updatePoolRowById,
+  updatePoolStatuses,
+  upsertPoolStrategy,
+} from "./store-queries";
+
+// The probe-verdict derivation is part of the row layer; re-exported so
+// existing consumers of this module keep resolving.
+export { storedProviderProbe } from "./store-queries";
 // Cloudflare's trace endpoint answers with plain `key=value` lines including
 // `ip=`, the address the request egressed from. Dialing it THROUGH the pool
 // therefore reports the pool's public address — which is what an operator
@@ -68,48 +87,6 @@ const PROVIDER_PROBE_TIMEOUT_MS = 45_000;
 
 /** Worst-case wait for the largest allowed payload on a slow link. */
 const NETWORK_POOL_SPEED_TEST_TIMEOUT_MS = 60_000;
-/**
- * The stored probe verdict for a row, or nothing when it does not describe the
- * pool as it stands.
- *
- * Two ways it can be stale, and both must read as "never probed" rather than as
- * a verdict:
- *
- * - The endpoint changed. The verdict was measured against a specific egress,
- *   and the pool now points somewhere else.
- * - The row was written before `provider_probe_endpoint` existed. There is no
- *   address to compare against, so the claim cannot be validated.
- */
-export function storedProviderProbe(
-  row: typeof networkPools.$inferSelect,
-  currentEndpoint: string,
-): StoredProviderProbe | undefined {
-  const status = row.providerProbeStatus;
-  if (
-    status !== "allowed" &&
-    status !== "blocked" &&
-    status !== "throttled" &&
-    status !== "unreachable"
-  ) {
-    return undefined;
-  }
-  if (row.providerProbeEndpoint !== currentEndpoint) return undefined;
-  const providerId = row.providerProbeProviderId;
-  if (!providerId) return undefined;
-  return {
-    providerId,
-    status,
-    endpoint: currentEndpoint,
-    checkedAt: (row.providerProbeAt ?? new Date(0)).toISOString(),
-    ...(row.providerProbeHttpStatus === null || row.providerProbeHttpStatus === undefined
-      ? {}
-      : { httpStatus: row.providerProbeHttpStatus }),
-    ...(row.providerProbeReason ? { reason: row.providerProbeReason } : {}),
-    ...(row.providerProbeLatencyMs === null || row.providerProbeLatencyMs === undefined
-      ? {}
-      : { latencyMs: row.providerProbeLatencyMs }),
-  };
-}
 
 /** Real Drizzle-backed network pool repository. */
 export class DrizzleNetworkPoolStore implements NetworkPoolStore {
@@ -125,63 +102,6 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
     private readonly ssrfPolicy: SsrfPolicy = {},
   ) {
     this.poolAgents = new PoolAgentResolver(new DrizzleNetworkPoolLoader(db), { ssrfPolicy, db });
-  }
-  private map(row: typeof networkPools.$inferSelect, tenantId: string): NetworkPoolRecord {
-    const raw = (row.endpointConfig ?? {}) as Record<string, unknown>;
-    const { endpoint, label, rest } = splitEndpointConfig(raw);
-    return {
-      id: row.id,
-      kind: deriveKind(row.kind, endpoint ?? ""),
-      endpoint: endpoint ?? "",
-      ...(label ? { label } : {}),
-      maxInflight: row.maxInflight ?? 10,
-      weight: row.weight ?? 100,
-      status: row.status,
-      inflight: 0,
-      consecutiveFailures: row.consecutiveFailures,
-      ...(row.lastSuccessAt ? { lastSuccessAt: row.lastSuccessAt.toISOString() } : {}),
-      ...(row.lastLatencyMs !== null && row.lastLatencyMs !== undefined
-        ? { lastLatencyMs: row.lastLatencyMs }
-        : {}),
-      ...(row.lastHealthCheckAt ? { lastHealthCheckAt: row.lastHealthCheckAt.toISOString() } : {}),
-      ...(row.lastErrorAt ? { lastErrorAt: row.lastErrorAt.toISOString() } : {}),
-      ...(row.lastError ? { lastError: row.lastError } : {}),
-      ...(row.lastErrorCategory ? { lastErrorCategory: row.lastErrorCategory } : {}),
-      ...(row.egressIp ? { egressIp: row.egressIp } : {}),
-      ...(row.quotaBytes !== null && row.quotaBytes !== undefined
-        ? { quotaBytes: row.quotaBytes }
-        : {}),
-      ...(row.bytesSentTotal !== null && row.bytesSentTotal !== undefined
-        ? { bytesSentTotal: row.bytesSentTotal }
-        : {}),
-      ...(row.bytesReceivedTotal !== null && row.bytesReceivedTotal !== undefined
-        ? { bytesReceivedTotal: row.bytesReceivedTotal }
-        : {}),
-      ...(row.lastSpeedtestBytes !== null && row.lastSpeedtestBytes !== undefined
-        ? { lastSpeedtestBytes: row.lastSpeedtestBytes }
-        : {}),
-      ...(row.lastSpeedtestDurationMs !== null && row.lastSpeedtestDurationMs !== undefined
-        ? { lastSpeedtestDurationMs: row.lastSpeedtestDurationMs }
-        : {}),
-      ...(row.lastSpeedtestStatus === "ok" || row.lastSpeedtestStatus === "failed"
-        ? { lastSpeedtestStatus: row.lastSpeedtestStatus }
-        : {}),
-      ...(row.lastSpeedtestError ? { lastSpeedtestError: row.lastSpeedtestError } : {}),
-      ...(row.lastSpeedtestAt ? { lastSpeedtestAt: row.lastSpeedtestAt.toISOString() } : {}),
-      ...(() => {
-        // A verdict describes the address recorded beside it. Once the pool is
-        // re-pointed, that address is gone and the verdict is a claim about an
-        // address the pool no longer uses — report "never probed" instead of
-        // showing a colour the operator cannot trust.
-        const probe = storedProviderProbe(row, endpoint ?? "");
-        return probe === undefined ? {} : { providerProbe: probe };
-      })(),
-      ...(Object.keys(rest).length > 0 ? { config: rest } : {}),
-      ...(row.credentialCiphertext ? { hasCredential: true } : {}),
-      ...(row.family ? { family: row.family } : {}),
-      tenantId,
-      createdAt: row.createdAt.toISOString(),
-    };
   }
 
   /**
@@ -374,18 +294,15 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
     result: PoolProviderProbeResult,
   ): Promise<void> {
     try {
-      await this.db
-        .update(networkPools)
-        .set({
-          providerProbeProviderId: result.providerId,
-          providerProbeStatus: result.status,
-          providerProbeHttpStatus: result.httpStatus ?? null,
-          providerProbeReason: result.reason ?? null,
-          providerProbeLatencyMs: result.latencyMs ?? null,
-          providerProbeAt: new Date(),
-          providerProbeEndpoint: endpoint,
-        })
-        .where(eq(networkPools.id, poolId));
+      await updatePoolRowById(this.db, poolId, {
+        providerProbeProviderId: result.providerId,
+        providerProbeStatus: result.status,
+        providerProbeHttpStatus: result.httpStatus ?? null,
+        providerProbeReason: result.reason ?? null,
+        providerProbeLatencyMs: result.latencyMs ?? null,
+        providerProbeAt: new Date(),
+        providerProbeEndpoint: endpoint,
+      });
     } catch {
       // A verdict that cannot be stored must not fail the probe: the operator
       // still gets the answer they asked for, and the next probe retries.
@@ -393,22 +310,13 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
   }
 
   async list(tenantId: string): Promise<readonly NetworkPoolRecord[]> {
-    const rows = await this.db
-      .select()
-      .from(networkPools)
-      .where(eq(networkPools.tenantId, tenantId))
-      .orderBy(asc(networkPools.createdAt), asc(networkPools.id));
-    return rows.map((row) => this.map(row, tenantId));
+    const rows = await selectPoolRows(this.db, tenantId);
+    return rows.map((row) => mapNetworkPoolRow(row, tenantId));
   }
 
   async get(tenantId: string, poolId: string): Promise<NetworkPoolRecord | undefined> {
-    const rows = await this.db
-      .select()
-      .from(networkPools)
-      .where(and(eq(networkPools.tenantId, tenantId), eq(networkPools.id, poolId)))
-      .limit(1);
-    const row = rows[0];
-    return row ? this.map(row, tenantId) : undefined;
+    const row = await selectPoolRow(this.db, tenantId, poolId);
+    return row ? mapNetworkPoolRow(row, tenantId) : undefined;
   }
 
   async create(record: NetworkPoolRecord): Promise<void> {
@@ -445,7 +353,7 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
       ...(record.quotaBytes !== undefined ? { quotaBytes: record.quotaBytes } : {}),
       ...(record.family !== undefined ? { family: record.family } : {}),
     }));
-    await this.db.insert(networkPools).values(values);
+    await insertPoolRows(this.db, values);
 
     // Materialize pool-as-account rows for ip-scoped, credential-less
     // providers (OpenCode Free today): the operator sees the egress in the
@@ -462,7 +370,7 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
         createdAt: now,
         updatedAt: now,
       }));
-      await this.db.insert(providerPoolAccounts).values(poolAccounts);
+      await insertPoolAccountRows(this.db, poolAccounts);
     }
     return values.length;
   }
@@ -480,32 +388,13 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
     status: NetworkPoolRecord["status"],
   ): Promise<number> {
     if (poolIds.length === 0) return 0;
-    const rows = await this.db
-      .update(networkPools)
-      .set({ status })
-      .where(
-        and(
-          eq(networkPools.tenantId, tenantId),
-          inArray(networkPools.id, [...poolIds]),
-        ),
-      )
-      .returning({ id: networkPools.id });
-    return rows.length;
+    return updatePoolStatuses(this.db, tenantId, poolIds, status);
   }
 
   /** Deletes every named pool in one statement. */
   async deleteMany(tenantId: string, poolIds: readonly string[]): Promise<number> {
     if (poolIds.length === 0) return 0;
-    const rows = await this.db
-      .delete(networkPools)
-      .where(
-        and(
-          eq(networkPools.tenantId, tenantId),
-          inArray(networkPools.id, [...poolIds]),
-        ),
-      )
-      .returning({ id: networkPools.id });
-    return rows.length;
+    return deletePoolRows(this.db, tenantId, poolIds);
   }
 
   async update(
@@ -535,60 +424,51 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
       current.status === "disabled" &&
       (current.lastErrorCategory === "proxy_payment_required" ||
         current.lastErrorCategory === "proxy_auth_required");
-    const rows = await this.db
-      .update(networkPools)
-      .set({
-        endpointConfig,
-        kind: effectiveKind === "https" ? "http" : effectiveKind,
-        // Fields default to `undefined` when omitted from the patch, which
-        // would overwrite the current row with `undefined` and clobber
-        // existing values. Fall back to the current record so a partial
-        // PATCH truly leaves un-mentioned fields alone.
-        maxInflight: patch.maxInflight ?? current.maxInflight,
-        weight: patch.weight ?? current.weight,
-        // An explicit `null` clears the quota (back to unmetered); omitting the
-        // field leaves it as-is.
-        ...("quotaBytes" in patch ? { quotaBytes: patch.quotaBytes ?? null } : {}),
-        ...(clearsProxyResponseFailure
-          ? {
-              consecutiveFailures: 0,
-              cooldownUntil: null,
-              lastError: null,
-              lastErrorCategory: null,
-              lastErrorAt: null,
-            }
-          : {}),
-        status: patch.status ?? current.status,
-        ...(patch.credential !== undefined
-          ? { credentialCiphertext: encryptCredential(patch.credential) }
-          : {}),
-        // An explicit `null` clears the family tag; omitting the field leaves
-        // it as-is, matching `quotaBytes`.
-        ...("family" in patch ? { family: patch.family ?? null } : {}),
-        ...(endpointChanged
-          ? {
-              providerProbeProviderId: null,
-              providerProbeStatus: null,
-              providerProbeHttpStatus: null,
-              providerProbeReason: null,
-              providerProbeLatencyMs: null,
-              providerProbeAt: null,
-              providerProbeEndpoint: null,
-            }
-          : {}),
-      })
-      .where(and(eq(networkPools.tenantId, tenantId), eq(networkPools.id, poolId)))
-      .returning();
-    const row = rows[0];
-    return row ? this.map(row, tenantId) : undefined;
+    const row = await updatePoolRow(this.db, tenantId, poolId, {
+      endpointConfig,
+      kind: effectiveKind === "https" ? "http" : effectiveKind,
+      // Fields default to `undefined` when omitted from the patch, which
+      // would overwrite the current row with `undefined` and clobber
+      // existing values. Fall back to the current record so a partial
+      // PATCH truly leaves un-mentioned fields alone.
+      maxInflight: patch.maxInflight ?? current.maxInflight,
+      weight: patch.weight ?? current.weight,
+      // An explicit `null` clears the quota (back to unmetered); omitting the
+      // field leaves it as-is.
+      ...("quotaBytes" in patch ? { quotaBytes: patch.quotaBytes ?? null } : {}),
+      ...(clearsProxyResponseFailure
+        ? {
+            consecutiveFailures: 0,
+            cooldownUntil: null,
+            lastError: null,
+            lastErrorCategory: null,
+            lastErrorAt: null,
+          }
+        : {}),
+      status: patch.status ?? current.status,
+      ...(patch.credential !== undefined
+        ? { credentialCiphertext: encryptCredential(patch.credential) }
+        : {}),
+      // An explicit `null` clears the family tag; omitting the field leaves
+      // it as-is, matching `quotaBytes`.
+      ...("family" in patch ? { family: patch.family ?? null } : {}),
+      ...(endpointChanged
+        ? {
+            providerProbeProviderId: null,
+            providerProbeStatus: null,
+            providerProbeHttpStatus: null,
+            providerProbeReason: null,
+            providerProbeLatencyMs: null,
+            providerProbeAt: null,
+            providerProbeEndpoint: null,
+          }
+        : {}),
+    });
+    return row ? mapNetworkPoolRow(row, tenantId) : undefined;
   }
 
   async delete(tenantId: string, poolId: string): Promise<boolean> {
-    const rows = await this.db
-      .delete(networkPools)
-      .where(and(eq(networkPools.tenantId, tenantId), eq(networkPools.id, poolId)))
-      .returning({ id: networkPools.id });
-    return rows.length > 0;
+    return deletePoolRow(this.db, tenantId, poolId);
   }
 
   async listHealthEvents(tenantId: string, poolId: string) {
@@ -627,12 +507,7 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
     return recoverNetworkPool(this.db, tenantId, poolId);
   }
   async getStrategy(tenantId: string): Promise<PoolStrategySetting> {
-    const rows = await this.db
-      .select()
-      .from(poolRoutingSettings)
-      .where(eq(poolRoutingSettings.tenantId, tenantId))
-      .limit(1);
-    const row = rows[0];
+    const row = await selectPoolStrategy(this.db, tenantId);
     // No row = never configured = the default least-loaded scan.
     if (!row) return DEFAULT_POOL_STRATEGY;
     return { strategy: row.strategy, rotateCount: row.rotateCount };
@@ -642,25 +517,14 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
     tenantId: string,
     setting: PoolStrategySetting,
   ): Promise<PoolStrategySetting> {
-    await this.db
-      .insert(poolRoutingSettings)
-      .values({ tenantId, strategy: setting.strategy, rotateCount: setting.rotateCount })
-      .onConflictDoUpdate({
-        target: poolRoutingSettings.tenantId,
-        set: { strategy: setting.strategy, rotateCount: setting.rotateCount },
-      });
+    await upsertPoolStrategy(this.db, tenantId, setting);
     return setting;
   }
 
   async healthCheck(tenantId: string, poolId: string): Promise<HealthCheckResult> {
     // Existence check only: the agent builder re-reads the row it needs, so a
     // full-row select here just ships columns nobody reads.
-    const rows = await this.db
-      .select({ id: networkPools.id })
-      .from(networkPools)
-      .where(and(eq(networkPools.tenantId, tenantId), eq(networkPools.id, poolId)))
-      .limit(1);
-    const row = rows[0];
+    const row = await selectPoolRowId(this.db, tenantId, poolId);
     if (!row) return { poolId, status: "unhealthy", errorMessage: "Pool not found" };
     // Resolve the pool's dispatch agent and dial a public canary THROUGH it.
     // This fixes the prior dual bug: `socks5://` endpoints were fed to
@@ -710,31 +574,28 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
     // last pool-touching write.
     const now = new Date();
     const delta = drainPoolByteDelta(poolId);
-    await this.db
-      .update(networkPools)
-      .set({
-        lastHealthCheckAt: now,
-        lastLatencyMs: result.latencyMs ?? null,
-        // The outcome is the last known state, so it has to live on the row.
-        // A browser cache cannot: it dies with the browser, and another
-        // machine never sees it.
-        ...(result.status === "healthy" || result.status === "reachable"
-          ? { lastSuccessAt: now, lastError: null, lastErrorCategory: null, lastErrorAt: null }
-          : {
-              lastError: result.errorMessage ?? result.status,
-              lastErrorCategory: result.status,
-              lastErrorAt: now,
-            }),
-        // Keep the previous address when this probe could not read one.
-        ...(result.egressIp ? { egressIp: result.egressIp } : {}),
-        ...(delta.sent > 0 || delta.received > 0
-          ? {
-              bytesSentTotal: sql`${networkPools.bytesSentTotal} + ${delta.sent}`,
-              bytesReceivedTotal: sql`${networkPools.bytesReceivedTotal} + ${delta.received}`,
-            }
-          : {}),
-      })
-      .where(and(eq(networkPools.tenantId, tenantId), eq(networkPools.id, poolId)));
+    await updatePoolRow(this.db, tenantId, poolId, {
+      lastHealthCheckAt: now,
+      lastLatencyMs: result.latencyMs ?? null,
+      // The outcome is the last known state, so it has to live on the row.
+      // A browser cache cannot: it dies with the browser, and another
+      // machine never sees it.
+      ...(result.status === "healthy" || result.status === "reachable"
+        ? { lastSuccessAt: now, lastError: null, lastErrorCategory: null, lastErrorAt: null }
+        : {
+            lastError: result.errorMessage ?? result.status,
+            lastErrorCategory: result.status,
+            lastErrorAt: now,
+          }),
+      // Keep the previous address when this probe could not read one.
+      ...(result.egressIp ? { egressIp: result.egressIp } : {}),
+      ...(delta.sent > 0 || delta.received > 0
+        ? {
+            bytesSentTotal: sql`${networkPools.bytesSentTotal} + ${delta.sent}`,
+            bytesReceivedTotal: sql`${networkPools.bytesReceivedTotal} + ${delta.received}`,
+          }
+        : {}),
+    });
     if (result.httpStatus !== undefined) {
       await disablePoolForProxyHttpStatus(this.db, poolId, result.httpStatus);
     }
@@ -751,12 +612,8 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
    */
   async speedTest(tenantId: string, poolId: string, bytes: number): Promise<PoolSpeedTestResult> {
     // Existence check only — same narrowing as `healthCheck`.
-    const rows = await this.db
-      .select({ id: networkPools.id })
-      .from(networkPools)
-      .where(and(eq(networkPools.tenantId, tenantId), eq(networkPools.id, poolId)))
-      .limit(1);
-    if (!rows[0]) {
+    const row = await selectPoolRowId(this.db, tenantId, poolId);
+    if (!row) {
       return { poolId, status: "failed", bytes: 0, durationMs: 0, errorMessage: "Pool not found" };
     }
     // The measurement costs real bytes off the operator's proxy plan, so the
@@ -767,26 +624,23 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
     ): Promise<PoolSpeedTestResult> => {
       const measuredAt = new Date();
       const delta = drainPoolByteDelta(poolId);
-      await this.db
-        .update(networkPools)
-        .set({
-          lastSpeedtestBytes: result.status === "ok" ? result.bytes : 0,
-          lastSpeedtestDurationMs: result.durationMs,
-          lastSpeedtestStatus: result.status,
-          lastSpeedtestError: result.errorMessage ?? null,
-          lastSpeedtestAt: measuredAt,
-          // The Proxy page reads the egress address off the pool row, so a
-          // measurement that read one banks it — otherwise the Test button
-          // leaves the address column showing "not probed" forever.
-          ...(result.egressIp ? { egressIp: result.egressIp } : {}),
-          ...(delta.sent > 0 || delta.received > 0
-            ? {
-                bytesSentTotal: sql`${networkPools.bytesSentTotal} + ${delta.sent}`,
-                bytesReceivedTotal: sql`${networkPools.bytesReceivedTotal} + ${delta.received}`,
-              }
-            : {}),
-        })
-        .where(and(eq(networkPools.tenantId, tenantId), eq(networkPools.id, poolId)));
+      await updatePoolRow(this.db, tenantId, poolId, {
+        lastSpeedtestBytes: result.status === "ok" ? result.bytes : 0,
+        lastSpeedtestDurationMs: result.durationMs,
+        lastSpeedtestStatus: result.status,
+        lastSpeedtestError: result.errorMessage ?? null,
+        lastSpeedtestAt: measuredAt,
+        // The Proxy page reads the egress address off the pool row, so a
+        // measurement that read one banks it — otherwise the Test button
+        // leaves the address column showing "not probed" forever.
+        ...(result.egressIp ? { egressIp: result.egressIp } : {}),
+        ...(delta.sent > 0 || delta.received > 0
+          ? {
+              bytesSentTotal: sql`${networkPools.bytesSentTotal} + ${delta.sent}`,
+              bytesReceivedTotal: sql`${networkPools.bytesReceivedTotal} + ${delta.received}`,
+            }
+          : {}),
+      });
       return { ...result, measuredAt: measuredAt.toISOString() };
     };
     let agent: PoolAgent;

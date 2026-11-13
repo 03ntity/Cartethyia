@@ -28,11 +28,9 @@ import type { ProviderAdapter, ProviderDispatchContext, ProviderDispatchTarget }
 import { GatewayError } from "../../../protocol/gateway-error";
 import { applyParamQuirks } from "../../../protocol/translation/quirks";
 import { buildClaudeMessagesRequest, filterClaudeCustomHeaders, resolveClaudeMessagesApiKey } from "../shared/claude-messages";
-import { mapClaudeHttpError } from "../../../protocol/messages-errors";
-import { isRecord } from "../../../protocol/codecs";
+import { sendClaudeMessagesRequest } from "../../../protocol/upstream/send-claude-messages";
 import { classifyUpstreamError, upstreamErrorIdentifier, upstreamMessageAsIs } from "../../../protocol/failure-policy";
-import { parseClaudeSseStream, claudeResponseToEvents } from "../../../protocol/response/messages";
-import { createUpstreamDeadlineLifecycle } from "../../operations/upstream-deadline";
+import { isRecord } from "../../../protocol/codecs";
 import type { CanonicalEvent, CanonicalRequest } from "../../../protocol/canonical-model";
 import { parseJwt } from "../../authentication/jwt-validator";
 import { zaiEnvelopeOk } from "../zcode/zai-envelope";
@@ -232,89 +230,46 @@ export class ZcodeStartPlanAdapter implements ProviderAdapter {
     });
     Object.assign(outbound.headers, await identityHeaders(context));
 
-    const outboundFetch = context.outbound_fetch ?? this.fetchFn;
-    const lifecycle = createUpstreamDeadlineLifecycle(context);
-    let response: Response;
-    try {
-      response = await outboundFetch(outbound.url, {
-        method: "POST",
-        headers: outbound.headers,
-        body: outbound.body,
-        signal: lifecycle.signal,
-      });
-    } catch (error: unknown) {
-      lifecycle.release();
-      if (error instanceof GatewayError) throw error;
-      throw new GatewayError(
-        "transport_unavailable",
-        502,
-        `zcode-start upstream fetch failed: ${(error as Error)?.message ?? String(error)}`,
-        {},
-        "network",
-      );
-    }
-    lifecycle.release();
-
-    if (!response.ok) {
-      const bodyText = await response.text().catch(() => "");
-      throw mapClaudeHttpError(response.status, bodyText, response.headers);
-    }
-    const contentType = response.headers.get("content-type") ?? "";
-    if (contentType.toLowerCase().includes("text/event-stream") || request.stream) {
-      if (response.body === null) {
-        throw new GatewayError(
-          "platform_unavailable",
-          502,
-          "zcode-start returned no stream body (request {requestId}). The upstream came back empty-handed — retry 🌙",
-          {},
-          "upstream",
-        );
-      }
-      yield* parseClaudeSseStream(response.body, context.abort_signal, false);
-      return;
-    }
-    const bodyText = await response.text().catch(() => "");
-    let json: unknown;
-    try {
-      json = JSON.parse(bodyText) as unknown;
-    } catch {
-      const upstreamText = upstreamMessageAsIs(bodyText, "");
-      throw new GatewayError(
-        "platform_unavailable",
-        502,
-        upstreamText.message || "zcode-start response is not valid JSON (request {requestId}). The upstream came back empty-handed — retry 🌙",
-        { raw: bodyText.slice(0, 4096) },
-        "upstream",
-      );
-    }
-    if (!isRecord(json)) {
-      throw new GatewayError(
-        "platform_unavailable",
-        502,
-        "zcode-start response must be an object (request {requestId}). The upstream came back empty-handed — retry 🌙",
-        {},
-        "upstream",
-      );
-    }
-    if (isZcodeEnvelopeError(json)) {
-      const identifier = upstreamErrorIdentifier(json);
-      const classification = classifyUpstreamError(undefined, identifier);
-      const upstreamText = upstreamMessageAsIs(json, "");
-      throw new GatewayError(
-        classification.code,
-        classification.status,
-        upstreamText.message || "zcode-start reported an upstream error",
-        {
-          providerId: this.provider_id,
-          ...(identifier === undefined ? {} : { providerCode: identifier }),
-          ...(upstreamText.hadUpstreamText ? { upstreamMessageAsIs: true } : {}),
-          raw: bodyText.slice(0, 4096),
-        },
-        classification.origin,
-      );
-    }
-    yield* claudeResponseToEvents(json, request, false);
+    yield* sendClaudeMessagesRequest(
+      outbound.url,
+      outbound.headers,
+      outbound.body,
+      context,
+      request,
+      this.fetchFn,
+      false,
+      zcodeStartPlanEnvelopeError(this.provider_id),
+    );
   }
+}
+
+/**
+ * Classifies the ZCode `{code,msg,logid}` business-error envelope that rides
+ * inside an HTTP 200 response. Shared with the Claude Messages wire executor so
+ * the plan lane keeps the same GatewayError vocabulary without duplicating the
+ * fetch/stream/decode path.
+ */
+function zcodeStartPlanEnvelopeError(
+  providerId: string,
+): (json: Record<string, unknown>) => GatewayError | undefined {
+  return (json) => {
+    if (!isZcodeEnvelopeError(json)) return undefined;
+    const identifier = upstreamErrorIdentifier(json);
+    const classification = classifyUpstreamError(undefined, identifier);
+    const upstreamText = upstreamMessageAsIs(json, "");
+    return new GatewayError(
+      classification.code,
+      classification.status,
+      upstreamText.message || "zcode-start reported an upstream error",
+      {
+        providerId,
+        ...(identifier === undefined ? {} : { providerCode: identifier }),
+        ...(upstreamText.hadUpstreamText ? { upstreamMessageAsIs: true } : {}),
+        raw: JSON.stringify(json).slice(0, 4096),
+      },
+      classification.origin,
+    );
+  };
 }
 
 export function createZcodeStartPlanAdapter(fetchImpl?: typeof fetch): ProviderAdapter {

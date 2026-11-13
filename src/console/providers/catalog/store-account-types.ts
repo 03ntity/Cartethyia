@@ -1,12 +1,14 @@
 /**
- * Shared context for the provider-account store modules. The catalog store
- * class owns the handle and optional collaborators; the account and
- * operations modules receive them as this context so each file stays a plain
+ * Shared context for the catalog store modules. The catalog store class owns
+ * the handle and optional collaborators; the account, operations, provider,
+ * and model modules receive them as these contexts so each file stays a plain
  * function module instead of a second class.
  */
 import type { CartethyiaDatabase } from "../../../persistence/db-handle";
 import type { AccountInflightReading } from "./contracts";
 import type { RedisClient } from "../../../persistence/redis";
+import type { ProviderRegistry } from "../../../providers/provider-registry";
+import type { ProviderProbingService } from "../../../providers/discovery/probing-service";
 import type * as schema from "../../../persistence/schema";
 
 /** One open transaction handle, as `CartethyiaDatabase.transaction` passes it. */
@@ -42,3 +44,15 @@ export interface StoreOperationsContext extends StoreAccountContext {
 
 /** One `provider_accounts` row as Drizzle returns it. */
 export type ProviderAccountRow = typeof schema.providerAccounts.$inferSelect;
+
+/** What the provider-CRUD functions need from the owning store. */
+export interface StoreProviderContext {
+  readonly db: CartethyiaDatabase;
+  readonly providerRegistry: ProviderRegistry;
+}
+
+/** What the model functions need from the owning store. */
+export interface StoreModelContext {
+  readonly db: CartethyiaDatabase;
+  readonly probing: ProviderProbingService;
+}

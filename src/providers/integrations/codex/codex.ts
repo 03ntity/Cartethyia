@@ -16,6 +16,9 @@
  *   - `headers.ts`  — Codex identity headers + client/turn metadata
  *   - `errors.ts`   upstream HTTP error → `GatewayError`
  *   - `identity.ts` — Codex account / install / residency lookups
+ *   - `retry.ts`   — 429 capacity-wait planning + rate-limit sleep override
+ *   - `wire.ts`    — bearer auth headers, SSE sniffing, search citations
+ *   - `session.ts` — bounded per-session state store (sticky routing)
  *
  * Bespoke by wire protocol (Phase C5): session/SSE protocol (Codex Responses
  * envelope, session headers, frame processor) is outside the
@@ -31,31 +34,8 @@ import { decodeSseEvents } from "../../../protocol/sse-decoder";
 import { imageCreatedSeconds, imagePrompt, responsesImageResult } from "../../../protocol/image-generation";
 import { isRecord, joinUrl } from "../../../protocol/codecs";
 import { postUpstreamJson } from "../../../protocol/upstream/post-json";
-import {
-  MIN_RETRY_BUDGET_MS,
-  sleep as defaultSleep,
-} from "../../../protocol/failure-policy";
-import { parseUpstreamBackoff } from "../../../protocol/upstream-parsing";
-
-/**
- * Sleep used by the 429 capacity-wait loop, overridable in tests.
- *
- * A real capacity wait is tens of seconds by design, so a test that exercises
- * the loop would otherwise spend that long on the clock or blow its timeout.
- * Production always uses the shared `failure-policy` sleep; only a test swaps
- * it.
- */
-let rateLimitSleep = defaultSleep;
-export function _setCodexRateLimitSleepForTesting(
-  impl: typeof defaultSleep | null,
-): void {
-  rateLimitSleep = impl ?? defaultSleep;
-}
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return rateLimitSleep(ms, signal);
-}
 import { assertWireFamily } from "../../provider-contracts";
-import type { ImageGenerationOutcome, ProviderDispatchTarget, ProviderAdapter, ProviderDispatchContext, ResolvedCredential, WebSearchOutcome, WebSearchResult } from "../../provider-contracts";
+import type { ImageGenerationOutcome, ProviderDispatchTarget, ProviderAdapter, ProviderDispatchContext, ResolvedCredential, WebSearchOutcome } from "../../provider-contracts";
 import {
   createCodexIdentity,
   getCodexAccountId,
@@ -63,6 +43,18 @@ import {
   getCodexResidency,
 } from "./codex-identity";
 import { mapCodexErrorResponse } from "./codex-errors";
+import {
+  codex429WaitMs,
+  codex429ServerDelayMs,
+  sleep,
+} from "./codex-retry";
+import {
+  authHeadersForCodex,
+  normalizeCodexSearchCitations,
+  sniffSseBody,
+  CODEX_SEARCH_DEFAULT_MODEL,
+} from "./codex-wire";
+import { CodexSessionStore } from "./codex-session";
 import {
   canonicalToCodexResponsesPayload,
   dropCodexAccessPrograms,
@@ -87,37 +79,12 @@ export {
   discoverCodexModels,
 } from "./codex-models";
 
-const CODEX_SEARCH_DEFAULT_MODEL = "gpt-5.6-luna";
-
-function normalizeCodexSearchCitations(
-  citations: readonly unknown[],
-  answerText: string,
-): readonly WebSearchResult[] {
-  const results: WebSearchResult[] = [];
-  const seen = new Set<string>();
-  const snippet = answerText.trim().slice(0, 400);
-  for (const raw of citations) {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-    const record = raw as Record<string, unknown>;
-    const nested = record.url_citation;
-    const source =
-      nested && typeof nested === "object" && !Array.isArray(nested)
-        ? (nested as Record<string, unknown>)
-        : record;
-    const url = typeof source.url === "string" ? source.url : "";
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
-    results.push({
-      title: typeof source.title === "string" ? source.title : "",
-      url,
-      snippet,
-      published_at: null,
-      score: null,
-    });
-  }
-  return results;
-}
-
+// 429 capacity-wait planning and its test-overridable sleep live in
+// `codex-retry.ts`; re-exported here so importers keep their module path.
+export {
+  _setCodexRateLimitSleepForTesting,
+  codex429WaitMs,
+} from "./codex-retry";
 
 /** OAuth-family credential kinds accepted by the Codex adapter. */
 export const CODEX_OAUTH_FAMILY_KINDS: readonly string[] = [
@@ -200,148 +167,6 @@ export interface CodexCompactAdapter extends ProviderAdapter {
   ): Promise<Response>;
 }
 
-
-/**
- * Total wall-clock a Codex dispatch may spend *waiting* on 429s.
- *
- * A transient quota/overload response is latency, not a terminal error: the
- * upstream names how long the bucket is closed and the request can simply
- * wait it out instead of surfacing `quota_exceeded` to the client. The budget
- * is what keeps that from becoming an unbounded stall — a server that keeps
- * restating a delay (or states one longer than the request has left) must not
- * hold the attempt open past its own deadline.
- *
- * 5 minutes matches the donor Codex 429 window this closes
- * (`openai-codex-responses.ts:310-311`, research item Codex #2) and is far
- * below the default request deadline, so the deadline clamp below — not this
- * cap — is the binding limit in practice.
- */
-const CODEX_429_RETRY_BUDGET_MS = 5 * 60 * 1000;
-
-/** Upper bound on one 429 wait before the deadline clamp. */
-const CODEX_429_MAX_WAIT_MS = 60_000;
-
-/** Zero-delay 429 guard. Grows from 50ms, doubling per wait. */
-const CODEX_429_MIN_WAIT_MS = 50;
-
-/** The `x-codex-*` window headers, in seconds or epoch seconds. */
-function codexWindowResetMs(res: Response): number | undefined {
-  for (const header of ["x-codex-primary-reset-at", "x-codex-secondary-reset-at"]) {
-    const raw = res.headers.get(header);
-    const parsed = raw === null || raw.trim().length === 0 ? Number.NaN : Number(raw);
-    if (!Number.isFinite(parsed) || parsed <= 0) continue;
-    const targetMs = parsed >= 1_000_000_000 ? parsed * 1000 : Date.now() + parsed * 1000;
-    const remaining = targetMs - Date.now();
-    if (remaining > 0) return remaining;
-  }
-  return undefined;
-}
-
-/**
- * The delay the Codex upstream asked us to wait before retrying a 429, in ms.
- *
- * Standard backoff headers first, then the Codex window headers. `null` when
- * the upstream named no delay at all, which is *not* the same as "retry now" —
- * see `codex429WaitMs`.
- */
-function codex429ServerDelayMs(res: Response): number | null {
-  const headerDelay = parseUpstreamBackoff(res.headers);
-  if (headerDelay !== null) return headerDelay;
-  return codexWindowResetMs(res) ?? null;
-}
-
-/**
- * How long to actually wait before re-posting a 429, or `null` to stop.
- *
- * Pure — `now` is passed in rather than read, so the clamps are testable
- * without running the clock.
- *
- * Three cases:
- *
- * - **No server-stated delay** — a 429 that names no wait is retired as an
- *   error (current behavior), *except* that the first bare 429 gets one short
- *   backoff, because the rate-limit window itself is the evidence that a retry
- *   is meaningful. UNCONFIRMED: our captures do not show whether Codex emits
- *   `retry-after` on 429, so the header path is unverified against live traffic
- *   and the backoff is the conservative fallback.
- * - **The wait fits** — budget and deadline both leave room, so the stated
- *   delay is honored in full.
- * - **The wait does not fit** — clamped to what is left, or skipped entirely
- *   when less than `MIN_RETRY_BUDGET_MS` would remain, because a re-post the
- *   deadline would kill mid-flight has only turned a fast error into a slow
- *   one.
- */
-export function codex429WaitMs(options: {
-  readonly serverDelayMs: number | null;
-  readonly waitedMs: number;
-  readonly retry: number;
-  readonly deadline: number;
-  readonly now: number;
-}): number | null {
-  const { serverDelayMs, waitedMs, retry, deadline, now } = options;
-  const target =
-    serverDelayMs ?? (retry === 0 ? CODEX_429_MIN_WAIT_MS * 2 ** retry : null);
-  if (target === null) return null;
-  const budgetLeft = CODEX_429_RETRY_BUDGET_MS - waitedMs;
-  if (budgetLeft <= 0) return null;
-  // Leave the pre-dispatch floor for the re-post itself: the retry has to pay
-  // the whole pre-dispatch phase again before the upstream is even called.
-  const deadlineLeft = deadline - now - MIN_RETRY_BUDGET_MS;
-  if (deadlineLeft <= 0) return null;
-  const wait = Math.min(
-    target,
-    CODEX_429_MAX_WAIT_MS,
-    Math.max(budgetLeft, 0),
-    Math.max(deadlineLeft, 0),
-  );
-  return wait > 0 ? wait : null;
-}
-
-function authHeadersForCodex(
-  credential: ResolvedCredential,
-): Record<string, string> {
-  if (!credential.secret || credential.secret.length === 0) {
-    throw new GatewayError(
-      "invalid_request",
-      400,
-      "codex: OAuth credential is missing a bearer token (request {requestId}). Wrong key, right door — check the credential 🔑",
-    );
-  }
-  const token = new TextDecoder().decode(credential.secret);
-  return { authorization: `Bearer ${token}` };
-}
-
-/** Reads just enough of an untyped body to tell SSE from JSON, then replays it. */
-async function sniffSseBody(body: ReadableStream<Uint8Array> | null): Promise<{
-  readonly sse: boolean;
-  readonly body: ReadableStream<Uint8Array> | null;
-}> {
-  if (body === null) return { sse: false, body };
-  const reader = body.getReader();
-  const first = await reader.read();
-  if (first.done || first.value.byteLength === 0) return { sse: false, body: null };
-  const head = new TextDecoder().decode(first.value.subarray(0, 32)).trimStart();
-  const sse = head.startsWith("event:") || head.startsWith("data:") || head.startsWith(":");
-  const replay = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(first.value);
-    },
-    async pull(controller) {
-      const next = await reader.read();
-      if (next.done) {
-        controller.close();
-        return;
-      }
-      controller.enqueue(next.value);
-    },
-    cancel(reason) {
-      return reader.cancel(reason);
-    },
-  });
-  return { sse, body: replay };
-}
-
-
 export function createCodexAdapter(
   config: CodexAdapterConfig,
 ): CodexCompactAdapter {
@@ -357,47 +182,17 @@ export function createCodexAdapter(
   const installationOverride = config.installation_id_override;
 
   // Per-session state for sticky routing (x-codex-turn-state) and identity
-  // reuse. Bounded LRU + TTL: an unbounded map would leak
-  // memory forever under a long-running process serving many distinct
-  // Codex sessions.
-  const sessionStates = new Map<
-    string,
-    { state: CodexSessionState; lastAccessMs: number }
-  >();
-  const MAX_SESSION_STATES = 2000;
-  const SESSION_STATE_TTL_MS = 60 * 60 * 1000;
-
-  function pruneExpiredSessionStates(): void {
-    const cutoff = Date.now() - SESSION_STATE_TTL_MS;
-    for (const [id, entry] of sessionStates) {
-      if (entry.lastAccessMs < cutoff) sessionStates.delete(id);
-    }
-  }
+  // reuse. Bounded LRU + TTL (see `codex-session.ts`): an unbounded map
+  // would leak memory forever under a long-running process serving many
+  // distinct Codex sessions.
+  const sessionStates = new CodexSessionStore(2000, 60 * 60 * 1000);
 
   function getSessionState(id: string): CodexSessionState | undefined {
-    const entry = sessionStates.get(id);
-    if (entry === undefined) return undefined;
-    if (entry.lastAccessMs < Date.now() - SESSION_STATE_TTL_MS) {
-      sessionStates.delete(id);
-      return undefined;
-    }
-    // Refresh recency: delete+set moves the entry to the end (Map preserves
-    // insertion order), making eviction below a true least-recently-used sweep.
-    sessionStates.delete(id);
-    entry.lastAccessMs = Date.now();
-    sessionStates.set(id, entry);
-    return entry.state;
+    return sessionStates.get(id);
   }
 
   function setSessionState(id: string, state: CodexSessionState): void {
-    pruneExpiredSessionStates();
-    sessionStates.delete(id);
-    sessionStates.set(id, { state, lastAccessMs: Date.now() });
-    while (sessionStates.size > MAX_SESSION_STATES) {
-      const oldest = sessionStates.keys().next();
-      if (oldest.done) break;
-      sessionStates.delete(oldest.value);
-    }
+    sessionStates.set(id, state);
   }
 
   let cachedInstallationId: string | undefined = installationOverride;

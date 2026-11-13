@@ -1,9 +1,7 @@
 import { GatewayError } from "../../protocol/gateway-error";
-import type { CanonicalRequest, CanonicalMessage, ServiceKind, ContentPart } from "../../protocol/canonical-model";
-import { toolResultParts } from "../../protocol/canonical-model";
+import type { CanonicalRequest, ServiceKind } from "../../protocol/canonical-model";
 import type { ApiKeyAdmissionService } from "../../security/admission/service";
 import type { VisionHandoffCall, VisionHandoffResult } from "../vision-handoff";
-import { isImageOrPlaceholderPart, lastImageCarryingUserTurnIndex } from "../vision-handoff";
 import type { CallerIdentity } from "../../security/access-control";
 import type { RouteCandidate as RouteCandidate, InMemoryRouteSnapshotService, RoutePlan, RouteSnapshot } from "../routing/route-model";
 import type { RouteContinuationAffinity } from "../routing/route-model";
@@ -19,13 +17,16 @@ import { parseThinkingSuffix, withThinkingSuffixIntent } from "../../protocol/tr
 import { nativeServicePathFor } from "../contracts";
 import { log } from "../../observability/logger";
 import { BUDDY_PROVIDER_IDS } from "../../providers/provider-metadata";
-import { cursorRunSessions } from "../../providers/integrations/cursor/cursor-session-manager";
 import {
   degradedRequestVariants,
   degradeEncryptedReasoning,
   shouldWarnDegradation,
 } from "./degradation";
 import { DEFAULT_ESTIMATED_OUTPUT_TOKENS, estimateInputTokens } from "./token-estimate";
+import { condenseHandoffRequest, replaceImagePartsWithText } from "./vision-rewrite";
+import { resolveContinuationAffinityWithRebase } from "./continuation-affinity";
+
+export { condenseHandoffRequest } from "./vision-rewrite";
 
 /** True when the request carries tools or message parts that need repair/sanitize. */
 function requestNeedsToolRepair(request: CanonicalRequest): boolean {
@@ -36,275 +37,6 @@ function requestNeedsToolRepair(request: CanonicalRequest): boolean {
     }
   }
   return false;
-}
-
-/**
- * The text that replaces an image part after a successful vision handoff.
- * The description is wrapped so the receiving model understands it is an
- * automated description of an image the user attached — not prose the user
- * typed — which is what made it answer as if it had no image at all.
- */
-function visionDescriptionText(description: string): string {
-  return `[The user attached an image. A vision model described it for you: ${description}]`;
-}
-
-/**
- * Replaces every image part (or its `[image]` degradation placeholder) in the
- * request with a single text part carrying the vision-handoff description.
- * Returns `null` when the request has neither image parts nor placeholders.
- * Only user-message parts are replaced; system/tool-result images are left
- * untouched.
- */
-function replaceImagePartsWithText(
-  request: CanonicalRequest,
-  description: string,
-): CanonicalRequest | null {
-  const activeIndex = lastImageCarryingUserTurnIndex(request);
-  const strip = (parts: readonly ContentPart[]): readonly ContentPart[] => {
-    const hasImage = parts.some(isImageOrPlaceholderPart);
-    if (!hasImage) return parts;
-    return parts.flatMap((part): ContentPart[] =>
-      isImageOrPlaceholderPart(part)
-        ? [{ kind: "text", text: visionDescriptionText(description) }]
-        : [part],
-    );
-  };
-  const nextMessages = request.messages.map((message, i) => {
-    if (message.role !== "user") return message;
-    // The active turn (the one the handoff actually described) gets the
-    // description; older image-carrying history turns are dropped — they are
-    // not part of the current context the vision model saw, and leaving a
-    // stale image on a text-only route would risk an upstream rejection.
-    if (i === activeIndex) {
-      return { ...message, content: strip(message.content) };
-    }
-    const hasImage = message.content.some(isImageOrPlaceholderPart);
-    if (!hasImage) return message;
-    // Never delete images silently (proposal Option E): replace a dropped
-    // older image with a marker so the main model at least knows something
-    // was there, instead of the loss being invisible.
-    return {
-      ...message,
-      content: message.content.flatMap((part) =>
-        isImageOrPlaceholderPart(part)
-          ? [{ kind: "text" as const, text: "[image omitted]" }]
-          : [part],
-      ),
-    };
-  });
-  const unchangedMessages = nextMessages.every(
-    (message, i) => message === request.messages[i],
-  );
-  if (unchangedMessages) return null;
-  return { ...request, messages: nextMessages };
-}
-
-/**
- * When a handoff request is a giant session (opencode CLI sessions routinely
- * carry hundreds of tool-result turns), the text-only request that goes to the
- * main model is still enormous: the handoff only replaced the image parts, so
- * the full history — including 700+ tool transcripts — is forwarded verbatim.
- * Upstreams reject or reset such payloads (502/ECONNRESET), which is the
- * "broken on large sessions" report: a small fresh chat works, a session with
- * a large context dies even though the handoff itself is just a description.
- *
- * The handoff describes *an image the user just attached* — it does not need
- * the rest of the session. For a giant request this pass returns only the
- * system prompt (when present) plus the active image-carrying turn; the whole
- * history is dropped so the payload stays small and upstreams do not reset it.
- * Small requests (< the thresholds) pass through untouched.
- */
-export function condenseHandoffRequest(request: CanonicalRequest): CanonicalRequest {
-  const activeIndex = lastImageCarryingUserTurnIndex(request);
-  if (activeIndex < 0) return request;
-
-  const totalMessages = request.messages.length;
-  let totalChars = 0;
-  for (const message of request.messages) totalChars += messageCharSize(message);
-  if (totalMessages <= HANDOFF_CONDENSE_MESSAGE_THRESHOLD && totalChars <= HANDOFF_CONDENSE_CHARS_THRESHOLD) {
-    return request;
-  }
-
-  const kept: CanonicalMessage[] = [];
-  for (let i = 0; i < request.messages.length; i += 1) {
-    const message = request.messages[i]!;
-    if (message.role === "system") {
-      kept.push(message);
-      continue;
-    }
-    if (i === activeIndex) {
-      kept.push(message);
-      // Anything after the active turn stays after it (rare, but preserved).
-      kept.push(...request.messages.slice(activeIndex + 1));
-      break;
-    }
-  }
-  // Never return a request that lost the very turn we are answering.
-  if (!kept.includes(request.messages[activeIndex]!)) return request;
-  return { ...request, messages: kept };
-}
-
-const HANDOFF_CONDENSE_MESSAGE_THRESHOLD = 100;
-const HANDOFF_CONDENSE_CHARS_THRESHOLD = 200_000;
-
-function messageCharSize(message: CanonicalMessage): number {
-  let size = 0;
-  for (const part of message.content) {
-    if (part.kind === "text" || part.kind === "refusal") {
-      size += part.text.length;
-    } else if (part.kind === "toolCall") {
-      size += part.name.length;
-      try {
-        size += JSON.stringify(part.arguments).length;
-      } catch {
-        size += 64;
-      }
-    } else {
-      try {
-        size += JSON.stringify((part as { data?: unknown }).data ?? "").length;
-      } catch {
-        size += 64;
-      }
-    }
-  }
-  return size;
-}
-
-/** Prefix of a provider-continuation tool-call id the gateway itself minted. */
-const CURSOR_CALL_PREFIX = "call_cursor_";
-
-/**
- * The provider-continuation tool results this request carries.
- *
- * Only ids the gateway minted (`call_cursor_<run-id>_<exec-id>`) are considered.
- * Any other id belongs to a conversation the client owns; it is not a
- * continuation and must not influence routing.
- */
-function continuationCallIds(request: CanonicalRequest): readonly string[] {
-  const ids: string[] = [];
-  for (const message of request.messages) {
-    if (message.role !== "tool" && message.role !== "user") continue;
-    for (const part of toolResultParts(message)) {
-      if (!part.call_id.startsWith(CURSOR_CALL_PREFIX)) continue;
-      if (!ids.includes(part.call_id)) ids.push(part.call_id);
-    }
-  }
-  return ids;
-}
-
-/**
- * Resolves a request's pending tool results to the one account that owns them.
- *
- * Every pending id must resolve to the *same* live Run and the same account.
- * Ids resolving to different Runs, or to no live Run at all, are refused rather
- * than partially applied: one result cannot be delivered to another account's
- * upstream turn, and a request that cannot be satisfied as a whole must not be
- * dispatched at all.
- *
- * Returns `undefined` when the request carries no continuation ids — the
- * ordinary routing path.
- */
-function resolveContinuationAffinity(
-  request: CanonicalRequest,
-  authorization: ResolvedApiKey,
-): RouteContinuationAffinity | undefined {
-  const ids = continuationCallIds(request);
-  if (ids.length === 0) return undefined;
-  const scope = {
-    tenantId: authorization.tenantId,
-    apiKeyId: authorization.id,
-  };
-  let affinity: RouteContinuationAffinity | undefined;
-  let anyResolved = false;
-  let allResolved = true;
-  for (const callId of ids) {
-    // The registry resolves by tenant + API key + provider + account, so a call
-    // id replayed from another key or tenant resolves nothing.
-    const record = lookupPendingCall(callId, scope);
-    if (record === undefined) {
-      // A replayed conversation carries every earlier tool result, and results
-      // previous legs already answered resolve nothing here — they are history,
-      // not the flight being continued. The request is a continuation only
-      // through the ids that still resolve; when none do, the ordinary routing
-      // path decides (a Cursor adapter may rebase the full history into a
-      // fresh Run).
-      allResolved = false;
-      continue;
-    }
-    if (affinity !== undefined && affinity.providerAccountId !== record.providerAccountId) {
-      throw new GatewayError(
-        "invalid_request",
-        400,
-        "These tool results belong to different Cursor accounts (request {requestId}); resend them one account at a time. The session went cold — reconnect or resend 🔌",
-        { callIds: [...ids] },
-      );
-    }
-    anyResolved = true;
-    affinity = {
-      providerId: record.providerId,
-      providerAccountId: record.providerAccountId,
-      rebaseable: false,
-    };
-  }
-  if (affinity !== undefined) {
-    // Rebaseable when every supplied call id resolved to a live pending call
-    // (so none is owed to another account) — or when none resolved and the
-    // whole history is present. In both cases the conversation is complete and
-    // may travel as history to a fresh Run.
-    return { ...affinity, rebaseable: anyResolved ? allResolved : true };
-  }
-  return undefined;
-}
-
-/**
- * True when every continuation call id this request carries is answered by a
- * matching `toolCall` block in the same conversation — i.e. the request is a
- * complete replay, not a tail continuation still owed to a live Run.
- */
-function isCompleteContinuationReplay(request: CanonicalRequest, ids: readonly string[]): boolean {
-  const calledIds = new Set<string>();
-  for (const message of request.messages) {
-    for (const part of message.content) {
-      if (part.kind === "toolCall") calledIds.add(part.call_id);
-    }
-  }
-  return ids.every((id) => calledIds.has(id));
-}
-
-/**
- * Resolves a request's pending tool results to the one account that owns them,
- * with rebaseability computed from the conversation shape.
- *
- * A hard pin is only safe when the request is still owed to a live Run. But an
- * account that has since become unroutable (quota exhausted, cooling) must not
- * turn a complete replay into a hard 400: the whole recorded conversation is
- * present, so the router may fall through to normal routing and the Cursor
- * adapter rebases it into a fresh Run on whichever account serves the model.
- * That is what makes switching provider/model mid-conversation work.
- */
-function resolveContinuationAffinityWithRebase(
-  request: CanonicalRequest,
-  authorization: ResolvedApiKey,
-): RouteContinuationAffinity | undefined {
-  const affinity = resolveContinuationAffinity(request, authorization);
-  if (affinity === undefined) return undefined;
-  const ids = continuationCallIds(request);
-  if (affinity.rebaseable) return affinity;
-  return {
-    ...affinity,
-    rebaseable: isCompleteContinuationReplay(request, ids),
-  };
-}
-
-/** Looks up one pending call across every provider that records continuations. */
-function lookupPendingCall(
-  callId: string,
-  scope: { readonly tenantId: string; readonly apiKeyId: string },
-): { readonly providerId: string; readonly providerAccountId: string } | undefined {
-  const record = cursorRunSessions.describePendingCall(callId, scope);
-  return record === undefined
-    ? undefined
-    : { providerId: record.providerId, providerAccountId: record.providerAccountId };
 }
 
 export interface PreparedProxyRequest {

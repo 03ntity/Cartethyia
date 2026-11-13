@@ -95,8 +95,12 @@ const ALLOW_LIST: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "src/providers/integrations/cursor/cursor.ts": {
     // Cursor heartbeat tuning; subsystem-specific, only meaningful if the
     // operator is debugging the cursor transport.
-    CARTETHYIA_CURSOR_HEARTBEAT_MS: "cursor transport heartbeat override",
+  },
+  "src/providers/integrations/cursor/cursor-run-lifecycle.ts": {
     CARTETHYIA_CURSOR_CLIENT_VERSION: "cursor client version override (wire identity)",
+  },
+  "src/providers/integrations/cursor/cursor-run-pump.ts": {
+    CARTETHYIA_CURSOR_HEARTBEAT_MS: "cursor transport heartbeat override",
   },
   "src/providers/integrations/cursor/cursor-hardening.ts": {
     CARTETHYIA_CURSOR_WIRE_TRACE: "cursor wire-trace dump flag (debug only)",

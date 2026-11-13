@@ -447,3 +447,31 @@ export async function refreshKiroOidcTokens(
     ...(profileArn === undefined ? {} : { profileArn }),
   };
 }
+
+/**
+ * Signals that an OIDC portal callback needs a second browser leg: the portal
+ * returns `login_option=builderid|awsidc` without a code, and the real
+ * authorize URL for the regional AWS SSO OIDC service is attached so the route
+ * can redirect the operator to it. Carries the fresh PKCE verifier and the
+ * serialized registration so `completeLogin` can rewrite the pending flow
+ * before sending the browser on — memory alone is not enough across gateways.
+ */
+export class KiroOidcPendingError extends Error {
+  readonly authorizeUrl: string;
+  readonly codeVerifier: string;
+  readonly providerState: string;
+  readonly continueState: string;
+  constructor(
+    authorizeUrl: string,
+    codeVerifier: string,
+    providerState: string,
+    continueState: string,
+  ) {
+    super(`Kiro OIDC requires a second authorization step: ${authorizeUrl}`);
+    this.name = "KiroOidcPendingError";
+    this.authorizeUrl = authorizeUrl;
+    this.codeVerifier = codeVerifier;
+    this.providerState = providerState;
+    this.continueState = continueState;
+  }
+}

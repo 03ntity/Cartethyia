@@ -6,33 +6,22 @@ import { getDbHandle } from "../boot";
 import type { CartethyiaDatabase } from "../db-handle";
 import { lockRows } from "../dialect";
 import { apiKeys, shareLinks, sharePopups, telemetryUsageTotals, type ApiKeyMode, type ApiKeyModelAccessMode, type ApiKeyConcurrencyScope } from "../schema";
-import type { AccessScope } from "../../security/access-control";
+import { mergeSharePopup, popupPatchTouched, writeSharePopup } from "./api-key-popup";
+import type {
+  ApiKeyPatch,
+  ApiKeyRecord,
+  SharedChildSortColumn,
+  SharedChildrenPageOptions,
+  SharedChildrenPage,
+} from "./api-key-types";
 
-/** Sortable columns for the paged share-child listing (api_keys columns only). */
-export type SharedChildSortColumn =
-  | "createdAt"
-  | "label"
-  | "keyPrefix"
-  | "issuedClientIp"
-  | "revokedAt"
-  | "enabled";
-
-export interface SharedChildrenPageOptions {
-  readonly limit: number;
-  readonly offset: number;
-  readonly sortBy: SharedChildSortColumn;
-  readonly order: "asc" | "desc";
-  readonly status: "all" | "active" | "revoked";
-}
-
-export interface SharedChildrenPage {
-  readonly rows: readonly ApiKeyRecord[];
-  readonly total: number;
-  readonly active: number;
-  readonly revoked: number;
-  /** Family-wide `lifetime_tokens_consumed` sum, independent of the page. */
-  readonly consumed: number;
-}
+export type {
+  ApiKeyPatch,
+  ApiKeyRecord,
+  SharedChildSortColumn,
+  SharedChildrenPage,
+  SharedChildrenPageOptions,
+} from "./api-key-types";
 
 /**
  * SQL predicate: the key is not under an active ban. A ban is active while
@@ -44,56 +33,6 @@ function notBannedSql(): SQL {
     isNull(apiKeys.bannedAt),
     and(isNotNull(apiKeys.bannedUntil), lte(apiKeys.bannedUntil, new Date())),
   ) as SQL;
-}
-
-/** Persisted API key. Only its one-way hash authenticates; plaintext is never stored. */
-export interface ApiKeyRecord {
-  readonly id: string;
-  readonly tenantId: string;
-  readonly keyHash: string | null;
-  readonly keyMode: ApiKeyMode;
-  readonly parentKeyId?: string;
-  readonly issuedClientIp?: string;
-  readonly issuedClientIpKey?: string;
-  readonly label: string;
-  readonly enabled: boolean;
-  readonly scopes: readonly AccessScope[];
-  /** The tenant's mandatory gateway key: rotatable, never revocable. */
-  readonly isDefault: boolean;
-  /** Non-secret prefix configured on a key or used to identify a share child. */
-  readonly keyPrefix?: string;
-  /** Encrypted copy exists only for personal keys used by CLI handoff. */
-  readonly keyEncrypted?: Buffer;
-  readonly notesTitle?: string;
-  readonly notesSubtitle?: string;
-  readonly notesBody?: string;
-  readonly sharePopupEnabled?: boolean;
-  /** Uploaded popup art; served from the share page rather than a remote URL. */
-  readonly sharePopupImage?: Buffer;
-  readonly sharePopupImageMime?: string;
-  readonly sharePopupTitle?: string;
-  readonly sharePopupBody?: string;
-  readonly requestsPerMinute?: number;
-  readonly dailyTokenLimit?: number;
-  readonly monthlyTokenLimit?: number;
-  readonly lifetimeTokenBudget?: number;
-  readonly maxConcurrentRequests?: number;
-  readonly concurrencyScope?: ApiKeyConcurrencyScope;
-  /** Share-template recipient slot cap; undefined = unlimited. */
-  readonly maxChildren?: number;
-  readonly modelPrefix?: string;
-  readonly modelAccessMode?: ApiKeyModelAccessMode;
-  readonly modelList?: readonly string[];
-  /** Client-router ids this key refuses; see the schema column for the contract. */
-  readonly clientRouterDenylist?: readonly string[];
-  readonly createdAt: Date;
-  readonly revokedAt?: Date;
-  /** Ban state; see the schema column for the contract. */
-  readonly bannedAt?: Date;
-  readonly banReason?: string;
-  /** When the ban lifts on its own; null means permanent. */
-  readonly bannedUntil?: Date;
-  readonly tokensConsumed: number;
 }
 
 type SharedChildSortColumnRef =
@@ -112,143 +51,6 @@ const SHARED_CHILD_SORT_COLUMNS: Readonly<Record<SharedChildSortColumn, SharedCh
   revokedAt: apiKeys.revokedAt,
   enabled: apiKeys.enabled,
 };
-
-/**
- * Partial key update. Nullable policy fields clear their values; `undefined`
- * leaves them unchanged. Credential metadata is writable only for a mode
- * transition performed by the API-key domain.
- */
-export interface ApiKeyPatch
-  extends Omit<
-    Partial<ApiKeyRecord>,
-    | "id"
-    | "tenantId"
-    | "keyHash"
-    | "parentKeyId"
-    | "issuedClientIp"
-    | "issuedClientIpKey"
-    | "createdAt"
-    | "revokedAt"
-    | "tokensConsumed"
-    | "keyEncrypted"
-    | "keyPrefix"
-    | "notesTitle"
-    | "notesSubtitle"
-    | "notesBody"
-    | "sharePopupEnabled"
-    | "sharePopupImage"
-    | "sharePopupImageMime"
-    | "sharePopupTitle"
-    | "sharePopupBody"
-    | "requestsPerMinute"
-    | "dailyTokenLimit"
-    | "monthlyTokenLimit"
-    | "lifetimeTokenBudget"
-    | "maxConcurrentRequests"
-    | "maxChildren"
-    | "bannedAt"
-    | "banReason"
-    | "bannedUntil"
-  > {
-  readonly keyHash?: string | null;
-  readonly keyEncrypted?: Buffer | null;
-  readonly keyPrefix?: string | null;
-  readonly notesTitle?: string | null;
-  readonly notesSubtitle?: string | null;
-  readonly notesBody?: string | null;
-  readonly sharePopupEnabled?: boolean | null;
-  /** Null clears both bytes and mime; setting one without the other is rejected upstream. */
-  readonly sharePopupImage?: Buffer | null;
-  readonly sharePopupImageMime?: string | null;
-  readonly sharePopupTitle?: string | null;
-  readonly sharePopupBody?: string | null;
-  readonly requestsPerMinute?: number | null;
-  readonly dailyTokenLimit?: number | null;
-  readonly monthlyTokenLimit?: number | null;
-  readonly lifetimeTokenBudget?: number | null;
-  readonly maxConcurrentRequests?: number | null;
-  readonly maxChildren?: number | null;
-  /** Ban state; a ban also disables the key, unban clears both columns entirely. */
-  readonly bannedAt?: Date | null;
-  readonly banReason?: string | null;
-  /** When the ban lifts on its own; null (explicit) means permanent. */
-  readonly bannedUntil?: Date | null;
-}
-
-interface PopupFields {
-  readonly sharePopupEnabled?: boolean | null;
-  readonly sharePopupImage?: Buffer | null;
-  readonly sharePopupImageMime?: string | null;
-  readonly sharePopupTitle?: string | null;
-  readonly sharePopupBody?: string | null;
-}
-
-function popupPatchTouched(patch: PopupFields): boolean {
-  return (
-    patch.sharePopupEnabled !== undefined ||
-    patch.sharePopupImage !== undefined ||
-    patch.sharePopupImageMime !== undefined ||
-    patch.sharePopupTitle !== undefined ||
-    patch.sharePopupBody !== undefined
-  );
-}
-
-/** Merges a partial popup patch onto the stored row, so an omitted field is kept. */
-async function mergeSharePopup(
-  db: CartethyiaDatabase,
-  apiKeyId: string,
-  patch: PopupFields,
-): Promise<void> {
-  const existing = await db
-    .select()
-    .from(sharePopups)
-    .where(eq(sharePopups.apiKeyId, apiKeyId))
-    .limit(1);
-  const row = existing[0];
-  await writeSharePopup(db, apiKeyId, {
-    sharePopupEnabled: patch.sharePopupEnabled !== undefined ? patch.sharePopupEnabled : (row?.enabled ?? false),
-    sharePopupImage: patch.sharePopupImage !== undefined ? patch.sharePopupImage : (row?.image ?? null),
-    sharePopupImageMime: patch.sharePopupImageMime !== undefined ? patch.sharePopupImageMime : (row?.imageMime ?? null),
-    sharePopupTitle: patch.sharePopupTitle !== undefined ? patch.sharePopupTitle : (row?.title ?? null),
-    sharePopupBody: patch.sharePopupBody !== undefined ? patch.sharePopupBody : (row?.body ?? null),
-  });
-}
-
-/** Writes the popup row, or removes it when the owner cleared every field. */
-async function writeSharePopup(
-  db: CartethyiaDatabase,
-  apiKeyId: string,
-  fields: PopupFields,
-): Promise<void> {
-  const enabled = fields.sharePopupEnabled ?? false;
-  const image = fields.sharePopupImage ?? null;
-  const title = fields.sharePopupTitle ?? null;
-  const body = fields.sharePopupBody ?? null;
-  if (!enabled && image === null && title === null && body === null) {
-    await db.delete(sharePopups).where(eq(sharePopups.apiKeyId, apiKeyId));
-    return;
-  }
-  await db
-    .insert(sharePopups)
-    .values({
-      apiKeyId,
-      enabled,
-      image,
-      imageMime: fields.sharePopupImageMime ?? null,
-      title,
-      body,
-    })
-    .onConflictDoUpdate({
-      target: sharePopups.apiKeyId,
-      set: {
-        enabled,
-        image,
-        imageMime: fields.sharePopupImageMime ?? null,
-        title,
-        body,
-      },
-    });
-}
 
 /** Explicit persistence boundary. Production must provide this; there is no fallback store. */
 export interface ApiKeyStore {
