@@ -559,7 +559,7 @@ export class DrizzleShareLinkStore implements ShareLinkStore {
       // limits, model_list, denylist, etc. was pure write-amplification.
       // Nullable policy columns stay NULL; `model_access_mode` takes its
       // NOT NULL default ('whitelist'). Keep in sync with migration 0029 and
-      // `normalizeShareChildPolicy` in `src/console/backup/store.ts`.
+      // `normalizeShareChildPolicy` in `src/console/backup/restore.ts`.
       //
       // Exception: a template with `concurrencyScope: "per_key"` lets each
       // recipient carry its own concurrency cap, so the cap is copied to the

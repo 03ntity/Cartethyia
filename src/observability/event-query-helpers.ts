@@ -2,7 +2,7 @@
  * Shared SQL machinery for the canonical telemetry reader.
  *
  * Every predicate and fragment here is used by at least two of the reader
- * modules (`event-query.ts` and `event-query-family.ts`), so it lives once,
+ * modules (`event-query.ts` and `event-query-types.ts`), so it lives once,
  * here. The row-level gateway-error rule, the aggregate select fragments, and
  * the membership/family predicates cannot drift between the readers that
  * consume them.

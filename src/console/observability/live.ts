@@ -1,5 +1,5 @@
 // Live domain: process-local in-flight proxy request count, read from the
-// request state store's admission funnel (`transport/request/inflight`), plus
+// request state store's admission funnel (`transport/request/state`), plus
 // per-pool inflight usage from `NetworkPoolSelector` and tenant-filtered pool
 // health notifications. The streams push changes with a heartbeat; health data
 // is joined to the owning tenant before it leaves the process.
