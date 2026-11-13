@@ -14,7 +14,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import * as fullSchema from "../../src/persistence/schema";
 import { DrizzleApiKeyStore } from "../../src/persistence/stores/api-key-store";
 import { createApiKeyOperations } from "../../src/console/api-keys/routes";
-import { API_KEY_BAN_REASONS } from "../../src/console/shared/ban-constants";
+import { API_KEY_BAN_REASONS } from "../../src/console/api-keys/ban-constants";
 import { createRunId, dbDescribe, requireDatabase, withRollback } from "../helpers/database";
 import { createApiKey, createTenant } from "../helpers/fixtures";
 

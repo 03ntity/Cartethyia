@@ -10,7 +10,7 @@ import { Elysia, t, type AnyElysia } from "elysia";
 import { errorResponse, requireGlobalAdmin } from "../shared/errors";
 import type { IpAbuseStore } from "../../security/abuse";
 import type { ConsoleAccessResolver } from "../auth/access";
-import { BAN_DURATION_CHOICES } from "../shared/ban-constants";
+import { BAN_DURATION_CHOICES } from "../api-keys/ban-constants";
 
 /** One active IP ban, as the console returns it. */
 export interface IpBanResponse {
