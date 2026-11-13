@@ -8,7 +8,11 @@
 import { Elysia, type AnyElysia } from "elysia";
 import { errorResponse, requireGlobalAdmin } from "../shared/errors";
 import { performanceMetricsSnapshot } from "../../observability/performance-metrics";
-import type { PerformanceConfig } from "./performance-contracts";
+import type { ConsoleAccessResolver } from "../auth/access";
+
+export interface PerformanceConfig {
+  readonly accessResolver: ConsoleAccessResolver;
+}
 
 export function createPerformanceRoutes(config: PerformanceConfig): AnyElysia {
   return new Elysia()
