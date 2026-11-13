@@ -186,7 +186,7 @@ and lifecycle violations.
 | Output-token floor/ceiling differs per wire | `WIRE_TOKEN_BOUNDS` in `quirks.ts`, then the builder that calls `resolveWireMaxTokens` |
 | Capability not granted to a route | `capabilities.ts` (`routeCapabilitiesFor`, `deriveRequiredCapabilities`) and the snapshot profile in `routing/route-catalog.ts` |
 | Tool-call ids or indexes disagree across frames | `protocol/tool-identity.ts`, then `protocol/translation/tool-repair.ts` |
-| Upstream error lands with the wrong code | `transport/failure-policy.ts` (`classifyUpstreamError`), plus `protocol/stream-error-frames.ts` for in-stream cases |
+| Upstream error lands with the wrong code | `protocol/failure-policy.ts` (`classifyUpstreamError`), plus `protocol/stream-error-frames.ts` for in-stream cases |
 | Public error envelope shape | `protocol/gateway-error.ts`, then `transport/guards/error-lifecycle.ts` |
 | Usage or cost is wrong | decoders → `UsageRecord`; pricing is `repriceUsage` in `providers/provider-usage.ts` |
 | Streaming frames or `[DONE]` | `dispatch/stream-bridge.ts`, then the surface encoder |

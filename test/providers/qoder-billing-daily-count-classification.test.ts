@@ -13,7 +13,7 @@
  */
 import { expect, test } from "bun:test";
 import { classifyAccountError } from "../../src/providers/operations/account-health-service";
-import { classifyUpstreamError } from "../../src/transport/failure-policy";
+import { classifyUpstreamError } from "../../src/protocol/failure-policy";
 import { GatewayError } from "../../src/protocol/gateway-error";
 
 const BILLING_DAILY = '{"code":"110","message":"Billing daily count exceeded"}';

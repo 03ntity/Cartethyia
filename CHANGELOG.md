@@ -60,6 +60,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Internal:** large-scale dead-code removal and module dedup from a
   12-agent audit of `src/`; no operator-facing behavior change beyond the
   fixes above.
+- **Internal:** `UsageFlushBuffer.stop({flush:true})` now waits for an
+  in-flight flush before its final drain, so deltas queued behind that write
+  are not dropped at shutdown.
+- **Internal:** upstream error classification moved from `transport/` to
+  `protocol/` so providers and protocol no longer import transport for
+  failure policy; cursor exec schemas, freebuff tool tables, catalog
+  contracts, and the default provider registry were split into focused
+  modules behind stable re-export facades.
 
 ## [2.8.1] - 2026-11-13
 

@@ -30,7 +30,7 @@ import { applyParamQuirks } from "../../../protocol/translation/quirks";
 import { buildClaudeMessagesRequest, filterClaudeCustomHeaders, resolveClaudeMessagesApiKey } from "../shared/claude-messages";
 import { mapClaudeHttpError } from "../../../protocol/messages-errors";
 import { isRecord } from "../../../protocol/codecs";
-import { classifyUpstreamError, upstreamErrorIdentifier, upstreamMessageAsIs } from "../../../transport/failure-policy";
+import { classifyUpstreamError, upstreamErrorIdentifier, upstreamMessageAsIs } from "../../../protocol/failure-policy";
 import { parseClaudeSseStream, claudeResponseToEvents } from "../../../protocol/response/messages";
 import { createUpstreamDeadlineLifecycle } from "../../operations/upstream-deadline";
 import type { CanonicalEvent, CanonicalRequest } from "../../../protocol/canonical-model";

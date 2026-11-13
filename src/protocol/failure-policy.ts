@@ -11,7 +11,7 @@
  *   `fallbackRetryDelayMs`, `sleep`).
  *
  * This file re-exports both so every existing `../failure-policy` /
- * `../../transport/failure-policy` importer is unchanged.
+ * `../../protocol/failure-policy` importer is unchanged.
  */
 export * from "./upstream-errors";
 export * from "./failure-classify";

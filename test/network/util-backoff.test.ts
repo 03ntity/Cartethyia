@@ -5,7 +5,7 @@
  *
  * - `"additive"` (network/util/retry.ts): bound + a random 0..+25% slice,
  *   rounded — the mean stays near the bound while a herd desynchronizes.
- * - `"full"` (transport/failure-policy.ts `fallbackRetryDelayMs`): a uniform
+ * - `"full"` (protocol/failure-policy.ts `fallbackRetryDelayMs`): a uniform
  *   draw in [0, bound), unrounded — the first retry lands anywhere inside the
  *   window, and sub-millisecond configured caps are not rounded away.
  *
@@ -115,7 +115,7 @@ describe("exponentialBackoff — additive jitter (network/util)", () => {
   });
 });
 
-describe("exponentialBackoff — full jitter (transport/failure-policy)", () => {
+describe("exponentialBackoff — full jitter (protocol/failure-policy)", () => {
   const options = { baseDelayMs: 100, maxDelayMs: 2_000, jitterPolicy: "full" as const };
 
   test("random()=0 returns 0 and random()→1 approaches the bound", () => {

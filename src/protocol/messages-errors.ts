@@ -13,7 +13,7 @@ import {
   extractUpstreamMessage,
   upstreamErrorIdentifier,
   upstreamRequestId,
-} from "../transport/failure-policy";
+} from "./failure-policy";
 import { isRecord } from "./codecs";
 
 interface ClaudeErrorExtras {

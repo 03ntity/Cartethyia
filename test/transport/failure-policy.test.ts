@@ -1,7 +1,7 @@
 /**
  * The failure-policy decisions, as units.
  *
- * Everything in `transport/failure-policy.ts` is a pure function over a header
+ * Everything in `protocol/failure-policy.ts` is a pure function over a header
  * map, an error body, a status code, or an abort signal — no database, no
  * socket, and no clock the caller cannot supply. That is exactly why it gets an
  * exhaustive suite: these functions decide whether an account is cooled down,
@@ -45,7 +45,7 @@ import {
   upstreamErrorIdentifier,
   upstreamProviderCode,
   upstreamRequestId,
-} from "../../src/transport/failure-policy";
+} from "../../src/protocol/failure-policy";
 
 const MAX_COOLDOWN_MS = 24 * 3600 * 1000;
 const MINUTE_MS = 60_000;
@@ -2229,7 +2229,7 @@ describe("upstream error passthrough (message as-is, no generalized 502)", () =>
   });
 
   test("extractUpstreamMessageText ignores code identifiers", async () => {
-    const { extractUpstreamMessageText } = await import("../../src/transport/failure-policy");
+    const { extractUpstreamMessageText } = await import("../../src/protocol/failure-policy");
     expect(extractUpstreamMessageText({ code: "permission_error" })).toBe("");
     expect(extractUpstreamMessageText({ code: 4026, message: "context too long" })).toBe("context too long");
     expect(extractUpstreamMessageText({ code: "6004", msg: "resets at 12:00" })).toBe("resets at 12:00");

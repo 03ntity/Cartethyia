@@ -23,7 +23,7 @@ import {
   upstreamErrorIdentifier,
   statusToGatewayErrorCode,
   parseRetryAfter,
-} from "../../src/transport/failure-policy";
+} from "../../src/protocol/failure-policy";
 
 /** InferHub's error envelope: `{ error: { code, message } }`. */
 function inferhubBody(code: string): unknown {

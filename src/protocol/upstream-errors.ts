@@ -6,9 +6,9 @@
  * Everything here reads an untrusted upstream body or header set; nothing
  * here decides retryability — that is `failure-classify.ts`.
  */
-import { GatewayError, type GatewayErrorCode, type GatewayErrorOrigin } from "../protocol/gateway-error";
-import { isRecord } from "../protocol/codecs";
-import { parseUpstreamBackoff } from "../protocol/upstream-parsing";
+import { GatewayError, type GatewayErrorCode, type GatewayErrorOrigin } from "./gateway-error";
+import { isRecord } from "./codecs";
+import { parseUpstreamBackoff } from "./upstream-parsing";
 
 /**
  * How much of the upstream's error body is kept and surfaced.

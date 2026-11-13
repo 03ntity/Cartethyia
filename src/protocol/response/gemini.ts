@@ -14,7 +14,7 @@ import {
   classifyUpstreamError,
   extractUpstreamMessage,
   upstreamErrorIdentifier,
-} from "../../transport/failure-policy";
+} from ".././failure-policy";
 import { isRecord } from "../codecs";
 
 function nullableNumber(value: unknown): number | null {

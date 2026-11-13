@@ -23,7 +23,7 @@ import { decodeSseEvents } from "../../../protocol/sse-decoder";
 import { postUpstreamJson } from "../../../protocol/upstream/post-json";
 import { imageCreatedSeconds, imagePrompt } from "../../../protocol/image-generation";
 import { abortGatewayError, createUpstreamDeadlineLifecycle } from "../../operations/upstream-deadline";
-import { mapUpstreamHttpError } from "../../../transport/failure-policy";
+import { mapUpstreamHttpError } from "../../../protocol/failure-policy";
 import type { ImageGenerationOutcome, ProviderDispatchContext, ProviderDispatchTarget, ValidatedOutboundFetch } from "../../provider-contracts";
 import type { CanonicalRequest } from "../../../protocol/canonical-model";
 import { codebuddyHeaders, type CodeBuddyVariant } from "./codebuddy/shared";

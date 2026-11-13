@@ -12,7 +12,7 @@
  * `test/gateway/streaming-contract.test.ts` pins the observable contract.
  */
 import { GatewayError, explainGatewayError, formatPublicErrorMessage, publicGatewayErrorDetails } from "../../../protocol/gateway-error";
-import { classifyTerminalOutcome } from "../../failure-policy";
+import { classifyTerminalOutcome } from "../../../protocol/failure-policy";
 import type { CanonicalEvent } from "../../../protocol/canonical-model";
 import type { CartethyiaDatabase } from "../../../persistence/db-handle";
 import type { NetworkPoolSelector } from "../../../network/pool/selector";

@@ -46,7 +46,7 @@ import {
 import { endpointUrl } from "../../../protocol/codecs";
 import { usageFromProvider } from "../../provider-usage";
 import { createUpstreamDeadlineLifecycle, abortGatewayError } from "../../operations/upstream-deadline";
-import { mapUpstreamHttpError } from "../../../transport/failure-policy";
+import { mapUpstreamHttpError } from "../../../protocol/failure-policy";
 import { buildClaudeMessagesRequest, filterClaudeCustomHeaders } from "../shared/claude-messages";
 import { sendClaudeMessagesRequest } from "../../../protocol/upstream/send-claude-messages";
 import { applyParamQuirks } from "../../../protocol/translation/quirks";

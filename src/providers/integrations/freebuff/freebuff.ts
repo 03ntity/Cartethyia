@@ -27,7 +27,7 @@ import { isRecord } from "../../../protocol/codecs";
 import { encodeWireRequest, decodeWireStream } from "../../../protocol/registry";
 import { resolveDialect } from "../../../protocol/translation/dialect/resolver";
 import { postUpstreamJson } from "../../../protocol/upstream/post-json";
-import { mapUpstreamHttpError, throwIfHtmlResponse } from "../../../transport/failure-policy";
+import { mapUpstreamHttpError, throwIfHtmlResponse } from "../../../protocol/failure-policy";
 import { getFreebuffVersion } from "../../operations/client-versions";
 import type {
   ProviderAdapter,

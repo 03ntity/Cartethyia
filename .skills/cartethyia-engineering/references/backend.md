@@ -42,7 +42,7 @@ authenticated request, `prepare()`, canonical request, `RoutingEngine` plan,
 `completeAttempt`, release. A retryable failure releases the lease and tries the
 next candidate; a terminal one becomes a `GatewayError` and stops.
 
-Retryability is decided in `src/transport/failure-policy.ts`. A
+Retryability is decided in `src/protocol/failure-policy.ts`. A
 `context_length_exceeded` is retryable: it names how large the prompt was
 against the window *that* candidate offered, so a sibling with more room is
 tried unchanged. Nothing in the loop rewrites the prompt.

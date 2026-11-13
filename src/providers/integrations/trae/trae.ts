@@ -16,7 +16,7 @@ import {
   type ProviderDispatchTarget,
   type ProviderId,
 } from "../../provider-contracts";
-import { mapUpstreamHttpError } from "../../../transport/failure-policy";
+import { mapUpstreamHttpError } from "../../../protocol/failure-policy";
 import { abortGatewayError, createUpstreamDeadlineLifecycle } from "../../operations/upstream-deadline";
 import { resolvePromptCacheKey } from "../../operations/session-resolution";
 import { estimateTraeSessionCache } from "./trae-cache";

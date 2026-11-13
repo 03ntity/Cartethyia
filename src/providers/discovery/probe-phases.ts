@@ -39,7 +39,7 @@ import { recordAccountFailure, recordAccountSuccess } from "../operations/accoun
 import { buildCapabilityProfile } from "../../transport/routing/route-catalog";
 import { payloadRetentionMs, resolvePayloadCapture } from "../../observability/payload-capture";
 import type { TelemetryPayloadDepth } from "../../console/settings/contracts";
-import { classifyUpstreamFailure } from "../../transport/failure-policy";
+import { classifyUpstreamFailure } from "../../protocol/failure-policy";
 import { terminalFailure } from "../../transport/dispatch/attempt-finalize";
 import { GatewayError } from "../../protocol/gateway-error";
 import type { ModelDefinition } from "../provider-model-definition";

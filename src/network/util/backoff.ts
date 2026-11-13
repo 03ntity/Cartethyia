@@ -5,12 +5,12 @@
  * jitter policy that matches their traffic shape instead of re-implementing
  * the formula:
  *
- * - `"none"` — the bare bound, for callers that schedule their own delay.
- * - `"additive"` — bound plus a random 0..+25% slice. Used by
+ * - "none" — the bare bound, for callers that schedule their own delay.
+ * - "additive" — bound plus a random 0..+25% slice. Used by
  *   `network/util/retry.ts` (idempotent lookups): additive jitter keeps the
  *   mean delay near the bound while still desynchronizing a herd.
- * - `"full"` — `random() * bound`, the AWS-style full jitter used by
- *   `transport/failure-policy.ts` `fallbackRetryDelayMs` for candidate
+ * - "full" — `random() * bound`, the AWS-style full jitter used by
+ *   `protocol/failure-policy.ts` `fallbackRetryDelayMs` for candidate
  *   failover, where the first retry should land anywhere inside the window.
  */
 
@@ -31,8 +31,8 @@ export interface BackoffOptions {
  * @returns The delay in milliseconds
  *
  * Formula: min(maxDelayMs, baseDelayMs * 2^max(0, attempt))
- * `"additive"` adds 0..+25% random jitter to avoid thundering herd;
- * `"full"` returns a uniform draw in [0, bound) and stays unrounded so
+ * t"additive"t adds 0..+25% random jitter to avoid thundering herd;
+ * t"full"t returns a uniform draw in [0, bound) and stays unrounded so
  * sub-millisecond bounds (and env-configured caps below 1ms) survive.
  */
 export function exponentialBackoff(attempt: number, options: BackoffOptions): number {

@@ -30,7 +30,7 @@ import { HEADER_CONTROL } from "../../../security/outbound-headers";
 import { CLAUDE_USER_PROFILES_BETA } from "./claude-user-profiles";
 import { sharedClaudeSlowLanes } from "./claude-slow-lane";
 import { planSlowLaneRetry } from "./claude-slow-lane-retry";
-import { sleep } from "../../../transport/failure-policy";
+import { sleep } from "../../../protocol/failure-policy";
 
 /**
  * Floor reserved out of the request deadline before a slow-lane wait, so a

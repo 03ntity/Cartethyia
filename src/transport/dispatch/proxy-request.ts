@@ -97,7 +97,7 @@ function ttfbFields(
  *    finalizes telemetry; `dispatch/attempt-finalize` owns terminal bookkeeping.
  *
  * Error handling: a failed *intermediate* attempt is retried on the next
- * candidate after a bounded backoff (`failure-policy`); non-retryable
+ * candidate after a bounded backoff (`protocol/failure-policy`); non-retryable
  * failures and exhaustion of the candidate list propagate as GatewayErrors.
  * Streaming responses prime the first upstream event before the 200 is
  * committed (so failover can still happen), then retain their leases until

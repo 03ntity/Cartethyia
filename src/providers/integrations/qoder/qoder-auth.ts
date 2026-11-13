@@ -19,7 +19,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { GatewayError } from "../../../protocol/gateway-error";
-import { mapUpstreamHttpError } from "../../../transport/failure-policy";
+import { mapUpstreamHttpError } from "../../../protocol/failure-policy";
 import { getQoderVersion } from "../../operations/client-versions";
 import { qoderMachineOs } from "../../operations/cli-platform";
 import { parseQoderOAuthState } from "./qoder-oauth";

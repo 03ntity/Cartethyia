@@ -8,7 +8,7 @@
  * they can never disagree; `fallbackRetryDelayMs` / `MIN_RETRY_BUDGET_MS` /
  * `sleep` are the shared retry mechanics every retry site must agree on.
  */
-import { GatewayError, type GatewayErrorCode, type GatewayErrorOrigin } from "../protocol/gateway-error";
+import { GatewayError, type GatewayErrorCode, type GatewayErrorOrigin } from "./gateway-error";
 import { resolveFallbackRetryBaseMs, resolveFallbackRetryCapMs } from "../config/timeouts";
 import { exponentialBackoff } from "../network/util/backoff";
 

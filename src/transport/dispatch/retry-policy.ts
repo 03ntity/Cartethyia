@@ -6,7 +6,7 @@
  * credential itself dead, so refreshing could help?" and "is this a provider
  * rate limit, so the pool should cool down?". They live beside the loop rather
  * than inside it so the loop stays a policy *consumer* — one place decides
- * retryability (`../failure-policy.ts`), one place decides refresh and
+ * retryability (`../protocol/failure-policy.ts`), one place decides refresh and
  * cooldown eligibility (here).
  *
  * The egress-scoped half of the rate-limit decision lives in

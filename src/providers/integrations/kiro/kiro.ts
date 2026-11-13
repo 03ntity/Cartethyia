@@ -35,7 +35,7 @@ import type {
   UsageRecord,
 } from "../../../protocol/canonical-model";
 import { GatewayError } from "../../../protocol/gateway-error";
-import { mapUpstreamHttpError } from "../../../transport/failure-policy";
+import { mapUpstreamHttpError } from "../../../protocol/failure-policy";
 import type { ProviderAdapter, ProviderDispatchContext, ProviderDispatchTarget } from "../../provider-contracts";
 import {
   buildKiroAmzUserAgent,

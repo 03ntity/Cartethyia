@@ -5,7 +5,7 @@ import { oauthIdentityFingerprint } from "../../src/console/providers/oauth/rout
 import { createDefaultProviderRegistry } from "../../src/providers/default-registry";
 import { EligibilityEvaluator } from "../../src/transport/routing/router";
 import { classifyAccountError } from "../../src/providers/operations/account-error-classification";
-import { classifyUpstreamFailure, mapUpstreamHttpError } from "../../src/transport/failure-policy";
+import { classifyUpstreamFailure, mapUpstreamHttpError } from "../../src/protocol/failure-policy";
 import { encodeResponsesEvents } from "../../src/transport/surface/responses/encode";
 import { withFrozenTime } from "../helpers/clock";
 import type { CanonicalRequest, CanonicalEvent } from "../../src/protocol/canonical-model";

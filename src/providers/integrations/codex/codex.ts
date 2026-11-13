@@ -34,7 +34,7 @@ import { postUpstreamJson } from "../../../protocol/upstream/post-json";
 import {
   MIN_RETRY_BUDGET_MS,
   sleep as defaultSleep,
-} from "../../../transport/failure-policy";
+} from "../../../protocol/failure-policy";
 import { parseUpstreamBackoff } from "../../../protocol/upstream-parsing";
 
 /**

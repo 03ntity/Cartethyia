@@ -21,7 +21,7 @@ import {
   classifyUpstreamError,
   upstreamErrorIdentifier,
   extractUpstreamMessageText,
-} from "../transport/failure-policy";
+} from "./failure-policy";
 import { isRecord } from "./codecs";
 
 

@@ -4,7 +4,7 @@ import { GatewayError, publicGatewayErrorBody } from "../../protocol/gateway-err
 import type { ValidatedOutboundFetch } from "../../providers/provider-contracts";
 import { reportAttemptOutcome } from "../../providers/operations/account-health-service";
 import type { UsageRecord } from "../../protocol/canonical-model";
-import { classifyUpstreamFailure } from "../failure-policy";
+import { classifyUpstreamFailure } from "../../protocol/failure-policy";
 import type { AdmissionLease } from "../../security/admission/contracts";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import { resolvePayloadCapture, TelemetryPayloadCapture, truncateUtf8 } from "../../observability/payload-capture";

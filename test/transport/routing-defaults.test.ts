@@ -27,7 +27,7 @@ import { resolveRouteUserAgent } from "../../src/transport/routing/route-catalog
 import { InMemoryAdmissionController } from "../../src/transport/routing/admission";
 import { capacityExhaustedError } from "../../src/transport/routing/route-model";
 import { reasonToGatewayError } from "../../src/security/admission/reasons";
-import { isRetryableFailure } from "../../src/transport/failure-policy";
+import { isRetryableFailure } from "../../src/protocol/failure-policy";
 import { GatewayError } from "../../src/protocol/gateway-error";
 import type { RouteCandidate } from "../../src/transport/routing/route-model";
 

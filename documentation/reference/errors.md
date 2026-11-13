@@ -20,7 +20,7 @@ code from one is not valid in another:
 Authoritative definitions:
 
 - `GatewayErrorCode` union + `GatewayError` class: `src/protocol/gateway-error.ts`
-- Upstream → gateway classification: `src/transport/failure-policy.ts`
+- Upstream → gateway classification: `src/protocol/failure-policy.ts`
 - Account health decision (categories/cooldowns): `src/providers/operations/account-error-classification.ts`
 - Console domain errors: `src/console/shared/errors.ts`
 - Admission reason → code mapping: `src/security/admission/reasons.ts`
@@ -382,7 +382,7 @@ in use:
 1. **Union + class** — `src/protocol/gateway-error.ts` (`GatewayErrorCode`,
    `PUBLIC_ERROR_DETAIL_KEYS` if new details keys should surface).
 2. **Retry semantics** — add/remove the code in `classifyUpstreamFailure`
-   retryable list (`src/transport/failure-policy.ts`); if it is upstream-
+   retryable list (`src/protocol/failure-policy.ts`); if it is upstream-
    mapped, also touch `statusToGatewayErrorCode` / `classifyUpstreamError`
    identifier sets.
 3. **HTTP status mapping** — `CATEGORY_HTTP_STATUS` when the code is a
@@ -406,7 +406,7 @@ in use:
 | Concern | File |
 | --- | --- |
 | `GatewayErrorCode` union, class, sanitization, public envelope | `src/protocol/gateway-error.ts` |
-| Upstream status/identifier classification, retry policy, terminal categories | `src/transport/failure-policy.ts` |
+| Upstream status/identifier classification, retry policy, terminal categories | `src/protocol/failure-policy.ts` |
 | Claude HTTP/stream error mapping | `src/protocol/messages-errors.ts` |
 | OpenAI-family stream error frames | `src/protocol/stream-error-frames.ts` |
 | Codex HTTP error mapping | `src/providers/integrations/codex/codex-errors.ts` |

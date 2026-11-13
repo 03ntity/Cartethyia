@@ -97,7 +97,7 @@ presence changes the result as the trigger, then verify its mechanism.
 | Chat body | `canonicalToChatPayload` in `src/protocol/request/chat.ts` |
 | Responses body | `canonicalToResponsesPayload` in `src/protocol/request/responses.ts` |
 | Provider-specific hooks | `buddyPrePayloadCommon` in `src/providers/integrations/buddy/buddy-chat-shared.ts`, and each adapter's `prePayload` |
-| Error mapping/classification | `mapUpstreamHttpError` in `src/transport/failure-policy.ts` |
+| Error mapping/classification | `mapUpstreamHttpError` in `src/protocol/failure-policy.ts` |
 | `tools` array membership / trim | `clampOpenCodeTools` and `ensureFreeAgentRequest` in `src/providers/integrations/opencode/provider.ts` |
 | Free-tier refusal (403 `FreeTierError`) | the adapter's fingerprint set, not auth — see [`references/opencode-free-tier.md`](references/opencode-free-tier.md) |
 
