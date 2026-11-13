@@ -18,6 +18,7 @@ import { validateIssuedAccessToken } from "../../../providers/authentication/jwt
 import { inlineScriptContentSecurityPolicy } from "../../../security/outbound-headers";
 import type { AccessDecision } from "../../../security/access-control";
 import type { ConsoleAccessResolver } from "../../auth/access";
+import { pickDefined } from "../../shared/object";
 
 export interface OAuthLoginConfig {
   readonly providerRegistry: ProviderRegistry;
@@ -112,8 +113,8 @@ export async function completeLogin(
   };
   try {
     const result = await client.exchangeCode(code, flow.codeVerifier, flow.redirectUri, state, {
-      ...(callbackParams === undefined ? {} : { parameters: callbackParams }),
-      ...(flow.providerState === undefined ? {} : { providerState: flow.providerState }),
+      ...pickDefined({ parameters: callbackParams }),
+      ...pickDefined({ providerState: flow.providerState }),
     });
     const tokenCheck = await validateIssuedAccessToken(
       result.access,
@@ -287,7 +288,7 @@ export function createOAuthLoginOperations(config: OAuthLoginConfig) {
           state,
           codeChallenge,
           redirectUri: client.browserRedirectUri ?? browserAuthorizeRedirectUri(),
-          ...(parameters === undefined ? {} : { parameters }),
+          ...pickDefined({ parameters }),
         };
         const prepared =
           typeof client.prepareAuthorize === "function"
@@ -313,7 +314,7 @@ export function createOAuthLoginOperations(config: OAuthLoginConfig) {
           accountLabel,
           tenantId: a.tenantId,
           redirectUri,
-          ...(parameters === undefined ? {} : { parameters }),
+          ...pickDefined({ parameters }),
         });
         return {
           authorizeUrl: client.buildAuthorizeUrl(prepared),
@@ -382,7 +383,7 @@ export function createOAuthLoginOperations(config: OAuthLoginConfig) {
             tenantId: a.tenantId,
             accountLabel,
             fetchFn: egress.fetch,
-            ...(parameters === undefined ? {} : { parameters }),
+            ...pickDefined({ parameters }),
           });
         } finally {
           // The flow has been started; the pool slot is only needed for the
@@ -394,8 +395,8 @@ export function createOAuthLoginOperations(config: OAuthLoginConfig) {
           providerId,
           accountLabel,
           tenantId: a.tenantId,
-          ...(providerState === undefined ? {} : { providerState }),
-          ...(parameters === undefined ? {} : { parameters }),
+          ...pickDefined({ providerState }),
+          ...pickDefined({ parameters }),
         });
         return publicStarted;
       },
@@ -436,7 +437,7 @@ export function createOAuthLoginOperations(config: OAuthLoginConfig) {
             ...(correlation.providerState === undefined
               ? {}
               : { providerState: correlation.providerState }),
-            ...(correlation.parameters === undefined ? {} : { parameters: correlation.parameters }),
+            ...pickDefined({ parameters: correlation.parameters }),
           });
         } finally {
           // The pool slot is only needed for the poll request itself, and a

@@ -14,6 +14,7 @@ import { TOOL_IDS, TOOL_REGISTRY, type ToolId, type ToolRegistryEntry } from "./
 import { INJECTORS } from "./injectors/driver";
 import type { CliToolMappingStore } from "./store";
 import { ConsoleDomainError } from "../shared/errors";
+import { pickDefined } from "../shared/object";
 // ── service.ts ──
 /**
  * CliToolService — orchestrates registry + injectors + per-tenant mapping
@@ -39,10 +40,10 @@ function toToolRegistryEntry(def: ToolDef): ToolRegistryEntry {
     // target. A `custom` tool writes the routed name into its own config.
     mappingSupported: def.mappingMode === "remote",
     defaultModels: def.defaultModels,
-    ...(def.mappingMode === undefined ? {} : { mappingMode: def.mappingMode }),
-    ...(def.settingsFile === undefined ? {} : { settingsFile: def.settingsFile }),
-    ...(def.docsUrl === undefined ? {} : { docsUrl: def.docsUrl }),
-    ...(def.notes === undefined ? {} : { notes: def.notes }),
+    ...pickDefined({ mappingMode: def.mappingMode }),
+    ...pickDefined({ settingsFile: def.settingsFile }),
+    ...pickDefined({ docsUrl: def.docsUrl }),
+    ...pickDefined({ notes: def.notes }),
   };
 }
 
@@ -313,7 +314,7 @@ export class CliToolService {
       outcome,
       wroteFile,
       savedRemoteRoute,
-      ...(settingsPath === undefined ? {} : { settingsPath }),
+      ...pickDefined({ settingsPath }),
       message: applyMessage(outcome, toolId, fileMessage),
       ...(fileWarnings && fileWarnings.length > 0 ? { warnings: fileWarnings } : {}),
     };

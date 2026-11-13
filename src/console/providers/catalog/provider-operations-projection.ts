@@ -16,6 +16,7 @@ import type { OAuthLoginField } from "../../../providers/authentication/oauth-fl
 import { providerCredentialHint, providerCredentialUrl, providerDisplayName, providerHasAdapterUserAgent, providerOperatorNotice, providerServiceKinds, customProviderServiceKinds, type CompatibilityProfile } from "../../../providers/provider-metadata";
 import type { ProviderRegistry } from "../../../providers/provider-registry";
 import type { ProviderCatalogConfig } from "./provider-operations";
+import { pickDefined } from "../../shared/object";
 
 export function sanitizeProviderResponse(
   provider: unknown,
@@ -51,10 +52,10 @@ export function sanitizeProviderResponse(
     hasAdapterUserAgent: providerHasAdapterUserAgent(p.providerId),
     // No model advertises search; see the note in provider-metadata.ts.
     supportsWebSearch: false,
-    ...(credentialUrl === undefined ? {} : { credentialUrl }),
-    ...(credentialHint === undefined ? {} : { credentialHint }),
-    ...(operatorNotice === undefined ? {} : { operatorNotice }),
-    ...(clientVersion === undefined ? {} : { clientVersion }),
+    ...pickDefined({ credentialUrl }),
+    ...pickDefined({ credentialHint }),
+    ...pickDefined({ operatorNotice }),
+    ...pickDefined({ clientVersion }),
     routeIdentityVersions: getRouteIdentityVersions(),
     supportsModelDiscovery: (p.supportsModelDiscovery as boolean | undefined) ?? !isBuiltIn,
     ...(typeof p.createdAt === "string" ? { createdAt: p.createdAt } : {}),
@@ -133,10 +134,10 @@ function toProviderLoginField(field: OAuthLoginField): ProviderLoginField {
   return {
     key: field.key,
     label: field.label,
-    ...(field.placeholder === undefined ? {} : { placeholder: field.placeholder }),
-    ...(field.secret === undefined ? {} : { secret: field.secret }),
-    ...(field.required === undefined ? {} : { required: field.required }),
-    ...(field.defaultValue === undefined ? {} : { defaultValue: field.defaultValue }),
+    ...pickDefined({ placeholder: field.placeholder }),
+    ...pickDefined({ secret: field.secret }),
+    ...pickDefined({ required: field.required }),
+    ...pickDefined({ defaultValue: field.defaultValue }),
     ...(field.options === undefined
       ? {}
       : { options: field.options.map((option) => ({ value: option.value, label: option.label })) }),

@@ -37,6 +37,7 @@ import {
 } from "../../../network/pool/health";
 import { drainPoolByteDelta, recordPoolBytes } from "../../../network/pool/accounting";
 import * as poolCooldownStore from "../../../network/pool/cooldown-store";
+import { pickDefined } from "../../shared/object";
 import {
   deletePoolRow,
   deletePoolRows,
@@ -270,7 +271,7 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
       status: verdict.status,
       httpStatus: response.status,
       latencyMs,
-      ...(verdict.reason === undefined ? {} : { reason: verdict.reason }),
+      ...pickDefined({ reason: verdict.reason }),
     };
     if (poolId !== undefined) await this.persistProviderProbe(poolId, endpoint ?? label, result);
     return result;

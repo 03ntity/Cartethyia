@@ -11,6 +11,7 @@ import type {
 } from "./contracts";
 import { PurgeNotWiredError, ReclaimNotAllowedError } from "./contracts";
 import { hourStamp } from "../../shared/time";
+import { pickDefined } from "../shared/object";
 
 /**
  * Reads and reclaims the on-disk telemetry and payload directories, and
@@ -211,7 +212,7 @@ export function createDataManagementOperations(config: DataManagementConfig) {
       totalBytes: buckets.reduce((sum, bucket) => sum + bucket.bytes, 0),
       retentionDays: config.retentionDays,
       payloadRetentionMs: retentionMs,
-      ...(healthEventCount === undefined ? {} : { healthEventCount }),
+      ...pickDefined({ healthEventCount }),
     };
   }
 

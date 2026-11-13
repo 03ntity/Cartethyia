@@ -2,6 +2,7 @@ import { ValidationError } from "elysia";
 import type { AccessDecision, AccessScope } from "../../security/access-control";
 import { isRecord } from "../../protocol/codecs";
 import { formatPublicErrorMessage, GatewayError } from "../../protocol/gateway-error";
+import { pickDefined } from "./object";
 
 // Single console error/access contract. Every domain throws ConsoleDomainError
 // (or the storage-layer BackupError, same code/status/message shape) and
@@ -89,7 +90,7 @@ export function errorResponse(
     const body: Record<string, unknown> = {
       error: message,
       code: shaped.code,
-      ...(shaped.origin === undefined ? {} : { origin: shaped.origin }),
+      ...pickDefined({ origin: shaped.origin }),
     };
     if (includeDetails) body.details = details;
     return body as { error: string; code: string; origin?: string; details?: Record<string, unknown> };

@@ -26,6 +26,7 @@ import type {
   UpdateModelMetadataRequest,
 } from "./contracts";
 import type { StoreModelContext } from "./store-contexts";
+import { pickDefined } from "../../shared/object";
 
 /**
  * Every enabled-and-disabled model row the tenant can see, grouped by
@@ -173,7 +174,7 @@ export async function probeAllModels(
     modelId: entry.modelId,
     route: entry.route,
     serviceKind: isServiceKind(entry.serviceKind) ? entry.serviceKind : ("llm" as const),
-    ...(mode === undefined ? {} : { mode }),
+    ...pickDefined({ mode }),
   }));
   const seenRequestKeys = new Set<string>();
   const uniqueRequests = requests.filter((request) => {
@@ -346,8 +347,8 @@ export async function updateModelMetadata(
             warnings: override.warnings.map((warning) => ({
               kind: warning.kind,
               message: warning.message,
-              ...(warning.severity === undefined ? {} : { severity: warning.severity }),
-              ...(warning.updatedAt === undefined ? {} : { updatedAt: warning.updatedAt }),
+              ...pickDefined({ severity: warning.severity }),
+              ...pickDefined({ updatedAt: warning.updatedAt }),
             })),
           };
   }
@@ -463,14 +464,14 @@ export async function listDiscoveryCandidates(
       modalities: definition.modalities,
       reasoning: definition.reasoning,
       toolCall: definition.toolCall,
-      ...(definition.freeTier === undefined ? {} : { freeTier: definition.freeTier }),
-      ...(definition.proOnly === undefined ? {} : { proOnly: definition.proOnly }),
+      ...pickDefined({ freeTier: definition.freeTier }),
+      ...pickDefined({ proOnly: definition.proOnly }),
       alreadyRegistered: false,
     }));
   return {
     supported: true,
     candidates,
-    ...(discovery.accountLabel === undefined ? {} : { accountLabel: discovery.accountLabel }),
+    ...pickDefined({ accountLabel: discovery.accountLabel }),
   };
 }
 

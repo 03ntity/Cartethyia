@@ -31,6 +31,7 @@ import {
   parsePastedOAuthCredential,
 } from "./store-helpers";
 import { accountsWithUsage } from "./store-account-queries";
+import { pickDefined } from "../../shared/object";
 
 /**
  * Labels already in use for one provider, for numbering a generated name.
@@ -199,7 +200,7 @@ export async function createAccountRow(
       ...(request.authState ?? {}),
       credentialMode: effectiveCredentialMode,
       ...(tokenExpiresAt === undefined ? {} : { tokenExpiresAt: tokenExpiresAt.toISOString() }),
-      ...(jwtIssuer === undefined ? {} : { jwtIssuer }),
+      ...pickDefined({ jwtIssuer }),
     };
     const nextSortIndex =
       sortIndexOverride ?? (await nextAccountSortIndex(tx, providerId, tenantId));

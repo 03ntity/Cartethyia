@@ -21,6 +21,7 @@ import type {
   ModelRoutingStore,
 } from "./contracts";
 import { modelsDevCatalog } from "../../../providers/discovery/models-dev-catalog";
+import { pickDefined } from "../../shared/object";
 /**
  * Projects one alias row, including the limits the console shows for it.
  *
@@ -287,7 +288,7 @@ export class DrizzleModelRoutingStore implements ModelRoutingStore {
       .set({
         updatedAt: new Date(),
         ...(patch.members === undefined ? {} : { members: [...patch.members] }),
-        ...(patch.strategy === undefined ? {} : { strategy: patch.strategy }),
+        ...pickDefined({ strategy: patch.strategy }),
       })
       .where(and(eq(modelCombos.tenantId, tenantId), eq(modelCombos.id, id)))
       .returning();

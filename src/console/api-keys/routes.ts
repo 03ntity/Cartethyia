@@ -12,6 +12,7 @@ import { parseRequest } from "./contracts";
 import { popupImageBytes } from "./share-popup-image";
 import { createKeyOperations } from "./key-operations";
 import { createShareOperations } from "./share-operations";
+import { pickDefined } from "../shared/object";
 
 /**
  * Composes the tenant-scoped key lifecycle factory: validation, credential
@@ -248,8 +249,8 @@ export function createApiKeyRoutes(config: ApiKeyConfig): AnyElysia {
         set.status = 201;
         const input = (body ?? {}) as { expiresAt?: string | null; regenerate?: boolean };
         return await factory.shareKey(config.accessResolver(request), params.keyId, {
-          ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
-          ...(input.regenerate === undefined ? {} : { regenerate: input.regenerate }),
+          ...pickDefined({ expiresAt: input.expiresAt }),
+          ...pickDefined({ regenerate: input.regenerate }),
           origin: new URL(request.url).origin,
         });
       } catch (error) {

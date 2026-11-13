@@ -32,6 +32,7 @@ import {
   sanitizeProviderResponse,
 } from "./provider-operations-projection";
 import { createProviderAccountOperations } from "./provider-account-operations";
+import { pickDefined } from "../../shared/object";
 import {
   PROVIDER_READ_SCOPES,
   PROVIDER_WRITE_SCOPES,
@@ -218,11 +219,11 @@ function createProviderOperations(config: ProviderCatalogConfig) {
           supportsModelDiscovery: true,
           // the two builtin credential-less routes get `false`, set at seed time.
           requiresAccount: true,
-          ...(request.label === undefined ? {} : { label: request.label }),
+          ...pickDefined({ label: request.label }),
           ...(request.capabilityProfile === undefined
             ? {}
             : { capabilityProfile: request.capabilityProfile }),
-          ...(request.baseUrl === undefined ? {} : { baseUrl: request.baseUrl }),
+          ...pickDefined({ baseUrl: request.baseUrl }),
           // The operator's chosen wire family is what the BYOK adapter derives
           // its supported families and credential header shape from; dropping
           // it here silently made every custom provider an OpenAI-compatible one.

@@ -14,6 +14,7 @@ import {
 } from "./apply-update";
 import { CARTETHYIA_VERSION } from "../../version";
 import { createSamplerLifecycle } from "../shared/sse-sampler";
+import { pickDefined } from "../shared/object";
 
 /**
  * Minimal drain surface the apply route needs from the process coordinator.
@@ -306,7 +307,7 @@ export function createUpdateRoutes(config: {
       writeUpdateStatus(
         {
           status: "installing",
-          ...(targetTag === undefined ? {} : { targetTag }),
+          ...pickDefined({ targetTag }),
           startedAt: new Date().toISOString(),
         },
         configDir,

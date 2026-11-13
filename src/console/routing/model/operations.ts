@@ -4,6 +4,7 @@
 import { ConsoleDomainError, requireTenantScope } from "../../shared/errors";
 import { validateReorderIds } from "../../shared/reorder";
 import type { AccessDecision } from "../../../security/access-control";
+import { pickDefined } from "../../shared/object";
 import {
   aliasCycleExists,
   partitionResolvableMembers,
@@ -190,8 +191,8 @@ export function createModelRoutingOperations(deps: ModelRoutingConfig) {
         }
 
         const updated = await deps.store.updateAlias(tenantId, id, {
-          ...(nextAlias === undefined ? {} : { alias: nextAlias }),
-          ...(targetModel === undefined ? {} : { targetModel }),
+          ...pickDefined({ alias: nextAlias }),
+          ...pickDefined({ targetModel }),
         });
         if (!updated) throw new ConsoleDomainError("alias_not_found", 404, `Alias ${id} not found`);
         await deps.auditSink?.record({
@@ -400,8 +401,8 @@ export function createModelRoutingOperations(deps: ModelRoutingConfig) {
           );
         }
         const updated = await deps.store.updateCombo(tenantId, id, {
-          ...(members === undefined ? {} : { members }),
-          ...(patch.strategy === undefined ? {} : { strategy: patch.strategy }),
+          ...pickDefined({ members }),
+          ...pickDefined({ strategy: patch.strategy }),
         });
         if (!updated) throw new ConsoleDomainError("combo_not_found", 404, `Combo ${id} not found`);
         await deps.auditSink?.record({

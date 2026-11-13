@@ -38,6 +38,7 @@ import type {
 import { maskClientIp } from "../../observability/redaction";
 import { resolveDbMode } from "../../persistence/db-mode";
 import { shouldMaskClientIp } from "../shared/ip-privacy";
+import { pickDefined } from "../shared/object";
 import {
   breakdownDimension,
   chartBucketSeconds,
@@ -506,7 +507,7 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
           tenantId,
           since: this.periodSince(period),
           limit,
-          ...(httpStatus === undefined ? {} : { httpStatus }),
+          ...pickDefined({ httpStatus }),
         });
         const rows = page.events.slice(0, limit);
         const keyIds = [...new Set(rows.map((row) => row.apiKeyId).filter((id): id is string => id !== null))];
@@ -615,7 +616,7 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
           ? { providerResponse: captured.providerResponse }
           : {}),
       },
-      ...(captured.signals === undefined ? {} : { payloadSignals: captured.signals }),
+      ...pickDefined({ payloadSignals: captured.signals }),
     };
   }
 

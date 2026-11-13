@@ -43,6 +43,7 @@ import {
   setStatus,
   __resetStore,
 } from "./store";
+import { pickDefined } from "../shared/object";
 import type {
   ModelMarket,
   ProviderMarket,
@@ -112,7 +113,7 @@ async function ensureModels(
   }
   const options: InferhubClientOptions = {
     configKey,
-    ...(config.fetchFn === undefined ? {} : { fetchFn: config.fetchFn }),
+    ...pickDefined({ fetchFn: config.fetchFn }),
   };
   const [catalog, market] = await Promise.all([fetchCatalog(options), fetchMarket(options)]);
   if (catalog === undefined) {

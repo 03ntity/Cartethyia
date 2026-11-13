@@ -13,6 +13,7 @@ import {
 } from "./relay-deploy";
 import { parseProxyFile } from "./import-parse";
 import { SPEED_TEST_MAX_BYTES, SPEED_TEST_MIN_BYTES } from "./speed-test-sizes";
+import { pickDefined } from "../../shared/object";
 import {
   MAX_BATCH_PROBE_TARGETS,
   PROVIDER_PROBE_BATCH_CONCURRENCY,
@@ -108,12 +109,12 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
       consecutiveFailures: 0,
       tenantId,
       createdAt: new Date().toISOString(),
-      ...(request.label === undefined ? {} : { label: request.label }),
+      ...pickDefined({ label: request.label }),
       ...(Object.keys(normalizedConfig).length > 0 ? { config: normalizedConfig } : {}),
-      ...(request.credential === undefined ? {} : { credential: request.credential }),
+      ...pickDefined({ credential: request.credential }),
       ...(request.credential !== undefined ? { hasCredential: true } : {}),
       ...(typeof request.quotaBytes === "number" ? { quotaBytes: request.quotaBytes } : {}),
-      ...(request.family === undefined ? {} : { family: request.family }),
+      ...pickDefined({ family: request.family }),
     };
   }
   /**
@@ -276,9 +277,9 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
               kind: row.kind,
               endpoint: row.endpoint,
               ...(row.credential === null ? {} : { credential: row.credential }),
-              ...(request.maxInflight === undefined ? {} : { maxInflight: request.maxInflight }),
-              ...(request.weight === undefined ? {} : { weight: request.weight }),
-              ...(request.family === undefined ? {} : { family: request.family }),
+              ...pickDefined({ maxInflight: request.maxInflight }),
+              ...pickDefined({ weight: request.weight }),
+              ...pickDefined({ family: request.family }),
               ...(row.label !== null
                 ? { label: row.label }
                 : request.labelPrefix

@@ -21,6 +21,7 @@ import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveUserConfigDir } from "../../config/package-paths";
+import { pickDefined } from "../shared/object";
 
 /** Shape written before the installer spawns and overwritten by its wrapper. */
 export interface UpdateStatus {
@@ -159,7 +160,7 @@ export function spawnDetachedUpdate(options: {
     const message = error instanceof Error ? error.message : String(error);
     try {
       writeUpdateStatus(
-        { status: "failed", ...(options.targetTag === undefined ? {} : { targetTag: options.targetTag }), startedAt: new Date().toISOString(), stderrTail: message },
+        { status: "failed", ...pickDefined({ targetTag: options.targetTag }), startedAt: new Date().toISOString(), stderrTail: message },
         configDir,
       );
     } catch {

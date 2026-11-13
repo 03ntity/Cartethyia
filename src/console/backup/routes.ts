@@ -30,6 +30,7 @@ import { compressBackupStream } from "./export";
 import { DELETE_ALL_SCOPES } from "./restore";
 import type { BackupService } from "./service";
 import type { AuditRecorder } from "../auth/audit-recorder";
+import { pickDefined } from "../shared/object";
 
 interface BackupRoutesConfig {
   readonly accessResolver: ConsoleAccessResolver;
@@ -184,7 +185,7 @@ export function createBackupRoutes(config: BackupRoutesConfig): AnyElysia {
           password: query.password,
           tenantId: access.tenantId,
           compressed,
-          ...(sections === undefined ? {} : { sections }),
+          ...pickDefined({ sections }),
         });
         const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
         set.headers["cache-control"] = "no-store";

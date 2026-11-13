@@ -23,6 +23,7 @@ import type { ShareFamilyStats, ShareStatsPort } from "./share-stats";
 import { consoleSseResponse, createConsoleSseStream } from "../observability/sse";
 import { createSamplerLifecycle } from "../shared/sse-sampler";
 import { GatewayError, publicGatewayErrorBody } from "../../protocol/gateway-error";
+import { pickDefined } from "../shared/object";
 import {
   type ShareLinkPolicy,
   type ShareLinkRefusal,
@@ -240,8 +241,8 @@ function normalizeShareCapabilities(
   const output = pick(record.output);
   if (input === undefined && output === undefined) return null;
   return {
-    ...(input === undefined ? {} : { input }),
-    ...(output === undefined ? {} : { output }),
+    ...pickDefined({ input }),
+    ...pickDefined({ output }),
   };
 }
 

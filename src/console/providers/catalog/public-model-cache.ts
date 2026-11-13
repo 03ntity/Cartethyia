@@ -16,6 +16,7 @@
 import { publishInvalidation, subscribeInvalidation } from "../../../persistence/shared-cache";
 import type { ApiKeyAuthorizationSnapshot } from "../../../security/api-key-auth";
 import type { AllowedModelEntry } from "./public-model-projections";
+import { pickDefined } from "../../shared/object";
 
 export const PUBLIC_MODEL_CACHE_MAX_ENTRIES = 256;
 /**
@@ -118,7 +119,7 @@ export function publicModelCacheSize(): number {
 function publishPublicModelInvalidation(tenantId?: string): void {
   publishInvalidation({
     namespace: "public-models",
-    ...(tenantId === undefined ? {} : { key: tenantId }),
+    ...pickDefined({ key: tenantId }),
   });
 }
 

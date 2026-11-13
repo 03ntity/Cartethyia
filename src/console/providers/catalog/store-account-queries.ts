@@ -24,6 +24,7 @@ import {
 import { listPoolAccounts, listAllPoolAccounts } from "./store-pool-accounts";
 import type { OwnedProviderAccountRef, ProviderAccountResponse } from "./contracts";
 import type { ProviderAccountRow, StoreAccountContext } from "./store-contexts";
+import { pickDefined } from "../../shared/object";
 
 /**
  * Today's per-account usage for a concrete id set. Scoped to those ids so
@@ -136,7 +137,7 @@ export async function accountsWithUsage(
     return mapAccountRow(row, {
       today: usageTotalsFromRow(todayByAccount.get(row.id)),
       allTime: usageTotalsFromRow(lifetimeByAccount.get(row.id)),
-      ...(inflight === undefined ? {} : { inflight }),
+      ...pickDefined({ inflight }),
     });
   });
 }

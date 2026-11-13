@@ -10,6 +10,7 @@ import { oauthAccountIdentity } from "../../../providers/authentication/oauth-fl
 import { nextFreeLabel } from "../catalog/store-helpers";
 import { isUniqueViolation } from "../../../persistence/boot";
 import { ConsoleDomainError } from "../../shared/errors";
+import { pickDefined } from "../../shared/object";
 
 /**
  * The identity a repeated OAuth login is matched on.
@@ -71,8 +72,8 @@ function resolvedOAuthIdentity(
   const label = unresolved ? (accountEmail ?? accountName ?? existing) : existing;
   return {
     label,
-    ...(accountEmail === undefined ? {} : { accountEmail }),
-    ...(accountName === undefined ? {} : { accountName }),
+    ...pickDefined({ accountEmail }),
+    ...pickDefined({ accountName }),
   };
 }
 
@@ -130,10 +131,10 @@ export class DrizzleOAuthAccountStore implements OAuthAccountStore {
         : {
           authState: {
             ...(input.auth_state ?? {}),
-            ...(identity.accountName === undefined ? {} : { accountName: identity.accountName }),
+            ...pickDefined({ accountName: identity.accountName }),
           },
         }),
-      ...(identity.accountEmail === undefined ? {} : { accountEmail: identity.accountEmail }),
+      ...pickDefined({ accountEmail: identity.accountEmail }),
       ...(identity.accountEmail !== undefined || identity.accountName !== undefined
         ? { identityCheckedAt: new Date() }
         : {}),
@@ -185,7 +186,7 @@ export class DrizzleOAuthAccountStore implements OAuthAccountStore {
             .set({
               refreshCiphertext,
               expiresAt: input.expiresAt,
-              ...(clientSecretCiphertext === undefined ? {} : { clientSecretCiphertext }),
+              ...pickDefined({ clientSecretCiphertext }),
             })
             .where(eq(providerOauthStates.providerAccountId, existingId));
           return { accountId: existingId };
@@ -226,7 +227,7 @@ export class DrizzleOAuthAccountStore implements OAuthAccountStore {
           providerAccountId: row.id,
           refreshCiphertext,
           expiresAt: input.expiresAt,
-          ...(clientSecretCiphertext === undefined ? {} : { clientSecretCiphertext }),
+          ...pickDefined({ clientSecretCiphertext }),
         });
         return { accountId: row.id };
       });

@@ -25,6 +25,7 @@ import { modelsDevCatalog } from "../../../providers/discovery/models-dev-catalo
 import { liveModelCooldowns } from "./catalog-projections";
 import { models } from "../../../persistence/schema";
 import type * as schema from "../../../persistence/schema";
+import { pickDefined } from "../../shared/object";
 /** Field names a pasted OAuth credential may carry its access token under. */
 const OAUTH_ACCESS_FIELDS = ["accessToken", "access_token", "access", "token"] as const;
 /** Field names a pasted OAuth credential may carry its refresh token under. */
@@ -63,8 +64,8 @@ export function parseJwtCredential(
   const iss = payload["iss"];
   const issuer = typeof iss === "string" && iss.trim().length > 0 ? iss.trim() : undefined;
   return {
-    ...(expiresAt === undefined ? {} : { expiresAt }),
-    ...(issuer === undefined ? {} : { issuer }),
+    ...pickDefined({ expiresAt }),
+    ...pickDefined({ issuer }),
   };
 }
 
@@ -231,11 +232,11 @@ function pastedAuthState(
   const machineId = firstStringFrom(sources, ["machineId", "machine_id"]);
   return {
     ...carried,
-    ...(profileArn === undefined ? {} : { profileArn }),
-    ...(authMethod === undefined ? {} : { authMethod }),
-    ...(region === undefined ? {} : { region }),
-    ...(userId === undefined ? {} : { userId }),
-    ...(machineId === undefined ? {} : { machineId }),
+    ...pickDefined({ profileArn }),
+    ...pickDefined({ authMethod }),
+    ...pickDefined({ region }),
+    ...pickDefined({ userId }),
+    ...pickDefined({ machineId }),
   };
 }
 
@@ -505,15 +506,15 @@ export function mapAccountRow(
     providerId: row.providerId,
     tenantId: row.tenantId,
     label: row.label,
-    ...(accountEmail === undefined ? {} : { accountEmail }),
-    ...(accountName === undefined ? {} : { accountName }),
+    ...pickDefined({ accountEmail }),
+    ...pickDefined({ accountName }),
     credentialKind: row.credentialKind,
-    ...(credentialMode === undefined ? {} : { credentialMode }),
-    ...(tokenExpiresAt === undefined ? {} : { tokenExpiresAt }),
-    ...(jwtIssuer === undefined ? {} : { jwtIssuer }),
-    ...(authMethod === undefined ? {} : { authMethod }),
+    ...pickDefined({ credentialMode }),
+    ...pickDefined({ tokenExpiresAt }),
+    ...pickDefined({ jwtIssuer }),
+    ...pickDefined({ authMethod }),
     status: row.status,
-    ...(usage.inflight === undefined ? {} : { inflight: usage.inflight }),
+    ...pickDefined({ inflight: usage.inflight }),
     usageToday: usage.today,
     usageAllTime: usage.allTime,
     consecutiveFailures: row.consecutiveFailures,

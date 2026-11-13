@@ -26,6 +26,7 @@ import type {
 } from "./contracts";
 import type { AccountHealthEventRecord } from "../../../providers/operations/account-health-service";
 import type { ProviderCatalogConfig } from "./provider-operations";
+import { pickDefined } from "../../shared/object";
 
 /**
  * Asks the quota sweep to claim the daily check-in credit for a just-created
@@ -335,7 +336,7 @@ export function createProviderAccountOperations(config: ProviderCatalogConfig) {
             providerId,
             ok: outcome.ok,
             statusAfter: outcome.statusAfter,
-            ...(outcome.error === undefined ? {} : { error: outcome.error }),
+            ...pickDefined({ error: outcome.error }),
           },
         });
         await config.snapshotInvalidator?.invalidate();
@@ -343,10 +344,10 @@ export function createProviderAccountOperations(config: ProviderCatalogConfig) {
           ok: outcome.ok,
           statusAfter: outcome.statusAfter,
           ...(outcome.tokenRefreshed ? { tokenRefreshed: true } : {}),
-          ...(outcome.expiresAt === undefined ? {} : { expiresAt: outcome.expiresAt }),
-          ...(outcome.refreshedAt === undefined ? {} : { refreshedAt: outcome.refreshedAt }),
-          ...(outcome.error === undefined ? {} : { error: outcome.error }),
-          ...(outcome.category === undefined ? {} : { category: outcome.category }),
+          ...pickDefined({ expiresAt: outcome.expiresAt }),
+          ...pickDefined({ refreshedAt: outcome.refreshedAt }),
+          ...pickDefined({ error: outcome.error }),
+          ...pickDefined({ category: outcome.category }),
         };
       },
     /**
@@ -398,7 +399,7 @@ export function createProviderAccountOperations(config: ProviderCatalogConfig) {
               credentialKind: account.credentialKind,
               status: account.status,
               accessToken,
-              ...(refreshToken === undefined ? {} : { refreshToken }),
+              ...pickDefined({ refreshToken }),
               // Non-secret auth state is part of the credential export: without
               // it a re-import loses the upstream user id and region that Trae
               // refresh and dispatch are addressed by.
@@ -424,7 +425,7 @@ export function createProviderAccountOperations(config: ProviderCatalogConfig) {
                   ? { authState: effectiveAuthState }
                   : {};
               })()),
-              ...(account.inflight === undefined ? {} : { inflight: account.inflight }),
+              ...pickDefined({ inflight: account.inflight }),
               createdAt: account.createdAt,
               ...(account.cooldownUntil ? { cooldownUntil: account.cooldownUntil } : {}),
               ...(account.lastErrorCategory

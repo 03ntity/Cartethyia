@@ -14,6 +14,7 @@ import { clientNameFromUserAgent } from "../../observability/client-name";
 import { maskClientIp } from "../../observability/redaction";
 import { splitEndpointConfig } from "../../network/pool/agent";
 import { payloadReferenceFromRow, readPayloadFrame } from "../../observability/payload-store";
+import { pickDefined } from "../shared/object";
 import type {
   TelemetryEventView,
   UsageDimension,
@@ -93,7 +94,7 @@ export function mapUsageRequestItem(
     ...(event.sourceSurface ? { surface: event.sourceSurface } : {}),
     ...(event.providerId ? { providerId: event.providerId } : {}),
     ...(event.accountId ? { accountId: event.accountId } : {}),
-    ...(modelWithEffort(event) === undefined ? {} : { model: modelWithEffort(event) as string }),
+    ...pickDefined({ model: modelWithEffort(event) as string }),
     ...(event.reportedModel ? { reportedModel: event.reportedModel } : {}),
     status: event.status ?? "unknown",
     ...(event.errorCategory ? { errorKind: event.errorCategory } : {}),
@@ -226,7 +227,7 @@ export async function readCapturedBodies(
         : undefined;
     return {
       ...bodies,
-      ...(signals === undefined ? {} : { signals }),
+      ...pickDefined({ signals }),
     };
   } catch {
     return undefined;

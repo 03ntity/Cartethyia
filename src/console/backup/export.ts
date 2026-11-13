@@ -37,6 +37,7 @@ import {
   type BackupRow,
 } from "./contracts";
 import { encodeRow } from "./codec";
+import { pickDefined } from "../shared/object";
 
 /**
  * The predicate that selects exactly the rows `tenantId` owns in `table`.
@@ -201,7 +202,7 @@ async function* pagedTelemetryEvents(
     const page = await querySqlEvents(db, {
       tenantId,
       limit: EXPORT_PAGE_ROWS,
-      ...(cursor === undefined ? {} : { cursor }),
+      ...pickDefined({ cursor }),
     });
     yield* page.events;
     if (page.nextCursor === undefined) return;

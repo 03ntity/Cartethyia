@@ -25,6 +25,7 @@ import {
 import type { ApiKeyPatch, ApiKeyRecord } from "../../persistence/stores/api-key-store";
 import { validateReorderIds } from "../shared/reorder";
 import { invalidateFamilyCaches, purgeFamilyAdmission } from "./family-cache";
+import { pickDefined } from "../shared/object";
 
 /** The offered ban durations as a set of minute values, hoisted once. */
 const BAN_DURATION_MINUTES = new Set(BAN_DURATION_CHOICES.map((choice) => choice.minutes));
@@ -104,9 +105,9 @@ export function createKeyOperations(config: ApiKeyConfig) {
         isDefault: false,
         keyPrefix: generated?.prefix ?? keyPrefix,
         ...(generated ? { keyEncrypted: encryptCredential(generated.secret) } : {}),
-        ...(request.notesTitle === undefined ? {} : { notesTitle: request.notesTitle }),
-        ...(request.notesSubtitle === undefined ? {} : { notesSubtitle: request.notesSubtitle }),
-        ...(request.notesBody === undefined ? {} : { notesBody: request.notesBody }),
+        ...pickDefined({ notesTitle: request.notesTitle }),
+        ...pickDefined({ notesSubtitle: request.notesSubtitle }),
+        ...pickDefined({ notesBody: request.notesBody }),
         ...(request.sharePopupEnabled == null ? {} : { sharePopupEnabled: request.sharePopupEnabled }),
         ...(popupImage
           ? { sharePopupImage: popupImage.image, sharePopupImageMime: popupImage.mime }
@@ -120,9 +121,9 @@ export function createKeyOperations(config: ApiKeyConfig) {
         ...(request.maxConcurrentRequests == null ? {} : { maxConcurrentRequests: request.maxConcurrentRequests }),
         ...(request.concurrencyScope !== undefined ? { concurrencyScope: request.concurrencyScope } : {}),
         ...(request.maxChildren == null ? {} : { maxChildren: request.maxChildren }),
-        ...(request.modelPrefix === undefined ? {} : { modelPrefix: request.modelPrefix }),
+        ...pickDefined({ modelPrefix: request.modelPrefix }),
         modelAccessMode: request.modelAccessMode ?? "whitelist",
-        ...(request.modelList === undefined ? {} : { modelList: request.modelList }),
+        ...pickDefined({ modelList: request.modelList }),
         ...(request.clientRouterDenylist === undefined
           ? {}
           : { clientRouterDenylist: request.clientRouterDenylist }),
@@ -214,10 +215,10 @@ export function createKeyOperations(config: ApiKeyConfig) {
       const scopes = patchRequest.scopes === undefined ? undefined : validated.scopes;
       const popupImage = validated.popupImage;
       const updated = await config.store.update(authorized.tenantId, keyId, {
-        ...(patchRequest.enabled === undefined ? {} : { enabled: patchRequest.enabled }),
+        ...pickDefined({ enabled: patchRequest.enabled }),
         ...(isDefaultGatewayApiKey(current) ? { isDefault: true } : {}),
         ...credentialPatch,
-        ...(scopes === undefined ? {} : { scopes }),
+        ...pickDefined({ scopes }),
         // Rename. The label must be copied into the patch explicitly — it is
         // accepted and validated by the body schema but is not the credential,
         // so omitting it here leaves the name unchanged. Blank falls back to the
@@ -237,7 +238,7 @@ export function createKeyOperations(config: ApiKeyConfig) {
         ...(patchRequest.notesBody === undefined
           ? {}
           : { notesBody: patchRequest.notesBody.trim() === "" ? null : patchRequest.notesBody }),
-        ...(patchRequest.sharePopupEnabled === undefined ? {} : { sharePopupEnabled: patchRequest.sharePopupEnabled }),
+        ...pickDefined({ sharePopupEnabled: patchRequest.sharePopupEnabled }),
         ...(popupImage === undefined
           ? {}
           : popupImage === null
@@ -245,16 +246,16 @@ export function createKeyOperations(config: ApiKeyConfig) {
             : { sharePopupImage: popupImage.image, sharePopupImageMime: popupImage.mime }),
         ...(patchRequest.sharePopupTitle === undefined ? {} : { sharePopupTitle: patchRequest.sharePopupTitle.trim() || null }),
         ...(patchRequest.sharePopupBody === undefined ? {} : { sharePopupBody: patchRequest.sharePopupBody.trim() || null }),
-        ...(patchRequest.requestsPerMinute === undefined ? {} : { requestsPerMinute: patchRequest.requestsPerMinute }),
-        ...(patchRequest.dailyTokenLimit === undefined ? {} : { dailyTokenLimit: patchRequest.dailyTokenLimit }),
-        ...(patchRequest.monthlyTokenLimit === undefined ? {} : { monthlyTokenLimit: patchRequest.monthlyTokenLimit }),
-        ...(patchRequest.lifetimeTokenBudget === undefined ? {} : { lifetimeTokenBudget: patchRequest.lifetimeTokenBudget }),
-        ...(patchRequest.maxConcurrentRequests === undefined ? {} : { maxConcurrentRequests: patchRequest.maxConcurrentRequests }),
+        ...pickDefined({ requestsPerMinute: patchRequest.requestsPerMinute }),
+        ...pickDefined({ dailyTokenLimit: patchRequest.dailyTokenLimit }),
+        ...pickDefined({ monthlyTokenLimit: patchRequest.monthlyTokenLimit }),
+        ...pickDefined({ lifetimeTokenBudget: patchRequest.lifetimeTokenBudget }),
+        ...pickDefined({ maxConcurrentRequests: patchRequest.maxConcurrentRequests }),
         ...(patchRequest.concurrencyScope !== undefined ? { concurrencyScope: patchRequest.concurrencyScope } : {}),
-        ...(patchRequest.maxChildren === undefined ? {} : { maxChildren: patchRequest.maxChildren }),
-        ...(patchRequest.modelPrefix === undefined ? {} : { modelPrefix: patchRequest.modelPrefix }),
-        ...(patchRequest.modelAccessMode === undefined ? {} : { modelAccessMode: patchRequest.modelAccessMode }),
-        ...(patchRequest.modelList === undefined ? {} : { modelList: patchRequest.modelList }),
+        ...pickDefined({ maxChildren: patchRequest.maxChildren }),
+        ...pickDefined({ modelPrefix: patchRequest.modelPrefix }),
+        ...pickDefined({ modelAccessMode: patchRequest.modelAccessMode }),
+        ...pickDefined({ modelList: patchRequest.modelList }),
         ...(patchRequest.clientRouterDenylist === undefined
           ? {}
           : { clientRouterDenylist: patchRequest.clientRouterDenylist }),
@@ -339,7 +340,7 @@ export function createKeyOperations(config: ApiKeyConfig) {
         target: keyId,
         detail: { fields: Object.keys(request) },
       });
-      return { ...sanitizeApiKeyResponse(updated), ...(secret === undefined ? {} : { secret }) };
+      return { ...sanitizeApiKeyResponse(updated), ...pickDefined({ secret }) };
     },
     async deleteKey(access: AccessDecision | undefined, keyId: string): Promise<{ success: true }> {
       const authorized = requireTenantScope(access, "dashboard:write");
