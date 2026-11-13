@@ -81,6 +81,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   tables, the default provider registry, bundled provider manifest,
   antigravity (adapter/models/envelope/session/transport), account health
   writes, pools store queries, and kiro social OAuth.
+- **Internal:** the split campaign was consolidated — the freebuff tool
+  chunks and the cursor exec-schema slices merged back into single files,
+  every re-export-only facade deleted (catalog/backup store shims, the
+  routing and failure-policy barrels), single-consumer stubs absorbed into
+  their owners, one idiom per repeated pattern (the shared `pickDefined`
+  helper, the `consoleErrorHandler` hook, a shared probe JSON reader, one
+  Connect frame codec), and cross-layer contracts rehomed (system-prompt
+  contracts to `protocol/`, telemetry settings vocabulary to a pure config
+  leaf, ban constants to console `shared/`). Dead exports and the orphaned
+  `CARTETHYIA_ACCOUNT_POLICY_BLOCK_COOLDOWN_MS` env are gone; a
+  characterization test now pins the `/system/performance` route. No
+  operator-facing behavior change beyond the env removal.
 
 ## [2.8.1] - 2026-11-13
 
