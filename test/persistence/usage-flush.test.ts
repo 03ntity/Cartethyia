@@ -75,6 +75,44 @@ test("retries a key whose write failed and keeps deltas enqueued during the fail
   expect(calls.find((call) => call.id === "key-1")?.delta).toBe(8);
 });
 
+test("stop({flush:true}) waits for an in-flight flush and persists what queued behind it", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const calls: Array<{ id: string; delta: number }> = [];
+  // The batch statement path writes synchronously when it succeeds, so pin the
+  // single-key fallback to exercise the observable write hook.
+  // Per-key writes stay behind the gate; the one-statement batch path cannot
+  // carry an observable hook, so make every key fail the batch (non-uuid) and
+  // fall through to this per-key fallback.
+  const write = async (_db: CartethyiaDatabase, id: string, delta: number): Promise<void> => {
+    if (id === "key-a") await gate;
+    calls.push({ id, delta });
+  };
+  const buffer = new UsageFlushBuffer(db, 60_000, write);
+  // "key-a" is not a uuid, so the batch statement refuses it before SQL and the
+  // flush falls through to the per-key hook, where the gate holds it open.
+  buffer.enqueue("key-a", 11);
+  const inflight = buffer.flush().catch(() => {});
+  // Lands in `pending` after the flush snapshots/clears the map.
+  buffer.enqueue("key-b", 5);
+  let stopResolved = false;
+  const stopping = buffer.stop({ flush: true }).then(() => {
+    stopResolved = true;
+  });
+  // Give the barrier a chance to prove it is waiting: the in-flight flush is
+  // still parked on the gate, so `stop` must not resolve yet.
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(stopResolved).toBe(false);
+  release();
+  await stopping;
+  await inflight;
+  expect(calls.find((call) => call.id === "key-a")?.delta).toBe(11);
+  expect(calls.find((call) => call.id === "key-b")?.delta).toBe(5);
+});
+
 /**
  * The real flush path, against the embedded backend it exists for.
  *

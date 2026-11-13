@@ -103,6 +103,12 @@ export class UsageFlushBuffer {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private flushing = false;
   private stopped = false;
+  /**
+   * Settles once while a flush's writes are in flight, so `stop()` can wait
+   * that write out and then drain whatever accumulated behind it instead of
+   * dropping rows that were requeued or enqueued mid-flush.
+   */
+  private inflightDone: Promise<void> | undefined;
   /** Consecutive flushes that failed outright; drives the backoff below. */
   private failureStreak = 0;
   /** Wall-clock time before which no flush is attempted. */
@@ -169,6 +175,10 @@ export class UsageFlushBuffer {
     // that caused the failure.
     if (Date.now() < this.backoffUntil && options?.force !== true) return;
     this.flushing = true;
+    let settle!: () => void;
+    this.inflightDone = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
     const batch = new Map(this.pending);
     this.pending.clear();
     let failed = 0;
@@ -211,6 +221,8 @@ export class UsageFlushBuffer {
         this.backoffUntil = 0;
       }
       this.flushing = false;
+      this.inflightDone = undefined;
+      settle();
     }
   }
 
@@ -228,6 +240,11 @@ export class UsageFlushBuffer {
       clearTimeout(this.timer);
       this.timer = undefined;
     }
+    // Drain-after-inflight: `flush()` is a no-op while a write is in flight,
+    // so a plain flush would drop exactly the deltas that queued behind it or
+    // were requeued by a transient failure. Wait the write out, then flush
+    // what accumulated behind it (bypassing backoff on explicit shutdown).
+    await this.inflightDone;
     if (options?.flush) await this.flush({ force: true });
   }
 
