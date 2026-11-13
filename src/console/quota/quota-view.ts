@@ -1,5 +1,5 @@
 import { providerAccounts } from "../../persistence/schema";
-import { liveModelCooldowns } from "../providers/catalog/store-helpers";
+import { liveModelCooldowns } from "../providers/catalog/catalog-projections";
 import type { ProviderQuotaResult } from "../../providers/quota/quota-contracts";
 import { log } from "../../observability/logger";
 import { GLOBAL_QUOTA_LENS } from "../../providers/quota/cache";

@@ -22,6 +22,7 @@ import {
   FALLBACK_OUTPUT_LIMIT,
 } from "../../../providers/provider-model-definition";
 import { modelsDevCatalog } from "../../../providers/discovery/models-dev-catalog";
+import { liveModelCooldowns } from "./catalog-projections";
 import { models } from "../../../persistence/schema";
 import type * as schema from "../../../persistence/schema";
 /** Field names a pasted OAuth credential may carry its access token under. */
@@ -280,28 +281,6 @@ function firstStringFrom(
   }
   return undefined;
 }
-
-/**
- * The account's still-active per-model backoffs, or `undefined` when none are.
- *
- * Expired entries are dropped rather than returned: the sweep that clears them
- * runs on a timer, so between the deadline passing and the sweep a raw read
- * would report a cooldown that is not in force.
- */
-export function liveModelCooldowns(
-  raw: unknown,
-): { modelCooldowns: Record<string, string> } | undefined {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  const now = Date.now();
-  const live: Record<string, string> = {};
-  for (const [modelId, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value !== "string") continue;
-    const at = new Date(value).getTime();
-    if (Number.isFinite(at) && at > now) live[modelId] = value;
-  }
-  return Object.keys(live).length > 0 ? { modelCooldowns: live } : undefined;
-}
-
 
 /**
  * Parsed-warning cache, bounded so a long-lived process cannot grow it with
