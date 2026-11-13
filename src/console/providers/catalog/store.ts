@@ -20,7 +20,7 @@ import { encryptCredential, hashSecret } from "../../../security/crypto";
 import type { TelemetryBatchBuffer } from "../../../observability/telemetry-buffer";
 import type { RedisClient } from "../../../persistence/redis";
 import { bumpCatalogRevision, type BundledProviderCatalog } from "../../../providers/operations/provider-catalog-service";
-import type { AccountInflightReading, BuddyGrowthTaskLedgerEntry, ByokConnectionTestRequest, ByokConnectionTestResult, CreateProviderAccountBatchItemResult, CreateProviderAccountBatchResult, CreateProviderAccountRequest, CredentialMode, DiscoverModelCandidate, ModelCatalogEntry, ProbeAllAccountsResult, ProbeAllModelsResult, ProbeModelRequest, ProbeModelResult, ProviderAccountBulkActionResult, ProviderAccountResponse, ProviderAccountTokenUsage, ProviderCatalogStore, ProviderRecord, SetModelEnabledRequest, UpdateModelMetadataRequest, UpdateProviderAccountRequest, ModelMetadataOverride } from "./contracts";
+import type { AccountInflightReading, BuddyGrowthTaskLedgerEntry, ByokConnectionTestRequest, ByokConnectionTestResult, CreateProviderAccountBatchItemResult, CreateProviderAccountBatchResult, CreateProviderAccountRequest, CredentialMode, DiscoverModelCandidate, ModelCatalogEntry, OwnedProviderAccountRef, ProbeAllAccountsResult, ProbeAllModelsResult, ProbeModelRequest, ProbeModelResult, ProviderAccountBulkActionResult, ProviderAccountResponse, ProviderAccountTokenUsage, ProviderCatalogStore, ProviderRecord, SetModelEnabledRequest, UpdateModelMetadataRequest, UpdateProviderAccountRequest, ModelMetadataOverride } from "./contracts";
 import { isServiceKind, validateCompatibilityProfile } from "./contracts";
 import { ProviderProbingService, type ProbeOutboundResolver } from "../../../providers/discovery/probing-service";
 import {
@@ -32,6 +32,30 @@ import { DEFAULT_ENDPOINT_BY_WIRE_FAMILY, endpointPathForProviderModel, mapProvi
 import { pushStructuredConsoleLog } from "../../../observability/log-ring";
 
 const emptyUsage: ProviderAccountTokenUsage = { requests: 0, errors: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+
+/**
+ * Projects one usage aggregate row (today's telemetry group or a lifetime
+ * `telemetry_usage_totals` row) into the console's token-usage shape. Missing
+ * or NULL aggregates read as zero; `totalTokens` is always input + output.
+ * Shared by the account and pool usage paths, which previously carried two
+ * copies of this projection.
+ */
+function usageTotalsFromRow(row: {
+  readonly requests: number | string | null;
+  readonly errors: number | string | null;
+  readonly inputTokens: number | string | null;
+  readonly outputTokens: number | string | null;
+} | undefined): ProviderAccountTokenUsage {
+  const inputTokens = Number(row?.inputTokens ?? 0);
+  const outputTokens = Number(row?.outputTokens ?? 0);
+  return {
+    requests: Number(row?.requests ?? 0),
+    errors: Number(row?.errors ?? 0),
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+  };
+}
 
 /**
  * The owning pool's provider cooldown markers, filtered to the ones still in
@@ -745,29 +769,13 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
         ),
     ]);
     const lifetimeByAccount = new Map(lifetimeRows.map((row) => [row.entityId, row]));
-    const mapUsage = (row: {
-      readonly requests: number | string | null;
-      readonly errors: number | string | null;
-      readonly inputTokens: number | string | null;
-      readonly outputTokens: number | string | null;
-    } | undefined): ProviderAccountTokenUsage => {
-      const inputTokens = Number(row?.inputTokens ?? 0);
-      const outputTokens = Number(row?.outputTokens ?? 0);
-      return {
-        requests: Number(row?.requests ?? 0),
-        errors: Number(row?.errors ?? 0),
-        inputTokens,
-        outputTokens,
-        totalTokens: inputTokens + outputTokens,
-      };
-    };
     const first = rows[0];
     const inflightByAccount = await this.accountInflightFor(tenantId, first?.providerId);
     return rows.map((row) => {
       const inflight = inflightByAccount.get(row.id);
       return this.mapAccount(row, {
-        today: mapUsage(todayByAccount.get(row.id)),
-        allTime: mapUsage(lifetimeByAccount.get(row.id)),
+        today: usageTotalsFromRow(todayByAccount.get(row.id)),
+        allTime: usageTotalsFromRow(lifetimeByAccount.get(row.id)),
         ...(inflight === undefined ? {} : { inflight }),
       });
     });
@@ -845,27 +853,37 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
    *
    * Scoped to this provider and tenant: `dcint-key-1` and `other-key-1` belong
    * to different providers and must not collide with each other.
+   *
+   * `labelCache` lets a batch create share one read across its items: inside
+   * the batch transaction every insert is visible to the next item's select,
+   * so the first read already sees the labels the batch itself wrote — the
+   * cache only saves the repeated scan, never changes the answer. Keyed by
+   * `providerId` because one batch is one provider/tenant pair.
    */
   private async generateAccountLabel(
     db: CartethyiaDatabase | Parameters<Parameters<CartethyiaDatabase["transaction"]>[0]>[0],
     providerId: string,
     tenantId: string,
     credentialMode: CredentialMode,
+    labelCache?: Map<string, readonly string[]>,
   ): Promise<string> {
-    const rows = await db
-      .select({ label: providerAccounts.label })
-      .from(providerAccounts)
-      .where(
-        and(
-          eq(providerAccounts.providerId, providerId),
-          globalOrOwnedBy(providerAccounts.tenantId, tenantId),
-        ),
-      );
-    return nextGeneratedAccountLabel(
-      providerId,
-      credentialMode,
-      rows.map((row) => row.label).filter((label): label is string => typeof label === "string"),
-    );
+    let labels = labelCache?.get(providerId);
+    if (labels === undefined) {
+      const rows = await db
+        .select({ label: providerAccounts.label })
+        .from(providerAccounts)
+        .where(
+          and(
+            eq(providerAccounts.providerId, providerId),
+            globalOrOwnedBy(providerAccounts.tenantId, tenantId),
+          ),
+        );
+      labels = rows
+        .map((row) => row.label)
+        .filter((label): label is string => typeof label === "string");
+      labelCache?.set(providerId, labels);
+    }
+    return nextGeneratedAccountLabel(providerId, credentialMode, labels);
   }
 
   private async nextAccountSortIndex(
@@ -971,6 +989,70 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
         ),
       );
     return rows.map((row) => row.id);
+  }
+
+  /**
+   * One id-only ownership probe for routes that delegate to a narrower store
+   * call afterwards. `globalOrOwnedBy` admits shared rows exactly like the
+   * health-event/buddy-growth/recover preludes this replaces — the catalog's
+   * visibility rule is "tenant-owned or global", not owned-only.
+   */
+  async ownsAccount(
+    tenantId: string,
+    providerId: string,
+    accountId: string,
+  ): Promise<boolean> {
+    const rows = await this.db
+      .select({ id: providerAccounts.id })
+      .from(providerAccounts)
+      .where(
+        and(
+          eq(providerAccounts.id, accountId),
+          eq(providerAccounts.providerId, providerId),
+          globalOrOwnedBy(providerAccounts.tenantId, tenantId),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
+  }
+
+  /**
+   * The owned-only counterpart: `tenant_id` must equal the caller's tenant, so
+   * a shared/global account is never matched. Used where the operation must
+   * not act on a global row (the token-refresh admission check).
+   */
+  async getOwnedAccount(
+    tenantId: string,
+    providerId: string,
+    accountId: string,
+  ): Promise<OwnedProviderAccountRef | undefined> {
+    const rows = await this.db
+      .select({
+        id: providerAccounts.id,
+        providerId: providerAccounts.providerId,
+        tenantId: providerAccounts.tenantId,
+        credentialKind: providerAccounts.credentialKind,
+        staticToken: providerAccounts.staticToken,
+      })
+      .from(providerAccounts)
+      .where(
+        and(
+          eq(providerAccounts.id, accountId),
+          eq(providerAccounts.providerId, providerId),
+          ownedByOnly(providerAccounts.tenantId, tenantId),
+        ),
+      )
+      .limit(1);
+    const row = rows[0];
+    return row === undefined
+      ? undefined
+      : {
+          id: row.id,
+          providerId: row.providerId,
+          tenantId: row.tenantId,
+          credentialKind: row.credentialKind,
+          staticToken: row.staticToken,
+        };
   }
 
   async listAllAccounts(tenantId: string): Promise<readonly ProviderAccountResponse[]> {
@@ -1171,28 +1253,12 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
         )
         .groupBy(telemetryEvents.networkPoolId),
     ]);
-    const toUsage = (row: {
-      readonly requests: number | string | null;
-      readonly errors: number | string | null;
-      readonly inputTokens: number | string | null;
-      readonly outputTokens: number | string | null;
-    }): ProviderAccountTokenUsage => {
-      const inputTokens = Number(row.inputTokens ?? 0);
-      const outputTokens = Number(row.outputTokens ?? 0);
-      return {
-        requests: Number(row.requests ?? 0),
-        errors: Number(row.errors ?? 0),
-        inputTokens,
-        outputTokens,
-        totalTokens: inputTokens + outputTokens,
-      };
-    };
     for (const id of poolIds) {
       const today = todayRows.find((row) => row.poolId === id);
       const lifetime = lifetimeRows.find((row) => row.poolId === id);
       map.set(id, {
-        today: today ? toUsage(today) : emptyUsage,
-        allTime: lifetime ? toUsage(lifetime) : emptyUsage,
+        today: today ? usageTotalsFromRow(today) : emptyUsage,
+        allTime: lifetime ? usageTotalsFromRow(lifetime) : emptyUsage,
       });
     }
     return map;
@@ -1259,6 +1325,11 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
     existingTx?: Parameters<Parameters<CartethyiaDatabase["transaction"]>[0]>[0],
     includeUsage = true,
     sortIndexOverride?: number,
+    /**
+     * Batch-scoped label cache, threaded from `createAccountBatch`. Only the
+     * batch path passes it; a lone create always reads fresh labels.
+     */
+    labelCache?: Map<string, readonly string[]>,
   ): Promise<ProviderAccountResponse> {
     // Callers inside an existing transaction pass it in so the account lands in
     // that unit of work (the batch path); otherwise this opens its own.
@@ -1344,7 +1415,7 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
         // paste walks once per row.
         const label =
           request.label ??
-          (await this.generateAccountLabel(tx, providerId, tenantId, effectiveCredentialMode));
+          (await this.generateAccountLabel(tx, providerId, tenantId, effectiveCredentialMode, labelCache));
         const rows = await tx
           .insert(providerAccounts)
           .values({
@@ -1447,12 +1518,17 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
 
     await this.db.transaction(async (tx) => {
       let nextSortIndex = await this.nextAccountSortIndex(tx, providerId, tenantId);
+      // One label read for the whole batch: the first generated label scans
+      // the provider's labels once, and every later item reuses that list —
+      // inside the transaction the batch's own inserts are visible to the
+      // scan anyway, so the cached list is exactly what a fresh read returns.
+      const labelCache = new Map<string, readonly string[]>();
       for (const [index, request] of requests.entries()) {
         try {
           // A nested transaction acts as a savepoint: a duplicate-fingerprint
           // violation rolls back only this item, not the accounts before it.
           const account = await tx.transaction(async (inner) =>
-            this.createAccount(tenantId, providerId, request, inner, false, nextSortIndex),
+            this.createAccount(tenantId, providerId, request, inner, false, nextSortIndex, labelCache),
           );
           created += 1;
           nextSortIndex += 1;
@@ -1604,18 +1680,7 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
     providerId: string,
     accountId: string,
   ): Promise<readonly AccountHealthEventRecord[]> {
-    const owned = await this.db
-      .select({ id: providerAccounts.id })
-      .from(providerAccounts)
-      .where(
-        and(
-          eq(providerAccounts.id, accountId),
-          eq(providerAccounts.providerId, providerId),
-          globalOrOwnedBy(providerAccounts.tenantId, tenantId),
-        ),
-      )
-      .limit(1);
-    if (owned.length === 0) return [];
+    if (!(await this.ownsAccount(tenantId, providerId, accountId))) return [];
     return listAccountHealthEvents(this.db, accountId);
   }
 
@@ -1625,18 +1690,7 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
     providerId: string,
     accountId: string,
   ): Promise<number> {
-    const owned = await this.db
-      .select({ id: providerAccounts.id })
-      .from(providerAccounts)
-      .where(
-        and(
-          eq(providerAccounts.id, accountId),
-          eq(providerAccounts.providerId, providerId),
-          globalOrOwnedBy(providerAccounts.tenantId, tenantId),
-        ),
-      )
-      .limit(1);
-    if (owned.length === 0) return 0;
+    if (!(await this.ownsAccount(tenantId, providerId, accountId))) return 0;
     return deleteAccountHealthEvents(this.db, accountId);
   }
   async listBuddyGrowthTasks(
@@ -1645,18 +1699,7 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
     accountId: string,
     dayKey: string,
   ): Promise<readonly BuddyGrowthTaskLedgerEntry[]> {
-    const owned = await this.db
-      .select({ id: providerAccounts.id })
-      .from(providerAccounts)
-      .where(
-        and(
-          eq(providerAccounts.id, accountId),
-          eq(providerAccounts.providerId, providerId),
-          globalOrOwnedBy(providerAccounts.tenantId, tenantId),
-        ),
-      )
-      .limit(1);
-    if (owned.length === 0) return [];
+    if (!(await this.ownsAccount(tenantId, providerId, accountId))) return [];
     const rows = await this.db
       .select({
         accountId: buddyTaskLedger.accountId,
@@ -1682,18 +1725,7 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
     providerId: string,
     accountId: string,
   ): Promise<boolean> {
-    const owned = await this.db
-      .select({ id: providerAccounts.id })
-      .from(providerAccounts)
-      .where(
-        and(
-          eq(providerAccounts.id, accountId),
-          eq(providerAccounts.providerId, providerId),
-          globalOrOwnedBy(providerAccounts.tenantId, tenantId),
-        ),
-      )
-      .limit(1);
-    if (owned.length === 0) return false;
+    if (!(await this.ownsAccount(tenantId, providerId, accountId))) return false;
     return recoverAccount(this.db, accountId, "manual_operator_recovery");
   }
 
@@ -1892,7 +1924,7 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
       throw new ConsoleDomainError(
         "invalid_request",
         400,
-        `Models are no longer in the provider's listing: ${unknown.join(", ")} (request {requestId}). Fetch the model list again 🪞`,
+        `Models are no longer in the provider's listing: ${unknown.join(", ")}. Fetch the model list again 🪞`,
       );
     }
     const registered = await this.listModelsForTenant(tenantId, providerId);

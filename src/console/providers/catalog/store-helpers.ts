@@ -297,12 +297,50 @@ export function liveModelCooldowns(
 
 
 /**
+ * Parsed-warning cache, bounded so a long-lived process cannot grow it with
+ * every distinct blob it has ever seen. Warning blobs repeat across rows far
+ * more often than they vary (a seeded catalog warning is the same JSON on
+ * every row that carries it), so one parse serves many rows and many list
+ * reads. Entries are immutable projections — a stored blob never mutates in
+ * place, so a hit is always the value a fresh parse would produce.
+ */
+const WARNING_METADATA_CACHE_LIMIT = 512;
+const warningMetadataCache = new Map<string, { warnings: ModelWarning[] } | undefined>();
+
+function cachedWarningMetadata(
+  key: string,
+  parse: () => { warnings: ModelWarning[] } | undefined,
+): { warnings: ModelWarning[] } | undefined {
+  if (warningMetadataCache.has(key)) return warningMetadataCache.get(key);
+  const parsed = parse();
+  if (warningMetadataCache.size >= WARNING_METADATA_CACHE_LIMIT) {
+    // Evict the oldest entry: Map iteration is insertion-ordered, and a
+    // re-set below re-inserts at the tail so hot keys survive.
+    const oldest = warningMetadataCache.keys().next().value;
+    if (oldest !== undefined) warningMetadataCache.delete(oldest);
+  }
+  warningMetadataCache.set(key, parsed);
+  return parsed;
+}
+
+/**
  * Reads the display-only warning blob. Postgres returns `jsonb` already
  * decoded; SQLite returns the JSON string its `text` column carries, so both
  * shapes are accepted. A value that is not `{ warnings: [...] }` is ignored —
  * a malformed row must not break the entire model list.
  */
 function parseWarningMetadata(raw: unknown): { warnings: ModelWarning[] } | undefined {
+  // NULL/undefined is the common case (most rows carry no warnings) — skip the
+  // cache entirely rather than minting a "null"/"undefined" key for it.
+  if (raw === null || raw === undefined) return undefined;
+  // The cache key is the blob's own text: a string column value keys on
+  // itself, and a decoded jsonb object keys on its canonical serialization —
+  // two rows carrying the same warnings share one parse either way.
+  const key = typeof raw === "string" ? raw : typeof raw === "object" ? JSON.stringify(raw) : String(raw);
+  return cachedWarningMetadata(key, () => parseWarningMetadataUncached(raw));
+}
+
+function parseWarningMetadataUncached(raw: unknown): { warnings: ModelWarning[] } | undefined {
   let value: unknown = raw;
   if (typeof value === "string") {
     try {

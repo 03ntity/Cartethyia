@@ -222,12 +222,9 @@ describe("allocateQoderNativeIdentity", () => {
         };
       };
       const record = await allocateQoderNativeIdentity(store, "qoder", id, { mint, env: f.env, realm: "intl" });
-      // The vote samples twice (first two mint calls: tok-1, tok-2) and
-      // aborts on the second sample when tokens differ — here they differ, so
-      // the vote returns tok-1 (occupied), then the collision retry calls mint
-      // again: call 3 also yields tok-2 (the fake yields tok-2 for any call
-      // after the first), which is free.
-      expect(calls).toBe(3);
+      // The first mint yields tok-1 (occupied) → re-mint; the second call
+      // yields tok-2 (free), which is bound.
+      expect(calls).toBe(2);
       expect(record?.machineToken).toBe("tok-2");
     } finally {
       f.cleanup();
@@ -248,9 +245,8 @@ describe("allocateQoderNativeIdentity", () => {
       expect(ra?.machineToken).toBe("tok-1");
       // The in-process lock serializes the two allocations. The first binds
       // tok-1 and writes it to the disk cache; the second sees the cached
-      // token as occupied and mints fresh (vote consumes tok-2/tok-3, then
-      // binds tok-3).
-      expect(rb?.machineToken).toBe("tok-3");
+      // token as occupied and mints fresh (tok-2).
+      expect(rb?.machineToken).toBe("tok-2");
       expect(ra?.machineToken).not.toBe(rb?.machineToken);
     } finally {
       f.cleanup();
@@ -268,9 +264,8 @@ describe("allocateQoderNativeIdentity", () => {
 
       const minter = fakeMinter();
       const record = await allocateQoderNativeIdentity(store, "qodercn", b, { mint: minter.mint, env: f.env, realm: "cn" });
-      // tok-1 is occupied; the vote consumes tok-1/tok-2 and aborts on the
-      // differing token, so the retry binds tok-3.
-      expect(record?.machineToken).toBe("tok-3");
+      // tok-1 is occupied, so the fresh mint binds the next free token.
+      expect(record?.machineToken).toBe("tok-2");
       expect(record?.machineToken).not.toBe("tok-1");
     } finally {
       f.cleanup();

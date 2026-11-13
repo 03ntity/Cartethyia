@@ -3,24 +3,24 @@
 // `candidates` shapes, `x-goog-api-key`) — non-OpenAI wire; stays bespoke.
 import { GatewayError } from "../../protocol/gateway-error";
 import { mapUpstreamHttpError } from "../../transport/failure-policy";
-import type { CanonicalEvent, CanonicalRequest, CanonicalStopReason } from "../../protocol/canonical-model";
-import { decodeSseEvents } from "../../protocol/sse-decoder";
-import { usageFromProvider } from "../provider-usage";
-import { readCredentialSecret, assertWireFamily, type ImageGenerationOutcome, type ProviderDispatchTarget, type ProviderAdapter, type ProviderDispatchContext, type WebSearchOutcome, type WebSearchResult } from "../provider-contracts";
+import type { CanonicalEvent, CanonicalRequest } from "../../protocol/canonical-model";
+import { readCredentialSecret, assertWireFamily, type ImageGenerationOutcome, type ProviderDispatchTarget, type ProviderAdapter, type ProviderDispatchContext, type WebSearchOutcome } from "../provider-contracts";
 import type { ModelDefinition } from "../provider-model-definition";
 import { fetchOpenAICompatibleModels } from "../discovery/openai-model-discovery";
 import { isRecord } from "../../protocol/codecs";
 import { providerBaseUrl } from "../provider-metadata";
 import { abortGatewayError, createUpstreamDeadlineLifecycle } from "../operations/upstream-deadline";
 import { geminiModelUrl, buildGeminiPayload } from "../../protocol/request/gemini";
-import { geminiInlineImages, imageCreatedSeconds, imagePrompt } from "../../protocol/image-generation";
+import { geminiInlineImages, imageCreatedSeconds } from "../../protocol/image-generation";
+import { toCanonicalStopReason } from "../../protocol/response/gemini";
 import {
-  decodeGeminiStreamEvent,
-  geminiCandidate,
-  responseParts,
-  mapGeminiUsage,
-  toCanonicalStopReason,
-} from "../../protocol/response/gemini";
+  geminiNonStreamEvents,
+  geminiStreamEvents,
+  geminiStreamTerminal,
+  groundingResults,
+  parseWebsearchRequest,
+  resolveImagePromptModel,
+} from "./shared/gemini-wire";
 
 // Gemini provider constants.
 
@@ -115,48 +115,8 @@ export const GEMINI_SEARCH_MODELS: readonly ModelDefinition[] = [
 
 import type { DiscoveryInput } from "../discovery/discovery-types";
 
-
-function normalizeGroundingResults(data: unknown, maxResults: number): readonly WebSearchResult[] {
-  if (!isRecord(data)) return [];
-  const candidate = Array.isArray(data.candidates) && isRecord(data.candidates[0]) ? data.candidates[0] : undefined;
-  const metadata = candidate && isRecord(candidate.groundingMetadata) ? candidate.groundingMetadata : undefined;
-  const chunks = metadata && Array.isArray(metadata.groundingChunks) ? metadata.groundingChunks : [];
-  const snippetsByUrl = new Map<string, Set<string>>();
-  const supports = metadata && Array.isArray(metadata.groundingSupports) ? metadata.groundingSupports : [];
-  for (const support of supports) {
-    if (!isRecord(support) || !isRecord(support.segment)) continue;
-    const text = typeof support.segment.text === "string" ? support.segment.text.trim() : "";
-    if (!text || !Array.isArray(support.groundingChunkIndices)) continue;
-    for (const rawIndex of support.groundingChunkIndices) {
-      if (!Number.isInteger(rawIndex)) continue;
-      const chunk = chunks[rawIndex];
-      const web = isRecord(chunk) && isRecord(chunk.web) ? chunk.web : undefined;
-      const url = web && (typeof web.uri === "string" ? web.uri : typeof web.url === "string" ? web.url : "");
-      if (!url) continue;
-      const snippets = snippetsByUrl.get(url) ?? new Set<string>();
-      snippets.add(text);
-      snippetsByUrl.set(url, snippets);
-    }
-  }
-  const results: WebSearchResult[] = [];
-  const seen = new Set<string>();
-  for (const chunk of chunks) {
-    if (!isRecord(chunk) || !isRecord(chunk.web)) continue;
-    const web = chunk.web;
-    const url = typeof web.uri === "string" ? web.uri : typeof web.url === "string" ? web.url : "";
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
-    const title = typeof web.title === "string" ? web.title : "";
-    const snippet = [...(snippetsByUrl.get(url) ?? [])].join(" ").trim() || title;
-    results.push({ title, url, snippet, published_at: null, score: null });
-    if (results.length >= maxResults) break;
-  }
-  return results;
-}
-
 // SSE mapper
-// (removed: dead pre-refactor `geminiSseToCanonical` helper — live dispatch
-// parses SSE chunks directly below)
+// (moved: shared Gemini-wire mapping lives in `./shared/gemini-wire`)
 
 // Dispatch — manual, preserves x-goog-api-key header & v1beta baseUrl
 
@@ -236,94 +196,24 @@ class GeminiAdapter implements ProviderAdapter {
 
       if (!request.stream) {
         const json = (await response.json()) as Record<string, unknown>;
-        const { candidate: cand, parts } = geminiCandidate(json);
-        const output = responseParts(parts);
-        let seq = 1;
-        yield { type: "response_start", sequence_number: seq++, model: request.model } as CanonicalEvent;
-        if (output.thought) {
-          yield { type: "content_delta", sequence_number: seq++, content: { kind: "reasoning", payload: null, summary: output.thought, ...(output.thoughtSignature ? { signature: output.thoughtSignature } : {}) } } as CanonicalEvent;
-        }
-        if (output.text) {
-          yield { type: "content_delta", sequence_number: seq++, content: { kind: "text", text: output.text } } as CanonicalEvent;
-        }
-        for (const call of output.calls) {
-          yield { type: "tool_call_delta", sequence_number: seq++, call_id: call.id, name: call.name, arguments_delta: JSON.stringify(call.args) } as CanonicalEvent;
-        }
-        const usageRec = usageFromProvider(mapGeminiUsage(json));
-        const reason = toCanonicalStopReason(cand, output.calls.length);
+        const summary = yield* geminiNonStreamEvents(json, request.model);
         yield {
           type: "terminal",
-          sequence_number: seq++,
+          sequence_number: summary.nextSeq,
           state: "complete",
-          stop_reason: reason,
-          provider_stop_reason: typeof cand["finishReason"] === "string" ? (cand["finishReason"] as string) : undefined,
-          usage: usageRec,
+          stop_reason: toCanonicalStopReason(summary.candidate, summary.toolCalls),
+          provider_stop_reason: typeof summary.candidate["finishReason"] === "string" ? (summary.candidate["finishReason"] as string) : undefined,
+          usage: summary.usage,
         } as CanonicalEvent;
         return;
       }
 
       if (!response.body) throw new GatewayError("platform_unavailable", 502, "Gemini returned empty stream (request {requestId}). The upstream came back empty-handed — retry 🌙", {}, "upstream");
-      let seq = 1;
-      yield { type: "response_start", sequence_number: seq++, model: request.model } as CanonicalEvent;
-      const activeCalls = new Set<string>();
-      let rawUsage: Record<string, unknown> | undefined;
-      let finishReason: string | undefined;
-      let outputCalls = 0;
-      for await (const sse of decodeSseEvents(response.body as ReadableStream<Uint8Array>, { signal: lifecycle.signal })) {
-        const data = sse.data.trim();
-        if (!data || data === "[DONE]") continue;
-        const parsed = decodeGeminiStreamEvent(data, "Gemini stream error");
-        if (parsed === undefined) continue;
-        const { candidate: cand, parts } = geminiCandidate(parsed);
-        const output = responseParts(parts);
-        if (output.thought) {
-          yield { type: "content_delta", sequence_number: seq++, content: { kind: "reasoning", payload: null, summary: output.thought, ...(output.thoughtSignature ? { signature: output.thoughtSignature } : {}) } } as CanonicalEvent;
-        }
-        if (output.text) {
-          yield { type: "content_delta", sequence_number: seq++, content: { kind: "text", text: output.text } } as CanonicalEvent;
-        }
-        for (const call of output.calls) {
-          if (!activeCalls.has(call.id)) {
-            activeCalls.add(call.id);
-            yield { type: "tool_call_delta", sequence_number: seq++, call_id: call.id, name: call.name, arguments_delta: "" } as CanonicalEvent;
-          }
-          const argsText = JSON.stringify(call.args);
-          if (argsText !== "{}") {
-            yield { type: "tool_call_delta", sequence_number: seq++, call_id: call.id, arguments_delta: argsText } as CanonicalEvent;
-          }
-          outputCalls++;
-        }
-        if (isRecord(parsed["usageMetadata"])) rawUsage = parsed["usageMetadata"] as Record<string, unknown>;
-        if (typeof cand["finishReason"] === "string") {
-          finishReason = cand["finishReason"] as string;
-        }
-      }
-      const stopMap: Record<string, CanonicalStopReason> = { MAX_TOKENS: "length", STOP: "stop", SAFETY: "content_filter" };
-      const stopReason: CanonicalStopReason = finishReason ? (stopMap[finishReason] ?? (outputCalls > 0 ? "tool_use" : "stop")) : outputCalls > 0 ? "tool_use" : "stop";
-      // No finishReason means the stream ended without a terminal chunk:
-      // truncated, never complete.
-      const truncated = finishReason === undefined;
-      // Prefer usageMetadata if present, else empty
-      const usageRec = usageFromProvider(rawUsage ? mapGeminiUsage({ usageMetadata: rawUsage }) : undefined);
-      if (context.abort_signal.aborted || truncated) {
-        yield {
-          type: "terminal",
-          sequence_number: seq++,
-          state: truncated ? "failed" : "aborted",
-          stop_reason: stopReason,
-          ...(finishReason ? { provider_stop_reason: finishReason } : {}),
-          usage: usageRec,
-        } as CanonicalEvent;
-      } else {
-        yield {
-          type: "terminal",
-          sequence_number: seq++,
-          state: "complete",
-          stop_reason: stopReason,
-          ...(finishReason ? { provider_stop_reason: finishReason } : {}),
-          usage: usageRec,
-        } as CanonicalEvent;
-      }
+      const summary = yield* geminiStreamEvents(response.body as ReadableStream<Uint8Array>, request.model, {
+        signal: lifecycle.signal,
+        errorLabel: "Gemini stream error",
+      });
+      yield geminiStreamTerminal(summary, context.abort_signal.aborted);
     } catch (err: unknown) {
       const abortError = abortGatewayError(lifecycle, err, context.abort_signal);
       if (abortError) throw abortError;
@@ -337,13 +227,7 @@ class GeminiAdapter implements ProviderAdapter {
     _candidate: ProviderDispatchTarget,
     context: ProviderDispatchContext,
   ): Promise<WebSearchOutcome> {
-    const query = typeof body.query === "string" ? body.query.trim() : "";
-    if (!query) throw new GatewayError("invalid_request", 400, "search query is required (request {requestId}). Check the shape of what you sent — then resend 🪞");
-    const rawMax = body.max_results;
-    const maxResults =
-      typeof rawMax === "number" && Number.isFinite(rawMax)
-        ? Math.min(Math.max(1, Math.floor(rawMax)), 50)
-        : 10;
+    const { query, maxResults } = parseWebsearchRequest(body);
     const apiKey = readCredentialSecret(context.credential, "Gemini API key is required");
     const requested = typeof body.model === "string" ? body.model.trim() : "";
     const model = requested.length > 0 && requested !== "gemini" ? requested : GEMINI_SEARCH_MODEL;
@@ -377,7 +261,7 @@ class GeminiAdapter implements ProviderAdapter {
     } catch {
       throw new GatewayError("platform_unavailable", 502, "Gemini search returned invalid JSON (request {requestId}). The upstream came back empty-handed — retry 🌙");
     }
-    const results = normalizeGroundingResults(data, maxResults);
+    const results = groundingResults(data, maxResults);
     if (results.length === 0)
       throw new GatewayError("platform_unavailable", 502, "Gemini search returned no grounded results (request {requestId}). The upstream came back empty-handed — retry 🌙");
     return { results, total_results: results.length };
@@ -388,9 +272,7 @@ class GeminiAdapter implements ProviderAdapter {
     candidate: ProviderDispatchTarget,
     context: ProviderDispatchContext,
   ): Promise<ImageGenerationOutcome> {
-    const prompt = imagePrompt(body);
-    const model = candidate.model_id.length > 0 ? candidate.model_id : typeof body.model === "string" ? body.model : "";
-    if (model.length === 0) throw new GatewayError("invalid_request", 400, "model is required (request {requestId}). Check the shape of what you sent — then resend 🪞");
+    const { prompt, model } = resolveImagePromptModel(body, candidate);
     const apiKey = readCredentialSecret(context.credential, "Gemini API key is required");
     const outboundFetch = context.outbound_fetch ?? this.fetchFn;
     const lifecycle = createUpstreamDeadlineLifecycle(context);

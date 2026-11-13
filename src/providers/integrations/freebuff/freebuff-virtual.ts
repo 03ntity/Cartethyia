@@ -12,6 +12,8 @@
 // endpoint that resolves a name to a key, but every key in the live catalog
 // carries a displayName, so the pairing is fixed (snapshot 2026-11-09).
 
+import { virtualModelTable } from "../shared/virtual-models";
+
 /** A virtual id, the roster key it stands for, and its display name. */
 export interface FreebuffVirtualModel {
   /** The id a caller sends and the catalog publishes. */
@@ -46,20 +48,8 @@ export const FREEBUFF_VIRTUAL_MODELS: readonly FreebuffVirtualModel[] = [
   { id: "claude-haiku-5.5", target: "m-5b6a604eb6", displayName: "Claude Haiku 5.5" },
 ];
 
-/** Virtual id → roster key. */
-const VIRTUAL_TARGETS: ReadonlyMap<string, string> = new Map(
-  FREEBUFF_VIRTUAL_MODELS.map((entry) => [entry.id, entry.target]),
-);
-
-/** Roster key → virtual id, for labelling a discovered row. */
-const VIRTUAL_BY_TARGET: ReadonlyMap<string, string> = new Map(
-  FREEBUFF_VIRTUAL_MODELS.map((entry) => [entry.target, entry.id]),
-);
-
-/** Virtual id → display name. */
-const DISPLAY_BY_ID: ReadonlyMap<string, string> = new Map(
-  FREEBUFF_VIRTUAL_MODELS.map((entry) => [entry.id, entry.displayName]),
-);
+/** Shared lookup table for the virtual roster (see `shared/virtual-models`). */
+const virtualTable = virtualModelTable(FREEBUFF_VIRTUAL_MODELS);
 
 /**
  * Resolves a caller-supplied model id to the roster key to dispatch.
@@ -69,21 +59,20 @@ const DISPLAY_BY_ID: ReadonlyMap<string, string> = new Map(
  * not a gate on the old one.
  */
 export function freebuffDispatchModelId(modelId: string): string {
-  const trimmed = modelId.trim();
-  return VIRTUAL_TARGETS.get(trimmed) ?? trimmed;
+  return virtualTable.dispatchModelId(modelId);
 }
 
 /** True when the id is a virtual name rather than a roster key. */
 export function isFreebuffVirtualModel(modelId: string): boolean {
-  return VIRTUAL_TARGETS.has(modelId.trim());
+  return virtualTable.isVirtualModel(modelId);
 }
 
 /** The virtual name for a roster key, when one exists. */
 export function freebuffVirtualIdFor(target: string): string | undefined {
-  return VIRTUAL_BY_TARGET.get(target.trim());
+  return virtualTable.virtualIdFor(target);
 }
 
 /** The display name for a virtual id, when one exists. */
 export function freebuffDisplayNameFor(id: string): string | undefined {
-  return DISPLAY_BY_ID.get(id.trim());
+  return virtualTable.displayNameFor(id);
 }

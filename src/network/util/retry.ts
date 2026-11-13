@@ -35,7 +35,7 @@ export async function retryWithBackoff<T>(
   const sleep = options.sleep ?? defaultSleep;
   const shouldRetry = options.shouldRetry ?? (() => true);
 
-  const backoffOptions: BackoffOptions = { baseDelayMs, maxDelayMs, jitter: true };
+  const backoffOptions: BackoffOptions = { baseDelayMs, maxDelayMs, jitterPolicy: "additive" };
 
   let lastError: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {

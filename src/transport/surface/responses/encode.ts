@@ -6,6 +6,7 @@ import { SurfaceStreamEncoder } from "../stream-frame";
 import { ResponsesLifecycleError, ResponsesSequenceError } from "./errors";
 import type { ResponsesEncodingContext, ResponsesWireEvent } from "./contracts";
 import type { SurfaceOutput } from "../adapters";
+import { stopDetailsError } from "../adapters";
 import { parseResponsesComputerActionChunks } from "./parse";
 import { computerOutputToWire, outputToWire } from "./wire-output";
 
@@ -68,6 +69,14 @@ export class ResponsesEventEncoder extends SurfaceStreamEncoder<CanonicalEvent, 
    */
   private readonly parked = new Map<string, OpenOutput>();
   private readonly outputItems: Record<string, unknown>[] = [];
+  /**
+   * Cloned `output` array for `responseObject`, rebuilt only when
+   * `outputItems` changes. Entries are immutable once inserted (finalize
+   * replaces the slot wholesale), so the per-call `{ ...item }` de-clone only
+   * ever re-copied identical objects — the snapshot keeps the defensive copy
+   * without paying it on every `responseObject` call.
+   */
+  private outputSnapshot: Record<string, unknown>[] | undefined;
   private readonly computerCalls = new Set<string>();
   private readonly context: ResponsesEncodingContext;
 
@@ -96,7 +105,7 @@ export class ResponsesEventEncoder extends SurfaceStreamEncoder<CanonicalEvent, 
       created_at: this.createdAt,
       status,
       model: this.responseModel ?? this.context.model ?? "unknown",
-      output: this.outputItems.map((item) => ({ ...item })),
+      output: (this.outputSnapshot ??= this.outputItems.map((item) => ({ ...item }))),
     };
     if (this.systemFingerprint !== undefined)
       response.system_fingerprint = this.systemFingerprint;
@@ -214,6 +223,7 @@ export class ResponsesEventEncoder extends SurfaceStreamEncoder<CanonicalEvent, 
       }
     }
     this.outputItems[outputIndex] = { ...open.item };
+    this.outputSnapshot = undefined;
     const events: ResponsesWireEvent[] = [];
     if (open.kind === "text") {
       events.push(
@@ -310,6 +320,7 @@ export class ResponsesEventEncoder extends SurfaceStreamEncoder<CanonicalEvent, 
       chunks: [],
     };
     this.outputItems.push({ ...item });
+    this.outputSnapshot = undefined;
     events.push(
       this.emit("response.output_item.added", { output_index: outputIndex, item: { ...item } }),
     );
@@ -352,6 +363,7 @@ export class ResponsesEventEncoder extends SurfaceStreamEncoder<CanonicalEvent, 
       nextSummaryIndex: 0,
     };
     this.outputItems.push({ ...item });
+    this.outputSnapshot = undefined;
     events.push(
       this.emit("response.output_item.added", { output_index: outputIndex, item: { ...item } }),
     );
@@ -441,6 +453,7 @@ export class ResponsesEventEncoder extends SurfaceStreamEncoder<CanonicalEvent, 
       chunks: [],
     };
     this.outputItems.push({ ...item });
+    this.outputSnapshot = undefined;
     events.push(
       this.emit("response.output_item.added", { output_index: outputIndex, item: { ...item } }),
     );
@@ -613,6 +626,7 @@ export class ResponsesEventEncoder extends SurfaceStreamEncoder<CanonicalEvent, 
           status: "completed",
         };
     this.outputItems.push({ ...item });
+    this.outputSnapshot = undefined;
     events.push(
       this.emit("response.output_item.added", { output_index: outputIndex, item: { ...item } }),
     );
@@ -642,17 +656,7 @@ export class ResponsesEventEncoder extends SurfaceStreamEncoder<CanonicalEvent, 
       status.status === "incomplete" ? incompleteResponseReason(stopReason) : undefined;
     if (incompleteReason !== undefined) response.incomplete_details = { reason: incompleteReason };
     if (effectiveState === "failed") {
-      const raw = isRecord(stopDetails) ? stopDetails : undefined;
-      const message =
-        typeof raw?.["message"] === "string" && raw["message"].length > 0
-          ? raw["message"]
-          : "The upstream response failed";
-      response.error = {
-        type: "server_error",
-        code: stopReason ?? "provider_error",
-        ...(typeof raw?.["status"] === "number" ? { status: raw["status"] } : {}),
-        message,
-      };
+      response.error = stopDetailsError(stopDetails, stopReason);
     }
     events.push(this.emit(status.event, { response }));
     this.terminal = true;

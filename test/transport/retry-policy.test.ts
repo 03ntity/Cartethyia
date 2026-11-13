@@ -181,9 +181,9 @@ describe("isOAuthCredentialInvalidated — the credential-death signal", () => {
     // structured raw body contributes nothing to the phrase match. In the
     // product this is currently harmless: the producer that sets `raw` on a
     // provider error (`protocol/messages-errors.ts`) sets it to a string, and
-    // the only other consumer stringifies it explicitly before use
-    // (`gateway-error.ts`'s `publicGatewayErrorDetails` runs it through
-    // `redactTelemetryValue`). The test exists so that a future producer passing
+    // the only other consumer passes it through `sanitizePublicDetail`
+    // (inside `publicGatewayErrorDetails`), which stringifies non-strings.
+    // The test exists so that a future producer passing
     // a parsed body is a deliberate change with a test to update, rather than a
     // silent hole in the safety-review exclusion — a hole that would make the
     // gateway treat a policy refusal as a dead OAuth credential and burn a

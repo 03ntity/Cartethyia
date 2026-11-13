@@ -14,6 +14,8 @@ import type { CanonicalRequest, ContentPart } from "../../src/protocol/canonical
 import { canonicalToClaudeMessagesPayload } from "../../src/protocol/request/messages";
 import { claudeResponseToEvents } from "../../src/protocol/response/messages";
 import { recordToolAliases, toolAliasesFor, restoreToolNameFor } from "../../src/protocol/codecs";
+import { parseClaudeSseStream } from "../../src/protocol/response/messages";
+import type { CanonicalEvent } from "../../src/protocol/canonical-model";
 
 function requestWithTools(tools: { name: string }[]): CanonicalRequest {
   return {
@@ -118,6 +120,51 @@ describe("tool alias round trip (Claude Messages)", () => {
     recordToolAliases(request, [{ sent: "_a", original: "a" }]);
     recordToolAliases(request, [{ sent: "_a", original: "a" }]);
     expect(toolAliasesFor(request)).toEqual([{ sent: "_a", original: "a" }]);
+  });
+
+  test("the SSE stream decoder restores a renamed tool name", async () => {
+    // The stream path is the one that carries `aliases` as a parameter (the
+    // non-stream decoder reads them off the request via `toolAliasesFor`).
+    // `sendClaudeMessagesRequest` passes `toolAliasesFor(request)` — this pins
+    // that the recorded rename survives all the way to the emitted delta.
+    const request = requestWithTools([{ name: "my_tool" }]);
+    canonicalToClaudeMessagesPayload(request, { isOAuth: true });
+
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder();
+        const frames = [
+          { type: "message_start", message: { id: "msg_1", model: "claude-sonnet-4-5" } },
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "tool_use", id: "toolu_1", name: "_my_tool", input: {} },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "input_json_delta", partial_json: '{"a":1}' },
+          },
+          { type: "content_block_stop", index: 0 },
+          { type: "message_delta", delta: { stop_reason: "tool_use" } },
+          { type: "message_stop" },
+        ];
+        controller.enqueue(
+          encoder.encode(frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join("")),
+        );
+        controller.close();
+      },
+    });
+
+    const events: CanonicalEvent[] = [];
+    for await (const event of parseClaudeSseStream(sse, undefined, true, toolAliasesFor(request))) {
+      events.push(event);
+    }
+    const names = events.flatMap((event) =>
+      event.type === "tool_call_delta" && event.name !== undefined ? [event.name] : [],
+    );
+    expect(names).toContain("my_tool");
+    expect(names).not.toContain("_my_tool");
   });
 
   test("ambiguity between already and prefixed names resolves via the registry", () => {

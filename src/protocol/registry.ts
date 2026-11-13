@@ -1,6 +1,7 @@
 import type { CanonicalEvent, CanonicalRequest, WireFamily } from "./canonical-model";
 import type { DialectPolicy } from "./translation/dialect/types";
 import type { ThinkingConfig } from "./translation/dialect/thinking-ladder";
+import { toolAliasesFor, type ToolNameAlias } from "./codecs";
 
 interface CodecContext {
   readonly isOAuth?: boolean;
@@ -56,6 +57,7 @@ type CodecModule =
         body: ReadableStream<Uint8Array>,
         signal?: AbortSignal,
         isOAuth?: boolean,
+        aliases?: ReadonlyArray<ToolNameAlias>,
       ) => AsyncIterable<CanonicalEvent>;
     }
   | {
@@ -217,8 +219,16 @@ export function decodeWireStream(
     const codec = await loadCodec(wireFamily);
     if (codec.family === "messages") {
       // The Anthropic decoder does not take the canonical request: it rebuilds
-      // its state from the SSE frames alone.
-      yield* codec.decodeWireStream(body, context?.signal, context?.isOAuth ?? false);
+      // its state from the SSE frames alone. Tool-name aliases are the
+      // exception — they are recorded on the request object at encode time,
+      // so the registry reads them back here rather than threading a new
+      // parameter through every caller.
+      yield* codec.decodeWireStream(
+        body,
+        context?.signal,
+        context?.isOAuth ?? false,
+        toolAliasesFor(request),
+      );
       return;
     }
     if (codec.family === "chat") {

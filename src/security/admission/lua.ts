@@ -50,43 +50,53 @@ import {
  * Return codes: `0` reserved; `1` idempotent replay; `-1..-6` limit
  * rejections (mapped to GatewayErrors by `assertResult`); `-99` corrupt
  * counter state (never bypassed — admission fails closed).
+ *
+ * ARGV layout: 1 now(ms), 2 rpm window(ms), 3 estimated tokens,
+ * 4 rpm limit, 5 daily limit, 6 monthly limit, 7 lifetime budget,
+ * 8 concurrency limit, 9 reservation id, 10 lifetime seed,
+ * 11 tenant concurrency limit, 12 tenant id, 13 api key id,
+ * 14 lease ttl ms, 15 lease key ttl seconds, 16 concurrency tolerance.
+ *
+ * The window arrives as an argument rather than a literal so the Redis store
+ * and the in-memory store share `RPM_WINDOW_MS` (`ttl.ts`): both prune at
+ * `now - window` and an entry exactly one window old is expired on both sides.
  */
 export const RESERVE_SCRIPT = `
 local state = redis.call('HGET', KEYS[6], 'state')
 if state == 'active' or state == 'committed' or state == 'released' then return 1 end
-redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', tonumber(ARGV[1]) - 60000)
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', tonumber(ARGV[1]) - tonumber(ARGV[2]))
 local rpm = redis.call('ZCARD', KEYS[1])
 local daily = tonumber(redis.call('GET', KEYS[2]) or '0')
 local monthly = tonumber(redis.call('GET', KEYS[3]) or '0')
 local concurrent = tonumber(redis.call('GET', KEYS[4]) or '0')
 local tenantConcurrent = tonumber(redis.call('GET', KEYS[7]) or '0')
 local lifetime = 0
-if tonumber(ARGV[6]) then
+if tonumber(ARGV[7]) then
   local rawLifetime = redis.call('GET', KEYS[5])
-  lifetime = rawLifetime and tonumber(rawLifetime) or tonumber(ARGV[9])
+  lifetime = rawLifetime and tonumber(rawLifetime) or tonumber(ARGV[10])
   if not lifetime then return -99 end
   if not rawLifetime then redis.call('SET', KEYS[5], lifetime, 'EX', ${LIFETIME_COUNTER_TTL_SECONDS}) end
 end
-local estimated = tonumber(ARGV[2])
+local estimated = tonumber(ARGV[3])
 if not estimated or estimated < 0 then return -99 end
-if tonumber(ARGV[3]) and rpm >= tonumber(ARGV[3]) then return -1 end
-if tonumber(ARGV[4]) and daily + estimated > tonumber(ARGV[4]) then return -2 end
-if tonumber(ARGV[5]) and monthly + estimated > tonumber(ARGV[5]) then return -3 end
-if tonumber(ARGV[6]) and lifetime + estimated > tonumber(ARGV[6]) then return -4 end
--- ARGV[15] is the tolerance: slack above the configured limit, so the ceiling
+if tonumber(ARGV[4]) and rpm >= tonumber(ARGV[4]) then return -1 end
+if tonumber(ARGV[5]) and daily + estimated > tonumber(ARGV[5]) then return -2 end
+if tonumber(ARGV[6]) and monthly + estimated > tonumber(ARGV[6]) then return -3 end
+if tonumber(ARGV[7]) and lifetime + estimated > tonumber(ARGV[7]) then return -4 end
+-- ARGV[16] is the tolerance: slack above the configured limit, so the ceiling
 -- is the sum. It widens admission only; already-admitted requests are never
 -- revisited.
-if tonumber(ARGV[7]) and concurrent >= tonumber(ARGV[7]) + (tonumber(ARGV[15]) or 0) then return -5 end
-if tonumber(ARGV[10]) and tenantConcurrent >= tonumber(ARGV[10]) then return -6 end
-redis.call('ZADD', KEYS[1], ARGV[1], ARGV[8])
+if tonumber(ARGV[8]) and concurrent >= tonumber(ARGV[8]) + (tonumber(ARGV[16]) or 0) then return -5 end
+if tonumber(ARGV[11]) and tenantConcurrent >= tonumber(ARGV[11]) then return -6 end
+redis.call('ZADD', KEYS[1], ARGV[1], ARGV[9])
 redis.call('EXPIRE', KEYS[1], ${RPM_WINDOW_TTL_SECONDS})
-if tonumber(ARGV[4]) then redis.call('INCRBY', KEYS[2], estimated); redis.call('EXPIRE', KEYS[2], ${DAILY_COUNTER_TTL_SECONDS}) end
-if tonumber(ARGV[5]) then redis.call('INCRBY', KEYS[3], estimated); redis.call('EXPIRE', KEYS[3], ${MONTHLY_COUNTER_TTL_SECONDS}) end
-if tonumber(ARGV[6]) then redis.call('INCRBY', KEYS[5], estimated); redis.call('EXPIRE', KEYS[5], ${LIFETIME_COUNTER_TTL_SECONDS}) end
-if tonumber(ARGV[7]) then redis.call('INCR', KEYS[4]); redis.call('EXPIRE', KEYS[4], ${CONCURRENCY_TTL_SECONDS}) end
-if tonumber(ARGV[10]) then redis.call('INCR', KEYS[7]); redis.call('EXPIRE', KEYS[7], ${CONCURRENCY_TTL_SECONDS}) end
-redis.call('HSET', KEYS[6], 'state', 'active', 'reserved', estimated, 'daily', tonumber(ARGV[4]) and KEYS[2] or '', 'monthly', tonumber(ARGV[5]) and KEYS[3] or '', 'lifetime', tonumber(ARGV[6]) and KEYS[5] or '', 'concurrent', tonumber(ARGV[7]) and '1' or '0', 'concurrent_key', tonumber(ARGV[7]) and KEYS[4] or '', 'tenant_concurrent', tonumber(ARGV[10]) and '1' or '0', 'tenant_id', ARGV[11], 'api_key_id', ARGV[12], 'expires_at', tonumber(ARGV[1]) + tonumber(ARGV[13]))
-redis.call('EXPIRE', KEYS[6], tonumber(ARGV[14]))
+if tonumber(ARGV[5]) then redis.call('INCRBY', KEYS[2], estimated); redis.call('EXPIRE', KEYS[2], ${DAILY_COUNTER_TTL_SECONDS}) end
+if tonumber(ARGV[6]) then redis.call('INCRBY', KEYS[3], estimated); redis.call('EXPIRE', KEYS[3], ${MONTHLY_COUNTER_TTL_SECONDS}) end
+if tonumber(ARGV[7]) then redis.call('INCRBY', KEYS[5], estimated); redis.call('EXPIRE', KEYS[5], ${LIFETIME_COUNTER_TTL_SECONDS}) end
+if tonumber(ARGV[8]) then redis.call('INCR', KEYS[4]); redis.call('EXPIRE', KEYS[4], ${CONCURRENCY_TTL_SECONDS}) end
+if tonumber(ARGV[11]) then redis.call('INCR', KEYS[7]); redis.call('EXPIRE', KEYS[7], ${CONCURRENCY_TTL_SECONDS}) end
+redis.call('HSET', KEYS[6], 'state', 'active', 'reserved', estimated, 'daily', tonumber(ARGV[5]) and KEYS[2] or '', 'monthly', tonumber(ARGV[6]) and KEYS[3] or '', 'lifetime', tonumber(ARGV[7]) and KEYS[5] or '', 'concurrent', tonumber(ARGV[8]) and '1' or '0', 'concurrent_key', tonumber(ARGV[8]) and KEYS[4] or '', 'tenant_concurrent', tonumber(ARGV[11]) and '1' or '0', 'tenant_id', ARGV[12], 'api_key_id', ARGV[13], 'expires_at', tonumber(ARGV[1]) + tonumber(ARGV[14]))
+redis.call('EXPIRE', KEYS[6], tonumber(ARGV[15]))
 return 0
 `;
 

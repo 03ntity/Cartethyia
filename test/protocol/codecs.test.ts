@@ -41,7 +41,7 @@ import {
   normalizeAnthropicToolCallId,
   normalizeBearerToken,
   parseArguments,
-  prefixClaudeToolName,
+  claudeToolName,
   readBoolean,
   readNumber,
   readOutputIndex,
@@ -724,43 +724,43 @@ describe("completeRequiredSchema", () => {
   });
 });
 
-describe("prefixClaudeToolName / unprefixClaudeToolName", () => {
+describe("claudeToolName / unprefixClaudeToolName", () => {
   test("an OAuth caller's custom tool gets the underscore prefix", () => {
     // The prefix namespaces the operator's tools so they cannot shadow the
     // provider's built-ins on an OAuth (subscription) credential.
-    expect(prefixClaudeToolName("my_tool", true)).toBe("_my_tool");
+    expect(claudeToolName("my_tool", true)).toBe("_my_tool");
   });
 
   test("a non-OAuth caller is never prefixed", () => {
-    expect(prefixClaudeToolName("my_tool", false)).toBe("my_tool");
+    expect(claudeToolName("my_tool", false)).toBe("my_tool");
   });
 
   test("built-in tool names are never prefixed", () => {
     // The whole point: a provider built-in must keep its exact name or the
     // upstream does not recognise it.
     for (const name of ["web_search", "web_fetch", "code_execution", "text_editor", "computer"]) {
-      expect(prefixClaudeToolName(name, true)).toBe(name);
+      expect(claudeToolName(name, true)).toBe(name);
     }
   });
 
   test("the built-in check is case-insensitive", () => {
     // `name.toLowerCase()` — a caller sending `Web_Search` still matches, and the
     // ORIGINAL casing is returned.
-    expect(prefixClaudeToolName("Web_Search", true)).toBe("Web_Search");
-    expect(prefixClaudeToolName("WEB_SEARCH", true)).toBe("WEB_SEARCH");
+    expect(claudeToolName("Web_Search", true)).toBe("Web_Search");
+    expect(claudeToolName("WEB_SEARCH", true)).toBe("WEB_SEARCH");
   });
 
   test("unprefixing removes exactly one underscore", () => {
     // MEASURED: a name that already started with an underscore gains a second one
     // when prefixed, and unprefixing removes only the outer one. So the round trip
     // is lossless, which is the property that matters.
-    expect(prefixClaudeToolName("_already", true)).toBe("__already");
+    expect(claudeToolName("_already", true)).toBe("__already");
     expect(unprefixClaudeToolName("__already", true)).toBe("_already");
   });
 
   test("the round trip is lossless for a prefixed name", () => {
     for (const name of ["my_tool", "web_search", "_x", "a-b", "Ünïcödé"]) {
-      const prefixed = prefixClaudeToolName(name, true);
+      const prefixed = claudeToolName(name, true);
       expect(unprefixClaudeToolName(prefixed, true)).toBe(name);
     }
   });
@@ -1230,6 +1230,31 @@ describe("escapeHarmonyControlTokens", () => {
     const input = { k: "<|start|>" };
     escapeHarmonyControlTokensDeep(input);
     expect(input.k).toBe("<|start|>");
+  });
+
+  test("the deep variant returns the same reference when nothing matches", () => {
+    // Copy-on-change: the Codex encode path runs this on every request, so a
+    // payload with no control token must come back untouched — same object,
+    // same arrays, zero allocation of a parallel graph.
+    const input = {
+      model: "gpt-5",
+      messages: [{ role: "user", content: [{ type: "input_text", text: "hello" }] }],
+      tools: [{ name: "t", parameters: { type: "object", properties: {} } }],
+    };
+    const escaped = escapeHarmonyControlTokensDeep(input);
+    expect(escaped).toBe(input);
+    expect((escaped as typeof input).messages).toBe(input.messages);
+    expect((escaped as typeof input).messages[0]).toBe(input.messages[0]);
+  });
+
+  test("the deep variant copies only the branch that changed", () => {
+    const clean = { role: "user", content: "hi" };
+    const input = { a: clean, b: { nested: "<|start|>" } };
+    const escaped = escapeHarmonyControlTokensDeep(input) as typeof input;
+    expect(escaped).not.toBe(input);
+    expect(escaped.a).toBe(clean);
+    expect(escaped.b).not.toBe(input.b);
+    expect(escaped.b.nested).toBe("<\\|start\\|>");
   });
 });
 

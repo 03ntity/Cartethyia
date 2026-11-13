@@ -2,6 +2,8 @@ import type { ProviderDispatchTarget, ProviderId, ProviderAdapter, ProviderDispa
 import type { CanonicalRequest, WireFamily } from "../protocol/canonical-model";
 import { GatewayError } from "../protocol/gateway-error";
 import { OpenAICompatibleAdapter, withBearerAuthentication } from "./adapters/compatible-adapter";
+import type { ModelDefinition } from "./provider-model-definition";
+import type { ProviderModelDiscovery } from "./discovery/discovery-types";
 import { providerBaseUrl } from "./provider-metadata";
 import type { ProviderModule } from "./provider-registry";
 
@@ -180,6 +182,61 @@ export type OpenAIModelDiscoveryFactory = (
     readonly headers?: (credential: string) => Readonly<Record<string, string>>;
   },
 ) => ModelDiscoveryFactory;
+
+/**
+ * The request context a `ProviderModelDiscovery` receives, named once so the
+ * helpers below can speak about it without re-deriving the parameter type.
+ */
+export type ModelDiscoveryRequest = Parameters<ProviderModelDiscovery>[0];
+
+/**
+ * Builds the standard `loadModelDiscovery` wiring for a provider whose
+ * catalog comes from one exported `discover*Models` function.
+ *
+ * Every such provider repeated the same two-level lazy shape — the outer
+ * `async () =>` resolves the integration module on first discovery, the inner
+ * `async (request) =>` calls the export — so the seam lives here instead of
+ * twelve times in the registry. `discover` may take the whole request
+ * context or a narrower options object; `args` maps the request onto
+ * whichever shape the export declares (omit it when the context already
+ * fits).
+ */
+export function discoveryCapability<
+  M,
+  C = ModelDiscoveryRequest,
+  R extends readonly ModelDefinition[] | null = readonly ModelDefinition[] | null,
+>(
+  loadModule: () => Promise<M>,
+  discover: (module: M) => (context: C) => Promise<R>,
+  args?: (context: ModelDiscoveryRequest) => C,
+): ModelDiscoveryFactory {
+  return async () =>
+    async (request) => {
+      const module = await loadModule();
+      const context = args === undefined
+        ? (request as unknown as C)
+        : args(request);
+      return discover(module)(context);
+    };
+}
+
+/**
+ * Wraps a discovery function with a static-roster fallback: when discovery
+ * fails (`null`) or answers empty, the provider keeps serving the committed
+ * catalog rows instead of going dark. Providers whose roster lives beside the
+ * discovery export pass a one-line `loadRoster`; the import stays lazy
+ * because it only runs on the fallback path.
+ */
+export function withStaticRosterFallback(
+  discover: ProviderModelDiscovery,
+  loadRoster: () => Promise<readonly ModelDefinition[] | null>,
+): ProviderModelDiscovery {
+  return async (request) => {
+    const discovered = await discover(request);
+    if (discovered !== null && discovered.length > 0) return discovered;
+    return (await loadRoster()) ?? [];
+  };
+}
 
 const DISCOVERY_BACKED_PROVIDER_SPECS = {
   groq: VERSIONED_ROOT_API_KEY_SPECS.groq,

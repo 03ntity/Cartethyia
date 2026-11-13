@@ -24,8 +24,9 @@
  */
 
 import { GatewayError } from "../../../protocol/gateway-error";
-import type { CanonicalEvent, CanonicalStopReason } from "../../../protocol/canonical-model";
+import type { CanonicalEvent } from "../../../protocol/canonical-model";
 import { usageFromProvider, readReasoningText } from "../../provider-usage";
+import { mapChatFinishReason } from "../shared/cli-client-kit";
 import {
   classifyUpstreamError,
   extractUpstreamMessage,
@@ -299,16 +300,6 @@ function escapeJsonRawNewlines(data: string): string {
   return out;
 }
 
-function mapQoderFinishReason(raw: unknown): CanonicalStopReason | undefined {
-  if (raw === "stop") return "stop";
-  if (raw === "length") return "length";
-  if (raw === "tool_calls") return "tool_use";
-  if (raw === "content_filter") return "content_filter";
-  if (raw === "error") return "error";
-  if (raw === "refusal") return "refusal";
-  return undefined;
-}
-
 /**
  * Keys the stream's `raw_usage` (and top-level frame) carries that describe the
  * model that *actually* served the turn. The production COSY surface only
@@ -518,7 +509,7 @@ export async function* qoderBodyToCanonicalEvents(
     yield { type: "response_start", sequence_number: seq++, model } as CanonicalEvent;
   }
   if (hasTerminal && finishReason === undefined) finishReason = "stop";
-  const stopReason = mapQoderFinishReason(finishReason);
+  const stopReason = mapChatFinishReason(finishReason);
   const _providerStop = typeof finishReason === "string" ? finishReason : undefined;
   yield {
     type: "terminal",

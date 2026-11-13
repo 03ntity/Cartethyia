@@ -8,8 +8,9 @@
  * - Responses Lite reasoning override + body shape mutation
  */
 import type { CanonicalMessage, CanonicalRequest, ContentPart } from "../canonical-model";
-import { canContainToolResult, toolResultParts } from "../canonical-model";
+import { toolResultParts } from "../canonical-model";
 import { isWebSearchTool } from "../../protocol/translation/search";
+import { toolPairingSweep } from "../../protocol/translation/tool-pairing";
 import { reasoningEffortFromIntent } from "../../protocol/reasoning";
 import {
   decodeCodexToolCallId,
@@ -54,21 +55,11 @@ export function dropCodexAccessPrograms(
 function repairOrphanedCodexToolExchanges(
   messages: readonly CanonicalMessage[],
 ): readonly CanonicalMessage[] {
-  const calledIds = new Set<string>();
-  const resultedIds = new Set<string>();
-  for (const m of messages) {
-    if (m.role === "assistant") {
-      for (const p of m.content)
-        if (p.kind === "toolCall") calledIds.add(p.call_id);
-    } else if (canContainToolResult(m)) {
-      // Results live in `tool` turns or in `user` turns (the Messages ledger
-      // re-homes them). A `role === "tool"`-only scan missed every
-      // Messages-origin history, so its results read as orphaned and its
-      // calls as unanswered — the repair then rewrote a valid exchange.
-      for (const p of m.content)
-        if (p.kind === "toolResult") resultedIds.add(p.call_id);
-    }
-  }
+  // Shared pairing sweep (translation/tool-pairing.ts owns what "paired"
+  // means); the policy split — synthesize a result for an unanswered call,
+  // fold an unpaired result into a user note — stays here because the
+  // Responses wire rejects an unpaired `function_call_output` outright.
+  const { calledIds, resultedIds } = toolPairingSweep(messages);
   const orphanedCalls = new Set(
     [...calledIds].filter((id) => !resultedIds.has(id)),
   );

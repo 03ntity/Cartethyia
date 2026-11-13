@@ -39,6 +39,7 @@ import {
   resolveShareKeyPrefix,
 } from "./contracts";
 import type { SharedKeyActivityDetail, SharedKeySummary } from "../share/share-usage";
+import { validateReorderIds } from "../shared/reorder";
 import { popupImageBytes } from "./share-popup-image";
 
 const SHARED_CHILD_SORT_COLUMNS = new Set<SharedChildSortColumn>([
@@ -113,17 +114,11 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
   const operations = {
     async listKeys(access: AccessDecision | undefined, includeChildren = false): Promise<ApiKeyResponse[]> {
         const authorized = requireTenantScope(access, "dashboard:read");
-        const records = await config.store.list(authorized.tenantId);
-        const topLevel = records.filter(
-          (record) => record.revokedAt === undefined && record.parentKeyId === undefined,
-        );
-        // Share children are omitted from the main key list (they belong to a
-        // template), but the Banned Users search wants them so a child can be
-        // found and banned by hand.
-        const visible = includeChildren
-          ? records.filter((record) => record.revokedAt === undefined)
-          : topLevel;
-        return visible.map(sanitizeApiKeyResponse);
+        // The non-revoked / top-level filters live in the store query: without
+        // them this loaded the tenant's whole key table — every minted share
+        // child included — on each list call.
+        const records = await config.store.listForConsole(authorized.tenantId, { includeChildren });
+        return records.map(sanitizeApiKeyResponse);
     },
     async listActiveBannedKeys(access: AccessDecision | undefined): Promise<ApiKeyResponse[]> {
       const authorized = requireTenantScope(access, "dashboard:read");
@@ -134,25 +129,13 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
         the tenant has, so a partial list cannot silently renumber rows. */
     async reorderKeys(access: AccessDecision | undefined, keyIds: readonly string[]): Promise<void> {
         const authorized = requireTenantScope(access, "dashboard:write");
-        const records = await config.store.list(authorized.tenantId);
-        const reorderable = records.filter(
-          (record) => record.revokedAt === undefined && record.parentKeyId === undefined,
-        );
-        const known = new Set(reorderable.map((record) => record.id));
-        const seen = new Set<string>();
-        for (const keyId of keyIds) {
-          if (!known.has(keyId))
-            throw new ConsoleDomainError("key_not_found", 404, `Key not found: ${keyId}`);
-          if (seen.has(keyId))
-            throw new ConsoleDomainError("invalid_request", 422, `Duplicate key id: ${keyId}`);
-          seen.add(keyId);
-        }
-        if (seen.size !== known.size)
-          throw new ConsoleDomainError(
-            "invalid_request",
-            422,
-            "Reorder must list every key exactly once",
-          );
+        // Only the reorderable set is needed — live top-level keys — so the
+        // store query carries the same filters `listKeys` applies.
+        const records = await config.store.listForConsole(authorized.tenantId, { includeChildren: false });
+        validateReorderIds(keyIds, new Set(records.map((record) => record.id)), "key", {
+          code: "key_not_found",
+          status: 404,
+        });
         await config.store.reorder(authorized.tenantId, keyIds);
       },
     async getKeyDetail(access: AccessDecision | undefined, keyId: string): Promise<ApiKeyResponse> {
@@ -819,6 +802,18 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
       const current = await config.store.get(authorized.tenantId, keyId);
       if (!current || current.revokedAt !== undefined)
         throw new ConsoleDomainError("key_not_found", 404, "Key not found");
+      // The default gateway key cannot be banned: the ban is a timed or
+      // permanent refusal at the auth layer, and the row it names is the
+      // credential every gateway request and the CLI authenticate with —
+      // banning it is indistinguishable from disabling the installation, which
+      // the `enabled` toggle already expresses reversibly. Delete is refused
+      // for the same reason (`default_key_not_revocable`).
+      if (isDefaultGatewayApiKey(current))
+        throw new ConsoleDomainError(
+          "default_key_not_bannable",
+          409,
+          "The default gateway API key cannot be banned. Disable it instead.",
+        );
       const banned = await config.store.ban(authorized.tenantId, keyId, reason, bannedUntil);
       if (!banned) throw new ConsoleDomainError("key_not_found", 404, "Key not found");
       // A banned child key does not affect its share template or sibling keys:

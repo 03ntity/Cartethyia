@@ -190,24 +190,10 @@ export class AntigravityOAuthClient extends OAuthClient {
       timeoutMs: 15_000,
       label: "Antigravity token refresh",
     });
-    const body = payload as TokenResponse;
-    if (typeof body.access_token !== "string" || body.access_token.length === 0) {
-      throw new Error("Antigravity token response omitted access token");
-    }
-    if (
-      typeof body.expires_in !== "number" ||
-      !Number.isFinite(body.expires_in) ||
-      body.expires_in < 0
-    ) {
-      throw new Error("Antigravity token response omitted a valid expires_in");
-    }
-    return {
-      access: body.access_token,
-      ...(typeof body.refresh_token === "string" && body.refresh_token.length > 0
-        ? { refresh: body.refresh_token }
-        : {}),
-      expiresAt: new Date(Date.now() + body.expires_in * 1000),
-    };
+    // Shared token-response parse + refresh projection: validates access_token,
+    // carries a rotated refresh grant when Google issues one, and applies the
+    // documented expiry fallback.
+    return this.toRefreshResult(this.parseTokenResponse(payload, refreshToken));
   }
 }
 

@@ -10,6 +10,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import {
+  antigravityTierSuffix,
+  antigravityThinkingBudget,
   antigravityWireModelId,
   collapseAntigravityVariant,
   getAntigravityUserAgent,
@@ -414,5 +416,53 @@ describe("Antigravity wire model mapping & variant collapse", () => {
     expect(collapseAntigravityVariant("gemini-4-argon-high")).toBe("gemini-4-argon");
     expect(collapseAntigravityVariant("gemini-3.8-flash-low")).toBe("gemini-3.8-flash");
     expect(collapseAntigravityVariant("gemini-pro-agent")).toBe("gemini-3.1-pro");
+  });
+});
+
+describe("Antigravity effort-tier vocabulary (single owner)", () => {
+  test("tier suffixes resolve longest-match first", () => {
+    expect(antigravityTierSuffix("gemini-3.8-flash-extra-low")).toBe("extra-low");
+    expect(antigravityTierSuffix("gemini-3.8-flash-low")).toBe("low");
+    expect(antigravityTierSuffix("gemini-4-argon-medium")).toBe("medium");
+    expect(antigravityTierSuffix("gemini-4-argon-high")).toBe("high");
+    expect(antigravityTierSuffix("gemini-3.8-flash-tiered")).toBe("tiered");
+    expect(antigravityTierSuffix("gemini-3.8-flash")).toBeUndefined();
+  });
+
+  test("thinking budget follows the tier table for thinking-capable SKUs", () => {
+    // Claude routes always think; tiered ids take the tier budget.
+    expect(antigravityThinkingBudget("claude-sonnet-4-6")).toBe(10_000);
+    expect(antigravityThinkingBudget("claude-opus-4-6-thinking")).toBe(10_000);
+    // Gemini 3+ and the gemini-4 family (argon/carbon) are thinking-capable;
+    // the `-low`/`-medium`/`-high` deployments get that tier's budget.
+    expect(antigravityThinkingBudget("gemini-4-argon-low")).toBe(1_000);
+    expect(antigravityThinkingBudget("gemini-4-argon-medium")).toBe(4_000);
+    expect(antigravityThinkingBudget("gemini-4-argon-high")).toBe(10_000);
+    expect(antigravityThinkingBudget("gemini-4-carbon-low")).toBe(1_000);
+    expect(antigravityThinkingBudget("gemini-3.8-flash-medium")).toBe(4_000);
+    // A bare thinking-capable id falls back to the client's default budget.
+    expect(antigravityThinkingBudget("gemini-3.8-flash")).toBe(10_000);
+    expect(antigravityThinkingBudget("gemini-4-argon")).toBe(10_000);
+    expect(antigravityThinkingBudget("gemini-3.1-pro")).toBe(10_001);
+    // Earlier Gemini SKUs and GPT-OSS send no thinkingConfig.
+    expect(antigravityThinkingBudget("gemini-2.5-flash")).toBeUndefined();
+    expect(antigravityThinkingBudget("gemini-2.5-flash-thinking")).toBeUndefined();
+    expect(antigravityThinkingBudget("gpt-oss-120b-medium")).toBeUndefined();
+    expect(antigravityThinkingBudget("tab_flash_lite_preview")).toBeUndefined();
+  });
+
+  test("the default tier table is what wireModelId and collapseVariant share", () => {
+    // Every DEFAULT_TIER entry must round-trip: logical → wire → logical.
+    for (const [logical, tier] of [
+      ["gemini-3.6-flash", "low"],
+      ["gemini-3.7-flash", "low"],
+      ["gemini-3.8-flash", "low"],
+      ["gemini-4-argon", "low"],
+      ["gpt-oss-120b", "medium"],
+    ] as const) {
+      const wire = antigravityWireModelId(logical);
+      expect(wire).toBe(`${logical}-${tier}`);
+      expect(collapseAntigravityVariant(wire)).toBe(logical);
+    }
   });
 });

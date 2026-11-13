@@ -7,7 +7,7 @@
  * being absent breaks the caller". Every function here must degrade to a
  * no-op, and these assert exactly that.
  */
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
   deleteShared,
   publishInvalidation,
@@ -17,6 +17,9 @@ import {
   subscribeRoutingInvalidation,
   writeShared,
 } from "../../src/persistence/shared-cache";
+import { closeRedis, resolveRedisClient } from "../../src/persistence/redis";
+import { closeRedisSubscribers } from "../../src/persistence/redis-subscribers";
+import { testRedisUrl } from "../helpers/database";
 
 /**
  * These tests assert the no-Redis degradation: every shared-cache call must
@@ -28,6 +31,142 @@ import {
 const redisConfigured =
   (process.env.REDIS_URL?.trim() ?? "") !== "" ||
   (process.env.CARTETHYIA_TEST_REDIS_URL?.trim() ?? "") !== "";
+
+/**
+ * Subscriber lifecycle against a real Redis. These tests repoint
+ * `REDIS_URL` at the isolated test instance for their duration and restore
+ * every variable they touched afterwards — `resolveRedisClient` caches its
+ * client on `globalThis`, so the cached handle is cleared before and after
+ * too, or a suite running later in this process would keep talking to the
+ * test instance.
+ */
+const redisLifecycleDescribe = testRedisUrl ? describe : describe.skip;
+if (!testRedisUrl) {
+  console.info(
+    "[test-redis] skipped: set CARTETHYIA_TEST_REDIS_URL to run the subscriber lifecycle suite",
+  );
+}
+
+redisLifecycleDescribe("invalidation subscribers on real Redis", () => {
+  const savedEnv = {
+    REDIS_URL: process.env.REDIS_URL,
+    REDIS_PUBLIC_URL: process.env.REDIS_PUBLIC_URL,
+    REDISHOST: process.env.REDISHOST,
+    REDISPORT: process.env.REDISPORT,
+    REDISUSER: process.env.REDISUSER,
+    REDISPASSWORD: process.env.REDISPASSWORD,
+  };
+  const unsubscribes: (() => void)[] = [];
+
+  /** Subscribes and records the teardown so afterAll can always release it. */
+  function subscribe(handler: (notice: { namespace: string; key?: string }) => void): void {
+    unsubscribes.push(subscribeInvalidation(handler));
+  }
+
+  async function waitFor(predicate: () => boolean, timeoutMs = 3_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error("timed out waiting for pub/sub delivery");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
+  // Env and the cached client must be in place before the first subscription.
+  // `beforeAll` (not the describe body) is the earliest point that never runs
+  // for a skipped suite — `describe.skip` still evaluates its callback.
+  beforeAll(() => {
+    process.env.REDIS_URL = testRedisUrl;
+    delete process.env.REDIS_PUBLIC_URL;
+    delete process.env.REDISHOST;
+    delete process.env.REDISPORT;
+    delete process.env.REDISUSER;
+    delete process.env.REDISPASSWORD;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (globalThis as any).__cartethyiaRedis;
+  });
+
+  afterAll(async () => {
+    for (const unsubscribe of unsubscribes.splice(0)) unsubscribe();
+    await closeRedisSubscribers();
+    await closeRedis();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (globalThis as any).__cartethyiaRedis;
+    for (const [name, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  /**
+   * Waits until the subscriber connection's SUBSCRIBE has actually landed on
+   * the server — publishing before that races the handshake and the notice is
+   * legitimately missed.
+   */
+  async function waitForSubscription(): Promise<void> {
+    const client = resolveRedisClient();
+    if (client === undefined) throw new Error("expected a resolved Redis client");
+    const deadline = Date.now() + 3_000;
+    for (;;) {
+      const channels = (await client.pubsub("CHANNELS", "cartethyia:cache:invalidate")) as string[];
+      if (channels.includes("cartethyia:cache:invalidate")) return;
+      if (Date.now() > deadline) throw new Error("subscriber never appeared in PUBSUB CHANNELS");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  test("a foreign-origin notice reaches the subscriber; own echo is filtered", async () => {
+    // `publishInvalidation` stamps this process's ORIGIN, and the subscriber
+    // drops its own echo by design — so peer delivery is exercised by
+    // publishing the wire payload directly with a foreign origin, exactly what
+    // a peer process's publish looks like on the channel.
+    const seen: string[] = [];
+    subscribe((notice) => {
+      if (notice.namespace === "preferences") seen.push(notice.key ?? "");
+    });
+    await waitForSubscription();
+
+    const client = resolveRedisClient();
+    if (client === undefined) throw new Error("expected a resolved Redis client");
+    const foreignKey = `peer-${crypto.randomUUID()}`;
+    const selfKey = `self-${crypto.randomUUID()}`;
+    // Two publishes back to back: the foreign notice must arrive, the echo of
+    // this process's own origin must not.
+    await client.publish(
+      "cartethyia:cache:invalidate",
+      JSON.stringify({ namespace: "preferences", key: foreignKey, origin: "peer-process" }),
+    );
+    publishInvalidation({ namespace: "preferences", key: selfKey });
+
+    await waitFor(() => seen.includes(foreignKey));
+    // Give the self echo a beat to (not) arrive, then assert only the foreign
+    // notice was delivered.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(seen).toEqual([foreignKey]);
+  });
+
+  test("unsubscribing detaches the handler", async () => {
+    const seen: string[] = [];
+    subscribe((notice) => {
+      if (notice.namespace === "preferences") seen.push(notice.key ?? "");
+    });
+    await waitForSubscription();
+
+    const unsubscribe = unsubscribes.pop()!;
+    unsubscribe();
+    const client = resolveRedisClient();
+    if (client === undefined) throw new Error("expected a resolved Redis client");
+    await client.publish(
+      "cartethyia:cache:invalidate",
+      JSON.stringify({
+        namespace: "preferences",
+        key: `after-${crypto.randomUUID()}`,
+        origin: "peer-process",
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(seen).toHaveLength(0);
+  });
+});
 
 describe("shared cache without Redis", () => {
   test("a read is a miss, not an error", async () => {

@@ -7,6 +7,7 @@ import {
   LEASE_KEY_TTL_SECONDS,
   LEASE_TTL_MS,
   MONTHLY_COUNTER_TTL_SECONDS,
+  RPM_WINDOW_MS,
   dailyBucket,
   monthlyBucket,
 } from "./ttl";
@@ -48,6 +49,9 @@ export class RedisAdmissionCounterStore implements AdmissionCounterStore {
       keys.length,
       ...keys,
         String(request.now),
+        // ARGV[2]: the sliding RPM window, shared with the in-memory store via
+        // `RPM_WINDOW_MS` so both prune at the same cutoff.
+        String(RPM_WINDOW_MS),
         String(request.estimatedTokens),
         request.rpmLimit == null ? "" : String(request.rpmLimit),
         request.dailyLimit == null ? "" : String(request.dailyLimit),

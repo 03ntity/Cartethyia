@@ -22,6 +22,7 @@
 // no URL configured, and every function here degrades to the in-process path —
 // the same behaviour the tree has always had when Redis is unset.
 import { resolveRedisClient, type RedisClient } from "./redis";
+import { trackRedisSubscriber } from "./redis-subscribers";
 
 /** Channel carrying cross-process invalidation notices. */
 const INVALIDATION_CHANNEL = "cartethyia:cache:invalidate";
@@ -192,11 +193,12 @@ export function subscribeInvalidation(
 ): () => void {
   const client = resolveRedisClient();
   if (client === undefined) return () => undefined;
-  // One subscriber connection for the process. ioredis puts a connection into
+  // One subscriber connection per subscription: ioredis puts a connection into
   // subscriber mode permanently, so reusing the shared client for pub/sub
-  // would take it out of normal command service.
+  // would take it out of normal command service. The connection is tracked in
+  // `redis-subscribers.ts` so `closeRedis()` can reach it — an untracked
+  // duplicate would otherwise survive shutdown (and every `bun --hot` reload).
   const subscriber = client.duplicate();
-  let closed = false;
   const onMessage = (channel: string, payload: string): void => {
     if (channel !== INVALIDATION_CHANNEL) return;
     try {
@@ -211,10 +213,7 @@ export function subscribeInvalidation(
   };
   void subscriber.subscribe(INVALIDATION_CHANNEL).catch(() => undefined);
   subscriber.on("message", onMessage);
-  return () => {
-    if (closed) return;
-    closed = true;
+  return trackRedisSubscriber(client, subscriber, () => {
     subscriber.off("message", onMessage);
-    void subscriber.quit().catch(() => undefined);
-  };
+  });
 }

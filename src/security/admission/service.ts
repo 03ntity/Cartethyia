@@ -163,6 +163,14 @@ export class ApiKeyAdmissionService {
         if (finalized) return;
         const actual = usageTokens(usage);
         await this.store.reconcile(apiKeyId, estimatedTokens, actual, reservationId);
+        // `finalized` is set only after the await, so two *concurrent*
+        // commitUsage calls on this lease could both pass the guard. Verified
+        // unreachable: the lease's only caller is `completeAttempt`, which sets
+        // `state.completed` synchronously before its first await, and every
+        // dispatch path funnels through that one guard — a retried completion
+        // returns early and never reaches this function twice. The store side
+        // is idempotent regardless (Redis reconcile no-ops on a committed
+        // lease; the in-memory store returns early on non-active state).
         finalized = true;
         // Persist the spend against BOTH the authenticating key and the family
         // owner. The authenticating key (`snapshot.api_key_id`, the child for

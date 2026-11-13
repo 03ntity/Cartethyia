@@ -19,16 +19,20 @@
  * The reply is judged by the body, never the HTTP status: `0` claimed, `1003`
  * already claimed, `3007` the app's Aliyun attestation is missing.
  */
-import { createHash } from "node:crypto";
 import { sleep } from "../../../shared/sleep";
 import { asRecord, asTrimmedString } from "../../../shared/coerce";
 import type { ValidatedFetch } from "../../../network/egress/fetch";
+import {
+  ZAI_APP_VERSION,
+  ZAI_PLATFORM,
+  zaiAppHeaders,
+  zaiEnvelopeData,
+  zaiEnvelopeOk,
+} from "../zcode/zai-envelope";
 
 const ZCODE = "https://zcode.z.ai";
 const BILLING = `${ZCODE}/api/v1/zcode-plan/billing`;
 const TOUCH = `${ZCODE}/api/v1/marketing/touch`;
-const APP_VERSION = "3.16.3";
-const PLATFORM = "linux-x64";
 const TIMEOUT_MS = 15_000;
 const CLAIMED_ALREADY = 1003;
 const CAPTCHA = 3007;
@@ -44,23 +48,10 @@ export interface ZcodeGiftResult {
   readonly detail: string | null;
 }
 
-/** Stable per account — a per-request device id is itself a jitter signal. */
-function deviceMid(accountId: string): string {
-  const hash = createHash("sha256").update(`zcode-device\0${accountId}`).digest("hex");
-  const variant = ((parseInt(hash[16] as string, 16) & 3) | 8).toString(16);
-  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
-}
-
 function headers(credential: string, accountId: string): Record<string, string> {
-  return {
-    Authorization: `Bearer ${credential}`,
-    Accept: "application/json",
-    "Content-Type": "application/json",
-    "X-Device-Mid": deviceMid(accountId),
-    "X-Client-Language": "en-US",
-    "X-ZCode-App-Version": APP_VERSION,
-    "X-Platform": PLATFORM,
-  };
+  // The shared app-identity set is lowercase; the claim POST needs an explicit
+  // JSON content type (the GETs do not send a body).
+  return { ...zaiAppHeaders(credential, accountId), "content-type": "application/json" };
 }
 
 /** The claim actions a marketing delivery offers, and the plan's own name. */
@@ -112,13 +103,23 @@ async function read(
     });
   }
   const payload = asRecord(await response.json().catch(() => null));
-  if (!response.ok || !payload || payload["success"] === false) return { ok: false, data: null };
-  const code = payload["code"];
-  if (![0, 200, "0", "200"].includes(code as string | number)) return { ok: false, data: null };
-  // Successful empty lists omit data (or return null) on the app endpoints.
+  // A body asserting nothing at all (no `code`, `success`, or `data` key) is
+  // not a successful envelope — the ok-code verdict alone cannot tell it from
+  // `{}`. Every real response on these endpoints carries at least one of the
+  // three.
+  if (
+    !response.ok ||
+    payload === undefined ||
+    !zaiEnvelopeOk(payload) ||
+    !("code" in payload || "success" in payload || "data" in payload)
+  ) {
+    return { ok: false, data: null };
+  }
+  // Successful empty lists omit data (or return null) on the app endpoints;
+  // a present-but-unreadable `data` is a failed read, not an empty list.
   if (payload["data"] == null) return { ok: true, data: null };
-  const data = asRecord(payload["data"]);
-  return { ok: data !== undefined && data !== null, data: data ?? null };
+  const data = zaiEnvelopeData(payload);
+  return { ok: data !== null, data };
 }
 
 /**
@@ -160,7 +161,7 @@ async function toClaim(
   try {
     const preview = await read(
       fetcher,
-      `${BILLING}/preview?app_version=${APP_VERSION}&platform=${PLATFORM}`,
+      `${BILLING}/preview?app_version=${ZAI_APP_VERSION}&platform=${ZAI_PLATFORM}`,
       credential,
       accountId,
     );

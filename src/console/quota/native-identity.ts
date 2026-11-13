@@ -7,7 +7,7 @@
  * the device-uniqueness invariant lives in the store (and the partial unique
  * index behind it).
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import { providerAccounts, type NativeIdentityRecord } from "../../persistence/schema";
@@ -19,6 +19,7 @@ import {
 import { qoderRealmForProvider } from "../../providers/integrations/qoder/qoder-realm";
 import { ConsoleDomainError, requireGlobalAdmin, requireTenantScope } from "../shared/errors";
 import type { ConsoleAccessResolver } from "../auth/access";
+import { loadAccountRow } from "./account-quota-shared";
 
 /** True when `token` looks like a plausible machine token. */
 function isValidNativeIdentityToken(token: string): boolean {
@@ -50,19 +51,7 @@ async function loadAccount(
   accountId: string,
   tenantId: string | null,
 ): Promise<{ providerId: string; nativeIdentity: NativeIdentityRecord | null } | undefined> {
-  const rows = await db
-    .select({
-      providerId: providerAccounts.providerId,
-      nativeIdentity: providerAccounts.nativeIdentity,
-    })
-    .from(providerAccounts)
-    .where(
-      tenantId === null
-        ? and(eq(providerAccounts.id, accountId), isNull(providerAccounts.tenantId))
-        : and(eq(providerAccounts.id, accountId), eq(providerAccounts.tenantId, tenantId)),
-    )
-    .limit(1);
-  return rows[0];
+  return loadAccountRow(db, accountId, tenantId);
 }
 
 export interface NativeIdentityOps {

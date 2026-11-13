@@ -55,7 +55,7 @@ function fbModel(options: {
 }
 
 /** Raw `m-<hex>` roster floor seeded from the live catalog (13 rows, real context windows). */
-const FREEBUFF_ROSTER: readonly ReturnType<typeof defineModel>[] = [
+export const FREEBUFF_ROSTER: readonly ReturnType<typeof defineModel>[] = [
   fbModel({ id: "m-096e75164d", ctx: 1_048_576, vision: true, reasoning: true, reasoningEfforts: ["low", "high", "max"], toolCall: true, free: true, freeTier: true }),            // DeepSeek Fast
   fbModel({ id: "m-8db1ccbba6", ctx: 1_048_576, vision: true, reasoning: true, reasoningEfforts: ["low", "high"], toolCall: true, free: true, freeTier: true }),            // DeepSeek
   fbModel({ id: "m-61c26317cc", ctx: 1_048_576, vision: true, reasoning: true, toolCall: true, free: true, freeTier: true }),            // DeepSeek Slow

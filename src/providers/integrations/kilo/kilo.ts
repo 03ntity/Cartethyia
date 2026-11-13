@@ -16,9 +16,9 @@
  * Code publishes (`/api/openrouter/chat/completions`) and it is not derivable
  * from an origin plus a wire-family suffix.
  */
-import { defineModel } from "../../provider-model-definition";
-import { openrouterFreeRoster } from "../../discovery/openrouter-free-roster";
 import type { ModelDefinition } from "../../provider-model-definition";
+import { catalogRows } from "../shared/catalog-rows";
+import { openrouterFreeRoster } from "../../discovery/openrouter-free-roster";
 import type { ProviderAdapter, ProviderDispatchContext, ProviderDispatchTarget } from "../../provider-contracts";
 import type { CanonicalRequest } from "../../../protocol/canonical-model";
 import { OpenAICompatibleAdapter, withBearerAuthentication } from "../../adapters/compatible-adapter";
@@ -38,34 +38,35 @@ export const KILO_BASE_URL = providerBaseUrl("kilo");
  */
 export const KILO_ENDPOINT_PATH = "/chat/completions" as const;
 
-interface KiloModelOptions {
-  readonly vision?: boolean;
-  readonly document?: boolean;
-  readonly audio?: boolean;
-  readonly reasoning?: boolean;
-  readonly toolCall?: boolean;
-}
-
-function kiloModel(
-  modelId: string,
+type KiloCatalogRow = readonly [
+  id: string,
   contextLimit: number,
   outputLimit: number,
-  options: KiloModelOptions = {},
-): ModelDefinition {
-  return defineModel({
-    id: modelId,
-    providerId: KILO_PROVIDER_ID,
+  options?: {
+    readonly vision?: boolean;
+    readonly document?: boolean;
+    readonly audio?: boolean;
+    readonly reasoning?: boolean;
+    readonly toolCall?: boolean;
+  },
+];
+
+const kiloModel = catalogRows<KiloCatalogRow>({
+  providerId: KILO_PROVIDER_ID,
+  caps: {
     wireFamily: "chat",
     endpoint: KILO_ENDPOINT_PATH,
+  },
+  translate: ([, contextLimit, outputLimit, options]) => ({
     ctx: contextLimit,
     out: outputLimit,
-    vision: options.vision ?? false,
-    document: options.document ?? false,
-    audio: options.audio ?? false,
-    reasoning: options.reasoning ?? false,
-    toolCall: options.toolCall ?? true,
-  });
-}
+    vision: options?.vision ?? false,
+    document: options?.document ?? false,
+    audio: options?.audio ?? false,
+    reasoning: options?.reasoning ?? false,
+    toolCall: options?.toolCall ?? true,
+  }),
+});
 
 /**
  * Static fallback catalog, read from the live `/api/gateway/models` directory.
@@ -77,7 +78,7 @@ function kiloModel(
  * `supported_parameters` fields rather than from the base catalog, which prices
  * the underlying model and not this reseller's serving.
  */
-export const KILO_MODELS: readonly ModelDefinition[] = [
+export const KILO_MODELS: readonly ModelDefinition[] = ([
   // Three routers, and nothing else. A committed catalog of specific ids was a
   // snapshot of one afternoon: this provider resells the OpenRouter catalog,
   // which adds and pulls models within days, so discovery is the authority and
@@ -86,9 +87,9 @@ export const KILO_MODELS: readonly ModelDefinition[] = [
   // `kilo-auto/free` bills zero and `kilo-auto/small` bills a fraction of a
   // cent; both route on the provider's own side, so their limits are the
   // window the router may select into rather than one model's.
-  kiloModel("kilo-auto/free", 256_000, 32_768, { reasoning: true }),
-  kiloModel("kilo-auto/small", 262_144, 32_768, { vision: true, reasoning: true }),
-];
+  ["kilo-auto/free", 256_000, 32_768, { reasoning: true }],
+  ["kilo-auto/small", 262_144, 32_768, { vision: true, reasoning: true }],
+] as const satisfies readonly KiloCatalogRow[]).map(kiloModel);
 
 /**
  * The shared free roster, spelled for this provider's endpoint.

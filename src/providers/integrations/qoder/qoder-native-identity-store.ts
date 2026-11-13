@@ -3,10 +3,10 @@
  * account.
  *
  * Same-account probes found that daily 100-credit grant visibility does not
- * depend on machine headers. This store preserves native identities and seeds
- * for deterministic replay and other surfaces that may use device identity.
- * A native identity is a deterministic function of a seed file
- * (`~/.config/.locale_cfg`). The bound record lives in
+ * depend on machine headers. This store preserves native identities for
+ * surfaces that may use device identity. A native identity is a deterministic
+ * function of the host fingerprint and the account id (see `qoder-umid.ts`).
+ * The bound record lives in
  * `provider_accounts.native_identity` (plain JSON, not a secret).
  *
  * Uniqueness of the device is enforced by the partial unique index on the
@@ -23,7 +23,6 @@ import {
 import {
   readMachineIdentityCache,
   readMachineIdentityCacheEvenExpired,
-  sampleIdentityWithVote,
   writeMachineIdentityCache,
 } from "./qoder-identity-cache";
 
@@ -95,26 +94,22 @@ function withAllocationLock<T>(work: () => Promise<T>): Promise<T> {
   return next;
 }
 
-/** Identity minting injected for tests; defaults to the real bridge. */
+/** Identity minting injected for tests; defaults to the OS-derived mint. */
 export type NativeIdentityMinter = (accountId?: string) => { identity: QoderNativeIdentity; seed: string } | null;
-export type NativeIdentityReplayer = (seed: string, accountId?: string) => QoderNativeIdentity | null;
 
 const defaultMinter: NativeIdentityMinter = (accountId = "") => ({ identity: mintQoderOsIdentity(accountId), seed: "" });
-const defaultReplayer: NativeIdentityReplayer = () => null;
 
 /**
- * Mints and binds a fresh device identity for an account: runs the bridge
- * with a cleared seed, captures the new seed, and persists both. Returns the
- * bound record, or `null` when the bridge fails.
+ * Mints and binds a fresh device identity for an account and persists both.
+ * Returns the bound record, or `null` when no free identity could be minted.
  *
  * `avoidToken` optionally excludes the account's own current token so a
  * regenerate moves to a *different* device.
  *
  * The disk cache (per realm) is checked first — a cached native identity is
- * reused without re-running the bridge, so container rebuilds keep the same
- * device. When no cache exists, a majority vote stabilizes the bridge's VM
- * jitter. If the bridge fails entirely, the cached identity (even expired)
- * is preferred over a generated one.
+ * reused without re-minting, so container rebuilds keep the same device. If
+ * the mint fails entirely, the cached identity (even expired) is preferred
+ * over a generated one.
  */
 export function allocateQoderNativeIdentity(
   store: QoderNativeIdentityStore,
@@ -123,7 +118,6 @@ export function allocateQoderNativeIdentity(
   options: {
     readonly avoidToken?: string;
     readonly mint?: NativeIdentityMinter;
-    readonly replayer?: NativeIdentityReplayer;
     readonly realm?: string;
     readonly env?: NodeJS.ProcessEnv;
   } = {},
@@ -153,12 +147,13 @@ export function allocateQoderNativeIdentity(
       }
     }
 
-    // 2. No valid cache — sample with a majority vote (stabilizes VM jitter).
-    const voted = sampleIdentityWithVote(mint, accountId);
-    if (voted) {
+    // 2. No valid cache — mint a fresh identity, re-minting on a collision
+    //    with an occupied or avoided token (bounded attempts).
+    const firstMint = mint(accountId);
+    if (firstMint) {
       const occupied = await store.occupied(accountId);
       for (let i = 0; i < 6; i += 1) {
-        const minted = i === 0 ? voted : mint(accountId);
+        const minted = i === 0 ? firstMint : mint(accountId);
         if (!minted) return null;
         const token = minted.identity.machineToken;
         if (occupied.has(token)) continue; // collision (rare) → mint again
@@ -185,7 +180,7 @@ export function allocateQoderNativeIdentity(
       return null;
     }
 
-    // 3. Bridge failed entirely — fall back to the cached identity even if
+    // 3. The mint failed entirely — fall back to the cached identity even if
     //    expired. A real identity is better than a generated one.
     const evenExpired = readMachineIdentityCacheEvenExpired(realm, env);
     if (evenExpired) {
@@ -201,22 +196,4 @@ export function allocateQoderNativeIdentity(
 
     return null;
   });
-}
-
-/**
- * Ensures the bound identity is currently active on this host: replays the
- * stored seed so the bridge yields the same token. Returns `false` when the
- * account has no bound identity or replay failed.
- */
-export async function ensureQoderNativeIdentity(
-  store: QoderNativeIdentityStore,
-  providerId: string,
-  accountId: string,
-  replayer: NativeIdentityReplayer = defaultReplayer,
-): Promise<boolean> {
-  const record = await store.get(providerId, accountId);
-  if (!record) return false;
-  if (!record.seed) return true; // no seed captured → assume already active
-  const identity = replayer(record.seed, accountId);
-  return identity !== null && identity.machineToken === record.machineToken;
 }

@@ -1,5 +1,5 @@
 import { resolveImageSource, splitDataUrl } from "../codecs";
-import type { CanonicalRequest, ContentPart } from "../canonical-model";
+import type { CanonicalMessage, CanonicalRequest, ContentPart } from "../canonical-model";
 import { log } from "../../observability/logger";
 
 /**
@@ -208,27 +208,38 @@ export function dropCorruptAttachments(
 ): AttachmentIntegrityResult {
   const dropped: DroppedAttachment[] = [];
 
+  // Rebuild-on-hit: a message whose parts are all clean keeps its identity,
+  // and the request keeps its own when nothing was dropped — the prepare path
+  // runs this on every request, so an unchanged history must not pay a
+  // full message-list clone.
   const strip = (
     parts: readonly ContentPart[],
     messageIndex: number,
-  ): readonly ContentPart[] =>
-    parts.flatMap((part): ContentPart[] => {
-      if (part.kind !== "image") return [part];
-      const defect = inlineDefect(part);
-      if (defect === undefined) return [part];
+  ): readonly ContentPart[] => {
+    let next: ContentPart[] | undefined;
+    for (const [index, part] of parts.entries()) {
+      const defect = part.kind === "image" ? inlineDefect(part) : undefined;
+      if (defect === undefined) {
+        if (next !== undefined) next.push(part);
+        continue;
+      }
       dropped.push({ defect, messageIndex });
-      return [
-        {
-          kind: "text",
-          text: `[attachment dropped: ${DEFECT_TEXT[defect]}]`,
-        },
-      ];
-    });
+      if (next === undefined) next = parts.slice(0, index);
+      next.push({ kind: "text", text: `[attachment dropped: ${DEFECT_TEXT[defect]}]` });
+    }
+    return next ?? parts;
+  };
 
-  const messages = request.messages.map((message, index) => ({
-    ...message,
-    content: strip(message.content, index),
-  }));
+  let messages: CanonicalMessage[] | undefined;
+  for (const [index, message] of request.messages.entries()) {
+    const content = strip(message.content, index);
+    if (content === message.content) {
+      messages?.push(message);
+      continue;
+    }
+    if (messages === undefined) messages = request.messages.slice(0, index);
+    messages.push({ ...message, content });
+  }
   const system =
     request.system === undefined ? request.system : strip(request.system, -1);
 
@@ -242,7 +253,11 @@ export function dropCorruptAttachments(
     dropped: dropped.map((d) => `${d.defect}@msg${d.messageIndex}`),
   });
   return {
-    request: { ...request, messages, ...(system === undefined ? {} : { system }) },
+    request: {
+      ...request,
+      ...(messages === undefined ? {} : { messages }),
+      ...(system === undefined || system === request.system ? {} : { system }),
+    },
     dropped,
   };
 }

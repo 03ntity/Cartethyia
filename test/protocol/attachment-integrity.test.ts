@@ -109,6 +109,29 @@ describe("dropCorruptAttachments", () => {
     expect(result.dropped.map((d) => d.defect)).toEqual(["unrecognized_signature"]);
   });
 
+  it("returns the same request reference when nothing is dropped", () => {
+    // The prepare path runs this on every request: a clean history must not
+    // pay a full message-list clone.
+    const request = imageRequest(
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    );
+    const result = dropCorruptAttachments(request);
+    expect(result.request).toBe(request);
+    expect(result.request.messages[0]).toBe(request.messages[0]);
+  });
+
+  it("keeps untouched message identities when one attachment drops", () => {
+    const clean: CanonicalRequest["messages"][number] = {
+      role: "user",
+      content: [{ kind: "text", text: "look at this" }],
+    };
+    const request = imageRequest(png([badChunk("IDAT", new Uint8Array(64))]));
+    (request as { messages: unknown }).messages = [clean, ...request.messages];
+    const result = dropCorruptAttachments(request);
+    expect(result.request.messages[0]).toBe(clean);
+    expect(result.request.messages[1]).not.toBe(request.messages[1]);
+  });
+
   it("forwards a well-formed PNG untouched", () => {
     // The 1x1 fixture carries real CRCs, so nothing should be dropped.
     const valid =

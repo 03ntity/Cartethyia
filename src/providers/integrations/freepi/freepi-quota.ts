@@ -10,25 +10,9 @@
 import type { FetchLike, ProviderQuotaResult, ProviderQuotaWindow } from "../../quota/quota-contracts";
 import { cleanError, percentWindow, text } from "../../quota/quota-contracts";
 import type { QuotaCollectionContext } from "../../quota/quota-support";
+import { quotaUnreadable, readJsonOk } from "../shared/cli-client-kit";
 import { buildFreepiHeaders } from "./freepi-headers";
 import { FREEPI_BASE_URL } from "./freepi-realm";
-
-function readMe(baseUrl: string, credential: string, fetcher: FetchLike): Promise<Record<string, unknown> | null> {
-  return fetcher(new URL("/me", baseUrl), {
-    method: "GET",
-    headers: buildFreepiHeaders(credential),
-    signal: AbortSignal.timeout(15_000),
-  })
-    .then(async (res) => {
-      if (!res.ok) return null;
-      try {
-        return (await res.json()) as Record<string, unknown>;
-      } catch {
-        return null;
-      }
-    })
-    .catch(() => null);
-}
 
 /** Reads the account quota and returns a normalized result. */
 export async function fetchFreepiQuota(
@@ -37,14 +21,9 @@ export async function fetchFreepiQuota(
   _context?: QuotaCollectionContext,
 ): Promise<ProviderQuotaResult> {
   try {
-    const me = await readMe(FREEPI_BASE_URL, credential, fetcher);
+    const me = await readJsonOk(fetcher, new URL("/me", FREEPI_BASE_URL), buildFreepiHeaders(credential));
     if (!me) {
-      return {
-        source: "freepi",
-        plan: null,
-        windows: [],
-        error: "free-pi /me unavailable",
-      };
+      return quotaUnreadable("freepi", "free-pi /me unavailable");
     }
     const plan = me["tier"] === undefined ? null : text(me["tier"]);
     const windows: ProviderQuotaWindow[] = [];
@@ -123,6 +102,6 @@ export async function fetchFreepiQuota(
       ...(typeof handle === "string" && handle.trim() ? { accountLabel: handle } : {}),
     };
   } catch (error) {
-    return { source: "freepi", plan: null, windows: [], error: cleanError(error) };
+    return quotaUnreadable("freepi", cleanError(error));
   }
 }

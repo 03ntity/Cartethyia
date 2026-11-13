@@ -95,8 +95,6 @@ export { fetchQoderQuota, fetchQoderCnQuota } from "./qoder-quota";
 export {
   mintQoderOsIdentity,
   collectOsFingerprint,
-  mintQoderNativeIdentity,
-  replayQoderNativeIdentity,
   mintQoderGeneratedIdentity,
   qoderMachineHeaders,
 } from "./qoder-umid";
@@ -104,9 +102,8 @@ export type { QoderNativeIdentity } from "./qoder-umid";
 export {
   DrizzleQoderNativeIdentityStore,
   allocateQoderNativeIdentity,
-  ensureQoderNativeIdentity,
 } from "./qoder-native-identity-store";
-export type { QoderNativeIdentityStore, NativeIdentityMinter, NativeIdentityReplayer } from "./qoder-native-identity-store";
+export type { QoderNativeIdentityStore, NativeIdentityMinter } from "./qoder-native-identity-store";
 
 // Check-in / claims
 export {

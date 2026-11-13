@@ -68,3 +68,55 @@ export function normalizeInlineFile(raw: RawFileBlock): { data: unknown; media_t
     media_type: declared ?? split?.mediaType ?? "application/octet-stream",
   };
 }
+
+/**
+ * Assembles a canonical `file` content part from already-extracted fields.
+ * Each surface parser owns its wire shape (envelope unwrap, field
+ * precedence); this keeps the emitted part identical across them — optional
+ * fields appear only when defined, matching the hand-written spreads this
+ * replaces.
+ */
+export function fileContentPart(fields: {
+  readonly data: unknown;
+  readonly media_type: string;
+  readonly filename?: string | undefined;
+  readonly file_id?: string | undefined;
+  readonly url?: string | undefined;
+}): ContentPart {
+  return {
+    kind: "file",
+    data: fields.data,
+    media_type: fields.media_type,
+    ...(fields.filename === undefined ? {} : { filename: fields.filename }),
+    ...(fields.file_id === undefined ? {} : { file_id: fields.file_id }),
+    ...(fields.url === undefined ? {} : { url: fields.url }),
+  };
+}
+
+/**
+ * Assembles a canonical `document` content part. Same contract as
+ * {@link fileContentPart}: parsers extract their dialect's fields first and
+ * hand the normalized values here, so the optional-field spreads stay in one
+ * place. `source_type`/`url`/`file_id`/`citations` are emitted only by the
+ * surfaces whose wire vocabulary carries them.
+ */
+export function documentContentPart(fields: {
+  readonly data: unknown;
+  readonly media_type: string;
+  readonly title?: string | undefined;
+  readonly citations?: boolean | undefined;
+  readonly source_type?: "base64" | "url" | "file" | "text" | undefined;
+  readonly url?: string | undefined;
+  readonly file_id?: string | undefined;
+}): ContentPart {
+  return {
+    kind: "document",
+    data: fields.data,
+    media_type: fields.media_type,
+    ...(fields.title === undefined ? {} : { title: fields.title }),
+    ...(fields.citations === undefined ? {} : { citations: fields.citations }),
+    ...(fields.source_type === undefined ? {} : { source_type: fields.source_type }),
+    ...(fields.url === undefined ? {} : { url: fields.url }),
+    ...(fields.file_id === undefined ? {} : { file_id: fields.file_id }),
+  };
+}

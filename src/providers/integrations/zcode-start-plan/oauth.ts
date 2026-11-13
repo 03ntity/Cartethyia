@@ -28,6 +28,8 @@ import type {
 } from "../../authentication/oauth-flow-store";
 import { asRecord } from "../../../shared/coerce";
 import { parseJwt } from "../../authentication/jwt-validator";
+import { zaiEnvelopeOk } from "../zcode/zai-envelope";
+import { staticExchangeResult } from "../shared/oauth-exchange";
 
 const ZCODE_BASE = "https://zcode.z.ai" as const;
 const INIT_URL = `${ZCODE_BASE}/api/v1/oauth/cli/init` as const;
@@ -115,9 +117,7 @@ export class ZcodeStartPlanOAuthClient extends OAuthDeviceFlow {
       return { status: "failed", reason: `sign-in poll failed (${response.status})` };
     }
     const payload = asRecord(await readJsonResponse(response, `${this.providerLabel} sign-in poll`));
-    const code = payload?.["code"];
-    if (!payload || payload["success"] === false ||
-      (code !== undefined && ![0, 200, "0", "200"].includes(code as string | number))) {
+    if (!payload || !zaiEnvelopeOk(payload)) {
       return { status: "failed", reason: "ZCode sign-in poll was rejected" };
     }
     const ready = asRecord(payload?.data);
@@ -138,15 +138,18 @@ export class ZcodeStartPlanOAuthClient extends OAuthDeviceFlow {
     if (!email && (typeof userId !== "string" || !userId)) {
       return { status: "failed", reason: "sign-in token has no account identity" };
     }
-    const result: OAuthExchangeResult = {
+    // No refresh grant exists for this token; the account is stored as static
+    // (`refresh: ""` — the NOT NULL slot carries no grant). The shared builder
+    // keeps the JWT `exp` when present and the documented storage horizon
+    // otherwise, and carries the auth_state the plan lane needs at dispatch.
+    const result: OAuthExchangeResult = staticExchangeResult({
       access: token,
-      // No refresh grant exists for this token; the account is stored as static.
       refresh: "",
       expiresAt: new Date(typeof claims?.exp === "number" && Number.isFinite(claims.exp)
         ? claims.exp * 1000 : Date.now() + NO_EXPIRY_MS),
       accountLabel: email || String(userId),
       auth_state: { credentialMode: "api_key", tokenKind: "zcode-plan-jwt" },
-    };
+    });
     return { status: "complete", result };
   }
 }

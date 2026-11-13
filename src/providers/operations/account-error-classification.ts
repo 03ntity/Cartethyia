@@ -9,7 +9,6 @@
  */
 import { isRecord } from "../../protocol/codecs";
 import { GatewayError } from "../../protocol/gateway-error";
-import { BUDDY_PROVIDER_IDS } from "../provider-metadata";
 import type { AccountTier } from "./account-tier";
 import { parseProviderResetDuration, parseUpstreamBackoff } from "../../protocol/upstream-parsing";
 import {
@@ -24,15 +23,21 @@ import {
   resolveAccountUnclassifiedCooldownMs,
 } from "../../config/cooldowns";
 import {
+  buddyRules,
+  deploymentInfraErrorRule,
   githubRules,
+  modelFrequencyWindowRule,
   qoderPlanGatedRule,
   qoderModelQuotaRule,
+  zcodeStartPlanTrialRule,
   traeRules,
   inceptionRules,
   perchRules,
   isGrokFreeTierExhaustion,
   GROK_QUOTA_COOLDOWN_MS,
 } from "./provider-rules";
+import { isBuddyAccountBanned, policyRejection as isPolicyRejectionWording } from "./provider-rules/buddy";
+import { zcodeTrialRefusal } from "./provider-rules/zcode";
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = resolveAccountRateLimitCooldownMs;
 // Fallback when the error states no usable duration: deliberately short (1h,
 // not 24h) — quota state is re-probed on the next failure, so an unknown
@@ -405,78 +410,6 @@ export function accountDeadlineMs(
 }
 
 /**
- * Whether the upstream named a restriction on the account itself.
- *
- * The buddy family reuses "request illegal" for two unrelated rejections, and
- * the difference is only in the body:
- *
- * - `11140` carries `displayMsg` about the account being restricted ("Your
- *   account has been restricted due to unusual activity") and `actions`
- *   offering an appeal. That is a ban — the account is refused, not throttled.
- * - `11-128` is a refusal of this request; the account is fine.
- *
- * Proven account-scoped (2026-10-16): two live share-page requests carrying
- * byte-identical bodies and headers to the same model differed only in the
- * pooled account, and the blocked one 400'd while the other 200'd.
- *
- * Matched on the code *and* the account-restriction wording, so an unrelated
- * upstream that happens to say "restricted" in prose cannot disable accounts.
- */
-function isBuddyAccountBanned(
-  lower: string,
-  providerCode: string,
-  upstreamBody: unknown,
-): boolean {
-  if (providerCode !== "11140") return false;
-  if (banWording(lower)) return true;
-  // The message alone is not enough, and this is the case that proved it: the
-  // provider's message for a ban is the same two words it uses for a refused
-  // request — "request illegal" — while the actual verdict ("Your account has
-  // been restricted due to unusual activity") lives in `displayMsg`, which the
-  // message extractor never reads. Matching only the message therefore read
-  // every ban as a mere request refusal: no category, no disable, and the
-  // account kept serving.
-  const body = isRecord(upstreamBody) ? upstreamBody : undefined;
-  if (body === undefined) return false;
-  for (const field of ["displayMsg", "displayTips", "msg", "message"]) {
-    const value = body[field];
-    if (typeof value === "string" && banWording(value.toLowerCase())) return true;
-    // `displayMsg` is a per-language map: `{ en: "…", zh: "…" }`. Any
-    // language states the same verdict, so all of them are read.
-    if (!isRecord(value)) continue;
-    for (const nested of Object.values(value)) {
-      if (typeof nested === "string" && banWording(nested.toLowerCase())) return true;
-    }
-  }
-  // `actions` names the remedy: an appeal can only be offered for a verdict
-  // about the account, and "edit input" only ever describes a request.
-  const actions = body["actions"];
-  if (Array.isArray(actions)) {
-    for (const action of actions) {
-      if (typeof action !== "string") continue;
-      if (action.toLowerCase().includes("appeal") || action.toLowerCase().includes("feedback")) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-/** The wording an upstream uses when it restricted the account, not the request. */
-function banWording(lower: string): boolean {
-  return (
-    lower.includes("restricted") ||
-    lower.includes("has been banned") ||
-    lower.includes("unusual activity") ||
-    lower.includes("appeal this restriction") ||
-    lower.includes("submit feedback to appeal") ||
-    lower.includes("account has been") ||
-    lower.includes("账号存在异常行为") ||
-    lower.includes("帳號存在異常行為")
-  );
-}
-
-/**
  * Bounded to a day, matching `MAX_COOLDOWN_MS` in the failure policy: a stated
  * window longer than that is a monthly or plan-level limit, and parking an
  * account for a month on one upstream field is a decision for the operator,
@@ -704,6 +637,12 @@ export interface AccountErrorSignals {
   readonly priceRefusal: boolean;
   readonly quotaSignal: boolean;
   readonly policyRejection: boolean;
+  /** Deployment/proxy pool failure: transport infrastructure, not the account. */
+  readonly deploymentInfraError: boolean;
+  /** A buddy-family (account, model) frequency window the provider named a reset for. */
+  readonly modelFrequencyWindow: boolean;
+  /** A Zcode Start Plan refusal that named the selected model. */
+  readonly zcodeTrialRefused: boolean;
   readonly hostedToolFailure: boolean;
   readonly modelEntitlementFailure: boolean;
   readonly queuedUpstream: boolean;
@@ -711,46 +650,6 @@ export interface AccountErrorSignals {
   readonly validationUrl: string | undefined;
   /** True when this failure should switch to a sibling account rather than wait. */
   readonly rotateAccount: boolean;
-}
-
-/**
- * The shared verdict for the buddy family's two refusal surfaces — the policy
- * block (`11140`) and the channel rejection (`11-128`). Both end in the same
- * split: a ban is a verdict on the credential and disables the account at once,
- * a refusal of one request must only stop that request from being retried
- * verbatim (cooling the account there was the bug that made one malformed
- * request look like a dead credential).
- */
-function decidePolicyBlock(
-  result: AccountErrorContext["result"],
-  reason: (prefix: string) => string,
-  buddyBanned: boolean,
-  refusalReason: string,
-): AccountErrorClassification {
-  if (buddyBanned) {
-    return result(
-      "policy_blocked_banned",
-      "disabled",
-      0,
-      null,
-      reason("Account banned by upstream"),
-      // A ban is evidence about the credential even at provider scope, for the
-      // same reason a named revocation is: the message is the evidence. Without
-      // this a stream frame's missing credential detail would leave a banned
-      // account serving.
-      true,
-    );
-  }
-  return result(
-    "policy_blocked_invalid_request",
-    "cooldown",
-    0,
-    null,
-    reason(refusalReason),
-    // Never mutates: a refused request fails identically on every account, so
-    // cooling would burn a healthy credential on the gateway's own fault.
-    false,
-  );
 }
 
 /**
@@ -1013,19 +912,18 @@ export function classifyAccountError(
   const staticToken = options?.staticToken === true;
   const credentialKind = options?.credentialKind;
 
-  // Start Plan is a separate provider: its named trial refusal rests only that model.
-  const providerId = options?.providerId ?? (error instanceof GatewayError ? error.details.providerId : undefined);
-  const refusedModel = statusCode === 400
-    ? /no active limited quota for ([\w.-]+)/i.exec(message)?.[1]
-    : statusCode === 429
-      ? /limited quota(?: for)? ([\w.-]+)(?: is)? exhausted/i.exec(message)?.[1]
+  // The resolved provider id: the caller's evidence when it names one, the
+  // thrown error's identity otherwise (dispatch stores it on GatewayError
+  // details). Every provider-gated rule reads this resolved value, so a
+  // GatewayError that carries its own provider still reaches them.
+  const errorProviderId =
+    error instanceof GatewayError && typeof error.details.providerId === "string"
+      ? error.details.providerId
       : undefined;
-  if (providerId === "zcode-start" && modelId !== undefined && refusedModel !== undefined &&
-    refusedModel.toLowerCase().replace(/-trial$/, "") === modelId.toLowerCase().replace(/-trial$/, "")) {
-    const cooldownMs = statedCooldownMs ?? DEFAULT_QUOTA_COOLDOWN_MS();
-    return result("model_unreachable", "cooldown", cooldownMs, new Date(Date.now() + cooldownMs),
-      reason("Start Plan trial unavailable for this model"), origin === "upstream");
-  }
+  const providerId = options?.providerId ?? errorProviderId;
+  // Start Plan is a separate provider: its named trial refusal rests only that
+  // model (see the `zcode-start-plan-trial` rule).
+  const zcodeTrialRefused = zcodeTrialRefusal(providerId, statusCode, message, modelId);
 
   // A price refusal is a verdict on the *request*, not on the account. inferhub
   // answers 402 with `no provider's ask matches your max-per-mtok bid`: the
@@ -1047,9 +945,6 @@ export function classifyAccountError(
     lower.includes("deployment_disabled") ||
     lower.includes("deployment disabled") ||
     (lower.includes("sin1::") && lower.includes("deployment"));
-  if (deploymentInfraError) {
-    return result("server_error", "cooldown", 60_000, null, `Proxy deployment error: ${message.slice(0, 160)}`, false);
-  }
   // A (CodeBuddy/WorkBuddy) *frequency* window is a verdict on one
   // (account, model) pair, not on the account: `{"code":"6004","msg":"usage
   // exceeds frequency limit ... your usage will reset at <stamp> UTC+8,
@@ -1070,20 +965,6 @@ export function classifyAccountError(
   // work; without it the failure stays account-wide.
   const modelFrequencyWindow =
     lower.includes("frequency limit") && lower.includes("switch to the other models");
-  if (modelFrequencyWindow) {
-    const cooldownMs = statedCooldownMs ?? DEFAULT_QUOTA_COOLDOWN_MS();
-    return result(
-      "rate_limit_transient",
-      "cooldown",
-      cooldownMs,
-      new Date(Date.now() + cooldownMs),
-      reason("Provider frequency limit for this model"),
-      // Provider-scoped evidence still has to reach the writer: a stream frame
-      // carries no credential detail, so `canMutate` is false and without this
-      // the pair would be retried for the whole window it was closed for.
-      origin === "upstream" && scope === "provider",
-    );
-  }
 
   // Quota-shaped provider codes/messages (e.g. xAI's
   const quotaSignal =
@@ -1154,96 +1035,10 @@ export function classifyAccountError(
   // CodeBuddy returns HTTP 403 with provider code 11140 ("request illegal",
   // "did not pass the safety review") — refreshing the token cannot change
   // that outcome and the account itself is healthy, so it must never flip the
-  // account to auth_invalidated/disabled. Only real auth signals do.
-  const policyRejection =
-    providerCode === "11140" ||
-    lower.includes("safety review") ||
-    lower.includes("content did not pass") ||
-    lower.includes("request illegal") ||
-    lower.includes("content blocked") ||
-    lower.includes("account suspended");
-  // A ban is a verdict on the credential, and cooldown cannot answer it: the
-  // account is refused, not throttled. Disabling is the fix, and disabling
-  // *immediately* is a feature — a client's retry budget is spent in seconds,
-  // so a banned account that merely cooled stayed in the plan and burned
-  // sibling accounts that were still healthy before the window expired.
-  //
-  // The two shapes are told apart by the body, not the code alone: `11140`
-  // names a restriction on the account, `11-128` refuses the request.
-  const policyBlock =
-    policyRejection &&
-    options?.providerId !== undefined &&
-    BUDDY_PROVIDER_IDS.has(options.providerId.toLowerCase());
-  if (policyBlock) {
-    // Not a ban: the upstream refused this request. The account is fine, so the
-    // only correct move is to stop retrying it verbatim. Cooling the account
-    // here was the bug that made one malformed request look like a dead
-    // credential.
-    return decidePolicyBlock(result, reason, buddyBanned, "Upstream refused this request");
-  }
-  // These codes are a verdict on the request, not the account. Cooling the
-  // account for them burns a healthy credential on a body that will fail the
-  // same way on every other account:
-  //
-  // - `11148` tool-call/result mismatch — the transcript is broken; the
-  //   pre-payload repair is supposed to prevent it, and a slip is still the
-  //   body's fault.
-  // - `11135` the image cannot be processed, `11133` the model rejected a
-  //   parameter, `11101` the body failed to parse — deterministic for that
-  //   payload.
-  // - `12153` the session is dead — a refresh problem, not a reason to park
-  //   the account on the first observation.
-  // - `14017` trial not activated — the account may recover once registration
-  //   finishes, so a hard cooldown would keep it out after it becomes usable.
-  //
-  // Recognised before the auth and quota branches: several of these arrive as
-  // 401/403/429, which those branches would otherwise treat as account evidence.
-  const requestScoped =
-    providerCode === "11148" ||
-    providerCode === "11135" ||
-    providerCode === "11133" ||
-    providerCode === "11101" ||
-    providerCode === "12153" ||
-    providerCode === "14017" ||
-    lower.includes("tool_call_sequence_broken") ||
-    lower.includes("unmarshal chat params failed") ||
-    lower.includes("invalid image_url content") ||
-    lower.includes("offline user session not found") ||
-    lower.includes("trial not activated") ||
-    lower.includes("trial version is not yet activated");
-  if (requestScoped && BUDDY_PROVIDER_IDS.has(options?.providerId?.toLowerCase() ?? "")) {
-    return result(
-      "unknown",
-      "cooldown",
-      0,
-      null,
-      reason("Request-scoped upstream rejection"),
-      false,
-    );
-  }
-  // A channel rejection (`11128`) is the same shape: the upstream is refusing
-  // the caller for this account, not this particular prompt, and it keeps
-  // refusing on every invocation. Classifying it as `unknown` with
-  // `mutates=false` would leave the account in rotation failing every request —
-  // and since every account fails the same way, the whole pool looks dead with
-  // nothing ever parked.
-  const channelRejection =
-    providerCode === "11128" || lower.includes("unapproved channel");
-  const channelBlock =
-    channelRejection &&
-    options?.providerId !== undefined &&
-    BUDDY_PROVIDER_IDS.has(options.providerId.toLowerCase());
-  if (channelBlock) {
-    // Same split as the policy arm above: a ban disables, a channel refusal
-    // only stops this request. `11-128` is the request shape, so this branch
-    // nearly always takes the refusal path — but it shares the ban test so a
-    // `11140`-shaped body arriving as a channel rejection still disables. On
-    // the refusal path the credential is valid and only the calling channel is
-    // refused. Cooling was the bug: it kept a refused account in the plan,
-    // where a client's retry budget burned healthy siblings for the whole
-    // window.
-    return decidePolicyBlock(result, reason, buddyBanned, "Provider channel rejection");
-  }
+  // account to auth_invalidated/disabled. Only real auth signals do. The
+  // buddy-family arms that act on it live in `buddyRules` at the top of
+  // `ACCOUNT_ERROR_RULES`.
+  const policyRejection = isPolicyRejectionWording(providerCode, lower);
   // server-side tool (web search, x search, web fetch), not evidence about the
   // credential or the account's quota. Some providers surface it as 403, which
   // would otherwise look like an auth signal — refreshing the token cannot fix
@@ -1324,7 +1119,7 @@ export function classifyAccountError(
     canMutate,
     accountEvidence,
     revocationNamed,
-    providerId: options?.providerId,
+    providerId,
     modelId,
     modelBlockHits,
     staticToken,
@@ -1333,6 +1128,9 @@ export function classifyAccountError(
     priceRefusal,
     quotaSignal,
     policyRejection,
+    deploymentInfraError,
+    modelFrequencyWindow,
+    zcodeTrialRefused,
     hostedToolFailure,
     modelEntitlementFailure,
     queuedUpstream,
@@ -1373,6 +1171,13 @@ export function classifyAccountError(
  * {@link AccountErrorRule}.
  */
 const ACCOUNT_ERROR_RULES: readonly AccountErrorRule[] = [
+  // The early-return arms that used to precede this table, kept first so the
+  // precedence is unchanged: the zcode trial refusal, the deployment-infra
+  // verdict, the per-model frequency window, then the buddy family.
+  zcodeStartPlanTrialRule,
+  deploymentInfraErrorRule,
+  modelFrequencyWindowRule,
+  ...buddyRules,
   {
     // Must precede "rate-limit": this rejection is a 429 whose own text says
     // "rate limit", so the broader arm claimed it and cooled the account for

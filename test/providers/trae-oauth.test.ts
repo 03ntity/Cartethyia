@@ -126,6 +126,27 @@ describe("Trae refresh", () => {
     expect(new TraeOAuthClient(fetchFn, "cn").refreshWithUser("rt-old", "u")).rejects.toThrow(/HTTP 401/);
   });
 
+  test("an HTTP 4xx is upstream's verdict and is not replayed on the fallback host", async () => {
+    // Same class as a parsed rejection: the credential was refused, so the
+    // loop must not burn another token rotation on the fallback host.
+    const { fetchFn, calls } = stubFetch(() => ({ status: 400, payload: {} }));
+    expect(new TraeOAuthClient(fetchFn, "intl").refreshWithUser("rt-old", "u")).rejects.toThrow(/HTTP 400/);
+    expect(calls.length).toBe(1);
+  });
+
+  test("an HTTP 5xx moves on to the fallback host", async () => {
+    // A 5xx may be one bad host rather than a verdict on the credential, so
+    // the intl realm's account fallback still gets its turn.
+    const { fetchFn, calls } = stubFetch((url) =>
+      url.includes("traeapi.us") ? { payload: OK_PAYLOAD } : { status: 503, payload: {} },
+    );
+    const result = await new TraeOAuthClient(fetchFn, "intl").refreshWithUser("rt-old", "u");
+    expect(result.access).toBe("at-new");
+    expect(calls.length).toBe(2);
+    expect(calls[0]?.url).toContain("grow-normal.trae.ai");
+    expect(calls[1]?.url).toContain("grow-normal.traeapi.us");
+  });
+
   test("the OAuthTokenRefresher entry point takes the account id from context", async () => {
     const { fetchFn, calls } = stubFetch(() => ({ payload: OK_PAYLOAD }));
     const client = new TraeOAuthClient(fetchFn, "cn");

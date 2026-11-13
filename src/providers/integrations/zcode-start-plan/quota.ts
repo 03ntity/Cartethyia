@@ -1,23 +1,8 @@
-import { createHash } from "node:crypto";
 import { asCoercedNumber, asRecord, asTrimmedString } from "../../../shared/coerce";
 import type { FetchLike, ProviderQuotaResult, ProviderQuotaWindow } from "../../quota/quota-contracts";
+import { ZAI_APP_VERSION, zaiAppHeaders, zaiEnvelopeOk } from "../zcode/zai-envelope";
 
-const BALANCE_URL = "https://zcode.z.ai/api/v1/zcode-plan/billing/balance?app_version=3.16.3";
-const APP_VERSION = "3.16.3";
-const PLATFORM = "linux-x64";
-
-/**
- * Stable per-account device mid. The gateway validates `X-Device-Mid` as a
- * UUID (billing answers `3001 parameter error` without it) and attributes
- * usage to it; a hardcoded shared UUID would lump every account into one
- * billing identity. Derivation matches the gift-claim device id, so quota and
- * claim present the same device per account.
- */
-function deviceMid(accountId: string): string {
-  const hash = createHash("sha256").update(`zcode-device\0${accountId}`).digest("hex");
-  const variant = ((parseInt(hash[16] as string, 16) & 3) | 8).toString(16);
-  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
-}
+const BALANCE_URL = `https://zcode.z.ai/api/v1/zcode-plan/billing/balance?app_version=${ZAI_APP_VERSION}`;
 
 function instant(value: unknown): string | null {
   const seconds = asCoercedNumber(value);
@@ -77,21 +62,12 @@ export async function fetchZcodeStartPlanQuota(
   try {
     const accountId = context?.accountId ?? credential.trim();
     const response = await fetcher(BALANCE_URL, {
-      headers: {
-        authorization: `Bearer ${credential}`,
-        accept: "application/json",
-        "x-device-mid": deviceMid(accountId),
-        "x-zcode-app-version": APP_VERSION,
-        "x-client-language": "en-US",
-        "x-platform": PLATFORM,
-      },
+      headers: zaiAppHeaders(credential, accountId),
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) return { source, plan: null, windows: [], error: `plan billing answered ${response.status}` };
     const payload = asRecord(await response.json());
-    const code = payload?.["code"];
-    if (!payload || payload["success"] === false ||
-      (code !== undefined && ![0, 200, "0", "200"].includes(code as string | number))) {
+    if (payload === undefined || !zaiEnvelopeOk(payload)) {
       return { source, plan: null, windows: [], error: "plan billing rejected request" };
     }
     const data = asRecord(payload["data"]);

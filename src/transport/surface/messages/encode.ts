@@ -34,7 +34,7 @@ export function requireMessagesToolName(name: string | undefined, callId: string
   );
 }
 
-export function parseArgs(value: unknown): unknown {
+function parseArgs(value: unknown): unknown {
   if (typeof value !== "string") return value ?? {};
   // Anthropic requires `input` to be an object: a zero-arg call's "" (or
   // whitespace) must become {}, never be forwarded as a bare string.

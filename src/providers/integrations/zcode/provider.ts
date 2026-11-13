@@ -9,8 +9,8 @@
  * as-is and no credential codec is needed here — the sign-in client is what
  * turns an OAuth grant into that key.
  */
-import { defineModel } from "../../provider-model-definition";
 import type { ModelDefinition } from "../../provider-model-definition";
+import { catalogRows } from "../shared/catalog-rows";
 import { fetchOpenAICompatibleModels } from "../../discovery/openai-model-discovery";
 import { providerBaseUrl } from "../../provider-metadata";
 import type { ApiKeyProviderSpec } from "../../configured-provider";
@@ -26,24 +26,27 @@ interface ZcodeModelOptions {
   readonly reasoning?: boolean;
 }
 
-function zcodeModel(
-  modelId: string,
+type ZcodeCatalogRow = readonly [
+  id: string,
   contextLimit: number,
   outputLimit: number,
-  options: ZcodeModelOptions = {},
-): ModelDefinition {
-  return defineModel({
-    id: modelId,
-    providerId: ZCODE_PROVIDER_ID,
+  options?: ZcodeModelOptions,
+];
+
+const zcodeModel = catalogRows<ZcodeCatalogRow>({
+  providerId: ZCODE_PROVIDER_ID,
+  caps: {
     wireFamily: "chat",
     endpoint: ZCODE_ENDPOINT_PATH,
+  },
+  translate: ([, contextLimit, outputLimit, options]) => ({
     ctx: contextLimit,
     out: outputLimit,
-    vision: options.vision ?? false,
-    reasoning: options.reasoning ?? false,
+    vision: options?.vision ?? false,
+    reasoning: options?.reasoning ?? false,
     toolCall: true,
-  });
-}
+  }),
+});
 
 /**
  * Static fallback catalog.
@@ -53,10 +56,10 @@ function zcodeModel(
  * seeded here or live discovery would never surface it. `glm-5.3-flash` is the
  * first natively multimodal GLM coding SKU.
  */
-export const ZCODE_MODELS: readonly ModelDefinition[] = [
-  zcodeModel("glm-5.3", 1_000_000, 131_072, { reasoning: true }),
-  zcodeModel("glm-5.3-flash", 1_000_000, 131_072, { vision: true, reasoning: true }),
-];
+export const ZCODE_MODELS: readonly ModelDefinition[] = ([
+  ["glm-5.3", 1_000_000, 131_072, { reasoning: true }],
+  ["glm-5.3-flash", 1_000_000, 131_072, { vision: true, reasoning: true }],
+] as const satisfies readonly ZcodeCatalogRow[]).map(zcodeModel);
 
 /** Z.AI Coding Plan adapter spec; the registry builds it via `createApiKeyAdapter`. */
 export const ZCODE_SPEC: ApiKeyProviderSpec = {

@@ -63,7 +63,18 @@ interface Scan {
   readonly files: number;
 }
 
-async function scan(
+/**
+ * Scan results are cached briefly: the usage endpoint re-walks both data
+ * directories on every dashboard poll, and the numbers it reports (sizes,
+ * file counts, the stale-frame estimate) do not need second-level freshness —
+ * the reclaim path always measures around its own prune, so a cached scan can
+ * never make a delete decision on stale numbers.
+ */
+const SCAN_CACHE_TTL_MS = 10_000;
+const SCAN_CACHE_MAX_ENTRIES = 64;
+const scanCache = new Map<string, { expiresAt: number; scan: Scan }>();
+
+async function scanUncached(
   directory: string,
   match: (name: string) => boolean,
   modifiedBefore?: number,
@@ -80,6 +91,35 @@ async function scan(
     files += 1;
   }
   return { bytes, files };
+}
+
+async function scan(
+  directory: string,
+  match: (name: string) => boolean,
+  modifiedBefore?: number,
+): Promise<Scan> {
+  // The predicate and the cutoff are both part of the key: `isEventLog` and
+  // `isFrame` scan the same directories and are different answers, and a
+  // stale-frame scan must not share an entry with the full scan.
+  const key = `${match.name}:${directory}${modifiedBefore === undefined ? "" : `:${modifiedBefore}`}`;
+  const hit = scanCache.get(key);
+  if (hit !== undefined && Date.now() < hit.expiresAt) return hit.scan;
+  const fresh = await scanUncached(directory, match, modifiedBefore);
+  if (scanCache.size >= SCAN_CACHE_MAX_ENTRIES) {
+    const oldest = scanCache.keys().next();
+    if (!oldest.done) scanCache.delete(oldest.value);
+  }
+  scanCache.set(key, { expiresAt: Date.now() + SCAN_CACHE_TTL_MS, scan: fresh });
+  return fresh;
+}
+
+/**
+ * Drops every cached scan. For tests that repoint the data directories
+ * between fixtures: the cache is module state, so a fixture swap inside the
+ * TTL window would otherwise keep reporting the previous directory's numbers.
+ */
+export function invalidateDataScanCache(): void {
+  scanCache.clear();
 }
 
 const isEventLog = (name: string): boolean =>
@@ -180,15 +220,17 @@ export function createDataManagementOperations(config: DataManagementConfig) {
       // Delegated rather than reimplemented: frame expiry lives inside each
       // file, so a file's mtime alone cannot say whether it still holds a live
       // frame. Measuring around the call is how the bytes are reported without
-      // duplicating that rule.
-      const before = await scan(payloadDir(), isFrame);
+      // duplicating that rule — and the measurement is uncached on purpose:
+      // a cached `before`/`after` pair would report the same number twice and
+      // every reclaim would claim zero bytes freed.
+      const before = await scanUncached(payloadDir(), isFrame);
       // `before` is the expiry bound: a frame still live at this instant is
       // kept. The second argument covers files that cannot be parsed — one
       // written after that bound might still hold a live frame in the part
       // that failed to parse, so it is left for a later pass.
       const now = new Date();
       const deletedFiles = await prunePayloadFrames(now, payloadPruneBound(now));
-      const after = await scan(payloadDir(), isFrame);
+      const after = await scanUncached(payloadDir(), isFrame);
       return {
         action,
         deletedFiles,

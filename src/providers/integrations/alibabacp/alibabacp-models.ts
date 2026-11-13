@@ -17,8 +17,8 @@
  * this provider serves the chat surface, and a generation model published on it
  * is not a row this catalog can honestly declare.
  */
-import { defineModel } from "../../provider-model-definition";
 import type { ModelDefinition } from "../../provider-model-definition";
+import { catalogRows } from "../shared/catalog-rows";
 import { ALIBABACP_PROVIDER_ID } from "./alibabacp";
 
 /** Chat path below the region's `/compatible-mode/v1` base. */
@@ -26,18 +26,15 @@ const CHAT_ENDPOINT = "/chat/completions";
 
 type CatalogRow = readonly [id: string, vision: boolean, document: boolean, reasoning: boolean];
 
-function alibabacpModel([id, vision, document, reasoning]: CatalogRow): ModelDefinition {
-  return defineModel({
-    id,
-    providerId: ALIBABACP_PROVIDER_ID,
+const alibabacpModel = catalogRows<CatalogRow>({
+  providerId: ALIBABACP_PROVIDER_ID,
+  caps: {
     wireFamily: "chat",
     endpoint: CHAT_ENDPOINT,
-    vision,
-    document,
-    reasoning,
     toolCall: true,
-  });
-}
+  },
+  translate: ([, vision, document, reasoning]) => ({ vision, document, reasoning }),
+});
 
 /** Static Alibaba Token Plan catalog. */
 export const ALIBABACP_MODELS: readonly ModelDefinition[] = [

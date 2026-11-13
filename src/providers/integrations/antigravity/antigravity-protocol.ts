@@ -194,6 +194,69 @@ export function getAntigravityModelWireProfile(
   return ANTIGRAVITY_MODEL_WIRE_PROFILES[wireModelId];
 }
 
+// Effort-tier vocabulary — the single owner of tier suffixes and the thinking
+// budget each tier maps to. Three readers consume it: `antigravityWireModelId`
+// (logical id → default-tier deployment), `collapseAntigravityVariant` (wire
+// id → logical id), and `antigravityThinkingBudget` (tier → thinkingConfig).
+
+/**
+ * Tier suffixes the effort router appends to a deployment id. Order matters:
+ * `extra-low` is checked before `low` because it also ends in `-low`.
+ */
+export const ANTIGRAVITY_EFFORT_SUFFIXES = [
+  "extra-low",
+  "low",
+  "medium",
+  "high",
+  "tiered",
+  "agent",
+] as const;
+
+export type AntigravityEffortSuffix = (typeof ANTIGRAVITY_EFFORT_SUFFIXES)[number];
+
+/** Thinking budget the reference client sends per effort tier. */
+const ANTIGRAVITY_TIER_THINKING_BUDGET: Readonly<Record<string, number>> = Object.freeze({
+  low: 1_000,
+  medium: 4_000,
+  high: 10_000,
+});
+
+/**
+ * Default effort tier each logical id deploys as at dispatch (the wire id is
+ * `<id>-<tier>`). Ids not listed here are already wire ids and pass through.
+ */
+const ANTIGRAVITY_DEFAULT_TIER: Readonly<Record<string, AntigravityEffortSuffix>> = Object.freeze({
+  "gemini-3.6-flash": "low",
+  "gemini-3.7-flash": "low",
+  "gemini-3.8-flash": "low",
+  "gemini-4-argon": "low",
+  "gpt-oss-120b": "medium",
+});
+
+/** The tier suffix a (logical or wire) model id carries, if any. */
+export function antigravityTierSuffix(modelId: string): AntigravityEffortSuffix | undefined {
+  for (const suffix of ANTIGRAVITY_EFFORT_SUFFIXES) {
+    if (modelId.endsWith(`-${suffix}`)) return suffix;
+  }
+  return undefined;
+}
+
+/**
+ * Thinking budget for a model id, matching the client's effort tiers: a
+ * tier-suffixed id gets that tier's budget, a bare id the client's default.
+ *
+ * Applies to Claude routes and Gemini 3+ SKUs — the gemini-4 family included,
+ * since those deployments are thinking-capable on their `-low`/`-medium`/
+ * `-high` ids. Earlier Gemini SKUs and GPT-OSS send no `thinkingConfig`.
+ */
+export function antigravityThinkingBudget(modelId: string): number | undefined {
+  if (!modelId.includes("claude") && !isGemini3Plus(modelId)) return undefined;
+  const tier = antigravityTierSuffix(modelId);
+  const budget = tier === undefined ? undefined : ANTIGRAVITY_TIER_THINKING_BUDGET[tier];
+  if (budget !== undefined) return budget;
+  return modelId.includes("3.1-pro") ? 10_001 : 10_000;
+}
+
 /**
  * Collapses logical/display model ids to the upstream deployment ("wire")
  * ids actually accepted by `daily-cloudcode-pa`. The console keeps the
@@ -206,12 +269,8 @@ export function antigravityWireModelId(modelId: string): string {
   if (modelId === "gemini-3.1-pro" || modelId === "gemini-3.1-pro-high") {
     return "gemini-pro-agent";
   }
-  if (modelId === "gemini-3.6-flash") return "gemini-3.6-flash-low";
-  if (modelId === "gemini-3.7-flash") return "gemini-3.7-flash-low";
-  if (modelId === "gemini-3.8-flash") return "gemini-3.8-flash-low";
-  if (modelId === "gemini-4-argon") return "gemini-4-argon-low";
-  if (modelId === "gpt-oss-120b") return "gpt-oss-120b-medium";
-  return modelId;
+  const tier = ANTIGRAVITY_DEFAULT_TIER[modelId];
+  return tier === undefined ? modelId : `${modelId}-${tier}`;
 }
 
 // Tool schema normalization (`parametersJsonSchema` → `parameters`).
@@ -410,7 +469,8 @@ const ANTIGRAVITY_DISCOVERY_DENYLIST: Readonly<Record<string, true>> = {
 export function collapseAntigravityVariant(modelId: string): string {
   if (modelId === "claude-opus-4-6-thinking") return "claude-opus-4-6";
   if (modelId === "gemini-pro-agent") return "gemini-3.1-pro";
-  return modelId.replace(/(?:-(?:extra-low|low|medium|high|tiered|agent))$/, "");
+  const suffix = antigravityTierSuffix(modelId);
+  return suffix === undefined ? modelId : modelId.slice(0, -(suffix.length + 1));
 }
 
 interface AntigravityDiscoveryModel {

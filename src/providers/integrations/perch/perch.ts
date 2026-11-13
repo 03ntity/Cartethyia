@@ -28,6 +28,7 @@ import {
 } from "../../provider-contracts";
 import { usageFromProvider } from "../../provider-usage";
 import { getPerchVersion } from "../../operations/client-versions";
+import { upstreamGatewayError } from "../shared/cli-client-kit";
 import {
   PERCH_SAFFRON_SYSTEM_PROMPT,
   buildPerchModelCallBody,
@@ -294,10 +295,9 @@ function upstreamPerchError(
   message: string,
   providerCode: string | undefined,
 ): GatewayError {
-  return new GatewayError(code, status, message, {
-    providerId: PERCH_PROVIDER_ID,
+  return upstreamGatewayError(PERCH_PROVIDER_ID, code, status, message, {
     ...(providerCode ? { providerCode } : {}),
-  }, "upstream");
+  });
 }
 
 export function createPerchAdapter(options: PerchAdapterOptions = {}): PerchAdapter {

@@ -16,7 +16,7 @@ import {
   isClaudeBillingHeaderText,
   normalizeAnthropicToolCallId,
   parseArguments,
-  prefixClaudeToolName,
+  claudeToolName,
   recordToolAliases,
   sanitizeSchemaForAnthropic,
   stringValue,
@@ -342,7 +342,7 @@ function partToClaudeBlock(
       // stamp every call with its array position, so copying it here leaked a
       // stream-only field into a request. The position is not lost: the block
       // order in `content[]` already expresses it.
-      const sentName = prefixClaudeToolName(part.name, ctx?.isOAuth ?? false);
+      const sentName = claudeToolName(part.name, ctx?.isOAuth ?? false);
       if (sentName !== part.name) ctx?.toolAliases.push({ sent: sentName, original: part.name });
       return {
         type: "tool_use",
@@ -765,7 +765,7 @@ export function canonicalToClaudeMessagesPayload(
   }
   if (request.tools?.length) {
     payload.tools = request.tools.map((tool) => {
-      const sentName = prefixClaudeToolName(tool.name, isOAuth);
+      const sentName = claudeToolName(tool.name, isOAuth);
       if (sentName !== tool.name) ctx.toolAliases.push({ sent: sentName, original: tool.name });
       return {
         name: sentName,
@@ -787,7 +787,7 @@ export function canonicalToClaudeMessagesPayload(
   }
   const rawToolChoice = canonicalToolChoice(request.tool_choice);
   if (isRecord(rawToolChoice) && rawToolChoice.type === "tool" && stringValue(rawToolChoice.name)) {
-    const sentName = prefixClaudeToolName(rawToolChoice.name, isOAuth);
+    const sentName = claudeToolName(rawToolChoice.name, isOAuth);
     if (sentName !== rawToolChoice.name) ctx.toolAliases.push({ sent: sentName, original: rawToolChoice.name });
     rawToolChoice.name = sentName;
   }

@@ -5,8 +5,10 @@
 import { expect, test } from "bun:test";
 import {
   buildCampaignHeaders,
+  claimSashCampaign,
   fetchQoderDailyCheckin,
   isQoderCheckinProvider,
+  listSashCampaigns,
 } from "../../../src/providers/integrations/qoder/qoder-checkin";
 import type { QoderNativeIdentityStore } from "../../../src/providers/integrations/qoder/qoder-native-identity-store";
 import type { QoderNativeIdentity } from "../../../src/providers/integrations/qoder/qoder-umid";
@@ -387,6 +389,81 @@ test("a bound identity that errors falls back to the alternative identity, and t
   expect(claimPost?.headers?.["cosy-machinetoken"]).toBe("fb-token");
   // The winning fallback identity was persisted as the new device.
   expect(store.bound).toEqual([{ machineToken: "fb-token", machineType: "x86_64_linux", machineCode: "fb-code" }]);
+});
+
+// --- Shared sash client (claimSashCampaign / listSashCampaigns) ---
+// These are the one owner of the campaign claim idempotence map that both the
+// daily check-in and the manual credit-claim surface delegate to.
+
+test("claimSashCampaign maps the idempotence states and carries the amount", async () => {
+  const headers = buildCampaignHeaders("tok");
+  const claim = (body: string, status = 200) =>
+    fakeFetcher([{ url: CAMPAIGN_CLAIM_URL, method: "POST", status, body }]);
+
+  // A fresh claim reports its granted amount.
+  const claimed = claim(JSON.stringify({ status: "CLAIMED", amount: 100 }));
+  const claimedResult = await claimSashCampaign(BASE, "camp-1", headers, claimed.fetcher);
+  expect(claimedResult).toEqual({ state: "claimed", amount: 100, status: 200 });
+
+  // A replay is an already-claimed grant, not an error — and keeps the amount.
+  const replayed = claim(JSON.stringify({ status: "CLAIMED", failureCode: "REPLAYED", amount: 100 }), 200);
+  const replayedResult = await claimSashCampaign(BASE, "camp-1", headers, replayed.fetcher);
+  expect(replayedResult.state).toBe("already_claimed");
+  expect(replayedResult.amount).toBe(100);
+
+  // A bare HTTP 409 is also an already-claimed grant.
+  const conflict = claim(JSON.stringify({ error: "ALREADY_CLAIMED" }), 409);
+  const conflictResult = await claimSashCampaign(BASE, "camp-1", headers, conflict.fetcher);
+  expect(conflictResult.state).toBe("already_claimed");
+
+  // The same-person block is honest ineligibility, not a failure.
+  const blocked = claim(JSON.stringify({ status: "BLOCKED", failureCode: "SAME_PERSON_ALREADY_CLAIMED" }), 200);
+  const blockedResult = await claimSashCampaign(BASE, "camp-1", headers, blocked.fetcher);
+  expect(blockedResult.state).toBe("not_eligible");
+  expect(blockedResult.amount).toBeNull();
+
+  // Any other failure is an error carrying the upstream status.
+  const failed = claim("not-json", 500);
+  const failedResult = await claimSashCampaign(BASE, "camp-1", headers, failed.fetcher);
+  expect(failedResult.state).toBe("error");
+  expect(failedResult.status).toBe(500);
+
+  // A transport failure reports status 0 so callers can name it distinctly.
+  const throwing = (async () => {
+    throw new Error("offline");
+  }) as unknown as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  const offlineResult = await claimSashCampaign(BASE, "camp-1", headers, throwing);
+  expect(offlineResult).toEqual({ state: "error", amount: null, status: 0 });
+});
+
+test("listSashCampaigns normalizes camelCase rows and returns null when the surface is absent", async () => {
+  const headers = buildCampaignHeaders("tok");
+  const body = JSON.stringify({
+    campaigns: [
+      {
+        campaignId: "camp-1",
+        campaignKey: "daily-credits",
+        claimStatus: "CLAIMABLE",
+        actionType: "CLAIM_BENEFIT",
+        benefit: { kind: "CREDITS", amount: 100 },
+      },
+    ],
+  });
+  const ok = fakeFetcher([{ url: CAMPAIGNS_URL, method: "GET", status: 200, body }]);
+  const campaigns = await listSashCampaigns(BASE, headers, ok.fetcher);
+  expect(campaigns).not.toBeNull();
+  expect(campaigns![0]).toMatchObject({
+    campaign_id: "camp-1",
+    campaign_key: "daily-credits",
+    claim_status: "CLAIMABLE",
+    action_type: "CLAIM_BENEFIT",
+  });
+
+  const missing = fakeFetcher([{ url: CAMPAIGNS_URL, method: "GET", status: 404, body: "" }]);
+  expect(await listSashCampaigns(BASE, headers, missing.fetcher)).toBeNull();
+
+  const offline = fakeFetcher([]);
+  expect(await listSashCampaigns(BASE, headers, offline.fetcher)).toBeNull();
 });
 
 

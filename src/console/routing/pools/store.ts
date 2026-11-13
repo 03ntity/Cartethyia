@@ -653,8 +653,10 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
   }
 
   async healthCheck(tenantId: string, poolId: string): Promise<HealthCheckResult> {
+    // Existence check only: the agent builder re-reads the row it needs, so a
+    // full-row select here just ships columns nobody reads.
     const rows = await this.db
-      .select()
+      .select({ id: networkPools.id })
       .from(networkPools)
       .where(and(eq(networkPools.tenantId, tenantId), eq(networkPools.id, poolId)))
       .limit(1);
@@ -748,8 +750,9 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
    * layer), not by what the peer chooses to send.
    */
   async speedTest(tenantId: string, poolId: string, bytes: number): Promise<PoolSpeedTestResult> {
+    // Existence check only — same narrowing as `healthCheck`.
     const rows = await this.db
-      .select()
+      .select({ id: networkPools.id })
       .from(networkPools)
       .where(and(eq(networkPools.tenantId, tenantId), eq(networkPools.id, poolId)))
       .limit(1);

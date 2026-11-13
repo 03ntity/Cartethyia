@@ -38,6 +38,32 @@ export function lastEventOfType<T extends CanonicalEvent["type"]>(
   return undefined;
 }
 
+/**
+ * The OpenAI-family wire error object for a failed terminal.
+ *
+ * `stop_details` is the provider-native failure bag (Cursor writes
+ * code/status/message onto it); the canonical stop reason is the fallback
+ * code, and a missing or malformed bag degrades to the generic upstream
+ * message. Chat, completion, and Responses all emit this exact shape — one
+ * builder keeps the four call sites from drifting.
+ */
+export function stopDetailsError(
+  stopDetails: unknown,
+  stopReason: string | undefined,
+): Record<string, unknown> {
+  const raw = isRecord(stopDetails) ? stopDetails : undefined;
+  const message =
+    typeof raw?.["message"] === "string" && raw["message"].length > 0
+      ? raw["message"]
+      : "The upstream response failed";
+  return {
+    type: "server_error",
+    code: stopReason ?? "provider_error",
+    ...(typeof raw?.["status"] === "number" ? { status: raw["status"] } : {}),
+    message,
+  };
+}
+
 
 // Once-only surface detection with fixed precedence:
 // explicit header → endpoint path → unambiguous body shape → chat default.

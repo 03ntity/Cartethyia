@@ -21,6 +21,7 @@ import {
 } from "../../provider-contracts";
 import { mapUpstreamHttpError } from "../../../transport/failure-policy";
 import { abortGatewayError, createUpstreamDeadlineLifecycle } from "../../operations/upstream-deadline";
+import { mapChatFinishReason } from "../shared/cli-client-kit";
 import { usageFromProvider } from "../../provider-usage";
 import { buildFreepiChatBody, parseFreepiSse, throwFreepiUpstreamError } from "./freepi-protocol";
 import { buildFreepiHeaders } from "./freepi-headers";
@@ -39,13 +40,6 @@ import {
   FREEPI_CHAT_PATH,
   FREEPI_PROVIDER_ID,
 } from "./freepi-realm";
-
-const STOP_REASONS: Readonly<Record<string, CanonicalStopReason>> = {
-  stop: "stop",
-  length: "length",
-  tool_calls: "tool_use",
-  function_call: "tool_use",
-};
 
 interface FreepiAdapterOptions {
   readonly providerId?: string;
@@ -193,7 +187,7 @@ export class FreepiAdapter implements ProviderAdapter {
       if (frame.event === "done") {
         const data = frame.data as { finish_reason?: unknown };
         if (typeof data.finish_reason === "string") {
-          stopReason = STOP_REASONS[data.finish_reason] ?? "stop";
+          stopReason = mapChatFinishReason(data.finish_reason) ?? "stop";
         }
         continue;
       }
@@ -233,7 +227,7 @@ export class FreepiAdapter implements ProviderAdapter {
       }
       yield* this.#toolCallDeltas(delta["tool_calls"], announced, toolCallIds, () => seq++);
       if (typeof choice["finish_reason"] === "string" && choice["finish_reason"] !== null) {
-        stopReason = STOP_REASONS[String(choice["finish_reason"])] ?? "stop";
+        stopReason = mapChatFinishReason(String(choice["finish_reason"])) ?? "stop";
       }
       const u = record["usage"];
       if (typeof u === "object" && u !== null) usage = u as Record<string, unknown>;

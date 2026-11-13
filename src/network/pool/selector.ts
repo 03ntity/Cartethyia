@@ -212,6 +212,139 @@ export class NetworkPoolSelector {
   }
 
   /**
+   * Inflight + active cooldowns for every named pool, batched.
+   *
+   * The pool list used to issue two Redis round trips per pool — one
+   * `GET`/`MGET` for the inflight counter and one `SMEMBERS`+`MGET` for the
+   * cooldown index — so a tenant with dozens of pools paid that fan-out on
+   * every dashboard load. This reads the same data in a constant number of
+   * round trips: one local cooldown scan, one `SMEMBERS` per pool (the index
+   * is per-pool by design), one `MGET` for every cooldown marker, and one
+   * `MGET` for every inflight counter.
+   *
+   * Semantics match the per-pool reads: the local cooldown map wins, a
+   * non-expired Redis marker counts, and expired markers are cleaned from the
+   * index exactly like `getPoolCooldowns`. A failed Redis read degrades to the
+   * local state rather than failing the list — the same posture the console
+   * enrichment already takes when the selector is absent.
+   */
+  async getPoolListSnapshot(
+    poolIds: readonly string[],
+  ): Promise<ReadonlyMap<string, { inflight: number; cooldowns: readonly ProxyCooldownEntry[] }>> {
+    const out = new Map<string, { inflight: number; cooldowns: readonly ProxyCooldownEntry[] }>();
+    if (poolIds.length === 0) return out;
+
+    // One pass over the local cooldown map seeds every pool's local entries;
+    // expired local rows are dropped on sight, matching `getPoolCooldowns`.
+    const now = Date.now();
+    const localByPool = new Map<string, Map<string, ProxyCooldownEntry>>();
+    for (const poolId of poolIds) localByPool.set(poolId, new Map());
+    for (const [key, entry] of this.state.cooldowns.entries()) {
+      if (now >= entry.until) {
+        this.state.cooldowns.delete(key);
+        continue;
+      }
+      const bucket = localByPool.get(entry.poolId);
+      if (bucket !== undefined) bucket.set(entry.providerId, entry);
+    }
+
+    if (!this.redis) {
+      for (const poolId of poolIds) {
+        out.set(poolId, { inflight: this.getInflight(poolId), cooldowns: [...(localByPool.get(poolId)?.values() ?? [])] });
+      }
+      return out;
+    }
+
+    const redis = this.redis;
+    // The index sets are per-pool; fetch them concurrently, then read every
+    // marker in one MGET keyed by (poolId, providerId) order.
+    const providerIdsByPool = await Promise.all(
+      poolIds.map((poolId) => redis.smembers(proxyCooldownProvidersKey(poolId)).catch(() => [] as string[])),
+    );
+    const markerKeys: string[] = [];
+    const markerOwner: Array<{ poolId: string; providerId: string }> = [];
+    for (let i = 0; i < poolIds.length; i += 1) {
+      const poolId = poolIds[i]!;
+      const seen = new Set<string>();
+      for (const providerId of providerIdsByPool[i] ?? []) {
+        if (seen.has(providerId)) continue;
+        seen.add(providerId);
+        markerKeys.push(proxyCooldownKey(poolId, providerId));
+        markerOwner.push({ poolId, providerId });
+      }
+    }
+    // `undefined` (not `[]`) on a failed read: an unknown marker set must not
+    // be mistaken for "every marker is gone", which would SREM live cooldowns
+    // out of the index. `null` entries mean "key absent", which is safe to
+    // clean up.
+    const [markerRaws, inflightRaws] = await Promise.all([
+      markerKeys.length === 0
+        ? Promise.resolve([] as Array<string | null>)
+        : redis.mget(...markerKeys).catch(() => undefined),
+      redis
+        .mget(...poolIds.map((poolId) => proxyInflightKey(poolId)))
+        .catch(() => undefined),
+    ]);
+    const markersKnown = markerRaws !== undefined;
+    const inflightKnown = inflightRaws !== undefined;
+
+    // Resolve markers per pool. Expired or unparseable markers leave the active
+    // set and are collected for the same batched index cleanup
+    // `getPoolCooldowns` performs.
+    const cooldownsByPool = new Map<string, ProxyCooldownEntry[]>();
+    const staleMarkerKeys: string[] = [];
+    const staleSrem: Array<{ poolId: string; providerId: string }> = [];
+    for (let index = 0; index < markerOwner.length; index += 1) {
+      const owner = markerOwner[index]!;
+      const raw = markersKnown ? (markerRaws[index] ?? null) : null;
+      const entry = raw ? parseCooldownEntry(raw) : undefined;
+      const local = localByPool.get(owner.poolId);
+      // The local map already contributed this provider's entry when it had a
+      // live one; a Redis row for the same provider only fills the gap.
+      if (local?.has(owner.providerId)) continue;
+      if (entry && entry.poolId === owner.poolId && now < entry.until) {
+        let bucket = cooldownsByPool.get(owner.poolId);
+        if (bucket === undefined) {
+          bucket = [];
+          cooldownsByPool.set(owner.poolId, bucket);
+        }
+        bucket.push(entry);
+        continue;
+      }
+      // Only a known-absent or expired marker is stale; an unknown read
+      // (`markersKnown === false`) leaves the index untouched.
+      if (markersKnown) {
+        if (raw) staleMarkerKeys.push(proxyCooldownKey(owner.poolId, owner.providerId));
+        staleSrem.push(owner);
+      }
+    }
+    if (staleMarkerKeys.length > 0 || staleSrem.length > 0) {
+      void Promise.all([
+        ...(staleMarkerKeys.length > 0 ? [redis.del(...staleMarkerKeys)] : []),
+        ...staleSrem.map((owner) => redis.srem(proxyCooldownProvidersKey(owner.poolId), owner.providerId)),
+      ]).catch(() => undefined);
+    }
+
+    for (let i = 0; i < poolIds.length; i += 1) {
+      const poolId = poolIds[i]!;
+      let inflight = this.getInflight(poolId);
+      if (inflightKnown) {
+        try {
+          inflight = this.parseInflightCounter(inflightRaws[i] ?? null, poolId);
+        } catch {
+          // A corrupt counter is the same hard error the single-pool read
+          // raises; for a list read the local count is the honest fallback.
+        }
+      }
+      const merged = new Map<string, ProxyCooldownEntry>();
+      for (const entry of localByPool.get(poolId)?.values() ?? []) merged.set(entry.providerId, entry);
+      for (const entry of cooldownsByPool.get(poolId) ?? []) merged.set(entry.providerId, entry);
+      out.set(poolId, { inflight, cooldowns: [...merged.values()] });
+    }
+    return out;
+  }
+
+  /**
    * One local slot acquisition: checks every map's ceiling, bumps each counter,
    * and returns a release that decrements all of them exactly once. Shared by
    * `acquire` (single pool counter) and `acquireProvider` (pool + provider
@@ -720,12 +853,7 @@ export class NetworkPoolSelector {
     // A ceiling of zero admits nothing; treat it as "no pool is eligible"
     // rather than silently ignoring the operator's choice.
     if (providerCapacity === 0) return undefined;
-    const cooldownChecks = await Promise.all(
-      eligiblePoolIds.map(async (poolId) => ({
-        poolId,
-        inCooldown: (await this.isProviderCooldown(poolId, providerId)).inCooldown,
-      })),
-    );
+    const cooldownChecks = await this.providerCooldownStates(eligiblePoolIds, providerId);
     const scored = cooldownChecks
       .filter((check) => !check.inCooldown)
       .map((check) => {
@@ -898,11 +1026,52 @@ export class NetworkPoolSelector {
   }
 
   /**
+   * Cooldown state for every eligible pool in admission order.
+   *
+   * With Redis this is one `MGET` over the cooldown keys — one round trip per
+   * admission instead of one `GET` per pool — resolved through the same
+   * `cooldownFromBatchState` path `batchSelectionChecks` uses. A failed batch
+   * read falls back to per-pool `isProviderCooldown` calls, which keeps the
+   * "cooldown store unavailable" per-pool detail and costs no more than the
+   * serial path this replaced. Without Redis the rows resolve from the local
+   * cooldown map alone (`raw` is always null).
+   */
+  private async providerCooldownStates(
+    eligiblePoolIds: readonly string[],
+    providerId: string,
+  ): Promise<Array<{ poolId: string; inCooldown: boolean }>> {
+    if (!this.redis) {
+      return eligiblePoolIds.map((poolId) => ({
+        poolId,
+        inCooldown: this.cooldownFromBatchState(poolId, providerId, null).inCooldown,
+      }));
+    }
+    let raws: Array<string | null>;
+    try {
+      raws = (await this.redis.mget(
+        ...eligiblePoolIds.map((poolId) => proxyCooldownKey(poolId, providerId)),
+      )) as Array<string | null>;
+    } catch {
+      return Promise.all(
+        eligiblePoolIds.map(async (poolId) => ({
+          poolId,
+          inCooldown: (await this.isProviderCooldown(poolId, providerId)).inCooldown,
+        })),
+      );
+    }
+    return eligiblePoolIds.map((poolId, index) => ({
+      poolId,
+      inCooldown: this.cooldownFromBatchState(poolId, providerId, raws[index] ?? null).inCooldown,
+    }));
+  }
+
+  /**
    * Per-pool cooldown resolution with the same semantics as
    * `isProviderCooldown`: the local cooldown map wins when it has a live
    * entry; otherwise a non-expired Redis row is admitted (bounded) and an
-   * expired Redis row is cleared. Used by the batched failure path, which
-   * reads all cooldown keys in one `MGET` and resolves each row here.
+   * expired Redis row is cleared. Used by the batched reads — admission's
+   * cooldown pre-check and the failure report — which read all cooldown keys
+   * in one `MGET` and resolve each row here.
    */
   private cooldownFromBatchState(
     poolId: string,

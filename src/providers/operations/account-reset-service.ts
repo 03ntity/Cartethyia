@@ -109,13 +109,23 @@ export function invalidateResetCreditsCache(accountId: string): void {
   }
 }
 
+/**
+ * The provider id as the reset operations compare it: trimmed and
+ * case-folded, so `" Codex "` and `"CODEX"` reach the same branch. Kept as a
+ * plain string (not `parseProviderId`) because this module answers `null` /
+ * `unsupported_provider` for unknown ids rather than rejecting them.
+ */
+function resetProviderId(providerId: string): string {
+  return providerId.trim().toLowerCase();
+}
+
 export function supportsAccountReset(providerId: string): boolean {
-  const norm = providerId.trim().toLowerCase();
+  const norm = resetProviderId(providerId);
   return norm === "codex" || norm === "claude" || norm === "anthropic";
 }
 
 function isClaude(providerId: string): boolean {
-  const norm = providerId.trim().toLowerCase();
+  const norm = resetProviderId(providerId);
   return norm === "claude" || norm === "anthropic";
 }
 
@@ -209,7 +219,7 @@ export async function listAccountResetCredits(
   credentialRaw: string,
   fetcher: typeof fetch = globalThis.fetch,
 ): Promise<ResetCreditList | null> {
-  if (providerId.trim().toLowerCase() === "codex") {
+  if (resetProviderId(providerId) === "codex") {
     const { access, accountId } = codexAccess(credentialRaw);
     // Reuse the version already resolved for dispatch (`getCodexVersion`), never
     // a fresh probe: the reset path must not race an npm lookup against the
@@ -470,7 +480,7 @@ export async function consumeAccountResetCredit(args: {
   readonly snapshotInvalidator?: { invalidate(): Promise<number> } | undefined;
 }): Promise<ResetConsumeResult> {
   const { db, accountId, providerId, credentialRaw, fetcher = globalThis.fetch } = args;
-  const norm = providerId.trim().toLowerCase();
+  const norm = resetProviderId(providerId);
 
   let result: ResetConsumeResult;
 

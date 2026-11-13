@@ -4,20 +4,8 @@ import type { FetchLike, ProviderQuotaResult, ProviderQuotaWindow } from "../../
 import { authCredential, getJson, percentWindow, record, text, number } from "../../quota/quota-contracts";
 import { parseQuotaWindows } from "../../quota/quota-window-parser";
 import { parseLimitWindows } from "../../quota/quota-limit-windows";
+import { CLAUDE_CODE_OAUTH_QUOTA_BETAS } from "./claude-credentials";
 import { CLAUDE_CODE_USER_AGENT } from "./claude-fingerprint";
-
-export const claudeCodeOAuthBetas = [
-  "claude-code-20250219",
-  "oauth-2025-04-20",
-  "interleaved-thinking-2025-05-14",
-  "redact-thinking-2026-02-12",
-  "context-management-2025-06-27",
-  "prompt-caching-scope-2026-01-05",
-  "mid-conversation-system-2026-04-07",
-  "advanced-tool-use-2025-11-20",
-  "effort-2025-11-24",
-  "extended-cache-ttl-2025-04-11",
-];
 
 /** Fixed per-key windows Claude reports alongside the dynamic `limits` array. */
 const CLAUDE_FIXED_WINDOWS: readonly {
@@ -124,7 +112,7 @@ export async function fetchClaudeQuota(
       "https://api.anthropic.com/api/oauth/usage",
       {
         authorization: `Bearer ${access}`,
-        "anthropic-beta": claudeCodeOAuthBetas.join(","),
+        "anthropic-beta": CLAUDE_CODE_OAUTH_QUOTA_BETAS.join(","),
         "anthropic-version": "2023-06-01",
         "anthropic-dangerous-direct-browser-access": "true",
         "x-app": "cli",

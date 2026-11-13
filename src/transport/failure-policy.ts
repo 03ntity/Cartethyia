@@ -2,6 +2,7 @@ import { GatewayError, type GatewayErrorCode, type GatewayErrorOrigin } from "..
 import { isRecord } from "../protocol/codecs";
 import { resolveFallbackRetryBaseMs, resolveFallbackRetryCapMs } from "../config/timeouts";
 import { parseUpstreamBackoff } from "../protocol/upstream-parsing";
+import { exponentialBackoff } from "../network/util/backoff";
 
 /**
  * How much of the upstream's error body is kept and surfaced.
@@ -1124,8 +1125,14 @@ export const MIN_RETRY_BUDGET_MS = 15_000;
  * returns 200-with-no-events from driving an unbounded wait.
  */
 export function fallbackRetryDelayMs(attemptIndex: number): number {
-  const exp = Math.min(resolveFallbackRetryCapMs(), resolveFallbackRetryBaseMs() * 2 ** attemptIndex);
-  return Math.random() * exp;
+  // The bound is `min(cap, base * 2^attempt)`; `Math.max(0, attemptIndex)` only
+  // matters for a negative index, which no caller produces — the shared helper
+  // clamps it so the formula stays monotone in attempt number.
+  return exponentialBackoff(attemptIndex, {
+    baseDelayMs: resolveFallbackRetryBaseMs(),
+    maxDelayMs: resolveFallbackRetryCapMs(),
+    jitterPolicy: "full",
+  });
 }
 
 /** Sleeps until the delay expires or the request is aborted. */

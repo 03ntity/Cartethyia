@@ -2,7 +2,12 @@ import type { CredentialKind } from "../../provider-contracts";
 import type { CanonicalRequest } from "../../../protocol/canonical-model";
 import { allParts, hasExtension, hasKind, hasOpaqueReasoning } from "../../../protocol/canonical-model";
 import { capabilityUnsupported } from "../../../protocol/gateway-error";
-import { negotiateAnthropicBetas, type AnthropicBetaNegotiation, type AnthropicBetaUnsupportedPolicy } from "./claude-betas";
+import {
+  canonicalCapabilityName,
+  negotiateAnthropicBetas,
+  type AnthropicBetaNegotiation,
+  type AnthropicBetaUnsupportedPolicy,
+} from "./claude-betas";
 
 /** A semantic capability required by a Claude Code request. */
 type ClaudeRequestCapability =
@@ -28,24 +33,6 @@ interface ClaudeCompatibilityAssessment {
   readonly downgraded: readonly ClaudeCapabilityIssue[];
   readonly rejected: readonly ClaudeCapabilityIssue[];
   readonly betas: AnthropicBetaNegotiation;
-}
-
-/**
- * Folds a capability name to its comparison form.
- *
- * The route profile this is matched against is built by
- * `buildCapabilityProfile`, which spells its keys in camelCase
- * (`promptCaching`, `parallelToolCalls`, `reasoningEncryptedContent`,
- * `responseJsonObject`), while this module's vocabulary is snake_case
- * (`prompt_caching`, `parallel_tool_calls`) and the Anthropic beta map mixes
- * both. Comparing them literally matched nothing — `promptcaching` never
- * equals `prompt_caching` — so `prompt_caching`, `response_format`,
- * `redacted_thinking`, and `server_tool_use` were rejected on *every* Claude
- * route, live traffic included, not just probes. Case and separators carry no
- * meaning here, so both sides drop them before comparing.
- */
-function canonicalCapabilityName(name: string): string {
-  return name.toLowerCase().replace(/[_-]/g, "");
 }
 
 function capabilityAliases(

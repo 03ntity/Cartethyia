@@ -6,7 +6,7 @@
 // strict wire encoder runs. The same original→sanitized mapping is applied to
 // both the `toolCall` and its matching `toolResult` so pairing is preserved.
 
-import type { CanonicalRequest } from "../canonical-model";
+import type { CanonicalMessage, CanonicalRequest } from "../canonical-model";
 
 /** Anthropic tool ID contract: alphanumerics, underscore, hyphen only. */
 const TOOL_ID_PATTERN: RegExp = /^[a-zA-Z0-9_-]+$/;
@@ -48,9 +48,21 @@ function generateToolCallId(msgIndex = 0, tcIndex = 0, toolName?: string): strin
  */
 export function sanitizeRequestToolIds(request: CanonicalRequest): CanonicalRequest {
   const replacements = new Map<string, string>();
+  // Hit flag: the prepare path runs this on every request, so a history whose
+  // ids are all already valid must cost one scan and zero allocations — the
+  // message list is only rebuilt once an invalid id is actually found.
+  let hasInvalid = false;
 
   for (const [msgIndex, message] of request.messages.entries()) {
     for (const [partIndex, part] of message.content.entries()) {
+      // Results count toward the hit flag too: an orphan invalid result is
+      // sanitized independently even when no call needed rewriting.
+      if (
+        (part.kind === "toolCall" || part.kind === "toolResult") &&
+        !TOOL_ID_PATTERN.test(part.call_id)
+      ) {
+        hasInvalid = true;
+      }
       if (part.kind !== "toolCall" || TOOL_ID_PATTERN.test(part.call_id)) continue;
       replacements.set(
         part.call_id,
@@ -59,9 +71,23 @@ export function sanitizeRequestToolIds(request: CanonicalRequest): CanonicalRequ
     }
   }
 
-  let changed = false;
+  if (!hasInvalid) return request;
 
-  const messages = request.messages.map((message, msgIndex) => {
+  let changed = false;
+  let messages: CanonicalMessage[] | undefined;
+
+  for (const [msgIndex, message] of request.messages.entries()) {
+    // A message with no invalid id keeps its identity; only messages that
+    // actually carry one are rebuilt.
+    const needsRewrite = message.content.some(
+      (part) =>
+        (part.kind === "toolCall" || part.kind === "toolResult") &&
+        !TOOL_ID_PATTERN.test(part.call_id),
+    );
+    if (!needsRewrite) {
+      messages?.push(message);
+      continue;
+    }
     let messageChanged = false;
     const content = message.content.map((part, partIndex) => {
       if (part.kind === "toolCall") {
@@ -84,10 +110,10 @@ export function sanitizeRequestToolIds(request: CanonicalRequest): CanonicalRequ
       }
       return part;
     });
-    if (!messageChanged) return message;
-    changed = true;
-    return { ...message, content };
-  });
+    if (messages === undefined) messages = request.messages.slice(0, msgIndex);
+    messages.push(messageChanged ? { ...message, content } : message);
+    changed = changed || messageChanged;
+  }
 
-  return changed ? { ...request, messages } : request;
+  return changed ? { ...request, messages: messages ?? request.messages } : request;
 }

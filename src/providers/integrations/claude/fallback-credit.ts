@@ -24,6 +24,10 @@
  *
  * The token is bound to the body that was refused, so entries are keyed by a
  * hash of that body: only an identical replay may spend it.
+ *
+ * The beta that rides with a redemption (`fallback-credit-2026-06-01`) is owned
+ * by `claude-credentials.ts`, the single owner of the Claude Code beta profile;
+ * this module consumes the redemption machinery only.
  */
 
 import { GatewayError } from "../../../protocol/gateway-error";
@@ -34,9 +38,6 @@ const MAX_CACHE_SIZE = 64;
 
 /** Redemption window of a refusal's credit token (donor `anthropic.ts:248`). */
 export const FALLBACK_CREDIT_TTL_MS = CREDIT_TTL_MS;
-
-/** Beta the credit rides with (donor `anthropic.ts:242`). */
-export const FALLBACK_CREDIT_BETA = "fallback-credit-2026-06-01";
 
 /**
  * `provider_options` key naming the model a redemption is retargeted at.

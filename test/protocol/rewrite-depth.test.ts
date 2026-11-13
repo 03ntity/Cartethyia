@@ -358,8 +358,13 @@ describe("rewrite depth bound: past the bound is forwarded, not mangled", () => 
     // Below the bound the reserved token is still raw, so the escape did not
     // run there.
     expect(atDepth(out, MAX_REWRITE_DEPTH + 5)).toBe("<|start|>");
-    // Above the bound the escape did run, so the two levels differ.
-    expect(atDepth(out, MAX_REWRITE_DEPTH - 1)).not.toBe(atDepth(withToken, MAX_REWRITE_DEPTH - 1));
+    // The only leaf that could change sits below the stop point, so the
+    // copy-on-change walk finds nothing to rewrite and returns the input
+    // graph by identity — unchanged branches are never cloned.
+    expect(atDepth(out, MAX_REWRITE_DEPTH - 1)).toBe(
+      atDepth(withToken, MAX_REWRITE_DEPTH - 1),
+    );
+    expect(out).toBe(withToken);
   });
 
   test("a cycle is closed by pointing back at the original node", () => {

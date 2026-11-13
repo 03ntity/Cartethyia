@@ -55,8 +55,8 @@ export function createBackupExportHandler(
     requireLoopbackAdmin(request, {
       peer: deps.resolvePeerAddress(request),
       token: deps.token,
-      policyRejectedMessage: "backup export is only available from loopback (request {requestId}). This operation is only allowed from a trusted loopback connection — no hard feelings 🫂",
-      authenticationFailedMessage: "invalid export token (request {requestId}). Wrong key, right door — check the token 🔑",
+      policyRejectedMessage: "backup export is only available from loopback. This operation is only allowed from a trusted loopback connection — no hard feelings 🫂",
+      authenticationFailedMessage: "invalid export token. Wrong key, right door — check the token 🔑",
     });
 
     const directory =
@@ -64,11 +64,11 @@ export function createBackupExportHandler(
         ? body.directory
         : undefined;
     if (directory !== undefined && typeof directory !== "string")
-      throw new GatewayError("invalid_request", 400, "directory must be a string (request {requestId}). Check the shape of what you sent — then resend 🪞");
+      throw new GatewayError("invalid_request", 400, "directory must be a string. Check the shape of what you sent — then resend 🪞");
 
     const tenantId = await deps.resolveTenantId();
     if (tenantId === null)
-      throw new GatewayError("invalid_request", 409, "no tenant exists; run setup first (request {requestId}). Nothing here but dust — run setup first 🌙");
+      throw new GatewayError("invalid_request", 409, "no tenant exists; run setup first. Nothing here but dust — run setup first 🌙");
 
     // One gzip pass over the streamed document: a tenant with hundreds of
     // thousands of rows is read page by page and only the compressed bytes
@@ -88,7 +88,7 @@ export function createBackupExportHandler(
       throw new GatewayError(
         "internal_error",
         500,
-        `could not write ${path}: ${error instanceof Error ? error.message : "unknown error"} (request {requestId}). Even we have bad days — retry, and quote the request id if it persists 🐻`,
+        `could not write ${path}: ${error instanceof Error ? error.message : "unknown error"}. Even we have bad days — retry, and quote the request id if it persists 🐻`,
       );
     }
 

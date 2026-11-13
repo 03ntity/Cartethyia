@@ -2,6 +2,7 @@
 // mutations behind the routes. Depends only on the contracts; `routes.ts`
 // is the only HTTP surface.
 import { ConsoleDomainError, requireTenantScope } from "../../shared/errors";
+import { validateReorderIds } from "../../shared/reorder";
 import type { AccessDecision } from "../../../security/access-control";
 import {
   aliasCycleExists,
@@ -16,6 +17,80 @@ import {
   type ModelComboRow,
   type ModelRoutingConfig,
 } from "./contracts";
+
+/**
+ * Validates one combo member list against the tenant's current
+ * aliases/combos/models.
+ *
+ * Shared by create and update: both enforce the same rule — every member must
+ * resolve to a known alias, combo, or model; a member naming the combo itself
+ * is refused; a member that is itself a combo may not contain another combo
+ * (runtime expansion resolves only one level of nesting, so deeper nesting
+ * would dangle at dispatch). `selfName` is the name the combo answers to *after*
+ * any rename being applied, so a member naming the new name is caught.
+ *
+ * `grandfathered` exempts members the combo already carries: a member that
+ * resolved when it was written can go dangling later (its model was renamed or
+ * removed), and re-validating it would block an unrelated edit behind a stale
+ * entry the operator never touched.
+ */
+async function validateComboMembers(
+  deps: ModelRoutingConfig,
+  tenantId: string,
+  members: readonly string[],
+  selfName: string,
+  aliases: readonly ModelAliasRow[],
+  combos: readonly ModelComboRow[],
+  grandfathered?: ReadonlySet<string>,
+): Promise<void> {
+  const aliasSet = new Set(aliases.map((r) => r.alias));
+  const comboSet = new Set(combos.map((c) => c.name));
+  const needingDbCheck = [
+    ...new Set(
+      members.filter(
+        (m) =>
+          m !== selfName &&
+          grandfathered?.has(m) !== true &&
+          !aliasSet.has(m) &&
+          !comboSet.has(m),
+      ),
+    ),
+  ];
+  const knownModels =
+    needingDbCheck.length > 0
+      ? await deps.store.areKnownModels(tenantId, needingDbCheck)
+      : new Set<string>();
+  for (const member of members) {
+    if (member === selfName)
+      throw new ConsoleDomainError(
+        "unresolved_member",
+        422,
+        `member ${member} does not resolve to a known alias, combo, or model`,
+        { member },
+      );
+    // An existing member is kept as-is even if it no longer resolves.
+    if (grandfathered?.has(member) === true) continue;
+    if (comboSet.has(member)) {
+      const nested = combos.find((c) => c.name === member);
+      if (nested?.members.some((nestedMember) => comboSet.has(nestedMember)))
+        throw new ConsoleDomainError(
+          "combo_nesting_too_deep",
+          422,
+          `member ${member} is a combo containing another combo; combos support only one level of nesting`,
+          { member },
+        );
+      continue;
+    }
+    if (aliasSet.has(member)) continue;
+    if (!knownModels.has(member))
+      throw new ConsoleDomainError(
+        "unresolved_member",
+        422,
+        `member ${member} does not resolve to a known alias, combo, or model`,
+        { member },
+      );
+  }
+}
 
 export function createModelRoutingOperations(deps: ModelRoutingConfig) {
   const operations = {
@@ -142,21 +217,10 @@ export function createModelRoutingOperations(deps: ModelRoutingConfig) {
         const a = requireTenantScope(access, "dashboard:write");
         const tenantId = a.tenantId;
         const existing = await deps.store.listAliases(tenantId);
-        const existingIds = new Set(existing.map((row) => row.id));
-        const seen = new Set<string>();
-        for (const id of ids) {
-          if (!existingIds.has(id))
-            throw new ConsoleDomainError("unknown_alias", 404, `Alias not found: ${id}`);
-          if (seen.has(id))
-            throw new ConsoleDomainError("invalid_request", 422, `Duplicate alias id: ${id}`);
-          seen.add(id);
-        }
-        if (seen.size !== existingIds.size)
-          throw new ConsoleDomainError(
-            "invalid_request",
-            422,
-            "Reorder must list every alias exactly once",
-          );
+        validateReorderIds(ids, new Set(existing.map((row) => row.id)), "alias", {
+          code: "unknown_alias",
+          status: 404,
+        });
         await deps.store.reorderAliases(tenantId, ids);
       },
     async listCombos(access: AccessDecision | undefined): Promise<readonly ModelComboRow[]> {
@@ -168,21 +232,10 @@ export function createModelRoutingOperations(deps: ModelRoutingConfig) {
         const a = requireTenantScope(access, "dashboard:write");
         const tenantId = a.tenantId;
         const existing = await deps.store.listCombos(tenantId);
-        const existingIds = new Set(existing.map((row) => row.id));
-        const seen = new Set<string>();
-        for (const id of ids) {
-          if (!existingIds.has(id))
-            throw new ConsoleDomainError("unknown_combo", 404, `Combo not found: ${id}`);
-          if (seen.has(id))
-            throw new ConsoleDomainError("invalid_request", 422, `Duplicate combo id: ${id}`);
-          seen.add(id);
-        }
-        if (seen.size !== existingIds.size)
-          throw new ConsoleDomainError(
-            "invalid_request",
-            422,
-            "Reorder must list every combo exactly once",
-          );
+        validateReorderIds(ids, new Set(existing.map((row) => row.id)), "combo", {
+          code: "unknown_combo",
+          status: 404,
+        });
         await deps.store.reorderCombos(tenantId, ids);
       },
     async createCombo(
@@ -208,50 +261,7 @@ export function createModelRoutingOperations(deps: ModelRoutingConfig) {
             409,
             `Combo ${name} already exists for this tenant`,
           );
-        const aliasSet = new Set(existingAliases.map((r) => r.alias));
-        const comboSet = new Set(existingCombos.map((c) => c.name));
-        const needingDbCheck = [
-          ...new Set(members.filter((m) => m !== name && !aliasSet.has(m) && !comboSet.has(m))),
-        ];
-        const knownModels =
-          needingDbCheck.length > 0
-            ? await deps.store.areKnownModels(tenantId, needingDbCheck)
-            : new Set<string>();
-        // Runtime combo expansion (`routing/engine.ts` RoutingEngine.plan) only
-        // resolves one level of nested combo membership — a member that is
-        // itself a combo has ITS members expanded once, but a member of THAT
-        // combo which is in turn a combo is never expanded further. Allowing
-        // deeper nesting at write time would silently produce dangling
-        // "model ids" at dispatch time that never match a candidate. Reject
-        // it here instead of letting it fail opaquely at request time.
-        for (const member of members) {
-          if (member === name)
-            throw new ConsoleDomainError(
-              "unresolved_member",
-              422,
-              `member ${member} does not resolve to a known alias, combo, or model`,
-              { member },
-            );
-          if (comboSet.has(member)) {
-            const nested = existingCombos.find((c) => c.name === member);
-            if (nested?.members.some((nestedMember) => comboSet.has(nestedMember)))
-              throw new ConsoleDomainError(
-                "combo_nesting_too_deep",
-                422,
-                `member ${member} is a combo containing another combo; combos support only one level of nesting`,
-                { member },
-              );
-            continue;
-          }
-          if (aliasSet.has(member)) continue;
-          if (!knownModels.has(member))
-            throw new ConsoleDomainError(
-              "unresolved_member",
-              422,
-              `member ${member} does not resolve to a known alias, combo, or model`,
-              { member },
-            );
-        }
+        await validateComboMembers(deps, tenantId, members, name, existingAliases, existingCombos);
         const strategy = input.strategy ?? "fallback";
         const created = await deps.store.createCombo(tenantId, { name, members, strategy });
         await deps.auditSink?.record({
@@ -372,61 +382,22 @@ export function createModelRoutingOperations(deps: ModelRoutingConfig) {
           if (trimmed.some((m) => !m))
             throw new ConsoleDomainError("invalid_request", 422, "members cannot be empty");
           members = trimmed;
-          const existingAliases = await deps.store.listAliases(tenantId);
-          const aliasSetUp = new Set(existingAliases.map((r) => r.alias));
-          const comboSetUp = new Set(combosForValidation.map((c) => c.name));
           // Grandfather the members the combo already had. A combo can carry a
           // member that resolved when it was written but has since gone dangling
           // (its model was renamed or removed). Re-validating the whole list on
           // every edit would block an unrelated change — a rename, a strategy
           // switch — behind a stale entry the operator never touched. Only the
           // members being newly introduced are validated.
-          const alreadyMembers = new Set(current.members);
-          const needingDbCheckUp = [
-            ...new Set(
-              trimmed.filter(
-                (m) =>
-                  m !== renamedCurrent.name &&
-                  !alreadyMembers.has(m) &&
-                  !aliasSetUp.has(m) &&
-                  !comboSetUp.has(m),
-              ),
-            ),
-          ];
-          const knownModelsUp =
-            needingDbCheckUp.length > 0
-              ? await deps.store.areKnownModels(tenantId, needingDbCheckUp)
-              : new Set<string>();
-          for (const member of trimmed) {
-            if (member === renamedCurrent.name)
-              throw new ConsoleDomainError(
-                "unresolved_member",
-                422,
-                `member ${member} does not resolve to a known alias, combo, or model`,
-                { member },
-              );
-            // An existing member is kept as-is even if it no longer resolves.
-            if (alreadyMembers.has(member)) continue;
-            if (comboSetUp.has(member)) {
-              const nested = combosForValidation.find((c) => c.name === member);
-              if (nested?.members.some((nestedMember) => comboSetUp.has(nestedMember)))
-                throw new ConsoleDomainError(
-                  "combo_nesting_too_deep",
-                  422,
-                  `member ${member} is a combo containing another combo; combos support only one level of nesting`,
-                  { member },
-                );
-              continue;
-            }
-            if (aliasSetUp.has(member)) continue;
-            if (!knownModelsUp.has(member))
-              throw new ConsoleDomainError(
-                "unresolved_member",
-                422,
-                `member ${member} does not resolve to a known alias, combo, or model`,
-                { member },
-              );
-          }
+          const existingAliases = await deps.store.listAliases(tenantId);
+          await validateComboMembers(
+            deps,
+            tenantId,
+            trimmed,
+            renamedCurrent.name,
+            existingAliases,
+            combosForValidation,
+            new Set(current.members),
+          );
         }
         const updated = await deps.store.updateCombo(tenantId, id, {
           ...(members === undefined ? {} : { members }),

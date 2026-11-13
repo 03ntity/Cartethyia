@@ -20,7 +20,7 @@
 import { assertCredentialKind, assertWireFamily } from "../../provider-contracts";
 import type { ProviderAdapter, ProviderDispatchContext, ProviderDispatchTarget } from "../../provider-contracts";
 import type { ModelDefinition } from "../../provider-model-definition";
-import { defineModel } from "../../provider-model-definition";
+import { catalogRows } from "../shared/catalog-rows";
 import type { ProviderModelDiscovery } from "../../discovery/discovery-types";
 import type { FetchLike, ProviderQuotaResult } from "../../quota/quota-contracts";
 import type { CanonicalEvent, CanonicalRequest } from "../../../protocol/canonical-model";
@@ -38,33 +38,34 @@ export const ZRO_BASE_URL = "https://zro.moonmath.ai";
  * reachable set of the probe key (each also carries a `zro/` alias on the
  * wire); a live read may show more or fewer and replaces this seed entirely.
  */
-const ZRO_MODELS_RAW: readonly {
-  id: string;
-  contextLimit: number;
-  outputLimit: number;
-}[] = [
-  { id: "deepseek-v4-flash-0731", contextLimit: 1_048_576, outputLimit: 64_000 },
-  { id: "deepseek-v4.1-flash", contextLimit: 1_048_576, outputLimit: 64_000 },
-] as const;
+type ZroCatalogRow = readonly [id: string, contextLimit: number, outputLimit: number, reasoning: boolean];
 
-export const ZRO_MODELS: readonly ModelDefinition[] = ZRO_MODELS_RAW.map((row) =>
-  defineModel({
-    id: row.id,
-    providerId: ZRO_PROVIDER_ID,
+const zroModel = catalogRows<ZroCatalogRow>({
+  providerId: ZRO_PROVIDER_ID,
+  caps: {
     wireFamily: "messages",
     // The Messages wire root is `/v1/messages` on Zro's host, not the
     // family-conventional `/messages` path `defineModel` would otherwise pick.
     endpoint: "/v1/messages",
-    ctx: row.contextLimit,
-    out: row.outputLimit,
     vision: false,
-    reasoning: true,
     toolCall: true,
     // The reachable rows are the free-limited allowance this key can call; the
     // dashboard groups them under "Free models (auto)".
     freeTier: true,
+  },
+  translate: ([, contextLimit, outputLimit, reasoning]) => ({
+    ctx: contextLimit,
+    out: outputLimit,
+    reasoning,
   }),
-);
+});
+
+export const ZRO_MODELS: readonly ModelDefinition[] = (
+  [
+    ["deepseek-v4-flash-0731", 1_048_576, 64_000, true],
+    ["deepseek-v4.1-flash", 1_048_576, 64_000, true],
+  ] as const satisfies readonly ZroCatalogRow[]
+).map(zroModel);
 
 /**
  * Zro model discovery. The live `/v1/models` list is the *entitlement*

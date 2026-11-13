@@ -2,6 +2,11 @@ import Redis from "ioredis";
 import { log } from "../observability/logger";
 import { cancellableTimeout } from "../boot/timeout";
 import { encodeConnectionComponent, formatConnectionHost, requireConnectionUrl } from "./connection-url";
+// Subscriber teardown is part of the Redis close: `subscribeInvalidation`
+// duplicates the client per subscription, and those connections are invisible
+// to `client.quit()` — closing Redis without them leaks a socket per
+// subscription for the rest of the process (and across `bun --hot` reloads).
+import { closeRedisSubscribers } from "./redis-subscribers";
 
 export type RedisClient = InstanceType<typeof Redis>;
 
@@ -104,6 +109,9 @@ interface CloseRedisOptions {
  */
 export async function closeRedis(options: CloseRedisOptions = {}): Promise<void> {
   const c = globalThis.__cartethyiaRedis;
+  // Pub/sub subscribers are separate connections the main client's `quit()`
+  // cannot reach; close them first so no socket outlives the shutdown.
+  await closeRedisSubscribers();
   if (!c) return;
   globalThis.__cartethyiaRedis = undefined;
   const guard = cancellableTimeout(options.quitTimeoutMs ?? DEFAULT_QUIT_TIMEOUT_MS, "redis quit timed out");

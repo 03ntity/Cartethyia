@@ -10,7 +10,7 @@
 // real model and echoes it in each chunk (`choices[0].delta.model`).
 
 import type { CanonicalRequest, ContentPart } from "../../../protocol/canonical-model";
-import { GatewayError } from "../../../protocol/gateway-error";
+import { upstreamGatewayError } from "../shared/cli-client-kit";
 
 /** Upstream chat body (OpenAI-completions shape). */
 export interface FreepiChatBody {
@@ -234,18 +234,23 @@ export async function* parseFreepiSse(
 export function throwFreepiUpstreamError(code: unknown, message: unknown): never {
   const msg = typeof message === "string" && message.trim() ? message : "free-pi upstream error";
   const codeStr = code === undefined ? undefined : String(code);
+  const upstream = (error: "policy_rejected" | "platform_unavailable" | "upstream_conflict", status: number, text: string, details?: Readonly<Record<string, unknown>>) =>
+    upstreamGatewayError("freepi", error, status, text, {
+      ...(codeStr === undefined ? {} : { upstreamCode: codeStr }),
+      ...(details === undefined ? {} : { details }),
+    });
   // Entitlement/plan walls the gateway classifies as policy rejection (403):
   // the account is not allowed to use this model/credential type, which is
   // not a transient rate limit (quota_exceeded = 429).
   if (codeStr === "guest_unavailable" || codeStr === "model_requires_credits") {
-    throw new GatewayError("policy_rejected", 403, `${msg} (request {requestId}). The free-pi account cannot serve this — check credits or sign in. 💸`, { upstream_code: codeStr }, "upstream");
+    throw upstream("policy_rejected", 403, `${msg} (request {requestId}). The free-pi account cannot serve this — check credits or sign in. 💸`);
   }
   // Server-side model unavailability → platform unavailable (503).
   if (codeStr === "model_at_capacity" || codeStr === "model_unavailable") {
-    throw new GatewayError("platform_unavailable", 503, `${msg} (request {requestId}). Upstream has this model hard-down right now. 🔄`, { upstream_code: codeStr }, "upstream");
+    throw upstream("platform_unavailable", 503, `${msg} (request {requestId}). Upstream has this model hard-down right now. 🔄`);
   }
   if (codeStr === "upstream_error") {
-    throw new GatewayError("platform_unavailable", 502, `${msg} (request {requestId}). The upstream model host errored. 🌙`, { upstream_code: codeStr }, "upstream");
+    throw upstream("platform_unavailable", 502, `${msg} (request {requestId}). The upstream model host errored. 🌙`);
   }
   // A connection-bound session refusal: the caller's transcript carries native
   // items (tool_call_id) from a session this x-session-id does not own. Named
@@ -254,7 +259,7 @@ export function throwFreepiUpstreamError(code: unknown, message: unknown): never
   // code, so match the wording too (donor: "does not belong to this connection").
   const ownershipRefusal = /(?:does not|doesn't|not) belong to|belongs to (?:another|a different)/i.test(msg);
   if (codeStr === "session_mismatch" || codeStr === "invalid_session" || codeStr === "stale_session" || ownershipRefusal) {
-    throw new GatewayError("upstream_conflict", 409, `Free-pi session ownership refused: ${msg} (request {requestId}). Rebasing onto a fresh session 🔄`, { upstream_code: codeStr, freepi_session_mismatch: true }, "upstream");
+    throw upstream("upstream_conflict", 409, `Free-pi session ownership refused: ${msg} (request {requestId}). Rebasing onto a fresh session 🔄`, { freepi_session_mismatch: true });
   }
-  throw new GatewayError("platform_unavailable", 502, `${msg} (request {requestId}). The free-pi upstream refused the request. 🌙`, { upstream_code: codeStr }, "upstream");
+  throw upstream("platform_unavailable", 502, `${msg} (request {requestId}). The free-pi upstream refused the request. 🌙`);
 }

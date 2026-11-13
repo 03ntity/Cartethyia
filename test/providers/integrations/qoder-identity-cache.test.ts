@@ -9,7 +9,6 @@ import {
 import {
   readMachineIdentityCache,
   readMachineIdentityCacheEvenExpired,
-  sampleIdentityWithVote,
   writeMachineIdentityCache,
 } from "../../../src/providers/integrations/qoder/qoder-identity-cache";
 
@@ -52,37 +51,6 @@ test("qoderMachineHeaders omits token/type/code for generated identity (donor is
 test("qoderMachineHeaders falls back to machineToken as machine id when none supplied", () => {
   const headers = qoderMachineHeaders(nativeIdentity);
   expect(headers["cosy-machineid"]).toBe(nativeIdentity.machineToken);
-});
-
-test("sampleIdentityWithVote takes the majority when all samples agree", () => {
-  const sample = () => ({
-    identity: { ...nativeIdentity },
-    seed: "seed-1",
-  });
-  const result = sampleIdentityWithVote(sample, "acct-1");
-  expect(result).not.toBeNull();
-  expect(result!.identity.machineToken).toBe(nativeIdentity.machineToken);
-  expect(result!.seed).toBe("seed-1");
-});
-
-test("sampleIdentityWithVote resolves disagreement by extending and taking majority", () => {
-  let calls = 0;
-  const sample = () => {
-    calls += 1;
-    // First two calls disagree, the rest agree on the minority token.
-    if (calls <= 2) return { identity: { ...generatedIdentity }, seed: "seed-gen" };
-    return { identity: { ...nativeIdentity }, seed: "seed-native" };
-  };
-  const result = sampleIdentityWithVote(sample, "acct-1");
-  expect(calls).toBeGreaterThanOrEqual(3);
-  expect(result).not.toBeNull();
-  // Majority is native (3 votes vs 2 generated), so native wins.
-  expect(result!.identity.machineToken).toBe(nativeIdentity.machineToken);
-});
-
-test("sampleIdentityWithVote returns null when every sample fails", () => {
-  const sample = () => null;
-  expect(sampleIdentityWithVote(sample, "acct-1")).toBeNull();
 });
 
 describe("machine identity disk cache", () => {

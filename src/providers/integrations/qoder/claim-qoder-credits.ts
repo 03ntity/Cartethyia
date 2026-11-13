@@ -19,11 +19,10 @@ import type { ValidatedFetch } from "../../../network/egress/fetch";
 import { qoderRealmForProvider, QODER_REALMS } from "./qoder-realm";
 import { exchangeQoderPatForHost } from "./qoder-auth";
 import {
-  asNumber,
   asRecord,
   buildCampaignHeaders,
-  normalizeCampaign,
-  safeParse,
+  claimSashCampaign,
+  listSashCampaigns,
   QODER_CHECKIN_PROVIDER_IDS,
 } from "./qoder-checkin";
 import { qoderMachineHeaders } from "./qoder-umid";
@@ -146,27 +145,10 @@ export async function claimQoderCredits(args: {
     ...umidHeaders,
   };
 
-  // 1. List campaigns.
-  let campaigns: Array<Record<string, unknown>> = [];
-  try {
-    const res = await fetcher(`${base}/sash/api/v1/me/campaigns`, {
-      method: "GET",
-      headers,
-      signal: AbortSignal.timeout(25_000),
-    });
-    if (!res.ok) {
-      return { state: "error", amount: 0, detail: `Campaign list failed (HTTP ${res.status}).` };
-    }
-    const payload: unknown = await res.json().catch(() => null);
-    const rec = asRecord(payload);
-    const list = Array.isArray(rec?.["campaigns"])
-      ? rec!["campaigns"]
-      : Array.isArray(payload)
-        ? payload
-        : null;
-    if (Array.isArray(list)) campaigns = (list as Array<Record<string, unknown>>).map(normalizeCampaign);
-  } catch {
-    return { state: "error", amount: 0, detail: "Campaign list request failed." };
+  // 1. List campaigns through the shared sash client.
+  const campaigns = await listSashCampaigns(base, headers, fetcher);
+  if (campaigns === null) {
+    return { state: "error", amount: 0, detail: "Campaign list unavailable." };
   }
 
   // 2. Pick the CREDITS CLAIM_BENEFIT campaign that is not already claimed.
@@ -190,33 +172,21 @@ export async function claimQoderCredits(args: {
   const campaignId = String(target["campaign_id"] ?? "");
   if (!campaignId) return { state: "error", amount: 0, detail: "Campaign has no id." };
 
-  // 3. Claim.
-  try {
-    const res = await fetcher(`${base}/sash/api/v1/me/campaigns/${encodeURIComponent(campaignId)}/claim`, {
-      method: "POST",
-      headers: { ...headers, "Content-Type": "application/json" },
-      body: "{}",
-      signal: AbortSignal.timeout(25_000),
-    });
-    const raw = await res.text().catch(() => "");
-    const payload: unknown = raw ? safeParse(raw) : null;
-    const rec = asRecord(payload);
-    const status = String(rec?.["status"] ?? "").toUpperCase();
-    const failure = String(rec?.["failureCode"] ?? "").toUpperCase();
-    const success = rec?.["success"] !== false;
-    const benefit = asRecord(rec?.["benefit"]);
-    const amount = asNumber(rec?.["amount"] ?? benefit?.["amount"]) ?? 100;
-    if (res.status === 409 || failure === "ALREADY_CLAIMED" || (status === "CLAIMED" && failure === "REPLAYED")) {
-      return { state: "already_claimed", amount: 0, detail: null };
-    }
-    if (failure === "SAME_PERSON_ALREADY_CLAIMED" || status === "BLOCKED") {
-      return { state: "already_claimed", amount: 0, detail: "Same-person claim already used for this campaign." };
-    }
-    if (res.ok && success && (status === "CLAIMED" || status === "GRANTED" || status === "SUCCESS")) {
-      return { state: "claimed", amount, detail: null };
-    }
-    return { state: "error", amount: 0, detail: `Claim failed (${res.status})` };
-  } catch {
-    return { state: "error", amount: 0, detail: "Claim request failed." };
+  // 3. Claim through the shared sash client (one owner of the idempotence
+  // map); this surface maps its states onto the ZCode gift-claim result.
+  const claim = await claimSashCampaign(base, campaignId, headers, fetcher);
+  if (claim.state === "already_claimed") {
+    return { state: "already_claimed", amount: 0, detail: null };
   }
+  if (claim.state === "not_eligible") {
+    return { state: "already_claimed", amount: 0, detail: "Same-person claim already used for this campaign." };
+  }
+  if (claim.state === "claimed") {
+    return { state: "claimed", amount: claim.amount ?? 100, detail: null };
+  }
+  return {
+    state: "error",
+    amount: 0,
+    detail: claim.status === 0 ? "Claim request failed." : `Claim failed (${claim.status})`,
+  };
 }

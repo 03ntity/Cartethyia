@@ -15,6 +15,7 @@ import { isRecord, readNumber, readString, resolveImageSource, splitDataUrl } fr
 import { usageFromProvider } from "../../provider-usage";
 import { readCredentialSecret, type ProviderDispatchTarget, type ProviderAdapter, type ProviderDispatchContext } from "../../provider-contracts";
 import { abortGatewayError } from "../../operations/upstream-deadline";
+import { resolveInboundSessionId } from "../../operations/session-resolution";
 import { providerBaseUrl } from "../../provider-metadata";
 import { defineModel } from "../../provider-model-definition";
 import type { ModelDefinition } from "../../provider-model-definition";
@@ -631,7 +632,18 @@ class CommandCodeAdapter implements ProviderAdapter {
     context: ProviderDispatchContext,
   ): AsyncIterable<CanonicalEvent> {
     const token = readCredentialSecret(context.credential, "Command Code bearer token is required");
-    const sessionId = randomUUID();
+    // The session id is the conversation's, not the request's: it doubles as
+    // the envelope's `threadId`, and a per-request UUID filed every turn of one
+    // conversation under a different session — the shape the client avoids by
+    // omitting `x-session-id` rather than inventing one. With no derivable
+    // conversation the header is omitted; the envelope still requires a
+    // threadId, so a fresh one is minted for that case alone.
+    const sessionId =
+      request.conversation?.conversation_id ??
+      request.conversation_id ??
+      resolveInboundSessionId(context, request) ??
+      "";
+    const threadId = sessionId.length > 0 ? sessionId : randomUUID();
     const payload = buildRequest(candidate.model_id, {
       messages: request.messages,
       tools: (request.tools ?? []).map(({ name, description, jsonSchema }) => ({ name, description, jsonSchema })),
@@ -639,7 +651,7 @@ class CommandCodeAdapter implements ProviderAdapter {
       temperature: request.generation_controls.temperature ?? null,
       topP: request.generation_controls.top_p ?? null,
       reasoningEffort: request.reasoning?.effort ?? null,
-    }, sessionId, [request.system, request.instructions].map((parts) => joinTextParts(parts ?? [])).filter(Boolean).join("\n"));
+    }, threadId, [request.system, request.instructions].map((parts) => joinTextParts(parts ?? [])).filter(Boolean).join("\n"));
     const { res, release } = await postUpstreamJson(
       `${COMMANDCODE_HOST}${COMMANDCODE_GENERATE_PATH}`,
       await headers(sessionId, token),

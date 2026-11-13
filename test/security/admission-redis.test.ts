@@ -31,6 +31,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import Redis from "ioredis";
 import { RedisAdmissionCounterStore } from "../../src/security/admission/redis-store";
 import type { AdmissionReserveRequest } from "../../src/security/admission/contracts";
+import { RPM_WINDOW_MS } from "../../src/security/admission/ttl";
 import { GatewayError } from "../../src/protocol/gateway-error";
 import { testRedisUrl } from "../helpers/database";
 
@@ -296,6 +297,30 @@ redisDescribe("RedisAdmissionCounterStore", () => {
       const today = Number((await client.get(`admission:daily:${apiKeyId}:${bucketOf(Date.now())}`)) ?? "0");
       expect(yesterday).toBe(300);
       expect(today).toBe(0);
+    });
+  });
+
+  describe("rpm window parity", () => {
+    test("a request exactly one window old is expired, matching the in-memory store", async () => {
+      // Both stores share `RPM_WINDOW_MS` (`ttl.ts`): the Lua script prunes the
+      // ZSET at `now - window` and the in-memory queue prunes at the same
+      // cutoff, so a timestamp exactly one window old frees its slot on both.
+      // `admission.test.ts` pins the in-memory half of this boundary.
+      const apiKeyId = keyId();
+      const t0 = Date.now();
+      await store.reserve(
+        reserveRequest({ apiKeyId, now: t0, rpmLimit: 1, estimatedTokens: 0 }),
+      );
+      // One millisecond before the boundary the slot is still held.
+      await expect(
+        store.reserve(
+          reserveRequest({ apiKeyId, now: t0 + RPM_WINDOW_MS - 1, rpmLimit: 1, estimatedTokens: 0 }),
+        ),
+      ).rejects.toThrow();
+      // Exactly one window later the first timestamp is expired: admitted.
+      await store.reserve(
+        reserveRequest({ apiKeyId, now: t0 + RPM_WINDOW_MS, rpmLimit: 1, estimatedTokens: 0 }),
+      );
     });
   });
 

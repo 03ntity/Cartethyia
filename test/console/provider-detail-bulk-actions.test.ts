@@ -335,4 +335,45 @@ describe("provider detail bulk actions", () => {
       fx.cleanup();
     }
   });
+
+  test("ownsAccount admits tenant and global rows; getOwnedAccount is owned-only", async () => {
+    const fx = await fixture();
+    try {
+      const store = new DrizzleProviderCatalogStore(fx.db, {
+        telemetryBuffer: { enqueue() {} } as never,
+        bundledModelCatalog: { modelsByProvider: new Map() },
+        providerRegistry: new ProviderRegistry(),
+        outboundFetchFor: () => fetch as never,
+        snapshotInvalidator: { invalidate() {} },
+      });
+      const owned = await addAccount(fx.db, fx.tenantId, "owned", { staticToken: true });
+      const shared = await addAccount(fx.db, null, "shared");
+      const [otherTenant] = await fx.db
+        .insert(tenants)
+        .values({ name: "other-tenant", status: "active" })
+        .returning({ id: tenants.id });
+      const foreign = await addAccount(fx.db, otherTenant!.id, "foreign");
+      const missing = "00000000-0000-0000-0000-000000000000";
+
+      // The catalog visibility rule: tenant-owned and shared rows are both
+      // reachable; another tenant's row is not.
+      expect(await store.ownsAccount(fx.tenantId, PROVIDER_ID, owned)).toBe(true);
+      expect(await store.ownsAccount(fx.tenantId, PROVIDER_ID, shared)).toBe(true);
+      expect(await store.ownsAccount(fx.tenantId, PROVIDER_ID, foreign)).toBe(false);
+      expect(await store.ownsAccount(fx.tenantId, PROVIDER_ID, missing)).toBe(false);
+      expect(await store.ownsAccount(fx.tenantId, "other-provider", owned)).toBe(false);
+
+      // The owned-only variant never admits a shared row — the token-refresh
+      // admission check depends on that distinction.
+      const ownedRef = await store.getOwnedAccount(fx.tenantId, PROVIDER_ID, owned);
+      expect(ownedRef?.id).toBe(owned);
+      expect(ownedRef?.staticToken).toBe(true);
+      expect(ownedRef?.credentialKind).toBe("api_key");
+      expect(await store.getOwnedAccount(fx.tenantId, PROVIDER_ID, shared)).toBeUndefined();
+      expect(await store.getOwnedAccount(fx.tenantId, PROVIDER_ID, foreign)).toBeUndefined();
+      expect(await store.getOwnedAccount(fx.tenantId, PROVIDER_ID, missing)).toBeUndefined();
+    } finally {
+      fx.cleanup();
+    }
+  });
 });

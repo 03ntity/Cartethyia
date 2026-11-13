@@ -24,7 +24,7 @@ import {
   assertClaudeCodeCompatibility,
   requestHasClaudeTools,
 } from "./claude-compatibility";
-import { buildClaudeHeaders, type ClaudeHeaderOptions } from "./claude-credentials";
+import { buildClaudeHeaders, FALLBACK_CREDIT_BETA, type ClaudeHeaderOptions } from "./claude-credentials";
 import { isRecord } from "../../../protocol/codecs";
 import { HEADER_CONTROL } from "../../../security/outbound-headers";
 import { CLAUDE_USER_PROFILES_BETA } from "./claude-user-profiles";
@@ -53,7 +53,6 @@ import { applyParamQuirks } from "../../../protocol/translation/quirks";
 import { CLAUDE_BILLING_HEADER_PREFIX, endpointUrl } from "../../../protocol/codecs";
 import { sendClaudeMessagesRequest } from "../../../protocol/upstream/send-claude-messages";
 import {
-  FALLBACK_CREDIT_BETA,
   fallbackCreditRequestBody,
   fallbackCreditTargetModel,
   hashBody,

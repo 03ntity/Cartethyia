@@ -80,6 +80,32 @@ export function githubCopilotApiHostForProfile(
 }
 
 /**
+ * The stored credential for a profile whose inference token IS the GitHub
+ * token.
+ *
+ * The OpenCode wire presents the raw token upstream — there is no minted
+ * Copilot token — so login, refresh, and import all assemble the same
+ * envelope: the token as both `access` and `github`, the profile's API host,
+ * and a far-future expiry (the GitHub token carries no Copilot expiry to
+ * mirror). The VS Code profile mints instead and never reaches this helper.
+ */
+function githubCredentialForProfile(
+  token: string,
+  profile: GithubCopilotCredentialProfile,
+  domain: string,
+): { readonly credential: string; readonly expiresAt: Date } {
+  return {
+    credential: encodeGithubCredential(
+      token,
+      githubCopilotApiHostForProfile(profile, domain),
+      token,
+      profile,
+    ),
+    expiresAt: new Date(Date.now() + GITHUB_OPENCODE_TOKEN_LIFETIME_MS),
+  };
+}
+
+/**
  * Headers every Copilot inference and policy request must carry.
  *
  * The API rejects a request that does not identify a Copilot client, so these
@@ -219,16 +245,12 @@ export function bindImportedGithubCredential(
       throw new Error("a VS Code Copilot export needs its raw GitHub refresh token to import as opencode-copilot");
     }
     const token = githubToken ?? access;
+    const assembled = githubCredentialForProfile(token, profile, domain);
     return {
-      credential: encodeGithubCredential(
-        token,
-        githubCopilotApiHostForProfile(profile, domain),
-        token,
-        profile,
-      ),
+      credential: assembled.credential,
       profile,
       refreshToken: token,
-      expiresAt: new Date(Date.now() + GITHUB_OPENCODE_TOKEN_LIFETIME_MS),
+      expiresAt: assembled.expiresAt,
       requiresRefresh: false,
       warnings: [],
     };
@@ -633,14 +655,18 @@ export class GithubOAuthClient extends OAuthDeviceFlow implements OAuthTokenRefr
       return { status: "failed", reason: error instanceof Error ? error.message : "GitHub Copilot token mint failed" };
     }
     const label = await fetchGitHubLogin(githubToken, domain, profile, this.fetchFn, AbortSignal.timeout(10_000));
-    const access = minted === undefined ? githubToken : minted.access;
-    const apiHost = minted === undefined ? githubCopilotApiHostForProfile(profile, domain) : minted.apiHost;
-    const expiresAt =
-      minted === undefined
-        ? new Date(Date.now() + GITHUB_OPENCODE_TOKEN_LIFETIME_MS)
-        : minted.expiresAt;
+    let credential: string;
+    let expiresAt: Date;
+    if (minted === undefined) {
+      const assembled = githubCredentialForProfile(githubToken, profile, domain);
+      credential = assembled.credential;
+      expiresAt = assembled.expiresAt;
+    } else {
+      credential = encodeGithubCredential(minted.access, minted.apiHost, githubToken, profile);
+      expiresAt = minted.expiresAt;
+    }
     const result: OAuthExchangeResult = {
-      access: encodeGithubCredential(access, apiHost, githubToken, profile),
+      access: credential,
       // The raw GitHub token is the refresh value for the selected profile.
       refresh: githubToken,
       expiresAt,
@@ -666,15 +692,11 @@ export class GithubOAuthClient extends OAuthDeviceFlow implements OAuthTokenRefr
       throw new Error("github_copilot_profile_mismatch: reconnect this GitHub account under the selected CARTETHYIA_GITHUB_COPILOT_MODE");
     }
     if (profile === "opencode-copilot") {
+      const assembled = githubCredentialForProfile(refreshToken, profile, copilotGitHubDomain());
       return {
-        access: encodeGithubCredential(
-          refreshToken,
-          githubCopilotApiHostForProfile(profile, copilotGitHubDomain()),
-          refreshToken,
-          profile,
-        ),
+        access: assembled.credential,
         refresh: refreshToken,
-        expiresAt: new Date(Date.now() + GITHUB_OPENCODE_TOKEN_LIFETIME_MS),
+        expiresAt: assembled.expiresAt,
         auth_state: { github_copilot_profile: profile },
       };
     }

@@ -29,6 +29,7 @@ import type {
 import type { OAuthTokenRefreshResult } from "../../authentication/oauth-refresh-service";
 import { OAuthDeviceFlow } from "../../authentication/oauth-device-flow";
 import type { FetchLike } from "../../authentication/oauth-client";
+import { staticExchangeResult } from "../shared/oauth-exchange";
 
 const KILO_API_BASE_URL = "https://api.kilo.ai" as const;
 export const KILO_DEVICE_CODES_URL = `${KILO_API_BASE_URL}/api/device-auth/codes` as const;
@@ -37,17 +38,6 @@ export const KILO_PROFILE_URL = `${KILO_API_BASE_URL}/api/profile` as const;
 /** Upstream-reported window for a device code, used only when the start omits one. */
 const DEVICE_EXPIRY_SECONDS = 600;
 const DEVICE_INTERVAL_SECONDS = 3;
-
-/**
- * Fallback expiry for a token whose issuer advertises no lifetime.
- *
- * The value is not a claim about the token: it exists because a stored
- * credential needs an `expires_at`, and it is deliberately far out so the
- * freshness check never schedules a refresh this provider cannot perform.
- * Nothing registers a refresher for Kilo Code, so a nearer value would only
- * make `loadAccountWithFreshness` mark a working token as due.
- */
-const NO_EXPIRY_FALLBACK_MS = 365 * 24 * 60 * 60 * 1000;
 
 /**
  * Encodes the access secret. Decoding lives in `src/security/credential-codec.ts`
@@ -167,16 +157,16 @@ export class KiloOAuthClient extends OAuthDeviceFlow {
     }
     const orgId = await fetchOrganizationId(this.fetchFor(context), accessToken, AbortSignal.timeout(10_000));
     const label = accountLabelFrom(payload);
-    const result: OAuthExchangeResult = {
+    // No refresh grant exists, so the raw access secret is mirrored into the
+    // NOT NULL refresh slot as the identity fingerprint that keys a repeated
+    // login to the same account (never sent to a token endpoint — no refresher
+    // is registered for this provider). The envelope credential stays in
+    // `access`; the shared builder supplies the storage horizon.
+    const result: OAuthExchangeResult = staticExchangeResult({
       access: encodeKiloCredential(accessToken, orgId),
-      // No refresh grant exists, so the access secret is mirrored here for the
-      // identity fingerprint that keys a repeated login to the same account.
-      // `refreshCiphertext` is NOT NULL and this value is never sent to a
-      // token endpoint — no refresher is registered for this provider.
       refresh: accessToken,
-      expiresAt: new Date(Date.now() + NO_EXPIRY_FALLBACK_MS),
-      ...(label === undefined ? {} : { accountLabel: label }),
-    };
+      accountLabel: label,
+    });
     return { status: "complete", result };
   }
 

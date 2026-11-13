@@ -24,8 +24,8 @@
  * Haiku and Opus 4.5 at 200k, the rest at 1M — and the shared default would
  * flatten that.
  */
-import { defineModel } from "../../provider-model-definition";
 import type { ModelDefinition } from "../../provider-model-definition";
+import { catalogRows } from "../shared/catalog-rows";
 import { CLOUDFLAREAI_PROVIDER_ID } from "./cloudflareai";
 
 /** Messages path below the account's `/anthropic` base. */
@@ -33,20 +33,18 @@ const MESSAGES_ENDPOINT = "/v1/messages";
 
 type CatalogRow = readonly [id: string, context: number, output: number];
 
-function cloudflareaiModel([id, context, output]: CatalogRow): ModelDefinition {
-  return defineModel({
-    id,
-    providerId: CLOUDFLAREAI_PROVIDER_ID,
+const cloudflareaiModel = catalogRows<CatalogRow>({
+  providerId: CLOUDFLAREAI_PROVIDER_ID,
+  caps: {
     wireFamily: "messages",
     endpoint: MESSAGES_ENDPOINT,
-    ctx: context,
-    out: output,
     vision: true,
     document: true,
     reasoning: true,
     toolCall: true,
-  });
-}
+  },
+  translate: ([, context, output]) => ({ ctx: context, out: output }),
+});
 
 /** Static Anthropic-route catalog for one account's Cloudflare AI Gateway. */
 export const CLOUDFLAREAI_MODELS: readonly ModelDefinition[] = [

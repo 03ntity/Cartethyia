@@ -2,8 +2,7 @@ import { asCoercedNumber as sharedAsNumber, asRecord as sharedAsRecord } from ".
 import { providerBaseUrl, BUDDY_PROVIDER_IDS } from "../../provider-metadata";
 import { sleep } from "../../../shared/sleep";
 import { QODER_CHECKIN_PROVIDER_IDS } from "../qoder/qoder-checkin";
-import { buildCodeBuddyUserAgent } from "../../operations/client-versions";
-import { codebuddyDomain, type CodeBuddyVariant } from "./codebuddy/shared";
+import { buddyIdentityHeaders, type CodeBuddyVariant } from "./codebuddy/shared";
 import type { FetchLike } from "../../quota/quota-contracts";
 import { text as asText } from "../../quota/quota-contracts";
 
@@ -160,7 +159,7 @@ export async function fetchBuddyActivityReport(args: {
     return { ...base, state: "error", error: "Account uid is unavailable; cannot report activity." };
   }
   const headers = {
-    ...(await checkinHeaders(providerId)),
+    ...checkinHeaders(providerId),
     Authorization: `Bearer ${credential}`,
     "X-User-Id": userId,
   };
@@ -233,22 +232,17 @@ function claimUrl(providerId: string): string {
   return `${providerBaseUrl(providerId)}${VERSION_SEGMENT[providerId] ?? ""}${CHECKIN_CLAIM_PATH}`;
 }
 
-async function checkinHeaders(providerId: string): Promise<Record<string, string>> {
-  const common = {
-    "X-Product": "SaaS",
-    "X-Requested-With": "XMLHttpRequest",
-    "X-CodeBuddy-Request": "1",
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  };
+function checkinHeaders(providerId: string): Record<string, string> {
   const variant: CodeBuddyVariant = providerId === "cb" ? "IDE" : "CLI";
-  return {
-    ...common,
-    "User-Agent": buildCodeBuddyUserAgent(variant),
-    "X-IDE-Type": variant,
-    "X-IDE-Name": variant,
-    "X-Domain": codebuddyDomain(variant),
-  };
+  // The check-in facade is a billing read, not a chat dispatch: it carries the
+  // client identity block plus the JSON accept pair — no conversation, device,
+  // or agent headers.
+  return buddyIdentityHeaders(variant, {
+    extras: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+  });
 }
 
 function alreadyClaimedMessage(payload: unknown, rawBody: string): string | null {
@@ -312,7 +306,7 @@ export async function fetchDailyCheckin(args: {
   // `checkinHeaders()` already carries Content-Type/Accept; only auth is
   // layered on here so the per-provider identity stays in one place.
   const headers = {
-    ...(await checkinHeaders(providerId)),
+    ...checkinHeaders(providerId),
     Authorization: `Bearer ${credential}`,
   };
 

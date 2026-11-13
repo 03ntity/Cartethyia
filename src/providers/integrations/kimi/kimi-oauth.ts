@@ -228,14 +228,18 @@ export class KimiCodeOAuthClient extends OAuthDeviceFlow {
       timeoutMs: 15_000,
       label: "Kimi Code token refresh",
     })) as DeviceTokenResponse;
-    const access = typeof payload.access_token === "string" ? payload.access_token.trim() : "";
-    if (!access) throw new Error("Kimi Code refresh omitted access_token");
+    // Shared token-response validation: fails when the endpoint answers without
+    // an access_token. Kimi's stored shapes are envelopes, so the normalized
+    // fields are re-encoded around the device id rather than passed through;
+    // the expiry keeps Kimi's 24h fallback (the shared helper assumes 1h).
+    const normalized = this.parseTokenResponse(payload, parsedRefresh.refreshToken);
     const nextRefresh =
       typeof payload.refresh_token === "string" && payload.refresh_token.trim()
         ? payload.refresh_token.trim()
         : parsedRefresh.refreshToken;
     return {
-      access: encodeKimiCredential(access, parsedRefresh.deviceId),
+      ...this.toRefreshResult(normalized),
+      access: encodeKimiCredential(normalized.access.trim(), parsedRefresh.deviceId),
       refresh: encodeRefreshCredential(nextRefresh, parsedRefresh.deviceId),
       expiresAt: expiryFromSeconds(payload.expires_in, 86_400),
     };

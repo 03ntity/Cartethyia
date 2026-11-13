@@ -34,6 +34,7 @@ import {
   record,
 } from "../../authentication/oauth-flow-store";
 import type {
+  FetchLike,
   OAuthAuthorizeRequest,
   OAuthCodeExchangeContext,
   OAuthDeviceFlowContext,
@@ -313,6 +314,31 @@ export const KIRO_DEFAULT_LABELS: ReadonlySet<string> = new Set(
   ).map(kiroDefaultLabel),
 );
 
+/**
+ * Best-effort account-label enrichment for a completed sign-in.
+ *
+ * Called only when {@link kiroAccountLabel} found no identity in the access
+ * token — the opaque ones (social, Builder-ID/IdC, imported) — so the usage
+ * surface is asked for the account email instead, the same call the quota
+ * sweep makes. The call is guarded: a failure keeps the family `fallback`
+ * rather than failing a login that already succeeded.
+ */
+async function enrichKiroLabel(
+  accessToken: string,
+  authState: KiroAuthState,
+  fallback: string,
+  fetchFn: FetchLike,
+): Promise<string> {
+  try {
+    const quota = await fetchKiroQuota(accessToken, fetchFn, { auth_state: authStateOf(authState) });
+    const accountLabel = quota.accountLabel;
+    if (accountLabel !== undefined && accountLabel.trim().length > 0) return accountLabel;
+  } catch {
+    // keep the family fallback
+  }
+  return fallback;
+}
+
 /** Credentials the client registration minted and refresh must replay. */
 interface DeviceFlowRegistration {
   readonly clientId: string;
@@ -554,19 +580,14 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
       clientId: registration.clientId,
       machineId: deriveOAuthMachineId(refresh),
     };
-    let label = kiroAccountLabel(access) ?? kiroDefaultLabel(registration.authMethod);
-    // Same best-effort identity enrichment as the browser flows: the device
-    // token is opaque, so ask the usage surface for the account email.
-    if (label === kiroDefaultLabel(registration.authMethod)) {
-      try {
-        const quota = await fetchKiroQuota(access, this.fetchFor(context), { auth_state: authStateOf(authState) });
-        if (quota.accountLabel !== undefined && quota.accountLabel.trim().length > 0) {
-          label = quota.accountLabel;
-        }
-      } catch {
-        // keep the family fallback
-      }
-    }
+    const label =
+      kiroAccountLabel(access) ??
+      (await enrichKiroLabel(
+        access,
+        authState,
+        kiroDefaultLabel(registration.authMethod),
+        this.fetchFor(context),
+      ));
     return {
       status: "complete",
       result: {
@@ -729,20 +750,14 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
       clientId: registration.clientId,
       machineId: deriveOAuthMachineId(refresh),
     };
-    let label = kiroAccountLabel(access) ?? kiroDefaultLabel(registration.authMethod);
-    // Builder-ID / IdC access tokens are opaque (not JWTs), so the JWT
-    // extraction above misses the identity; ask the usage surface for the
-    // account email instead — the same best-effort enrichment social uses.
-    if (label === kiroDefaultLabel(registration.authMethod)) {
-      try {
-        const quota = await fetchKiroQuota(access, this.fetchFn, { auth_state: authStateOf(authState) });
-        if (quota.accountLabel !== undefined && quota.accountLabel.trim().length > 0) {
-          label = quota.accountLabel;
-        }
-      } catch {
-        // keep the family fallback
-      }
-    }
+    const label =
+      kiroAccountLabel(access) ??
+      (await enrichKiroLabel(
+        access,
+        authState,
+        kiroDefaultLabel(registration.authMethod),
+        this.fetchFn,
+      ));
     return {
       access,
       refresh,
@@ -796,20 +811,9 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
       ...(profileArn === undefined ? {} : { profileArn }),
       machineId: deriveOAuthMachineId(refresh),
     };
-    let label = kiroAccountLabel(access) ?? kiroDefaultLabel(authMethod);
-    // Social access tokens are opaque (not JWTs), so the JWT extraction above
-    // misses them; ask the usage surface for the account's email instead. The
-    // call is best-effort and guarded — a failure keeps the family fallback.
-    if (label === kiroDefaultLabel(authMethod)) {
-      try {
-        const quota = await fetchKiroQuota(access, this.fetchFn, { auth_state: authStateOf(authState) });
-        if (quota.accountLabel !== undefined && quota.accountLabel.trim().length > 0) {
-          label = quota.accountLabel;
-        }
-      } catch {
-        // keep the family fallback
-      }
-    }
+    const label =
+      kiroAccountLabel(access) ??
+      (await enrichKiroLabel(access, authState, kiroDefaultLabel(authMethod), this.fetchFn));
     return {
       access,
       refresh,
@@ -907,20 +911,14 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
       ...(profileArn === undefined ? {} : { profileArn }),
       machineId: deriveOAuthMachineId(refreshed.refresh),
     };
-    let label = kiroAccountLabel(refreshed.access) ?? kiroDefaultLabel(isIdc ? "idc" : "imported");
-    // An imported refresh token's access token is opaque, so extract the identity
-    // from the usage surface instead — the same call the quota sweep makes, and
-    // the same best-effort guard.
-    if (label === kiroDefaultLabel(isIdc ? "idc" : "imported")) {
-      try {
-        const quota = await fetchKiroQuota(refreshed.access, this.fetchFn, { auth_state: authStateOf(authState) });
-        if (quota.accountLabel !== undefined && quota.accountLabel.trim().length > 0) {
-          label = quota.accountLabel;
-        }
-      } catch {
-        // keep the family fallback
-      }
-    }
+    const label =
+      kiroAccountLabel(refreshed.access) ??
+      (await enrichKiroLabel(
+        refreshed.access,
+        authState,
+        kiroDefaultLabel(isIdc ? "idc" : "imported"),
+        this.fetchFn,
+      ));
     return {
       access: refreshed.access,
       refresh: refreshed.refresh,
@@ -1209,14 +1207,7 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
   ): Promise<DeviceFlowRegistration> {
     const response = await this.fetchFn(`https://oidc.${region}.amazonaws.com/client/register`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-        "user-agent": buildKiroSsoUserAgent(),
-        "x-amz-user-agent": buildKiroSsoAmzUserAgent(),
-        "amz-sdk-request": "attempt=1; max=4",
-        "amz-sdk-invocation-id": crypto.randomUUID(),
-      },
+      headers: ssoOidcHeaders(),
       body: JSON.stringify({
         clientName: KIRO_OIDC_CLIENT_NAME,
         clientType: "public",
@@ -1244,14 +1235,7 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
     const region = assertAwsRegion(registration.region);
     const response = await this.fetchFn(`https://oidc.${region}.amazonaws.com/token`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-        "user-agent": buildKiroSsoUserAgent(),
-        "x-amz-user-agent": buildKiroSsoAmzUserAgent(),
-        "amz-sdk-request": "attempt=1; max=4",
-        "amz-sdk-invocation-id": crypto.randomUUID(),
-      },
+      headers: ssoOidcHeaders(),
       body: JSON.stringify({
         clientId: registration.clientId,
         clientSecret: registration.clientSecret,

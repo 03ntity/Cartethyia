@@ -75,6 +75,19 @@ import type { ModelWarning } from "../../../providers/provider-model-definition"
  * `deleted`/`missing` are present on delete; `updated` on disable. Both actions
  * are idempotent: a second call finds no matching row and reports zero.
  */
+/**
+ * The non-secret slice of an owned `provider_accounts` row, for callers that
+ * need admission fields (`credentialKind`, `staticToken`) without the
+ * credential material or the response projection.
+ */
+export interface OwnedProviderAccountRef {
+  readonly id: string;
+  readonly providerId: string;
+  readonly tenantId: string | null;
+  readonly credentialKind: CredentialKind;
+  readonly staticToken: boolean;
+}
+
 export interface ProviderAccountBulkActionResult {
   readonly ok: boolean;
   readonly updated: number;
@@ -186,52 +199,52 @@ const ADAPTER_OWNED: Record<string, true> = {
 export function validateCompatibilityProfile(profile: CompatibilityProfile): void {
   if (profile.service_kinds !== undefined) {
     if (!Array.isArray(profile.service_kinds)) {
-      throw new GatewayError("invalid_request", 400, "service_kinds must be an array (request {requestId}). Check the shape of what you sent — then resend 🪞");
+      throw new GatewayError("invalid_request", 400, "service_kinds must be an array. Check the shape of what you sent — then resend 🪞");
     }
     for (const kind of profile.service_kinds) {
       if (!isServiceKind(kind)) {
-        throw new GatewayError("invalid_request", 400, `unknown service kind ${String(kind)} (request {requestId}). Check the shape of what you sent — then resend 🪞`);
+        throw new GatewayError("invalid_request", 400, `unknown service kind ${String(kind)}. Check the shape of what you sent — then resend 🪞`);
       }
     }
   }
   if (profile.cli_identity !== undefined) {
     if (typeof profile.cli_identity !== "boolean") {
-      throw new GatewayError("invalid_request", 400, "cli_identity must be boolean (request {requestId}). Check the shape of what you sent — then resend 🪞");
+      throw new GatewayError("invalid_request", 400, "cli_identity must be boolean. Check the shape of what you sent — then resend 🪞");
     }
   }
   if (profile.gateway_user_agent !== undefined) {
     if (typeof profile.gateway_user_agent !== "boolean") {
-      throw new GatewayError("invalid_request", 400, "gateway_user_agent must be boolean (request {requestId}). Check the shape of what you sent — then resend 🪞");
+      throw new GatewayError("invalid_request", 400, "gateway_user_agent must be boolean. Check the shape of what you sent — then resend 🪞");
     }
   }
   if (profile.extra_headers) {
     for (const [rawName, rawValue] of Object.entries(profile.extra_headers)) {
       const name = rawName.toLowerCase();
       if (name.length < 1 || name.length > 64 || !TOKEN_REGEX.test(name)) {
-        throw new GatewayError("invalid_request", 400, `invalid header name ${rawName} (request {requestId}). Check the shape of what you sent — then resend 🪞`);
+        throw new GatewayError("invalid_request", 400, `invalid header name ${rawName}. Check the shape of what you sent — then resend 🪞`);
       }
       if (isProtectedHeader(name, ADAPTER_OWNED)) {
         throw new GatewayError(
           "invalid_request",
           400,
-          `header ${rawName} is not allowed as custom header (request {requestId}). Check the shape of what you sent — then resend 🪞`,
+          `header ${rawName} is not allowed as custom header. Check the shape of what you sent — then resend 🪞`,
         );
       }
       if (typeof rawValue !== "string") {
         throw new GatewayError(
           "invalid_request",
           400,
-          `header value for ${rawName} must be string (request {requestId}). Check the shape of what you sent — then resend 🪞`,
+          `header value for ${rawName} must be string. Check the shape of what you sent — then resend 🪞`,
         );
       }
       if (Buffer.byteLength(rawValue, "utf8") > 4096) {
-        throw new GatewayError("invalid_request", 400, `header value for ${rawName} exceeds 4KiB (request {requestId}). We love long reads, but not that long 📚`);
+        throw new GatewayError("invalid_request", 400, `header value for ${rawName} exceeds 4KiB. We love long reads, but not that long 📚`);
       }
       if (/[\r\n\x00-\x1f\x7f]/.test(rawValue)) {
         throw new GatewayError(
           "invalid_request",
           400,
-          `header value for ${rawName} contains control characters (request {requestId}). Check the shape of what you sent — then resend 🪞`,
+          `header value for ${rawName} contains control characters. Check the shape of what you sent — then resend 🪞`,
         );
       }
     }
@@ -239,9 +252,9 @@ export function validateCompatibilityProfile(profile: CompatibilityProfile): voi
   if (profile.extra_query_params) {
     for (const [k, v] of Object.entries(profile.extra_query_params)) {
       if (typeof v !== "string")
-        throw new GatewayError("invalid_request", 400, `query param ${k} must be string (request {requestId}). Check the shape of what you sent — then resend 🪞`);
+        throw new GatewayError("invalid_request", 400, `query param ${k} must be string. Check the shape of what you sent — then resend 🪞`);
       if (/[\r\n]/.test(k) || /[\r\n]/.test(v))
-        throw new GatewayError("invalid_request", 400, `query param contains CRLF (request {requestId}). Check the shape of what you sent — then resend 🪞`);
+        throw new GatewayError("invalid_request", 400, `query param contains CRLF. Check the shape of what you sent — then resend 🪞`);
     }
   }
   if (profile.endpoint_paths_by_wire_family) {
@@ -250,56 +263,56 @@ export function validateCompatibilityProfile(profile: CompatibilityProfile): voi
         throw new GatewayError(
           "invalid_request",
           400,
-          `endpoint_paths_by_wire_family: unknown wire family ${wf} (request {requestId}). Check the shape of what you sent — then resend 🪞`,
+          `endpoint_paths_by_wire_family: unknown wire family ${wf}. Check the shape of what you sent — then resend 🪞`,
         );
       }
       if (typeof path !== "string") {
         throw new GatewayError(
           "invalid_request",
           400,
-          `endpoint_paths_by_wire_family.${wf} must be string (request {requestId}). Check the shape of what you sent — then resend 🪞`,
+          `endpoint_paths_by_wire_family.${wf} must be string. Check the shape of what you sent — then resend 🪞`,
         );
       }
       if (path.length === 0 || path.length > 256) {
         throw new GatewayError(
           "invalid_request",
           400,
-          `endpoint_paths_by_wire_family.${wf} path length must be 1-256 chars (request {requestId}). Check the shape of what you sent — then resend 🪞`,
+          `endpoint_paths_by_wire_family.${wf} path length must be 1-256 chars. Check the shape of what you sent — then resend 🪞`,
         );
       }
       if (!path.startsWith("/")) {
         throw new GatewayError(
           "invalid_request",
           400,
-          `endpoint_paths_by_wire_family.${wf} path must start with / (request {requestId}). Check the shape of what you sent — then resend 🪞`,
+          `endpoint_paths_by_wire_family.${wf} path must start with /. Check the shape of what you sent — then resend 🪞`,
         );
       }
       if (/[\s\r\n\x00-\x1f\x7f]/.test(path)) {
         throw new GatewayError(
           "invalid_request",
           400,
-          `endpoint_paths_by_wire_family.${wf} path contains invalid characters (request {requestId}). Check the shape of what you sent — then resend 🪞`,
+          `endpoint_paths_by_wire_family.${wf} path contains invalid characters. Check the shape of what you sent — then resend 🪞`,
         );
       }
     }
   }
   if (profile.model_wire_families) {
     if (!Array.isArray(profile.model_wire_families)) {
-      throw new GatewayError("invalid_request", 400, "model_wire_families must be an array (request {requestId}). Check the shape of what you sent — then resend 🪞");
+      throw new GatewayError("invalid_request", 400, "model_wire_families must be an array. Check the shape of what you sent — then resend 🪞");
     }
     for (const rule of profile.model_wire_families) {
       if (typeof rule?.pattern !== "string" || rule.pattern.length === 0) {
         throw new GatewayError(
           "invalid_request",
           400,
-          "model_wire_families[].pattern must be a non-empty string (request {requestId}). Check the shape of what you sent — then resend 🪞",
+          "model_wire_families[].pattern must be a non-empty string. Check the shape of what you sent — then resend 🪞",
         );
       }
       if (rule.pattern.length > 256) {
         throw new GatewayError(
           "invalid_request",
           400,
-          "model_wire_families[].pattern must be at most 256 chars (request {requestId}). Check the shape of what you sent — then resend 🪞",
+          "model_wire_families[].pattern must be at most 256 chars. Check the shape of what you sent — then resend 🪞",
         );
       }
       try {
@@ -308,14 +321,14 @@ export function validateCompatibilityProfile(profile: CompatibilityProfile): voi
         throw new GatewayError(
           "invalid_request",
           400,
-          `model_wire_families[].pattern ${rule.pattern} is not a valid regular expression (request {requestId}). Check the shape of what you sent — then resend 🪞`,
+          `model_wire_families[].pattern ${rule.pattern} is not a valid regular expression. Check the shape of what you sent — then resend 🪞`,
         );
       }
       if (!isWireFamily(rule.wire_family)) {
         throw new GatewayError(
           "invalid_request",
           400,
-          `model_wire_families[].wire_family: unknown wire family ${String(rule.wire_family)} (request {requestId}). Check the shape of what you sent — then resend 🪞`,
+          `model_wire_families[].wire_family: unknown wire family ${String(rule.wire_family)}. Check the shape of what you sent — then resend 🪞`,
         );
       }
     }
@@ -324,10 +337,10 @@ export function validateCompatibilityProfile(profile: CompatibilityProfile): voi
     profile.streaming_usage_mode &&
     !["include_usage", "none"].includes(profile.streaming_usage_mode)
   ) {
-    throw new GatewayError("invalid_request", 400, "invalid streaming_usage_mode (request {requestId}). Check the shape of what you sent — then resend 🪞");
+    throw new GatewayError("invalid_request", 400, "invalid streaming_usage_mode. Check the shape of what you sent — then resend 🪞");
   }
   if (profile.structured_output && typeof profile.structured_output.enabled !== "boolean") {
-    throw new GatewayError("invalid_request", 400, "structured_output.enabled must be boolean (request {requestId}). Check the shape of what you sent — then resend 🪞");
+    throw new GatewayError("invalid_request", 400, "structured_output.enabled must be boolean. Check the shape of what you sent — then resend 🪞");
   }
   // If any field is present but has no runtime reader, our current reader set covers all fields above.
   const allowed: Record<string, true> = {
@@ -354,7 +367,7 @@ export function validateCompatibilityProfile(profile: CompatibilityProfile): voi
       throw new GatewayError(
         "invalid_request",
         400,
-        `unknown compatibility_profile field ${k} has no runtime reader (request {requestId}). Check the shape of what you sent — then resend 🪞`,
+        `unknown compatibility_profile field ${k} has no runtime reader. Check the shape of what you sent — then resend 🪞`,
       );
     }
   }
@@ -937,6 +950,23 @@ export interface ProviderCatalogStore {
     modelIds: readonly string[],
   ): Promise<{ readonly committed: readonly string[]; readonly skipped: readonly string[]; readonly synced: number }>;
   listAccounts(tenantId: string, providerId: string): Promise<readonly ProviderAccountResponse[]>;
+  /**
+   * Existence check for one account under the catalog's visibility rule
+   * (tenant-owned or shared/global), without the usage aggregates
+   * `listAccounts` computes. Used by routes that only need "is this account
+   * reachable" before delegating to a narrower store call.
+   */
+  ownsAccount(tenantId: string, providerId: string, accountId: string): Promise<boolean>;
+  /**
+   * The non-secret fields of one account the calling tenant owns outright —
+   * `tenant_id` must equal `tenantId`, so a shared/global row never matches.
+   * Returns `undefined` for a missing, foreign-tenant, or global account.
+   */
+  getOwnedAccount(
+    tenantId: string,
+    providerId: string,
+    accountId: string,
+  ): Promise<OwnedProviderAccountRef | undefined>;
   listAllAccounts(tenantId: string): Promise<readonly ProviderAccountResponse[]>;
   /**
    * Provider-id + status only, for every account the tenant can see. Much

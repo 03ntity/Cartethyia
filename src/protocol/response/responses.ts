@@ -8,7 +8,7 @@ import { isRecord, readOutputIndex } from "../codecs";
 import { decodeSseEvents } from "../sse-decoder";
 import { gatewayErrorFromStreamError } from "../stream-error-frames";
 import { usageFromProvider, readResponsesReasoningDelta } from "../../providers/provider-usage";
-import { createToolEmitLedger } from "../tool-identity";
+import { createToolEmitLedger, type ToolEmitLedger } from "../tool-identity";
 
 function mapResponsesStopReason(
   status: unknown,
@@ -27,6 +27,96 @@ function numericField(value: unknown): number | undefined {
 
 /** The model-facing name the Responses wire uses for computer-use tool calls. */
 const COMPUTER_TOOL_NAME = "computer";
+
+/** One reasoning summary/content part normalized for emission. */
+interface ReasoningPart {
+  readonly text: string;
+  readonly index: number;
+  readonly isSummary: boolean;
+}
+
+/**
+ * Collects the emittable reasoning parts of one Responses reasoning item:
+ * every non-empty `summary[]` entry plus every `reasoning_text` content part,
+ * in wire order. Shared by the non-stream and stream decoders so the two can
+ * never disagree on what counts as reasoning.
+ */
+function collectReasoningParts(
+  item: Record<string, unknown>,
+): ReasoningPart[] {
+  const summaryParts =
+    (item["summary"] as Array<Record<string, unknown>> | undefined) ?? [];
+  const contentParts =
+    (item["content"] as Array<Record<string, unknown>> | undefined) ?? [];
+  return [
+    ...summaryParts.map((part, index) => ({ part, index, isSummary: true })),
+    ...contentParts
+      .filter((part) => part["type"] === "reasoning_text")
+      .map((part, index) => ({ part, index, isSummary: false })),
+  ]
+    .filter(
+      (entry) =>
+        typeof entry.part["text"] === "string" && entry.part["text"].length > 0,
+    )
+    .map((entry) => ({
+      text: entry.part["text"] as string,
+      index: entry.index,
+      isSummary: entry.isSummary,
+    }));
+}
+
+/**
+ * Shared tail of every "a complete call arrived" path: duplicate-check,
+ * claim the call in the emission ledger, and emit the `tool_call_delta` —
+ * or, when the call already streamed its arguments under a then-nameless
+ * id, emit a name-only delta so the surface encoder can attach the parked
+ * fragments (late-name recovery). Used by `output_item.done`,
+ * `function_call_arguments.done`, and the terminal-envelope recovery walk.
+ */
+function finishCall(
+  seq: number,
+  ledger: ToolEmitLedger,
+  namedCalls: Set<string>,
+  call: {
+    readonly callId: string;
+    readonly name: string | undefined;
+    readonly args: string;
+    readonly itemId?: string | undefined;
+    readonly responseId?: string | undefined;
+    readonly outputIndex?: number | undefined;
+  },
+): { readonly event: CanonicalEvent; readonly seq: number } | undefined {
+  const emit = (name: string | undefined, args: string): CanonicalEvent =>
+    ({
+      type: "tool_call_delta",
+      sequence_number: seq,
+      ...(call.responseId === undefined ? {} : { response_id: call.responseId }),
+      ...(call.itemId === undefined ? {} : { item_id: call.itemId }),
+      ...(call.outputIndex === undefined ? {} : { output_index: call.outputIndex }),
+      call_id: call.callId,
+      name,
+      arguments_delta: args,
+    }) as CanonicalEvent;
+  if (
+    !ledger.isDuplicateDefinition(call.callId, call.name ?? "", call.args) &&
+    ledger.claimFirstEmission(call.callId, call.name, call.args) &&
+    !ledger.hasStreamedArguments(call.callId)
+  ) {
+    if (call.name !== undefined) namedCalls.add(call.callId);
+    return { event: emit(call.name, call.args), seq: seq + 1 };
+  }
+  if (
+    call.name !== undefined &&
+    ledger.hasStreamedArguments(call.callId) &&
+    !namedCalls.has(call.callId)
+  ) {
+    // Late-name recovery: the backend named the call only here, after its
+    // argument deltas streamed under the (then-)nameless call id.
+    namedCalls.add(call.callId);
+    return { event: emit(call.name, ""), seq: seq + 1 };
+  }
+  return undefined;
+}
 
 /**
  * Maps a `computer_call_output.output` payload onto canonical content parts.
@@ -123,6 +213,7 @@ export function parseResponsesResponseToEvents(
   const output = (json["output"] as Array<Record<string, unknown>>) ?? [];
   let hasToolCall = false;
   const ledger = createToolEmitLedger();
+  const namedCalls = new Set<string>();
   for (const [outputIndex, item] of output.entries()) {
     if (item["type"] === "message") {
       const content = (item["content"] as Array<Record<string, unknown>>) ?? [];
@@ -148,24 +239,17 @@ export function parseResponsesResponseToEvents(
         }
       }
     } else if (item["type"] === "reasoning") {
-      const summaryParts = (item["summary"] as Array<Record<string, unknown>> | undefined) ?? [];
-      const contentParts = (item["content"] as Array<Record<string, unknown>> | undefined) ?? [];
-      const reasoningParts = [
-        ...summaryParts.map((part, index) => ({ part, index, isSummary: true })),
-        ...contentParts
-          .filter((part) => part["type"] === "reasoning_text")
-          .map((part, index) => ({ part, index, isSummary: false })),
-      ].filter((entry) => typeof entry.part["text"] === "string" && entry.part["text"].length > 0);
+      const reasoningParts = collectReasoningParts(item);
       const encryptedContent =
         typeof item["encrypted_content"] === "string" ? item["encrypted_content"] : undefined;
       const itemId = typeof item["id"] === "string" ? item["id"] : undefined;
-      const emittedParts = reasoningParts.length > 0
-        ? reasoningParts
-        : [{ part: {}, index: 0, isSummary: true }];
+      // An item with no readable parts still emits one (empty) delta so the
+      // encrypted payload has a carrier — the historical non-stream shape.
+      const emittedParts =
+        reasoningParts.length > 0
+          ? reasoningParts
+          : [{ text: "", index: 0, isSummary: true }];
       for (const [position, reasoningPart] of emittedParts.entries()) {
-        const text = typeof reasoningPart.part["text"] === "string"
-          ? reasoningPart.part["text"]
-          : "";
         events.push({
           type: "content_delta",
           sequence_number: events.length + 1,
@@ -177,10 +261,10 @@ export function parseResponsesResponseToEvents(
             ...(reasoningPart.isSummary
               ? {
                   payload: null,
-                  ...(text.length > 0 ? { summary: text } : {}),
+                  ...(reasoningPart.text.length > 0 ? { summary: reasoningPart.text } : {}),
                   summary_index: reasoningPart.index,
                 }
-              : { payload: text }),
+              : { payload: reasoningPart.text }),
             ...(position === 0 && encryptedContent !== undefined
               ? {
                   encrypted_content: encryptedContent,
@@ -203,21 +287,15 @@ export function parseResponsesResponseToEvents(
       const args = (item["arguments"] as string) ?? "";
       // Collapse only normalized id variants or an explicit different-id
       // duplicate. Distinct calls with identical names/arguments are valid.
-      if (
-        ledger.isDuplicateDefinition(rawCallId, name, args) ||
-        !ledger.claimFirstEmission(rawCallId, name, args)
-      )
-        continue;
-      events.push({
-        type: "tool_call_delta",
-        sequence_number: events.length + 1,
-        response_id: id,
-        ...(itemId === undefined ? {} : { item_id: itemId }),
-        output_index: outputIndex,
-        call_id: rawCallId,
+      const finished = finishCall(events.length + 1, ledger, namedCalls, {
+        callId: rawCallId,
         name,
-        arguments_delta: args,
+        args,
+        ...(itemId === undefined ? {} : { itemId }),
+        responseId: id,
+        outputIndex,
       });
+      if (finished !== undefined) events.push(finished.event);
     } else if (item["type"] === "computer_call") {
       hasToolCall = true;
       const callId =
@@ -477,38 +555,15 @@ export async function* decodeResponsesSseStream(
             (item["name"] as string) ?? callInfo.get(itemId ?? callId)?.name ?? callNameById.get(callId);
           // A call that already streamed argument deltas keeps its streamed
           // payload; re-emitting the full `arguments` here would duplicate it.
-          if (
-            !ledger.isDuplicateDefinition(callId, name ?? "", args) &&
-            ledger.claimFirstEmission(callId, name, args) &&
-            !ledger.hasStreamedArguments(callId)
-          ) {
-            if (name !== undefined) namedCalls.add(callId);
-            yield {
-              type: "tool_call_delta",
-              sequence_number: seq++,
-              ...(itemId === undefined ? {} : { item_id: itemId }),
-              call_id: callId,
-              name,
-              arguments_delta: args,
-            } as CanonicalEvent;
-          } else if (
-            name !== undefined &&
-            ledger.hasStreamedArguments(callId) &&
-            !namedCalls.has(callId)
-          ) {
-            // Late-name recovery: the backend named the call only here, after
-            // its argument deltas streamed under the (then-)nameless call id.
-            // Emit a name-only delta so the surface encoder can attach the
-            // fragments it parked instead of failing the call at terminal.
-            namedCalls.add(callId);
-            yield {
-              type: "tool_call_delta",
-              sequence_number: seq++,
-              ...(itemId === undefined ? {} : { item_id: itemId }),
-              call_id: callId,
-              name,
-              arguments_delta: "",
-            } as CanonicalEvent;
+          const finished = finishCall(seq, ledger, namedCalls, {
+            callId,
+            name,
+            args,
+            ...(itemId === undefined ? {} : { itemId }),
+          });
+          if (finished !== undefined) {
+            seq = finished.seq;
+            yield finished.event;
           }
         } else if (item?.["type"] === "computer_call") {
           const callId =
@@ -639,36 +694,15 @@ export async function* decodeResponsesSseStream(
           ledger.nextOrphanId("call");
         const args = (event["arguments"] as string) ?? "";
         const name = itemInfo?.name ?? callInfo.get(callId)?.name ?? callNameById.get(callId);
-        if (
-          !ledger.isDuplicateDefinition(callId, name ?? "", args) &&
-          ledger.claimFirstEmission(callId, name, args) &&
-          !ledger.hasStreamedArguments(callId)
-        ) {
-          if (name !== undefined) namedCalls.add(callId);
-          yield {
-            type: "tool_call_delta",
-            sequence_number: seq++,
-            ...(itemId === undefined ? {} : { item_id: itemId }),
-            call_id: callId,
-            name,
-            arguments_delta: args,
-          } as CanonicalEvent;
-        } else if (
-          name !== undefined &&
-          ledger.hasStreamedArguments(callId) &&
-          !namedCalls.has(callId)
-        ) {
-          // Same late-name recovery as `output_item.done`: this frame may be
-          // the first to carry the name for already-streamed arguments.
-          namedCalls.add(callId);
-          yield {
-            type: "tool_call_delta",
-            sequence_number: seq++,
-            ...(itemId === undefined ? {} : { item_id: itemId }),
-            call_id: callId,
-            name,
-            arguments_delta: "",
-          } as CanonicalEvent;
+        const finished = finishCall(seq, ledger, namedCalls, {
+          callId,
+          name,
+          args,
+          ...(itemId === undefined ? {} : { itemId }),
+        });
+        if (finished !== undefined) {
+          seq = finished.seq;
+          yield finished.event;
         }
         break;
       }

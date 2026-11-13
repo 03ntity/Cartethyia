@@ -62,6 +62,24 @@ export class MessagesStreamEncoder extends SurfaceStreamEncoder<CanonicalEvent, 
   private usage: UsageRecord | undefined;
   private failed = false;
   private errorMessage: string | undefined;
+
+  /**
+   * The terminal `error` event for a stream closing on an upstream failure.
+   * Emitted instead of `message_stop`/`message_delta` so the client sees the
+   * failure rather than a clean stop — the same shape the non-streaming
+   * encoder produces for `failed` terminals.
+   */
+  private failedErrorEvents(): MessagesStreamEvent[] {
+    return [
+      {
+        type: "error",
+        error: {
+          type: "server_error",
+          message: this.errorMessage ?? "The upstream response failed",
+        },
+      },
+    ];
+  }
   private stopReason: string | null = null;
   private readonly responseId: string;
   private readonly model: string;
@@ -402,15 +420,7 @@ export class MessagesStreamEncoder extends SurfaceStreamEncoder<CanonicalEvent, 
         // `message_stop` here would hide the failure from the client (it
         // reads a clean stop), so emit the error event instead — matching the
         // semantic the non-streaming encoder uses for `failed` terminals.
-        return [
-          {
-            type: "error",
-            error: {
-              type: "server_error",
-              message: this.errorMessage ?? "The upstream response failed",
-            },
-          },
-        ];
+        return this.failedErrorEvents();
       }
       out.push({
         type: "message_delta",
@@ -452,15 +462,7 @@ export class MessagesStreamEncoder extends SurfaceStreamEncoder<CanonicalEvent, 
     if (this.finished) return [];
     if (this.failed) {
       this.finished = true;
-      return [
-        {
-          type: "error",
-          error: {
-            type: "server_error",
-            message: this.errorMessage ?? "The upstream response failed",
-          },
-        },
-      ];
+      return this.failedErrorEvents();
     }
     const out: MessagesStreamEvent[] = [];
     out.push(...this.closeOpenBlock());

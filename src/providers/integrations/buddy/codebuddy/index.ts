@@ -6,7 +6,7 @@ import { GatewayError } from "../../../../protocol/gateway-error";
 import type { CanonicalRequest } from "../../../../protocol/canonical-model";
 import { providerBaseUrl } from "../../../provider-metadata";
 import { ensurePayloadModel } from "../../../configured-provider";
-import { codebuddyAdapterConfig, codebuddyDomain, codebuddyHeaders } from "./shared";
+import { buddyIdentityHeaders, codebuddyAdapterConfig, codebuddyHeaders } from "./shared";
 import {
   BUDDY_SHARED_RAW,
   BUDDY_IMAGE_MODEL_ID_SET,
@@ -325,34 +325,22 @@ const CODEBUDDY_INTL_REQUEST_USAGE_URL =
 
 type CodeBuddyProviderId = "cb" | "cbcn";
 
-async function cnHeaders(enterpriseId?: string): Promise<Record<string, string>> {
-  return {
-    "User-Agent": buildCodeBuddyUserAgent("CLI"),
-    "X-Product": "SaaS",
-    "X-IDE-Type": "CLI",
-    "X-IDE-Name": "CLI",
-    "X-Domain": codebuddyDomain("CLI"),
-    "x-requested-with": "XMLHttpRequest",
-    "x-codebuddy-request": "1",
-    ...(enterpriseId === undefined || enterpriseId.length === 0
-      ? {}
-      : { "X-Tenant-Id": enterpriseId, "X-Enterprise-Id": enterpriseId }),
-  };
+function enterpriseHeaders(enterpriseId?: string): Record<string, string> {
+  return enterpriseId === undefined || enterpriseId.length === 0
+    ? {}
+    : { "X-Tenant-Id": enterpriseId, "X-Enterprise-Id": enterpriseId };
 }
 
-async function intlHeaders(enterpriseId?: string): Promise<Record<string, string>> {
-  return {
-    "User-Agent": buildCodeBuddyUserAgent("IDE"),
-    "X-Product": "SaaS",
-    "X-IDE-Type": "IDE",
-    "X-IDE-Name": "IDE",
-    "X-Domain": codebuddyDomain("IDE"),
-    "x-requested-with": "XMLHttpRequest",
-    "x-codebuddy-request": "1",
-    ...(enterpriseId === undefined || enterpriseId.length === 0
-      ? {}
-      : { "X-Tenant-Id": enterpriseId, "X-Enterprise-Id": enterpriseId }),
-  };
+function cnHeaders(enterpriseId?: string): Record<string, string> {
+  return buddyIdentityHeaders("CLI", {
+    // The CN billing facade presents the CN desktop build, not the npm CLI pin.
+    version: "cn-desktop",
+    extras: enterpriseHeaders(enterpriseId),
+  });
+}
+
+function intlHeaders(enterpriseId?: string): Record<string, string> {
+  return buddyIdentityHeaders("IDE", { extras: enterpriseHeaders(enterpriseId) });
 }
 
 function parseProviderId(providerId: string): CodeBuddyProviderId {
@@ -371,9 +359,9 @@ async function providerConfig(
   display: string;
 }> {
   if (providerId === "cb") {
-    return { url: CODEBUDDY_INTL_USAGE_URL, headers: await intlHeaders(enterpriseId), display: "CodeBuddy" };
+    return { url: CODEBUDDY_INTL_USAGE_URL, headers: intlHeaders(enterpriseId), display: "CodeBuddy" };
   }
-  return { url: CODEBUDDY_CN_USAGE_URL, headers: await cnHeaders(enterpriseId), display: "CodeBuddy CN" };
+  return { url: CODEBUDDY_CN_USAGE_URL, headers: cnHeaders(enterpriseId), display: "CodeBuddy CN" };
 }
 
 export async function fetchCodeBuddyQuota(

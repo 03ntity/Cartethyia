@@ -30,6 +30,7 @@ import {
   type NetworkPoolConfig,
   type NetworkPoolRecord,
   type NetworkPoolResponse,
+  type PoolListSnapshotSource,
   type PoolStatus,
   type PoolBatchProbeResult,
   type PoolSpeedTestResult,
@@ -46,22 +47,109 @@ function isBlockedEntry(entry: { readonly blocked?: boolean }): boolean {
 
 export function createNetworkPoolOperations(config: NetworkPoolConfig) {
   /**
+   * Runs `probe` over `requests` with bounded worker concurrency, writing each
+   * outcome into `results` at its own index so the response order matches the
+   * request order. A single failing probe becomes that endpoint's result
+   * rather than failing the batch — the caller wants a per-endpoint verdict.
+   * Shared by the two ad-hoc batch probes, which differed only in probe shape.
+   */
+  async function runProbeBatch<T, R>(
+    requests: readonly CreateNetworkPoolRequest[],
+    concurrency: number,
+    probe: (request: CreateNetworkPoolRequest) => Promise<T>,
+    fallback: (request: CreateNetworkPoolRequest, error: unknown) => T,
+    map: (request: CreateNetworkPoolRequest, result: T) => R,
+  ): Promise<R[]> {
+    const results: R[] = new Array(requests.length);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < requests.length) {
+        const index = cursor++;
+        const request = requests[index]!;
+        let result: T;
+        try {
+          result = await probe(request);
+        } catch (error) {
+          result = fallback(request, error);
+        }
+        results[index] = map(request, result);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(concurrency, requests.length) }, () => worker()),
+    );
+    return results;
+  }
+
+  /**
+   * Validates one pool request and builds its store record.
+   *
+   * Shared by `createPool`, `createPoolBatch`, and `importPools` so all three
+   * apply the same endpoint/transport/limit checks and record shape — a paste
+   * import must not accept a row a single create would refuse.
+   */
+  function buildPoolRecord(
+    tenantId: string,
+    request: CreateNetworkPoolRequest,
+  ): NetworkPoolRecord {
+    const normalizedConfig = normalizePoolConfig(request.config);
+    const endpoint = request.endpoint;
+    validateEndpoint(request.kind, endpoint, config.ssrfPolicy);
+    validateTransportConfig(request.kind, normalizedConfig);
+    validatePoolLimits(request.maxInflight, request.weight);
+    return {
+      id: crypto.randomUUID(),
+      kind: request.kind,
+      endpoint,
+      maxInflight: request.maxInflight ?? 10,
+      weight: request.weight ?? 100,
+      status: "active",
+      inflight: 0,
+      consecutiveFailures: 0,
+      tenantId,
+      createdAt: new Date().toISOString(),
+      ...(request.label === undefined ? {} : { label: request.label }),
+      ...(Object.keys(normalizedConfig).length > 0 ? { config: normalizedConfig } : {}),
+      ...(request.credential === undefined ? {} : { credential: request.credential }),
+      ...(request.credential !== undefined ? { hasCredential: true } : {}),
+      ...(typeof request.quotaBytes === "number" ? { quotaBytes: request.quotaBytes } : {}),
+      ...(request.family === undefined ? {} : { family: request.family }),
+    };
+  }
+  /**
    * The read-only enrichment projection shared by the pool list and the pool
    * detail page: live inflight (falling back to the stored row counter when no
    * selector is configured), the derived available/utilization figures, and the
    * active provider cooldowns (omitted entirely when there are none).
    */
   async function enrichPoolResponse(res: NetworkPoolResponse, poolId: string): Promise<NetworkPoolResponse> {
-    const cooldowns = await config.poolSelector?.getPoolCooldowns(poolId);
-    const inflight = config.poolSelector
-      ? await config.poolSelector.getInflightAuthoritative(poolId)
-      : res.inflight;
+    // The two selector reads are independent; run them together instead of two
+    // sequential round trips per pool.
+    const [cooldowns, inflight] = await Promise.all([
+      config.poolSelector?.getPoolCooldowns(poolId),
+      config.poolSelector
+        ? config.poolSelector.getInflightAuthoritative(poolId)
+        : Promise.resolve(res.inflight),
+    ]);
+    return applyLivePoolState(res, inflight, cooldowns);
+  }
+
+  /**
+   * Renders the live admission state (inflight + provider cooldowns) onto a
+   * sanitized pool row. Shared by the single-pool read and the list's batch
+   * snapshot so both produce identical fields.
+   */
+  function applyLivePoolState(
+    res: NetworkPoolResponse,
+    inflight: number,
+    cooldowns: readonly { providerId: string; until: number; reason: string; blocked?: boolean }[] | undefined,
+  ): NetworkPoolResponse {
     return {
       ...res,
       inflight,
       available: Math.max(0, res.maxInflight - inflight),
       utilization: res.maxInflight > 0 ? Math.min(1, inflight / res.maxInflight) : 1,
-      ...(cooldowns && cooldowns.length > 0
+      ...(cooldowns !== undefined && cooldowns.length > 0
         ? {
             providerCooldowns: cooldowns.map((c) => ({
               providerId: c.providerId,
@@ -78,7 +166,27 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
     async listPools(access: AccessDecision | undefined): Promise<NetworkPoolResponse[]> {
         const a = requireTenantScope(access, "dashboard:read");
         const rawPools = await config.store.list(a.tenantId);
-        return Promise.all(rawPools.map(async (r) => enrichPoolResponse(sanitizePoolResponse(r), r.id)));
+        const sanitized = rawPools.map((r) => sanitizePoolResponse(r));
+        // One batched snapshot instead of two selector reads per pool: with
+        // Redis configured the per-pool path was 2N round trips on every list.
+        const snapshotSource = config.poolSelector as PoolListSnapshotSource | undefined;
+        if (snapshotSource?.getPoolListSnapshot === undefined) {
+          return Promise.all(sanitized.map(async (res, index) => enrichPoolResponse(res, rawPools[index]!.id)));
+        }
+        // A failed batch read falls back to the per-pool path rather than
+        // failing the list: enrichment is best-effort decoration on the rows.
+        const snapshot = await snapshotSource.getPoolListSnapshot(rawPools.map((r) => r.id)).catch(() => undefined);
+        if (snapshot === undefined) {
+          return Promise.all(sanitized.map(async (res, index) => enrichPoolResponse(res, rawPools[index]!.id)));
+        }
+        return sanitized.map((res, index) => {
+          const live = snapshot.get(rawPools[index]!.id);
+          // A pool the selector did not report (e.g. added mid-read) keeps its
+          // stored row values rather than failing the whole list.
+          return live === undefined
+            ? res
+            : applyLivePoolState(res, live.inflight, live.cooldowns);
+        });
       },
     async getPoolDetail(
         access: AccessDecision | undefined,
@@ -155,31 +263,53 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
       const a = requireTenantScope(access, "dashboard:write");
       const parsed = parseProxyFile(request.content);
       const skipped = [...parsed.skipped];
-      let created = 0;
-      for (const [index, row] of parsed.rows.entries()) {
+      // One bad node must not abort the list: the rest are still worth
+      // having, and the reason is reported against its own line. Valid rows
+      // are collected and land in a single insert — the per-row `createPool`
+      // path this replaced cost one round trip and one snapshot invalidation
+      // per proxy.
+      const records: NetworkPoolRecord[] = [];
+      parsed.rows.forEach((row, index) => {
         try {
-          await operations.createPool(a, {
-            kind: row.kind,
-            endpoint: row.endpoint,
-            ...(row.credential === null ? {} : { credential: row.credential }),
-            ...(request.maxInflight === undefined ? {} : { maxInflight: request.maxInflight }),
-            ...(request.weight === undefined ? {} : { weight: request.weight }),
-            ...(request.family === undefined ? {} : { family: request.family }),
-            ...(row.label !== null
-              ? { label: row.label }
-              : request.labelPrefix
-                ? { label: `${request.labelPrefix} ${index + 1}` }
-                : {}),
-          });
-          created += 1;
+          records.push(
+            buildPoolRecord(a.tenantId, {
+              kind: row.kind,
+              endpoint: row.endpoint,
+              ...(row.credential === null ? {} : { credential: row.credential }),
+              ...(request.maxInflight === undefined ? {} : { maxInflight: request.maxInflight }),
+              ...(request.weight === undefined ? {} : { weight: request.weight }),
+              ...(request.family === undefined ? {} : { family: request.family }),
+              ...(row.label !== null
+                ? { label: row.label }
+                : request.labelPrefix
+                  ? { label: `${request.labelPrefix} ${index + 1}` }
+                  : {}),
+            }),
+          );
         } catch (error) {
-          // One bad node must not abort the list: the rest are still worth
-          // having, and the reason is reported against its own line.
           skipped.push({
             line: index + 1,
             reason: error instanceof Error ? error.message.slice(0, 160) : "rejected",
           });
         }
+      });
+      let created = 0;
+      if (records.length > 0) {
+        if (config.store.createMany) {
+          created = await config.store.createMany(records);
+        } else {
+          for (const record of records) {
+            await config.store.create(record);
+            created += 1;
+          }
+        }
+        await config.auditSink?.record({
+          access: a,
+          action: "network_pool.created",
+          target: records[0]!.id,
+          detail: { count: created },
+        });
+        await config.snapshotInvalidator?.invalidate();
       }
       return { created, skipped };
     },
@@ -192,29 +322,7 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
       const records: NetworkPoolRecord[] = [];
       for (const request of requests) {
         try {
-          const normalizedConfig = normalizePoolConfig(request.config);
-          const endpoint = request.endpoint;
-          validateEndpoint(request.kind, endpoint, config.ssrfPolicy);
-          validateTransportConfig(request.kind, normalizedConfig);
-          validatePoolLimits(request.maxInflight, request.weight);
-          records.push({
-            id: crypto.randomUUID(),
-            kind: request.kind,
-            endpoint,
-            maxInflight: request.maxInflight ?? 10,
-            weight: request.weight ?? 100,
-            status: "active",
-            inflight: 0,
-            consecutiveFailures: 0,
-            tenantId: a.tenantId,
-            createdAt: new Date().toISOString(),
-            ...(request.label === undefined ? {} : { label: request.label }),
-            ...(Object.keys(normalizedConfig).length > 0 ? { config: normalizedConfig } : {}),
-            ...(request.credential === undefined ? {} : { credential: request.credential }),
-            ...(request.credential !== undefined ? { hasCredential: true } : {}),
-            ...(typeof request.quotaBytes === "number" ? { quotaBytes: request.quotaBytes } : {}),
-            ...(request.family === undefined ? {} : { family: request.family }),
-          });
+          records.push(buildPoolRecord(a.tenantId, request));
         } catch {
           failed += 1;
         }
@@ -312,31 +420,7 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
         request: CreateNetworkPoolRequest,
       ): Promise<NetworkPoolResponse> {
         const a = requireTenantScope(access, "dashboard:write");
-        const normalizedConfig = normalizePoolConfig(request.config);
-        const endpoint = request.endpoint;
-        validateEndpoint(request.kind, endpoint, config.ssrfPolicy);
-        validateTransportConfig(request.kind, normalizedConfig);
-        validatePoolLimits(request.maxInflight, request.weight);
-        const record: NetworkPoolRecord = {
-          id: crypto.randomUUID(),
-          kind: request.kind,
-          endpoint,
-          maxInflight: request.maxInflight ?? 10,
-          weight: request.weight ?? 100,
-          status: "active",
-          inflight: 0,
-          consecutiveFailures: 0,
-          tenantId: a.tenantId,
-          createdAt: new Date().toISOString(),
-          ...(request.label === undefined ? {} : { label: request.label }),
-          ...(Object.keys(normalizedConfig).length > 0 ? { config: normalizedConfig } : {}),
-          ...(request.credential === undefined ? {} : { credential: request.credential }),
-          ...(request.credential !== undefined ? { hasCredential: true } : {}),
-          // Absent or `null` both mean unmetered; a positive number is the
-          // allowance. The body schema already rejects zero and negatives.
-          ...(typeof request.quotaBytes === "number" ? { quotaBytes: request.quotaBytes } : {}),
-          ...(request.family === undefined ? {} : { family: request.family }),
-        };
+        const record = buildPoolRecord(a.tenantId, request);
         await config.store.create(record);
         await config.auditSink?.record({
           access: a,
@@ -591,30 +675,18 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
         throw new ConsoleDomainError("capability_unsupported", 400, "Provider probing is unavailable");
       }
       const probe = config.store.probeAdHocProvider.bind(config.store);
-      const results: PoolBatchProviderProbeResult[] = new Array(requests.length);
-      let cursor = 0;
-      const worker = async () => {
-        while (cursor < requests.length) {
-          const index = cursor++;
-          const request = requests[index]!;
-          let result: PoolProviderProbeResult;
-          try {
-            result = await probe(a.tenantId, request, providerId);
-          } catch (error) {
-            result = {
-              poolId: request.endpoint,
-              providerId,
-              status: "unreachable",
-              reason: error instanceof Error ? error.message : "Probe failed",
-            };
-          }
-          results[index] = { endpoint: request.endpoint, result };
-        }
-      };
-      await Promise.all(
-        Array.from({ length: Math.min(PROVIDER_PROBE_BATCH_CONCURRENCY, requests.length) }, () => worker()),
+      return await runProbeBatch<PoolProviderProbeResult, PoolBatchProviderProbeResult>(
+        requests,
+        PROVIDER_PROBE_BATCH_CONCURRENCY,
+        (request) => probe(a.tenantId, request, providerId),
+        (request, error) => ({
+          poolId: request.endpoint,
+          providerId,
+          status: "unreachable" as const,
+          reason: error instanceof Error ? error.message : "Probe failed",
+        }),
+        (request, result) => ({ endpoint: request.endpoint, result }),
       );
-      return results;
     },
     async probeAdHocPool(
       access: AccessDecision | undefined,
@@ -651,33 +723,17 @@ export function createNetworkPoolOperations(config: NetworkPoolConfig) {
         throw new ConsoleDomainError("capability_unsupported", 400, "Ad-hoc pool probing is unavailable");
       }
       const probe = config.store.probeAdHoc.bind(config.store);
-      const results: PoolBatchProbeResult[] = new Array(requests.length);
-      let cursor = 0;
-      const worker = async () => {
-        while (cursor < requests.length) {
-          const index = cursor++;
-          const request = requests[index]!;
-          // A single failing probe must not fail the batch: the caller wants a
-          // per-endpoint verdict, so an error becomes that endpoint's result.
-          let result: HealthCheckResult;
-          try {
-            result = await probe(a.tenantId, request);
-          } catch (error) {
-            result = {
-              poolId: request.endpoint,
-              status: "unhealthy",
-              errorMessage: error instanceof Error ? error.message : "Probe failed",
-            };
-          }
-          results[index] = { endpoint: request.endpoint, kind: request.kind, result };
-        }
-      };
-      const workers = Array.from(
-        { length: Math.min(POOL_BATCH_PROBE_CONCURRENCY, requests.length) },
-        () => worker(),
+      return await runProbeBatch<HealthCheckResult, PoolBatchProbeResult>(
+        requests,
+        POOL_BATCH_PROBE_CONCURRENCY,
+        (request) => probe(a.tenantId, request),
+        (request, error) => ({
+          poolId: request.endpoint,
+          status: "unhealthy" as const,
+          errorMessage: error instanceof Error ? error.message : "Probe failed",
+        }),
+        (request, result) => ({ endpoint: request.endpoint, kind: request.kind, result }),
       );
-      await Promise.all(workers);
-      return results;
     },
     /**
      * Deploys a hosted relay (Cloudflare/Vercel/Deno) and registers its URL as

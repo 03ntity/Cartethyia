@@ -32,32 +32,32 @@ export const MUSE_CODE_BASE_URL = providerBaseUrl("muse");
 
 // Model catalog — captured from provider models.json (`muse-code`)
 
-import { defineModel } from "../../provider-model-definition";
 import type { ModelDefinition } from "../../provider-model-definition";
+import { catalogRows } from "../shared/catalog-rows";
 
-const museModel = (
-  modelId: string,
-  contextLimit: number,
-  outputLimit: number,
-): ModelDefinition =>
-  defineModel({
-    id: modelId,
+type MuseCatalogRow = readonly [id: string, contextLimit: number, outputLimit: number];
+
+const museModel = catalogRows<MuseCatalogRow>({
+  caps: {
     wireFamily: "responses",
     endpoint: "/v1/responses",
-    ctx: contextLimit,
-    out: outputLimit,
     vision: true,
     reasoning: true,
     toolCall: true,
-  });
+  },
+  translate: ([, contextLimit, outputLimit]) => ({
+    ctx: contextLimit,
+    out: outputLimit,
+  }),
+});
 
-export const MUSE_CODE_MODELS: readonly ModelDefinition[] = [
-  museModel("muse-spark-1.1", 1_048_576, 131_072),
-  museModel("muse-spark-1.2", 1_048_576, 131_072),
-  museModel("muse-spark-1.2-contributor", 1_048_576, 131_072),
-  museModel("muse-spark-1.3", 1_048_576, 131_072),
-  museModel("muse-spark-1.3-contributor", 1_048_576, 131_072),
-];
+export const MUSE_CODE_MODELS: readonly ModelDefinition[] = ([
+  ["muse-spark-1.1", 1_048_576, 131_072],
+  ["muse-spark-1.2", 1_048_576, 131_072],
+  ["muse-spark-1.2-contributor", 1_048_576, 131_072],
+  ["muse-spark-1.3", 1_048_576, 131_072],
+  ["muse-spark-1.3-contributor", 1_048_576, 131_072],
+] as const satisfies readonly MuseCatalogRow[]).map(museModel);
 
 // Credential wrapping — {oauthAccessToken, apiKey} JSON blob
 

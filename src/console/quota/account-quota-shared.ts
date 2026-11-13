@@ -1,3 +1,6 @@
+import { and, eq, isNull } from "drizzle-orm";
+import type { CartethyiaDatabase } from "../../persistence/db-handle";
+import { providerAccounts } from "../../persistence/schema";
 import type { ConsoleAccessResolver } from "../auth/access";
 import type { AuditRecorder } from "../auth/audit-recorder";
 import { type QuotaRefreshDeps } from "../../providers/quota/refresh";
@@ -17,8 +20,41 @@ export interface AccountQuotaRoutesDeps extends QuotaRefreshDeps {
   readonly auditRecorder?: AuditRecorder | undefined;
 }
 
-export const ACCOUNT_STATUSES = ["active", "cooldown", "disabled"] as const;
-export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
+/**
+ * Every status a `provider_accounts` row can carry: the operator-settable pair
+ * plus `cooldown`, which only the health machine writes. The PATCH routes
+ * validate against this list so a status the machine owns can still be *read*
+ * back through the same resolver — see the catalog contract's
+ * `ACCOUNT_STATUSES`, which is the narrower operator-writable subset.
+ */
+export const ACCOUNT_PATCH_STATUSES = ["active", "cooldown", "disabled"] as const;
+export type AccountStatus = (typeof ACCOUNT_PATCH_STATUSES)[number];
+
+/**
+ * Loads one `provider_accounts` row by id, scoped to an owner.
+ *
+ * `tenantId === null` matches only shared/global rows (`tenant_id IS NULL`);
+ * a string matches only that tenant's own rows. This is the single owner of
+ * the "load one account under an owner scope" prelude the quota and identity
+ * routes repeated per handler — the predicate is the security boundary, so it
+ * lives in exactly one place.
+ */
+export async function loadAccountRow(
+  db: CartethyiaDatabase,
+  accountId: string,
+  tenantId: string | null,
+): Promise<typeof providerAccounts.$inferSelect | undefined> {
+  const rows = await db
+    .select()
+    .from(providerAccounts)
+    .where(
+      tenantId === null
+        ? and(eq(providerAccounts.id, accountId), isNull(providerAccounts.tenantId))
+        : and(eq(providerAccounts.id, accountId), eq(providerAccounts.tenantId, tenantId)),
+    )
+    .limit(1);
+  return rows[0];
+}
 
 /**
  * The merged result of interpreting a PATCH account-status body. On success it
@@ -43,12 +79,12 @@ export function resolveNextAccountStatus(body: {
   readonly active?: boolean;
   readonly status?: string;
 }): ResolveNextAccountStatusResult {
-  if (body.status !== undefined && !ACCOUNT_STATUSES.includes(body.status as AccountStatus)) {
+  if (body.status !== undefined && !ACCOUNT_PATCH_STATUSES.includes(body.status as AccountStatus)) {
     return {
       ok: false,
       status: 400,
       body: {
-        error: `status must be one of: ${ACCOUNT_STATUSES.join(", ")}`,
+        error: `status must be one of: ${ACCOUNT_PATCH_STATUSES.join(", ")}`,
         code: "invalid_status",
       },
     };

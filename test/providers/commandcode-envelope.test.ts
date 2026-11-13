@@ -128,7 +128,29 @@ describe("commandcode identity headers", () => {
 });
 
 describe("commandcode Go-plan dispatch", () => {
-  test("uses the CLI endpoint and a fresh session ID for every wire family", async () => {
+  function dispatchContext() {
+    return {
+      credential: {
+        provider_id: "commandcode",
+        credential_kind: "api_key",
+        secret: new TextEncoder().encode("go-plan-token"),
+      },
+      deadline: Date.now() + 60_000,
+      abort_signal: new AbortController().signal,
+    } as ProviderDispatchContext;
+  }
+
+  function dispatchTarget(wire: "chat" | "responses" | "messages"): ProviderDispatchTarget {
+    return {
+      provider_id: "commandcode",
+      model_id: "gpt-5.4-mini",
+      wire_family: wire,
+      endpoint_path: COMMANDCODE_GENERATE_PATH,
+      capabilities: {},
+    };
+  }
+
+  test("uses the CLI endpoint and one stable session id per conversation", async () => {
     const seen: Array<{ url: string; sessionId: string | null; body: Record<string, unknown> }> = [];
     const adapter = createCommandCodeAdapter({
       fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -143,25 +165,14 @@ describe("commandcode Go-plan dispatch", () => {
         });
       }) as typeof fetch,
     });
-    const context = {
-      credential: {
-        provider_id: "commandcode",
-        credential_kind: "api_key",
-        secret: new TextEncoder().encode("go-plan-token"),
-      },
-      deadline: Date.now() + 60_000,
-      abort_signal: new AbortController().signal,
-    } as ProviderDispatchContext;
+    const context = dispatchContext();
 
     for (const wire of ["chat", "responses", "messages"] as const) {
-      const target: ProviderDispatchTarget = {
-        provider_id: "commandcode",
-        model_id: "gpt-5.4-mini",
-        wire_family: wire,
-        endpoint_path: COMMANDCODE_GENERATE_PATH,
-        capabilities: {},
-      };
-      for await (const _event of adapter.dispatch({ ...REQUEST, model: "public-model-alias" }, target, context)) {
+      for await (const _event of adapter.dispatch(
+        { ...REQUEST, model: "public-model-alias", conversation_id: "conv-1" },
+        dispatchTarget(wire),
+        context,
+      )) {
         // Drain the stream so the outbound request completes.
       }
     }
@@ -169,8 +180,10 @@ describe("commandcode Go-plan dispatch", () => {
     expect(seen).toHaveLength(3);
     for (const request of seen) {
       expect(request.url).toBe(`${COMMANDCODE_HOST}${COMMANDCODE_GENERATE_PATH}`);
-      expect(request.sessionId).toBeTruthy();
-      expect(request.body["threadId"]).toBe(request.sessionId);
+      // The session id is the conversation's: every wire family of one
+      // conversation presents the same `x-session-id` and `threadId`.
+      expect(request.sessionId).toBe("conv-1");
+      expect(request.body["threadId"]).toBe("conv-1");
       expect(request.body["memory"]).toBeNull();
       expect(request.body["config"]).toBeTruthy();
       expect(request.body["params"]).toMatchObject({
@@ -183,7 +196,37 @@ describe("commandcode Go-plan dispatch", () => {
         top_p: 0.9,
       });
     }
-    expect(new Set(seen.map((request) => request.sessionId)).size).toBe(3);
+  });
+
+  test("omits x-session-id when the request carries no conversation identity", async () => {
+    // The client omits the header rather than inventing a session; the
+    // envelope still needs a threadId, so a fresh one is minted for it alone.
+    const seen: Array<{ sessionId: string | null; body: Record<string, unknown> }> = [];
+    const adapter = createCommandCodeAdapter({
+      fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push({
+          sessionId: new Headers(init?.headers).get("x-session-id"),
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return new Response('{"type":"finish","finishReason":"stop"}\n', {
+          status: 200,
+          headers: { "content-type": "application/x-ndjson" },
+        });
+      }) as typeof fetch,
+    });
+
+    for await (const _event of adapter.dispatch(
+      { ...REQUEST, model: "public-model-alias" },
+      dispatchTarget("chat"),
+      dispatchContext(),
+    )) {
+      // Drain the stream so the outbound request completes.
+    }
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.sessionId).toBeNull();
+    expect(typeof seen[0]?.body["threadId"]).toBe("string");
+    expect((seen[0]?.body["threadId"] as string).length).toBeGreaterThan(0);
   });
 });
 

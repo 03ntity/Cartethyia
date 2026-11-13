@@ -21,6 +21,7 @@ import {
 import { popupImageBytes } from "../api-keys/share-popup-image";
 import type { ShareFamilyStats, ShareStatsPort } from "./share-stats";
 import { consoleSseResponse, createConsoleSseStream } from "../observability/sse";
+import { createSamplerLifecycle } from "../shared/sse-sampler";
 import { GatewayError, publicGatewayErrorBody } from "../../protocol/gateway-error";
 import {
   type ShareLinkPolicy,
@@ -62,7 +63,7 @@ function createShareStatsSampler(config: {
   readonly stats: ShareStatsPort;
 }): { subscribe(token: string, listener: ShareStatsListener): () => void } {
   const subscribers = new Map<string, Set<ShareStatsListener>>();
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  const lifecycle = createSamplerLifecycle();
 
   const tick = async (): Promise<void> => {
     // One resolve per family token: a recipient with several tabs shares one
@@ -82,16 +83,13 @@ function createShareStatsSampler(config: {
   };
 
   const start = (): void => {
-    if (timer !== undefined) return;
-    timer = setTimeout(async function run() {
-      timer = setTimeout(run, SHARE_STATS_STREAM_INTERVAL_MS);
+    if (lifecycle.active === 0) return;
+    lifecycle.arm(SHARE_STATS_STREAM_INTERVAL_MS, async () => {
+      // Re-arm before the pass so the cadence survives a slow tick; `arm`
+      // refuses once the last subscriber has left.
+      start();
       await tick();
-    }, SHARE_STATS_STREAM_INTERVAL_MS);
-  };
-
-  const stop = (): void => {
-    if (timer !== undefined) clearTimeout(timer);
-    timer = undefined;
+    });
   };
 
   return {
@@ -102,11 +100,12 @@ function createShareStatsSampler(config: {
         subscribers.set(token, listeners);
       }
       listeners.add(listener);
-      if (subscribers.size > 0) start();
+      lifecycle.acquire();
+      start();
       return () => {
         listeners.delete(listener);
         if (listeners.size === 0) subscribers.delete(token);
-        if (subscribers.size === 0) stop();
+        lifecycle.release();
       };
     },
   };
@@ -160,12 +159,12 @@ function json(body: unknown, status = 200): Response {
 function notFound(refusal: ShareLinkRefusal = "not_found"): Response {
   const message =
     refusal === "expired"
-      ? "This share link has expired (request {requestId}). Time for a fresh one 🌷"
+      ? "This share link has expired. Time for a fresh one 🌷"
       : refusal === "revoked"
-        ? "This share link's key has been revoked (request {requestId}). Ask for a new one 📩"
+        ? "This share link's key has been revoked. Ask for a new one 📩"
         : refusal === "disabled"
-          ? "This share link's key is paused (request {requestId}). Re-enable it when ready 🌱"
-          : "Share link is unavailable (request {requestId}). This link leads nowhere — check it again 🔗";
+          ? "This share link's key is paused. Re-enable it when ready 🌱"
+          : "Share link is unavailable. This link leads nowhere — check it again 🔗";
   const error = new GatewayError(`link_${refusal}`, 404, message);
   return json(publicGatewayErrorBody(error), error.status);
 }

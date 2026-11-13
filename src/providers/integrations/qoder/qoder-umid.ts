@@ -129,16 +129,6 @@ export function mintQoderGeneratedIdentity(accountId: string): QoderNativeIdenti
   return mintQoderOsIdentity(accountId);
 }
 
-/** No bridge exists anymore; the OS mint is the only path. */
-export function mintQoderNativeIdentity(accountId = ""): QoderNativeIdentity {
-  return mintQoderOsIdentity(accountId);
-}
-
-/** Replay is a no-op: the OS identity is deterministic and host-bound. */
-export function replayQoderNativeIdentity(_seed: string, accountId = ""): QoderNativeIdentity | null {
-  return mintQoderOsIdentity(accountId);
-}
-
 /**
  * The six native machine headers for one identity.
  *

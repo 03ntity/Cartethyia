@@ -499,6 +499,14 @@ async function freebuffReleaseSession(
 
 // --- Chat request build ---
 
+/**
+ * The locked official tool set as it rides the chat body: identical wire data
+ * on every request, hoisted and frozen once. The previous per-request JSON
+ * deep clone (37 tools, ~50KB of parse+stringify per dispatch) bought nothing
+ * — nothing downstream mutates the body's tools.
+ */
+const FREEBUFF_CHAT_TOOLS: readonly unknown[] = Object.freeze([...FREEBUFF_OFFICIAL_TOOLS]);
+
 function expiresbuffChatBody(
   request: CanonicalRequest,
   payload: Record<string, unknown>,
@@ -518,7 +526,7 @@ function expiresbuffChatBody(
   const body: Record<string, unknown> = {
     ...payload,
     model: session.modelHandle,
-    tools: FREEBUFF_OFFICIAL_TOOLS.map((tool) => JSON.parse(JSON.stringify(tool))),
+    tools: FREEBUFF_CHAT_TOOLS,
     tool_choice: "auto",
     stream: true,
     codebuff_metadata: metadata,
@@ -625,7 +633,10 @@ export function createFreebuffAdapter(): ProviderAdapter {
         });
         const body = expiresbuffChatBody(request, payload, session);
 
-        // 5. Chat headers: desktop identity group + device signature.
+        // 5. Chat headers: desktop identity group + device signature. The body
+        // is serialized once and those exact bytes are both signed and sent —
+        // the signature covers the body, so two serializations could disagree.
+        const bodyJson = JSON.stringify(body);
         const headers: Record<string, string> = {
           "content-type": "application/json",
           Authorization: `Bearer ${secret}`,
@@ -639,7 +650,7 @@ export function createFreebuffAdapter(): ProviderAdapter {
           ...(await freebuffSignRequest(authState.device, {
             method: "POST",
             path: FREEBUFF_CHAT_COMPLETIONS_PATH,
-            body: JSON.stringify(body),
+            body: bodyJson,
             fetchId,
           })),
         };
@@ -650,6 +661,7 @@ export function createFreebuffAdapter(): ProviderAdapter {
           body,
           context,
           context.outbound_fetch ?? globalThis.fetch,
+          () => bodyJson,
         );
         const res = upstream.res;
         try {

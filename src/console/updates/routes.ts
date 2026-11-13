@@ -13,6 +13,7 @@ import {
   writeUpdateStatus,
 } from "./apply-update";
 import { CARTETHYIA_VERSION } from "../../version";
+import { createSamplerLifecycle } from "../shared/sse-sampler";
 
 /**
  * Minimal drain surface the apply route needs from the process coordinator.
@@ -125,11 +126,10 @@ function createUpdateSampler(config: {
   readonly fetchRelease: () => Promise<LatestRelease | null>;
 }): { subscribe(listener: NotificationListener): () => void } {
   const subscribers = new Set<NotificationListener>();
+  const lifecycle = createSamplerLifecycle();
   const samples: Array<{ at: number; rss: number; percent: number }> = [];
   let memoryState = { high: false, growth: false };
   let latestTag: string | undefined;
-  let memoryTimer: ReturnType<typeof setTimeout> | undefined;
-  let updateTimer: ReturnType<typeof setTimeout> | undefined;
 
   const broadcast = (notifications: readonly NotificationEvent[]): void => {
     if (notifications.length === 0) return;
@@ -178,22 +178,17 @@ function createUpdateSampler(config: {
   };
 
   const start = (): void => {
-    if (memoryTimer !== undefined) return;
-    memoryTimer = setTimeout(async function tick() {
-      memoryTimer = setTimeout(tick, MEMORY_SAMPLE_INTERVAL_MS);
+    if (lifecycle.active === 0) return;
+    lifecycle.arm(MEMORY_SAMPLE_INTERVAL_MS, async () => {
+      // Re-arm before the pass so the cadence survives a slow tick; `arm`
+      // refuses once the last subscriber has left.
+      start();
       await sampleMemory();
-    }, MEMORY_SAMPLE_INTERVAL_MS);
-    updateTimer = setTimeout(async function tick() {
-      updateTimer = setTimeout(tick, UPDATE_SAMPLE_INTERVAL_MS);
+    });
+    lifecycle.arm(UPDATE_SAMPLE_INTERVAL_MS, async () => {
+      start();
       await sampleUpdate();
-    }, UPDATE_SAMPLE_INTERVAL_MS);
-  };
-
-  const stop = (): void => {
-    if (memoryTimer !== undefined) clearTimeout(memoryTimer);
-    if (updateTimer !== undefined) clearTimeout(updateTimer);
-    memoryTimer = undefined;
-    updateTimer = undefined;
+    });
   };
 
   return {
@@ -237,10 +232,11 @@ function createUpdateSampler(config: {
           // Best-effort release discovery.
         }
       })();
-      if (subscribers.size > 0) start();
+      lifecycle.acquire();
+      start();
       return () => {
         subscribers.delete(listener);
-        if (subscribers.size === 0) stop();
+        lifecycle.release();
       };
     },
   };

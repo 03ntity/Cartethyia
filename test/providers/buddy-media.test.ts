@@ -183,6 +183,27 @@ describe("buddyGenerateVideo — submit then poll to completion", () => {
       adapter().generateVideo({ prompt: "x" }, VIDEO_TARGET, context(fetcher)),
     ).rejects.toThrow(/Credits exhausted/);
   });
+
+  test("a non-JSON status body is a 502, not an unhandled parse error", async () => {
+    const { fetcher, calls } = capture((_call, index) => {
+      if (index === 0) {
+        return new Response(
+          JSON.stringify({ data: { id: "task-1", status: "queued" } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      // An HTML error page on the poll endpoint must not escape as a raw
+      // SyntaxError — it is an upstream fault the gateway reports as 502.
+      return new Response("<html>bad gateway</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    });
+    await expect(
+      adapter().generateVideo({ prompt: "x" }, VIDEO_TARGET, context(fetcher)),
+    ).rejects.toMatchObject({ status: 502 });
+    expect(calls).toHaveLength(2);
+  });
 });
 
 describe("chat image extraction", () => {

@@ -19,30 +19,20 @@ import {
   FREEBUFF_CLIENT_HEADER_VALUE,
   FREEBUFF_MODEL_CATALOG_PATH,
 } from "./freebuff";
-import { FREEBUFF_VIRTUAL_MODELS } from "./freebuff-virtual";
+import { FREEBUFF_ROSTER } from "./freebuff-catalog";
+import { freebuffVirtualIdFor } from "./freebuff-virtual";
 
-const KNOWN_PREMIUM_KEYS: ReadonlySet<string> = new Set([
-  "m-127314bb39", // DeepSeek V4.1 Flash Fast
-  "m-5a5d0e255e", // GPT-6 Luna
-  "m-ffcbc2bcf3", // Muse Spark 1.3
-  "m-7d6e1b3ae0", // GPT-6.1 Terra
-  "m-5b6a604eb6", // Claude Haiku 5.5 · 100k
-]);
+/**
+ * Tier knowledge derived from the static roster — its free/proOnly flags are
+ * the single owner of "which key is premium/free". Live discovery only adds
+ * the response's own `access`/`premium` signals on top.
+ */
+const KNOWN_PREMIUM_KEYS: ReadonlySet<string> = new Set(
+  FREEBUFF_ROSTER.filter((row) => row.proOnly === true).map((row) => row.modelId),
+);
 
-const KNOWN_FREE_KEYS: ReadonlySet<string> = new Set([
-  "m-096e75164d", // DeepSeek Fast
-  "m-8db1ccbba6", // DeepSeek
-  "m-61c26317cc", // DeepSeek Slow
-  "m-9a7e098cc1", // Solar Pro 4
-  "m-69307952f8", // Solar Mini 4
-  "m-0921d81ce7", // Crouton Alpha
-  "m-02244092cb", // Glyph Cluster
-  "m-ddc687c50f", // Nemotron 3.5 Lightning
-]);
-
-/** Virtual id by roster key: a key with a known name publishes under that name. */
-const VIRTUAL_ID_BY_KEY: ReadonlyMap<string, string> = new Map(
-  FREEBUFF_VIRTUAL_MODELS.map((virtual) => [virtual.target, virtual.id]),
+const KNOWN_FREE_KEYS: ReadonlySet<string> = new Set(
+  FREEBUFF_ROSTER.filter((row) => row.freeTier === true).map((row) => row.modelId),
 );
 
 /**
@@ -88,7 +78,7 @@ export function freebuffModelDiscovery(): ProviderModelDiscovery {
         defineModel({
           // A known roster key publishes under its caller-facing virtual name;
           // an unnamed key keeps its raw id (still reachable, never renamed).
-          id: VIRTUAL_ID_BY_KEY.get(key) ?? key,
+          id: freebuffVirtualIdFor(key) ?? key,
           providerId: "freebuff",
           wireFamily: "chat",
           endpoint: FREEBUFF_CHAT_COMPLETIONS_PATH,

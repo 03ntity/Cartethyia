@@ -253,6 +253,17 @@ async function writeSharePopup(
 /** Explicit persistence boundary. Production must provide this; there is no fallback store. */
 export interface ApiKeyStore {
   list(tenantId: string): Promise<readonly ApiKeyRecord[]>;
+  /**
+   * The console's key listing, with the filters the dashboard applies pushed
+   * into the query: non-revoked rows only, and — unless `includeChildren` —
+   * top-level keys only (share children carry `parent_key_id`). Without this
+   * the console loaded the tenant's whole key table, including every minted
+   * share child, on each list and reorder request and filtered in memory.
+   */
+  listForConsole(
+    tenantId: string,
+    options: { readonly includeChildren: boolean },
+  ): Promise<readonly ApiKeyRecord[]>;
   /** Active, non-revoked bans for one tenant, including share children. */
   listActiveBanned(tenantId: string): Promise<readonly ApiKeyRecord[]>;
   get(tenantId: string, keyId: string): Promise<ApiKeyRecord | undefined>;
@@ -380,6 +391,26 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
       // `created_at` out of the 1000-row page. The console only renders
       // top-level keys, so they must never be truncated away by their own
       // children.
+      .orderBy(sql`(${apiKeys.parentKeyId} IS NOT NULL)`, apiKeys.sortIndex, apiKeys.createdAt, apiKeys.id)
+      .limit(1000);
+    return this.withPopups(this.db, rows);
+  }
+  async listForConsole(
+    tenantId: string,
+    options: { readonly includeChildren: boolean },
+  ): Promise<readonly ApiKeyRecord[]> {
+    // Same ordering as `list`: parents before children (children all share
+    // `sort_index = 0`), then the explicit list position.
+    const rows = await this.db
+      .select()
+      .from(apiKeys)
+      .where(
+        and(
+          eq(apiKeys.tenantId, tenantId),
+          isNull(apiKeys.revokedAt),
+          ...(options.includeChildren ? [] : [isNull(apiKeys.parentKeyId)]),
+        ),
+      )
       .orderBy(sql`(${apiKeys.parentKeyId} IS NOT NULL)`, apiKeys.sortIndex, apiKeys.createdAt, apiKeys.id)
       .limit(1000);
     return this.withPopups(this.db, rows);

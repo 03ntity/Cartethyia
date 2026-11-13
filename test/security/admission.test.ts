@@ -22,7 +22,8 @@
 import { describe, expect, test } from "bun:test";
 import { ApiKeyAdmissionService } from "../../src/security/admission/service";
 import { InMemoryAdmissionCounterStore } from "../../src/security/admission/in-memory-store";
-import { LEASE_KEY_TTL_SECONDS, LEASE_REAP_HORIZON_SECONDS } from "../../src/security/admission/ttl";
+import { LEASE_KEY_TTL_SECONDS, LEASE_REAP_HORIZON_SECONDS, RPM_WINDOW_MS } from "../../src/security/admission/ttl";
+import { RESERVE_SCRIPT } from "../../src/security/admission/lua";
 import type {
   AdmissionCounterStore,
   AdmissionReserveRequest,
@@ -271,7 +272,7 @@ describe("InMemoryAdmissionCounterStore — limit enforcement", () => {
   });
 
   test("rpm counts requests inside the window and forgets older ones", async () => {
-    const store = new InMemoryAdmissionCounterStore({ windowMs: 60_000 });
+    const store = new InMemoryAdmissionCounterStore();
     await store.reserve(reserveRequest({ reservationId: "r-1", now: NOW, rpmLimit: 2 }));
     await store.reserve(reserveRequest({ reservationId: "r-2", now: NOW + 1_000, rpmLimit: 2 }));
     await expect(
@@ -287,13 +288,25 @@ describe("InMemoryAdmissionCounterStore — limit enforcement", () => {
     // Pin the edge so a refactor to `>=` — which would hold one request too
     // many, and is the off-by-one an operator would report as "the limit
     // drifts down over time" — is caught.
-    const store = new InMemoryAdmissionCounterStore({ windowMs: 60_000 });
+    const store = new InMemoryAdmissionCounterStore();
     await store.reserve(reserveRequest({ reservationId: "r-1", now: NOW, rpmLimit: 1 }));
-    await store.reserve(reserveRequest({ reservationId: "r-2", now: NOW + 60_000, rpmLimit: 1 }));
+    await store.reserve(reserveRequest({ reservationId: "r-2", now: NOW + RPM_WINDOW_MS, rpmLimit: 1 }));
     // One millisecond earlier and the first timestamp is still in the window.
     await expect(
-      store.reserve(reserveRequest({ reservationId: "r-3", now: NOW + 60_000, rpmLimit: 1 })),
+      store.reserve(reserveRequest({ reservationId: "r-3", now: NOW + RPM_WINDOW_MS, rpmLimit: 1 })),
     ).rejects.toBeInstanceOf(GatewayError);
+  });
+
+  test("the rpm window matches the Redis script's, not a private literal", () => {
+    // Parity pin: the Lua script must take the window from ARGV[2] (fed
+    // `RPM_WINDOW_MS` by the store) rather than re-hardcoding it, and the
+    // in-memory store must prune at the same constant. If either side drifts,
+    // the two admission backends enforce different windows for the same key.
+    expect(RESERVE_SCRIPT).toContain("tonumber(ARGV[1]) - tonumber(ARGV[2])");
+    expect(RESERVE_SCRIPT).not.toContain("60000");
+    // The boundary case above exercises `RPM_WINDOW_MS`; assert the constant
+    // itself so a silent retune of the window is a deliberate, reviewed change.
+    expect(RPM_WINDOW_MS).toBe(60_000);
   });
 });
 
@@ -1130,7 +1143,7 @@ describe("ApiKeyAdmissionService", () => {
  */
 describe("InMemoryAdmissionCounterStore — amortized rpm pruning", () => {
   test("advancing many windows forgets old requests and keeps recent ones", async () => {
-    const store = new InMemoryAdmissionCounterStore({ windowMs: 60_000 });
+    const store = new InMemoryAdmissionCounterStore();
     // Two requests per window for 50 windows, limit 2: each reserve prunes
     // everything at or before its cutoff, so the previous window's pair (which
     // sits exactly one window old) is forgotten and the limit never trips.
@@ -1157,7 +1170,7 @@ describe("InMemoryAdmissionCounterStore — amortized rpm pruning", () => {
     // admission must still land in the live queue, not a detached one. This is
     // the regression where r-2's timestamp vanished and r-3 was admitted past
     // a limit of 1.
-    const store = new InMemoryAdmissionCounterStore({ windowMs: 60_000 });
+    const store = new InMemoryAdmissionCounterStore();
     await store.reserve(reserveRequest({ reservationId: "q-1", now: NOW, rpmLimit: 1 }));
     await store.reserve(reserveRequest({ reservationId: "q-2", now: NOW + 60_000, rpmLimit: 1 }));
     await expect(
@@ -1168,7 +1181,7 @@ describe("InMemoryAdmissionCounterStore — amortized rpm pruning", () => {
   test("requests sharing one timestamp share one queue position", async () => {
     // Concurrency-keyed RPM (several keys mapped to one bucket) still counts
     // each request: same now, distinct reservation ids, limit trips at 3.
-    const store = new InMemoryAdmissionCounterStore({ windowMs: 60_000 });
+    const store = new InMemoryAdmissionCounterStore();
     const at = (id: string) =>
       reserveRequest({
         reservationId: id,

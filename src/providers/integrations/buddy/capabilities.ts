@@ -3,8 +3,24 @@
 // deployment that only serves one realm never drags the others into memory.
 import type { ProviderModuleCapabilities } from "../../provider-registry";
 import { oauthCapability, quotaCapability } from "../../provider-registry";
+import {
+  discoveryCapability,
+  type ModelDiscoveryRequest,
+} from "../../configured-provider";
 
 type BuddyProviderId = "cb" | "cbcn";
+
+/**
+ * Maps the orchestration context onto the `DiscoveryInput` the buddy
+ * `discover*Models` exports declare. `signal` is not part of the context, so
+ * only the credential and the optional fetcher cross over.
+ */
+function discoveryInput({ credential, fetcher }: ModelDiscoveryRequest) {
+  return {
+    credential,
+    ...(fetcher === undefined ? {} : { fetcher }),
+  };
+}
 
 /**
  * Lazy capability declarations for Buddy's two independently identified
@@ -14,11 +30,11 @@ export const BUDDY_PROVIDER_CAPABILITIES = {
   cb: {
     loadAdapter: async () => (await import("./codebuddy/index")).createCodeBuddyAdapter(),
     loadModels: async () => (await import("./codebuddy/index")).CODEBUDDY_MODELS,
-    loadModelDiscovery: async () => async ({ credential, fetcher }) =>
-      (await import("./codebuddy/index")).discoverCodeBuddyModels({
-        credential,
-        ...(fetcher === undefined ? {} : { fetcher }),
-      }),
+    loadModelDiscovery: discoveryCapability(
+      () => import("./codebuddy/index"),
+      (module) => module.discoverCodeBuddyModels,
+      discoveryInput,
+    ),
     loadAuthentication: oauthCapability(
       () => import("./codebuddy/index"),
       "codeBuddyOAuthClient",
@@ -32,11 +48,11 @@ export const BUDDY_PROVIDER_CAPABILITIES = {
   cbcn: {
     loadAdapter: async () => (await import("./codebuddy/index")).createCodeBuddyCnAdapter(),
     loadModels: async () => (await import("./codebuddy/index")).CODEBUDDY_CN_MODELS,
-    loadModelDiscovery: async () => async ({ credential, fetcher }) =>
-      (await import("./codebuddy/index")).discoverCodeBuddyCnModels({
-        credential,
-        ...(fetcher === undefined ? {} : { fetcher }),
-      }),
+    loadModelDiscovery: discoveryCapability(
+      () => import("./codebuddy/index"),
+      (module) => module.discoverCodeBuddyCnModels,
+      discoveryInput,
+    ),
     loadAuthentication: oauthCapability(
       () => import("./codebuddy/index"),
       "codeBuddyCnOAuthClient",

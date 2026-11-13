@@ -90,34 +90,35 @@ export function lookupKimiModelBootstrap(
 
 
 
-import { defineModel } from "../../provider-model-definition";
+import { catalogRows } from "../shared/catalog-rows";
 
-const kimiModel = (
-  modelId: string,
-  contextLimit: number,
-  outputLimit: number,
-  reasoning: boolean,
-): ModelDefinition =>
-  defineModel({
-    id: modelId,
+type KimiCatalogRow = readonly [id: string, contextLimit: number, outputLimit: number, reasoning: boolean];
+
+const kimiModel = catalogRows<KimiCatalogRow>({
+  caps: {
     wireFamily: "messages",
+    // `/v1/messages` on the versioned `/coding` base — not the family's
+    // conventional `/messages` path.
     endpoint: "/v1/messages",
+    vision: true,
+    toolCall: true,
+  },
+  translate: ([, contextLimit, outputLimit, reasoning]) => ({
     ctx: contextLimit,
     out: outputLimit,
-    vision: true,
     reasoning,
-    toolCall: true,
-  });
+  }),
+});
 
-export const KIMI_CODE_MODELS: readonly ModelDefinition[] = [
-  kimiModel("k3", 1_048_576, 131_072, true),
-  kimiModel("k3-256k", 262_144, 131_072, true),
-  kimiModel("kimi-for-coding", 262_144, 32_768, true),
-  kimiModel("kimi-for-coding-highspeed", 262_144, 32_768, true),
-  kimiModel("kimi-k2", 262_144, 262_144, false),
-  kimiModel("kimi-k2-turbo-preview", 262_144, 32_000, false),
-  kimiModel("kimi-k2.5", 262_144, 65_536, true),
-];
+export const KIMI_CODE_MODELS: readonly ModelDefinition[] = ([
+  ["k3", 1_048_576, 131_072, true],
+  ["k3-256k", 262_144, 131_072, true],
+  ["kimi-for-coding", 262_144, 32_768, true],
+  ["kimi-for-coding-highspeed", 262_144, 32_768, true],
+  ["kimi-k2", 262_144, 262_144, false],
+  ["kimi-k2-turbo-preview", 262_144, 32_000, false],
+  ["kimi-k2.5", 262_144, 65_536, true],
+] as const satisfies readonly KimiCatalogRow[]).map(kimiModel);
 
 
 export interface KimiCodeAdapterOptions {

@@ -13,8 +13,10 @@
  * blocker with install guidance; downloading a third-party agent on the
  * operator's behalf is out of scope.
  */
+import { Buffer } from "node:buffer";
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, openSync } from "node:fs";
+import { access, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveUserConfigDir } from "../../config/package-paths";
 import {
@@ -44,8 +46,18 @@ function stateDirOf(config: RemoteSupportServiceConfig): string {
   return config.stateDir ?? join(resolveUserConfigDir(), "remote-support");
 }
 
-function ensureStateDir(dir: string): void {
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+async function ensureStateDir(dir: string): Promise<void> {
+  await mkdir(dir, { recursive: true });
+}
+
+/** `existsSync` for the request path: the sync variant blocks the event loop. */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function pidPath(dir: string, tool: RemoteSupportTool): string {
@@ -99,17 +111,17 @@ function pidAlive(pid: number): boolean {
  * malformed, or names a process that is no longer alive. Dead files are
  * cleaned up so a later start does not race against a stale record.
  */
-function readLivePid(dir: string, tool: RemoteSupportTool): number | null {
+async function readLivePid(dir: string, tool: RemoteSupportTool): Promise<number | null> {
   const file = pidPath(dir, tool);
-  if (!existsSync(file)) return null;
-  const raw = readFileSync(file, "utf8").trim();
+  if (!(await pathExists(file))) return null;
+  const raw = (await readFile(file, "utf8")).trim();
   const pid = Number.parseInt(raw, 10);
   if (!Number.isFinite(pid) || pid <= 0) {
-    rmSync(file, { force: true });
+    await rm(file, { force: true });
     return null;
   }
   if (!pidAlive(pid)) {
-    rmSync(file, { force: true });
+    await rm(file, { force: true });
     return null;
   }
   return pid;
@@ -157,19 +169,45 @@ function urlPatternFor(tool: RemoteSupportTool): RegExp {
 }
 
 /**
+ * Reads only the bytes appended to `path` since `offset`, returning the new
+ * text and the offset to resume from. A file that shrank or vanished resets
+ * the offset — the publisher recreates its logs on each launch.
+ */
+async function readAppended(path: string, offset: number): Promise<{ text: string; offset: number }> {
+  const info = await stat(path).catch(() => undefined);
+  if (info === undefined || !info.isFile()) return { text: "", offset: 0 };
+  if (info.size < offset) offset = 0;
+  if (info.size === offset) return { text: "", offset };
+  const handle = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(info.size - offset);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+    return { text: buffer.subarray(0, bytesRead).toString("utf8"), offset: offset + bytesRead };
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * Tails the publisher's stdout + stderr log files for the URL regex. Resolves
- * with the first match or `null` after the overall deadline.
+ * with the first match or `null` after the overall deadline. Each poll reads
+ * only the appended tail — the previous revision re-read both whole files
+ * every 500 ms for up to 25 s.
  */
 async function waitForUrl(dir: string, tool: RemoteSupportTool): Promise<string | null> {
   const pattern = urlPatternFor(tool);
   const deadline = Date.now() + URL_WAIT_MS;
   const log = logPath(dir, tool);
   const err = errPath(dir, tool);
+  const offsets = new Map<string, number>([
+    [log, 0],
+    [err, 0],
+  ]);
   while (Date.now() < deadline) {
     for (const path of [log, err]) {
-      if (!existsSync(path)) continue;
-      const text = readFileSync(path, "utf8");
-      const match = pattern.exec(text);
+      const chunk = await readAppended(path, offsets.get(path) ?? 0);
+      offsets.set(path, chunk.offset);
+      const match = pattern.exec(chunk.text);
       if (match) return match[0];
     }
     const { promise, resolve } = Promise.withResolvers<void>();
@@ -325,10 +363,10 @@ async function launchDetached(
   if (!binary) {
     return { pid: 0, url: null, error: `${tool} is not on PATH` };
   }
-  ensureStateDir(dir);
-  rmSync(urlPath(dir, tool), { force: true });
-  rmSync(logPath(dir, tool), { force: true });
-  rmSync(errPath(dir, tool), { force: true });
+  await ensureStateDir(dir);
+  await rm(urlPath(dir, tool), { force: true });
+  await rm(logPath(dir, tool), { force: true });
+  await rm(errPath(dir, tool), { force: true });
   const outFd = openSync(logPath(dir, tool), "a");
   const errFd = openSync(errPath(dir, tool), "a");
   try {
@@ -341,13 +379,13 @@ async function launchDetached(
     if (pid === undefined) {
       return { pid: 0, url: null, error: `failed to launch ${tool}` };
     }
-    writeFileSync(pidPath(dir, tool), String(pid), "utf8");
+    await writeFile(pidPath(dir, tool), String(pid), "utf8");
     child.unref();
     let url = await waitForUrl(dir, tool);
     if (!url && tool === "tailscale") {
       url = tailscaleUrlFromDaemon();
     }
-    if (url) writeFileSync(urlPath(dir, tool), url, "utf8");
+    if (url) await writeFile(urlPath(dir, tool), url, "utf8");
     return { pid, url, error: null };
   } finally {
     closeSync(outFd);
@@ -374,7 +412,7 @@ export function createRemoteSupportService(config: RemoteSupportServiceConfig): 
   }
 
   /** Which publisher, if any, is currently alive on this host. */
-  function detectActive(): { tool: RemoteSupportTool | null; url: string | null } {
+  async function detectActive(): Promise<{ tool: RemoteSupportTool | null; url: string | null }> {
     for (const tool of REMOTE_SUPPORT_TOOLS) {
       // Tailscale runs as a system service — its serve daemon owns its own
       // lifecycle, so a pid file is not reliable. Ask the daemon.
@@ -387,9 +425,10 @@ export function createRemoteSupportService(config: RemoteSupportServiceConfig): 
         if (url) return { tool: "tailscale", url };
         continue;
       }
-      const pid = readLivePid(dir, tool);
+      const pid = await readLivePid(dir, tool);
       if (pid === null) continue;
-      const recorded = existsSync(urlPath(dir, tool)) ? readFileSync(urlPath(dir, tool), "utf8").trim() : "";
+      const urlFile = urlPath(dir, tool);
+      const recorded = (await pathExists(urlFile)) ? (await readFile(urlFile, "utf8")).trim() : "";
       return { tool, url: recorded.length > 0 ? recorded : null };
     }
     return { tool: null, url: null };
@@ -399,7 +438,7 @@ export function createRemoteSupportService(config: RemoteSupportServiceConfig): 
     blocker: RemoteSupportBlocker | null = null,
     message: string | null = null,
   ): Promise<RemoteSupportStatus> {
-    const { tool, url } = detectActive();
+    const { tool, url } = await detectActive();
     const installed = await detectInstalled();
     return { active: tool, url, blocker, message, port, installed };
   }
@@ -409,14 +448,14 @@ export function createRemoteSupportService(config: RemoteSupportServiceConfig): 
       // The daemon owns the serve lifecycle; `serve reset` is the sanctioned
       // teardown and leaves no orphan process behind.
       spawnSync("tailscale", ["serve", "reset"], { stdio: "ignore", windowsHide: true });
-      rmSync(urlPath(dir, tool), { force: true });
-      rmSync(pidPath(dir, tool), { force: true });
+      await rm(urlPath(dir, tool), { force: true });
+      await rm(pidPath(dir, tool), { force: true });
       return;
     }
-    const pid = readLivePid(dir, tool);
+    const pid = await readLivePid(dir, tool);
     if (pid !== null) killTree(pid);
-    rmSync(pidPath(dir, tool), { force: true });
-    rmSync(urlPath(dir, tool), { force: true });
+    await rm(pidPath(dir, tool), { force: true });
+    await rm(urlPath(dir, tool), { force: true });
   }
 
   return {

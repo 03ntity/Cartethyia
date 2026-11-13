@@ -1,6 +1,7 @@
 import type { ApiKeyProviderSpec } from "../../configured-provider";
 import { fetchOpenAICompatibleModels } from "../../discovery/openai-model-discovery";
-import { defineModel, type ModelDefinition } from "../../provider-model-definition";
+import type { ModelDefinition } from "../../provider-model-definition";
+import { catalogRows } from "../shared/catalog-rows";
 
 const INCEPTION_PROVIDER_ID = "inception" as const;
 
@@ -32,19 +33,21 @@ export const INCEPTION_SPEC: ApiKeyProviderSpec = {
  * mercury-3's own chat-completions numbers: 1M context, 131072 max output,
  * reasoning (instant/low/medium/high), tool calling.
  */
-export const INCEPTION_MODELS: readonly ModelDefinition[] = [
-  defineModel({
-    id: "mercury-3",
+const inceptionModel = catalogRows<readonly [id: string, ctx: number, out: number]>({
+  caps: {
     wireFamily: "chat",
     endpoint: "/chat/completions",
-    ctx: 1_000_000,
-    out: 131_072,
     reasoning: true,
     toolCall: true,
     free: true,
     freeTier: true,
-  }),
-];
+  },
+  translate: ([, ctx, out]) => ({ ctx, out }),
+});
+
+export const INCEPTION_MODELS: readonly ModelDefinition[] = ([
+  ["mercury-3", 1_000_000, 131_072],
+] as const satisfies readonly (readonly [id: string, ctx: number, out: number])[]).map(inceptionModel);
 
 /**
  * Live `/v1/models` listing, pinned to the free tier.

@@ -24,7 +24,6 @@ import {
 } from "./qoder-umid";
 import {
   allocateQoderNativeIdentity,
-  ensureQoderNativeIdentity,
   type QoderNativeIdentityStore,
 } from "./qoder-native-identity-store";
 import type { NativeIdentityRecord } from "../../../persistence/schema";
@@ -138,8 +137,14 @@ export function normalizeCampaign(raw: Record<string, unknown>): Record<string, 
   };
 }
 
+/**
+ * One campaign claim outcome on the sash surface. `not_eligible` is the
+ * same-person block — an honest outcome, not a failure of this account's day.
+ */
+export type SashClaimState = "claimed" | "already_claimed" | "not_eligible" | "error";
+
 /** GET campaign list once with given headers; `null` when unreachable/unauthorized. */
-async function getCampaigns(
+export async function listSashCampaigns(
   base: string,
   headers: Record<string, string>,
   fetcher: Fetcher,
@@ -171,7 +176,7 @@ async function tryClaimDaily(
   headers: Record<string, string>,
   fetcher: Fetcher,
 ): Promise<{ state: DailyCheckinState; amount: number; error: string | null }> {
-  const campaigns = await getCampaigns(base, headers, fetcher);
+  const campaigns = await listSashCampaigns(base, headers, fetcher);
   if (campaigns === null) {
     return { state: "error", amount: 0, error: "Campaign list unavailable." };
   }
@@ -189,9 +194,9 @@ async function tryClaimDaily(
     const benefit = asRecord(campaign["benefit"]);
     const campaignId = String(campaign["campaign_id"] ?? "");
     if (!campaignId) continue;
-    const claim = await claimWithHeaders(base, campaignId, headers, fetcher);
+    const claim = await claimSashCampaign(base, campaignId, headers, fetcher);
     if (claim.state === "claimed") {
-      const amount = asNumber(benefit?.["amount"]) ?? claim.amount;
+      const amount = asNumber(benefit?.["amount"]) ?? claim.amount ?? 0;
       return { state: "claimed", amount, error: null };
     }
     if (claim.state === "already_claimed") return { state: "already_claimed", amount: 0, error: null };
@@ -262,18 +267,20 @@ async function probeDailyClaim(
 }
 
 /**
- * Claims one campaign and returns the resulting state. Mirrors the donor's
- * `claim_campaign` idempotence handling: a 409 or `ALREADY_CLAIMED` body is
- * an already-claimed grant, `SAME_PERSON_ALREADY_CLAIMED`/`BLOCKED` is a
+ * Claims one campaign and returns the resulting state. This is the one owner
+ * of the sash idempotence map: a 409 or `ALREADY_CLAIMED` body is an
+ * already-claimed grant, `SAME_PERSON_ALREADY_CLAIMED`/`BLOCKED` is a
  * same-person block (not a failure of this account's day), and anything else
- * is an error.
+ * is an error. `amount` is `null` when the response stated no amount so each
+ * surface applies its own default (the check-in reports 0, the manual claim
+ * reports the campaign's face value).
  */
-async function claimWithHeaders(
+export async function claimSashCampaign(
   base: string,
   campaignId: string,
   headers: Record<string, string>,
   fetcher: Fetcher,
-): Promise<{ state: DailyCheckinState; amount: number }> {
+): Promise<{ state: SashClaimState; amount: number | null; status: number }> {
   const url = base + CAMPAIGN_CLAIM_PATH.replace("%s", encodeURIComponent(campaignId));
   let response: Response;
   try {
@@ -284,7 +291,7 @@ async function claimWithHeaders(
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch {
-    return { state: "error", amount: 0 };
+    return { state: "error", amount: null, status: 0 };
   }
   const raw = await response.text().catch(() => "");
   const payload: unknown = raw ? safeParse(raw) : null;
@@ -293,17 +300,17 @@ async function claimWithHeaders(
   const failure = String(rec?.["failureCode"] ?? "").toUpperCase();
   const success = rec?.["success"] !== false;
   const benefit = asRecord(rec?.["benefit"]);
-  const amount = asNumber(rec?.["amount"] ?? benefit?.["amount"]) ?? 0;
+  const amount = asNumber(rec?.["amount"] ?? benefit?.["amount"]);
   if (response.status === 409 || failure === "ALREADY_CLAIMED" || status === "CLAIMED" && failure === "REPLAYED") {
-    return { state: "already_claimed", amount };
+    return { state: "already_claimed", amount, status: response.status };
   }
   if (failure === "SAME_PERSON_ALREADY_CLAIMED" || status === "BLOCKED") {
-    return { state: "not_eligible", amount: 0 };
+    return { state: "not_eligible", amount: null, status: response.status };
   }
   if (response.ok && success && (status === "CLAIMED" || status === "GRANTED" || status === "SUCCESS")) {
-    return { state: "claimed", amount };
+    return { state: "claimed", amount, status: response.status };
   }
-  return { state: "error", amount: 0 };
+  return { state: "error", amount: null, status: response.status };
 }
 
 /** Legacy sash status + claim. Returns `null` when the surface is absent (404/405/410). */
@@ -430,17 +437,15 @@ export async function fetchQoderDailyCheckin(args: {
     boundRecord = (await store.get(providerId, accountId)) ?? boundRecord;
   }
   if (boundRecord) {
-    // Ensure the stored device is active on this host (replay its seed).
-    const active = store ? await ensureQoderNativeIdentity(store, providerId, accountId) : true;
-    if (active) {
-      bound = {
-        machineToken: boundRecord.machineToken,
-        machineType: boundRecord.machineType,
-        machineCode: boundRecord.machineCode,
-        isVm: false,
-        source: "runtime-info",
-      };
-    }
+    // The bound record IS the account's device: the identity is host-derived
+    // and deterministic, so there is no bridge replay to gate on.
+    bound = {
+      machineToken: boundRecord.machineToken,
+      machineType: boundRecord.machineType,
+      machineCode: boundRecord.machineCode,
+      isVm: false,
+      source: "runtime-info",
+    };
   }
   if (!bound && store) {
     const minted = await allocateQoderNativeIdentity(store, providerId, accountId, { realm });

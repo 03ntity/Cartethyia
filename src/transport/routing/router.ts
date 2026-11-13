@@ -356,6 +356,19 @@ export function resolveAliasTarget(
   }
 }
 
+/**
+ * Merged alias maps cached per snapshot object. `plan()` resolves the requested
+ * model plus every combo member through `resolveAlias`, and each call used to
+ * re-merge the tenant and CLI alias records — O(members × aliases) per plan.
+ * Snapshots are immutable per revision, so the merge is cached on the snapshot
+ * itself; the returned record is read-only by contract (resolvers only index
+ * it, never write).
+ */
+const aliasMapCache = new WeakMap<
+  RouteSnapshot,
+  Map<string, Record<string, string> | undefined>
+>();
+
 function aliasMapFor(
   snapshot: RouteSnapshot,
   tenantId: string | null,
@@ -363,14 +376,23 @@ function aliasMapFor(
   keyId?: string,
 ): Record<string, string> | undefined {
   if (!tenantId) return undefined;
+  const cacheKey = JSON.stringify([tenantId, allowCliMappings, keyId ?? null]);
+  let perSnapshot = aliasMapCache.get(snapshot);
+  if (perSnapshot === undefined) {
+    perSnapshot = new Map();
+    aliasMapCache.set(snapshot, perSnapshot);
+  }
+  if (perSnapshot.has(cacheKey)) return perSnapshot.get(cacheKey);
   const aliases = snapshot.aliases?.[tenantId];
   const cliAliases = allowCliMappings
     ? keyId
       ? snapshot.cli_aliases?.[`${tenantId}:${keyId}`] ?? snapshot.cli_aliases?.[tenantId]
       : snapshot.cli_aliases?.[tenantId]
     : undefined;
-  if (!aliases && !cliAliases) return undefined;
-  return { ...(aliases ?? {}), ...(cliAliases ?? {}) };
+  const merged =
+    !aliases && !cliAliases ? undefined : { ...(aliases ?? {}), ...(cliAliases ?? {}) };
+  perSnapshot.set(cacheKey, merged);
+  return merged;
 }
 
 function resolveAlias(
@@ -672,27 +694,24 @@ export class RoutingEngine {
       ...(setting?.usageFloor == null
         ? {}
         : { usage_floor: setting.usageFloor, usage_floor_unit: setting.usageFloorUnit }),
-      // When no cache/snapshot evidence exists, keep the candidate's own
-      // stamped windows (unit tests and in-memory fixture route this way).
-      ...(quotaWindows === undefined
-        ? candidate.quota_windows === undefined
-          ? {}
-          : { quota_windows: candidate.quota_windows }
-        : { quota_windows: quotaWindows }),
+      // When no cache/snapshot evidence exists, the candidate's own stamped
+      // windows ride through `...candidate` untouched — a miss must not erase
+      // a stamped value.
+      ...(quotaWindows === undefined ? {} : { quota_windows: quotaWindows }),
       ...(quota?.source === "zcode-start" && quota.error === null ? { quota_entitlements_known: true } : {}),
-      // Drain urgency and reserve are derived from the same windows the credit
-      // ordering already reads. They are ordering preferences, never
-      // exclusions: an account in reserve or with a zero drain score stays
-      // eligible and routed.
-      ...(quotaWindows === undefined && candidate.quota_windows === undefined
-        ? {}
-        : { drain_score: drainScore(quotaWindows ?? candidate.quota_windows) }),
-      ...(quotaWindows === undefined && candidate.quota_windows === undefined
-        ? {}
-        : { in_reserve: isInReserve(quotaWindows ?? candidate.quota_windows, accountReservePct()) }),
     };
-    const fact = normalizeQuotaFact(stamped, cached, stored);
-    return { ...stamped, quota_fact: fact };
+    // Drain urgency and reserve are derived from the same windows the credit
+    // ordering already reads. They are ordering preferences, never exclusions:
+    // an account in reserve or with a zero drain score stays eligible and
+    // routed. `RoutedCandidate` declares these fields mutable, so stamping them
+    // directly avoids a second full candidate copy per plan.
+    const derivedWindows = quotaWindows ?? candidate.quota_windows;
+    if (derivedWindows !== undefined) {
+      stamped.drain_score = drainScore(derivedWindows);
+      stamped.in_reserve = isInReserve(derivedWindows, accountReservePct());
+    }
+    stamped.quota_fact = normalizeQuotaFact(stamped, cached, stored);
+    return stamped;
   }
 
   /**
@@ -1134,42 +1153,45 @@ export class RoutingEngine {
     const stickyEntry = stickyWarmMs > 0 ? this.sticky.get(eligible[0]?.provider_id ?? "", sessionId) : undefined;
     const stickyAccountId = stickyEntry?.accountId;
     const stickyWarm = stickyEntry !== undefined && Date.now() - stickyEntry.lastUsedAtMs < stickyWarmMs;
-    eligible = [...eligible].sort((left, right) => {
-      const leftRank = decisions.get(left)?.rank ?? ROUTING_RANK.FRESH_KNOWN;
-      const rightRank = decisions.get(right)?.rank ?? ROUTING_RANK.FRESH_KNOWN;
-      if (leftRank !== rightRank) return leftRank - rightRank;
+    const stickyExplicit = stickyEntry?.explicit === true;
+    // Every key the comparator reads is computed once per candidate. The sort
+    // runs O(n log n) comparisons; recomputing reserve/hot/credit/drain inside
+    // the comparator re-scanned each candidate's quota windows per comparison.
+    const keyed = eligible.map((candidate) => ({
+      candidate,
+      rank: decisions.get(candidate)?.rank ?? ROUTING_RANK.FRESH_KNOWN,
+      sticky: candidate.provider_account_id === stickyAccountId,
+      freeTier: candidate.free_tier === true,
+      reserve:
+        (candidate as RoutedCandidate).in_reserve ??
+        isInReserve(candidate.quota_windows, reservePct),
+      priority: (candidate as RoutedCandidate).account_priority ?? 0,
+      hot: hotWindow(candidate.quota_windows),
+      credit: creditPriority(candidate),
+      drain: (candidate as RoutedCandidate).drain_score ?? 0,
+    }));
+    keyed.sort((left, right) => {
+      if (left.rank !== right.rank) return left.rank - right.rank;
       // A free-tier model routes to any account: skip every quota-derived
       // preference (credit, reserve, hot-window, drain) so the original order
       // is preserved. Sticky warm pins still apply — they are about prompt
       // cache warmth, not quota.
-      const bothFree = left.free_tier === true && right.free_tier === true;
       // Sticky warm pin: within the warm window the account that last served
-      // this session wins outright (explicit pins always win).
-      const leftSticky = left.provider_account_id === stickyAccountId;
-      const rightSticky = right.provider_account_id === stickyAccountId;
-      if (leftSticky !== rightSticky) {
-        if (stickyEntry?.explicit === true) return leftSticky ? -1 : 1;
-        if (stickyWarm) return leftSticky ? -1 : 1;
+      // this session wins outright (explicit pins always win). When neither
+      // applies the comparison falls through to the quota preferences.
+      if (left.sticky !== right.sticky && (stickyExplicit || stickyWarm)) {
+        return left.sticky ? -1 : 1;
       }
-      if (bothFree) return 0;
-      const leftReserve = (left as RoutedCandidate).in_reserve ??
-        isInReserve(left.quota_windows, reservePct);
-      const rightReserve = (right as RoutedCandidate).in_reserve ??
-        isInReserve(right.quota_windows, reservePct);
-      if (leftReserve !== rightReserve) return leftReserve ? 1 : -1;
-      const leftPriority = (left as RoutedCandidate).account_priority ?? 0;
-      const rightPriority = (right as RoutedCandidate).account_priority ?? 0;
-      if (leftPriority !== rightPriority) return rightPriority - leftPriority;
-      const leftHot = hotWindow(left.quota_windows);
-      const rightHot = hotWindow(right.quota_windows);
-      if (leftHot !== rightHot) return leftHot ? 1 : -1;
-      const credit = creditPriority(right) - creditPriority(left);
+      if (left.freeTier && right.freeTier) return 0;
+      if (left.reserve !== right.reserve) return left.reserve ? 1 : -1;
+      if (left.priority !== right.priority) return right.priority - left.priority;
+      if (left.hot !== right.hot) return left.hot ? 1 : -1;
+      const credit = right.credit - left.credit;
       if (credit !== 0) return credit;
-      const leftDrain = (left as RoutedCandidate).drain_score ?? 0;
-      const rightDrain = (right as RoutedCandidate).drain_score ?? 0;
-      if (leftDrain !== rightDrain) return rightDrain - leftDrain;
+      if (left.drain !== right.drain) return right.drain - left.drain;
       return 0;
     });
+    eligible = keyed.map((entry) => entry.candidate);
 
     // Provider routing rotates accounts within the same rank group only; it can
     // never float a cooling/saturated account ahead of a fresh one because the

@@ -70,25 +70,28 @@ function etagKey(key: string): string {
  * limit.
  */
 const LOCAL_CACHE_MAX_ENTRIES = 2000;
-const localCache = new Map<string, { at: number; value: string; etag: string }>();
+const localCache = new Map<string, { expiresAt: number; value: string; etag: string }>();
 
 function localGet(key: string): { value: string; etag: string } | undefined {
   const entry = localCache.get(key);
   if (entry === undefined) return undefined;
-  if (Date.now() - entry.at >= READ_THROUGH_DEFAULT_TTL_SECONDS * 1000) {
+  // Each entry carries the TTL its own write was given: the default constant
+  // used to stand in for every caller's `ttlSeconds`, so a caller asking for a
+  // longer window silently got the 10 s default instead.
+  if (Date.now() >= entry.expiresAt) {
     localCache.delete(key);
     return undefined;
   }
   return { value: entry.value, etag: entry.etag };
 }
 
-function localSet(key: string, value: string, etag: string): void {
+function localSet(key: string, value: string, etag: string, ttlSeconds: number): void {
   if (localCache.size >= LOCAL_CACHE_MAX_ENTRIES) {
     // Evict the oldest entry (Map iterates in insertion order).
     const oldest = localCache.keys().next();
     if (!oldest.done) localCache.delete(oldest.value);
   }
-  localCache.set(key, { at: Date.now(), value, etag });
+  localCache.set(key, { expiresAt: Date.now() + ttlSeconds * 1000, value, etag });
 }
 
 /**
@@ -119,7 +122,7 @@ export async function cachedReadWithEtag<T>(
     const fresh = await compute();
     const bytes = JSON.stringify(fresh) ?? "null";
     const etag = etagFor(bytes);
-    localSet(key, bytes, etag);
+    localSet(key, bytes, etag, ttlSeconds);
     return { value: fresh, etag };
   }
   try {

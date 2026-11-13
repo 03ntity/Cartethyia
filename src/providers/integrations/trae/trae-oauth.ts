@@ -531,7 +531,7 @@ export class TraeOAuthClient extends OAuthClient {
       ...(signal ? { signal } : {}),
     });
     if (!response.ok) {
-      throw new Error(`Trae token exchange failed with HTTP ${response.status}`);
+      throw new TraeExchangeHttpError(response.status);
     }
     const parsed = (await response.json()) as TraeExchangeResponse;
     const result = parsed.Result ?? parsed;
@@ -542,7 +542,7 @@ export class TraeOAuthClient extends OAuthClient {
       // operator-actionable message.
       const code = parsed.Code ?? "refresh_failed";
       const detail = typeof parsed.Message === "string" ? `: ${parsed.Message}` : "";
-      throw new Error(`Trae token exchange rejected (${code})${detail}`);
+      throw new TraeExchangeRejectedError(`Trae token exchange rejected (${code})${detail}`);
     }
     const refresh = result.RefreshToken;
     const expiryMs = result.TokenExpireAt;
@@ -563,14 +563,44 @@ export class TraeOAuthClient extends OAuthClient {
 }
 
 /**
+ * An HTTP-level failure from the exchange endpoint.
+ *
+ * The status — not the message — decides whether the fallback-host loop moves
+ * on: a 4xx is upstream's verdict on the request and stops the loop, while a
+ * 5xx may be one bad host and earns the fallback a try.
+ */
+class TraeExchangeHttpError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`Trae token exchange failed with HTTP ${status}`);
+    this.name = "TraeExchangeHttpError";
+    this.status = status;
+  }
+}
+
+/**
+ * Upstream's verdict on the credential itself: the exchange endpoint answered
+ * but refused the token pair (a parsed rejection body). Every exchange attempt
+ * rotates the refresh token, so replaying this on a fallback host would burn
+ * the rotation for nothing — the loop must surface it immediately.
+ */
+class TraeExchangeRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TraeExchangeRejectedError";
+  }
+}
+
+/**
  * True when an error came from upstream rather than the transport.
  *
- * `#exchange` throws a plain `Error` for both, so the distinction has to be
- * made on the message; a business rejection must not be retried on another
- * host, because each attempt rotates the refresh token again.
+ * `#exchange` throws typed errors for both upstream answers, so the
+ * distinction is made on the type; a business rejection must not be retried
+ * on another host, because each attempt rotates the refresh token again.
  */
 function isBusinessError(err: unknown): boolean {
-  return err instanceof Error && (err.message.includes("rejected") || err.message.includes("HTTP 4"));
+  if (err instanceof TraeExchangeRejectedError) return true;
+  return err instanceof TraeExchangeHttpError && err.status >= 400 && err.status < 500;
 }
 
 /** Assembles an import result for an already-complete export. */

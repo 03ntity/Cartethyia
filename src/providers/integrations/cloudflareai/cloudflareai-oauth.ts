@@ -24,12 +24,12 @@ import type {
   OAuthLoginClient,
   OAuthLoginField,
 } from "../../authentication/oauth-flow-store";
-import { readJsonResponse } from "../../authentication/oauth-flow-store";
 import type { FetchLike } from "../../authentication/oauth-client";
 import {
   encodeCloudflareAiGatewayCredential,
   type CloudflareAiGatewayEnvelope,
 } from "../../../security/credential-codec";
+import { staticExchangeResult, validateBearerByModelList } from "../shared/oauth-exchange";
 
 /** Only the token is secret; the two ids are identifiers the operator can see. */
 export const CLOUDFLARE_AI_GATEWAY_IMPORT_FIELDS: readonly OAuthLoginField[] = [
@@ -55,19 +55,17 @@ async function validateToken(
   // both ids, and it costs no tokens. A single wrong field fails here rather
   // than on the operator's first real request.
   const url = `https://gateway.ai.cloudflare.com/v1/${encodeURIComponent(envelope.accountId)}/${encodeURIComponent(envelope.gatewayId)}/anthropic/v1/models`;
-  const response = await fetchFn(url, {
-    headers: {
-      accept: "application/json",
-      "cf-aig-authorization": `Bearer ${envelope.token}`,
-    },
-    signal: AbortSignal.timeout(20_000),
+  await validateBearerByModelList({
+    url,
+    bearer: envelope.token,
+    // The gateway reads this header, not `authorization`.
+    authHeader: "cf-aig-authorization",
+    fetchFn,
+    rejectionMessage: "Cloudflare AI Gateway rejected the token or the account/gateway ids",
+    // Read for body shape too: a 200 with an HTML body is an edge page that
+    // answered before the gateway, which is a different fix than a bad key.
+    bodyLabel: "Cloudflare AI Gateway model list",
   });
-  if (response.status === 401 || response.status === 403) {
-    throw new Error("Cloudflare AI Gateway rejected the token or the account/gateway ids");
-  }
-  // Read the body for its shape: a 200 with an HTML body is an edge page that
-  // answered before the gateway, which is a different fix than a bad key.
-  await readJsonResponse(response, "Cloudflare AI Gateway model list");
 }
 
 /** Cloudflare AI Gateway login: a durable token plus its two path segments. */
@@ -88,20 +86,13 @@ export class CloudflareaiOAuthClient implements OAuthLoginClient {
     if (!envelope.accountId) throw new Error("Cloudflare account ID is required");
     if (!envelope.gatewayId) throw new Error("Cloudflare gateway slug is required");
     await validateToken(envelope, this.fetchFn);
-    const access = encodeCloudflareAiGatewayCredential(envelope);
-    return {
-      access,
-      // No refresh grant. Mirrored because `refresh_ciphertext` is NOT NULL and
-      // the value is never presented to a token endpoint.
-      refresh: access,
-      // Cloudflare publishes no expiry for a gateway token, so this is a
-      // far-future value that keeps the freshness check from scheduling a
-      // refresh nothing can perform — the same shape Kilo Code uses.
-      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-      ...(input.accountLabel === undefined || input.accountLabel.trim() === ""
-        ? {}
-        : { accountLabel: input.accountLabel.trim() }),
-    };
+    // Durable token, no refresh grant: the shared builder mirrors `access`
+    // into the NOT NULL refresh slot and applies the documented storage
+    // horizon (Cloudflare publishes no expiry for a gateway token).
+    return staticExchangeResult({
+      access: encodeCloudflareAiGatewayCredential(envelope),
+      accountLabel: input.accountLabel,
+    });
   }
 }
 

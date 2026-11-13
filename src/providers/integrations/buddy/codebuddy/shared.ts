@@ -23,6 +23,60 @@ export function codebuddyDomain(variant: CodeBuddyVariant): string {
   return variant === "IDE" ? "www.codebuddy.ai" : "copilot.tencent.com";
 }
 
+/**
+ * Version source for the identity block's `User-Agent` and `X-IDE-Version`.
+ *
+ * - `"cli-package"` — the npm `@tencent-ai/codebuddy-code` pin for both the
+ *   User-Agent halves and `X-IDE-Version` (the reference CLI contract).
+ * - `"cn-desktop"` — the CN desktop build for the CLI identity's versions,
+ *   the intl package pin for IDE (the desktop/hybrid contract).
+ * - `"auto"` — `cli-package` for CLI, `cn-desktop` for IDE.
+ */
+export type BuddyIdentityVersion = "auto" | "cli-package" | "cn-desktop";
+
+export interface BuddyIdentityHeaderOptions {
+  /** Version source for `User-Agent` / `X-IDE-Version`; default `"auto"`. */
+  readonly version?: BuddyIdentityVersion;
+  /** Extra headers merged under the identity block (never overrides it). */
+  readonly extras?: Readonly<Record<string, string>>;
+}
+
+/**
+ * The CodeBuddy client-identity header block — the single owner of the
+ * `X-Product` / `X-IDE-*` / `X-Domain` / request-marker family shared by chat
+ * dispatch, billing/quota reads, and check-in calls.
+ *
+ * Marker casing is normalized to the desktop contract (`x-requested-with`,
+ * `x-codebuddy-request`); the wire is case-insensitive and `fetch` lowercases
+ * every name before sending, so bytes on the wire are unchanged.
+ */
+export function buddyIdentityHeaders(
+  variant: CodeBuddyVariant,
+  options: BuddyIdentityHeaderOptions = {},
+): Record<string, string> {
+  const version = options.version ?? "auto";
+  const resolved: BuddyIdentityVersion =
+    version === "auto" ? (variant === "CLI" ? "cli-package" : "cn-desktop") : version;
+  const cliPackage = resolved === "cli-package";
+  const packageVersion = getCodeBuddyVersion();
+  const cnVersion = getCodeBuddyCnVersion();
+  const ideVersion = variant === "CLI" ? (cliPackage ? packageVersion : cnVersion) : packageVersion;
+  const userAgent = cliPackage
+    ? `CLI/${packageVersion} CodeBuddy/${packageVersion}`
+    : buildCodeBuddyUserAgent(variant);
+  return {
+    ...(options.extras ?? {}),
+    "User-Agent": userAgent,
+    "X-Product": "SaaS",
+    "X-IDE-Type": variant,
+    "X-IDE-Name": variant,
+    "X-IDE-Version": ideVersion,
+    "X-Domain": codebuddyDomain(variant),
+    "x-requested-with": "XMLHttpRequest",
+    "x-codebuddy-request": "1",
+  };
+}
+
 
 /**
  * Per-request CodeBuddy headers — exact provider contract shared by the
@@ -40,8 +94,6 @@ export async function codebuddyHeaders(
   request?: CanonicalRequest,
   cliIdentity?: boolean,
 ): Promise<Record<string, string>> {
-  const identity = variant === "IDE" ? "IDE" : "CLI";
-  const ua = buildCodeBuddyUserAgent(identity);
   const conversationId = resolveInboundSessionId(context, request);
   const conversation = buddyConversationHeaders({
     ...(conversationId === undefined ? {} : { conversationId }),
@@ -61,14 +113,9 @@ export async function codebuddyHeaders(
       // the browser *transport* header (`accept: text/event-stream`) — so the
       // identity is still CLI, not the desktop hybrid.
       accept: "application/json",
-      "User-Agent": `CLI/${getCodeBuddyVersion()} CodeBuddy/${getCodeBuddyVersion()}`,
-      "X-Product": "SaaS",
-      "X-IDE-Type": "CLI",
-      "X-IDE-Name": "CLI",
-      "X-IDE-Version": getCodeBuddyVersion(),
-      "X-Domain": codebuddyDomain(variant),
-      "x-requested-with": "XMLHttpRequest",
-      "x-codebuddy-request": "1",
+      // The reference CLI is issued by the OpenAI Node SDK: its User-Agent and
+      // X-IDE-Version both name the npm CLI package pin (`cli-package`).
+      ...buddyIdentityHeaders(variant, { version: "cli-package" }),
       ...(purpose === undefined ? {} : { "X-Agent-Purpose": purpose }),
       ...conversation,
       ...(rootRequestId === undefined ? {} : { "X-Root-Request-ID": rootRequestId }),
@@ -89,17 +136,10 @@ export async function codebuddyHeaders(
   const purpose = buddyAgentPurpose(context, request);
   const headers: Record<string, string> = {
     accept: "text/event-stream",
-    "User-Agent": ua,
-    "X-Product": "SaaS",
-    "X-IDE-Type": identity,
-    "X-IDE-Name": identity,
-    // Every reference branch sends this, in both the desktop and the CLI
-    // product; its absence here is what made a CodeBuddy dispatch the only
-    // buddy caller with no client version on the wire.
-    "X-IDE-Version": identity === "CLI" ? getCodeBuddyCnVersion() : getCodeBuddyVersion(),
-    "X-Domain": codebuddyDomain(variant),
-    "x-requested-with": "XMLHttpRequest",
-    "x-codebuddy-request": "1",
+    // Desktop/hybrid identity: User-Agent and X-IDE-Version resolve through
+    // the variant (`cn-desktop` — the CN desktop build for CLI, the intl
+    // package pin for IDE).
+    ...buddyIdentityHeaders(variant),
   };
   // The effective agent purpose, matching the reference's dynamic value.
   // The reference does not invent `conversation`; it sends the purpose only
@@ -118,7 +158,7 @@ export async function codebuddyHeaders(
   // official failure placeholder. (CLI branch above already returned without
   // device headers.)
   Object.assign(headers, await buddyDeviceTokenHeaders({
-    realm: identity === "IDE" ? "intl" : "cn",
+    realm: variant === "IDE" ? "intl" : "cn",
     context,
     cliIdentity,
   }));

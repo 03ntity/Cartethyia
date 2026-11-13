@@ -79,15 +79,10 @@ export class HermesOAuthClient extends OAuthDeviceFlow {
       signal,
       label: "Hermes / Nous Portal token refresh",
     });
-    const record = payload as Record<string, unknown>;
-    const access = typeof record["access_token"] === "string" ? record["access_token"] : "";
-    if (!access) throw new Error("Hermes / Nous Portal refresh returned no access_token");
-    const expiresIn = typeof record["expires_in"] === "number" ? record["expires_in"] : 3600;
-    return {
-      access,
-      ...(typeof record["refresh_token"] === "string" ? { refresh: record["refresh_token"] as string } : {}),
-      expiresAt: new Date(Date.now() + expiresIn * 1000),
-    };
+    // Shared token-response parse + refresh projection: validates access_token,
+    // carries a rotated refresh grant when the portal issues one, and applies
+    // the documented expiry fallback (the portal publishes none on refresh).
+    return this.toRefreshResult(this.parseTokenResponse(payload));
   }
 }
 

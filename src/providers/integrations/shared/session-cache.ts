@@ -15,7 +15,7 @@ import type { CanonicalMessage, UsageRecord } from "../../../protocol/canonical-
 export const SESSION_CACHE_MAX_SESSIONS = 512;
 
 interface SessionCacheEntry {
-  /** hash(full messages) -> reported input tokens for that exact list. */
+  /** prefix digest -> reported input tokens for that exact message list. */
   readonly seen: Map<string, number>;
   /** Insertion order for bounded eviction. */
   readonly order: string[];
@@ -30,8 +30,22 @@ export interface SessionCache {
   resetForTesting(): void;
 }
 
-function hashOf(messages: readonly CanonicalMessage[]): string {
-  return createHash("sha256").update(JSON.stringify(messages)).digest("hex");
+/**
+ * Rolling per-message hash chain: element k is a digest of messages[0..k).
+ *
+ * Each step hashes the previous digest together with one message's JSON, so
+ * every prefix digest of a request is produced in one O(bytes) pass. The old
+ * scheme re-serialized a growing slice per prefix (O(n²) bytes per dispatch)
+ * and re-hashed the whole list again for the exact-match check.
+ */
+function prefixDigests(messages: readonly CanonicalMessage[]): string[] {
+  const digests: string[] = [];
+  let previous = "";
+  for (const message of messages) {
+    previous = createHash("sha256").update(previous).update(JSON.stringify(message)).digest("hex");
+    digests.push(previous);
+  }
+  return digests;
 }
 
 /**
@@ -73,23 +87,25 @@ export function createSessionCache(): SessionCache {
         typeof record.cached_input_tokens === "number" && record.cached_input_tokens > 0;
       if (upstreamReported) return record;
 
-      const fullHash = hashOf(messages);
+      const digests = prefixDigests(messages);
+      const fullHash = digests[digests.length - 1]!;
       const entry = sessions.get(sessionId);
 
       if (entry) {
+        // Byte-identical request: the whole input came from cache. The full
+        // digest is already in hand — the exact check never re-hashes the list.
+        const exact = entry.seen.get(fullHash);
+        if (exact !== undefined) {
+          return {
+            ...record,
+            cached_input_tokens: record.input_tokens,
+            uncached_input_tokens: 0,
+          };
+        }
         // Longest prefix that matches a previously sent complete request.
-        for (let len = messages.length; len >= 1; len -= 1) {
-          const prefix = messages.slice(0, len);
-          const tokens = entry.seen.get(hashOf(prefix));
+        for (let len = messages.length - 1; len >= 1; len -= 1) {
+          const tokens = entry.seen.get(digests[len - 1]!);
           if (tokens === undefined) continue;
-          if (len === messages.length) {
-            // Byte-identical request: the whole input came from cache.
-            return {
-              ...record,
-              cached_input_tokens: record.input_tokens,
-              uncached_input_tokens: 0,
-            };
-          }
           const cached = Math.min(tokens, record.input_tokens);
           return {
             ...record,

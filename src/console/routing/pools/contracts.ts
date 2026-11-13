@@ -456,6 +456,27 @@ export const MAX_BATCH_PROBE_TARGETS = 100;
  */
 export const PROVIDER_PROBE_BATCH_CONCURRENCY = 4;
 
+/**
+ * One pool's live admission state for a list read: the authoritative inflight
+ * count plus the provider cooldown entries that are still inside their window.
+ * Produced by `NetworkPoolSelector.getPoolListSnapshot`; `operations.ts`
+ * renders it onto each `NetworkPoolResponse`.
+ */
+export interface PoolListSnapshotEntry {
+  readonly inflight: number;
+  readonly cooldowns: readonly {
+    readonly providerId: string;
+    readonly until: number;
+    readonly reason: string;
+    readonly blocked?: boolean;
+  }[];
+}
+
+/** The subset of `NetworkPoolSelector` the pool list reads in one batch. */
+export interface PoolListSnapshotSource {
+  getPoolListSnapshot(poolIds: readonly string[]): Promise<ReadonlyMap<string, PoolListSnapshotEntry>>;
+}
+
 interface NetworkPoolAgentReleaser {
   releasePool(poolId: string, tenantId: string): Promise<void>;
 }

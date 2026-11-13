@@ -17,8 +17,8 @@
  * does not publish yet arrives through the sync control instead of being
  * asserted ahead of the upstream.
  */
-import { defineModel } from "../../provider-model-definition";
 import type { ModelDefinition } from "../../provider-model-definition";
+import { catalogRows } from "../shared/catalog-rows";
 
 export const DASHSCOPE_PROVIDER_ID = "dashscope" as const;
 
@@ -27,17 +27,15 @@ const CHAT_ENDPOINT = "/chat/completions";
 
 type CatalogRow = readonly [id: string, vision: boolean, reasoning: boolean];
 
-function dashscopeModel([id, vision, reasoning]: CatalogRow): ModelDefinition {
-  return defineModel({
-    id,
-    providerId: DASHSCOPE_PROVIDER_ID,
+const dashscopeModel = catalogRows<CatalogRow>({
+  providerId: DASHSCOPE_PROVIDER_ID,
+  caps: {
     wireFamily: "chat",
     endpoint: CHAT_ENDPOINT,
-    vision,
-    reasoning,
     toolCall: true,
-  });
-}
+  },
+  translate: ([, vision, reasoning]) => ({ vision, reasoning }),
+});
 
 /** Static Alibaba DashScope catalog; live discovery adds to it per account. */
 export const DASHSCOPE_MODELS: readonly ModelDefinition[] = [

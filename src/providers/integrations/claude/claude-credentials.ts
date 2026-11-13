@@ -76,7 +76,26 @@ const STRUCTURED_OUTPUTS_BETA = "structured-outputs-2025-12-15";
 const MID_CONVERSATION_SYSTEM_BETA = "mid-conversation-system-2026-04-07";
 const CLAUDE_CODE_BETA = "claude-code-20250219";
 const EFFORT_BETA = "effort-2025-11-24";
-const FALLBACK_CREDIT_BETA = "fallback-credit-2026-06-01";
+export const FALLBACK_CREDIT_BETA = "fallback-credit-2026-06-01";
+
+/**
+ * Beta values the usage/quota endpoint requires on its OAuth reads. Kept
+ * separate from the request beta profiles: the usage facade accepts a fixed
+ * superset (redacted thinking, advanced tool use, extended cache TTL) that
+ * chat dispatches never advertise.
+ */
+export const CLAUDE_CODE_OAUTH_QUOTA_BETAS: readonly string[] = [
+  CLAUDE_CODE_BETA,
+  OAUTH_AUTH_BETA,
+  INTERLEAVED_THINKING_BETA,
+  "redact-thinking-2026-02-12",
+  CONTEXT_MANAGEMENT_BETA,
+  PROMPT_CACHING_SCOPE_BETA,
+  MID_CONVERSATION_SYSTEM_BETA,
+  "advanced-tool-use-2025-11-20",
+  EFFORT_BETA,
+  "extended-cache-ttl-2025-04-11",
+];
 
 /**
  * Non-agentic calls (no tools, no thinking): the captured utility profile,

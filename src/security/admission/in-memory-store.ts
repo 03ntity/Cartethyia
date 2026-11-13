@@ -1,7 +1,7 @@
 import type { AdmissionCounterStore, AdmissionReserveRequest } from "./contracts";
 import { bucketKey, finiteNonNegative } from "./buckets";
 import { reasonToGatewayError } from "./reasons";
-import { dailyBucket, monthlyBucket } from "./ttl";
+import { dailyBucket, monthlyBucket, RPM_WINDOW_MS } from "./ttl";
 
 interface InMemoryReservation {
   readonly apiKeyId: string;
@@ -44,6 +44,14 @@ interface InMemoryReservation {
 const TERMINAL_RESERVATION_CAP = 10_000;
 /** Hard cap per bucketed counter map; oldest buckets evicted first. */
 const COUNTER_MAP_CAP = 20_000;
+
+/**
+ * Sliding RPM window, shared with the Redis store via `RPM_WINDOW_MS` in
+ * `ttl.ts` — the Lua script receives it as an argument so both sides prune at
+ * `now - window` with identical boundary semantics (an entry exactly one
+ * window old is expired). There is deliberately no constructor override: a
+ * per-store window is exactly the drift this constant exists to prevent.
+ */
 
 
 /**
@@ -107,8 +115,6 @@ export class InMemoryAdmissionCounterStore implements AdmissionCounterStore {
   private terminalRingStart = 0;
   private failing = false;
   private gate: Promise<void> = Promise.resolve();
-
-  constructor(private readonly options: { readonly windowMs?: number } = {}) {}
 
   simulateFailure(failing: boolean): void {
     this.failing = failing;
@@ -396,7 +402,7 @@ export class InMemoryAdmissionCounterStore implements AdmissionCounterStore {
     }
     // Amortized: advances the head past expired entries; compaction of the
     // consumed prefix happens only when it exceeds half the array.
-    existing.prune(now, this.options.windowMs ?? 60_000);
+    existing.prune(now, RPM_WINDOW_MS);
     if (existing.isEmpty()) {
       // Drop the emptied bucket so the map cannot pin one dead queue per key
       // the process ever served, then hand the caller a fresh queue — the

@@ -22,7 +22,7 @@ const PAYLOAD_DIR = await mkdtemp(join(tmpdir(), "carte-dm-payload-"));
 const previousPayloadDir = process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR;
 process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR = PAYLOAD_DIR;
 
-const { createDataManagementOperations } = await import(
+const { createDataManagementOperations, invalidateDataScanCache } = await import(
   "../../src/console/data-management/operations"
 );
 const { PurgeNotWiredError } = await import(
@@ -53,6 +53,10 @@ beforeEach(async () => {
   await mkdir(TELEMETRY_DIR, { recursive: true });
   await mkdir(PAYLOAD_DIR, { recursive: true });
   await clear();
+  // The operations module caches directory scans for a few seconds; fixtures
+  // swap the directories' contents between tests, so the cache must drop with
+  // them or a "zeroes" assertion reads the previous fixture's numbers.
+  invalidateDataScanCache();
 });
 
 afterAll(async () => {

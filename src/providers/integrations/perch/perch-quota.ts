@@ -10,33 +10,9 @@
 import type { FetchLike, ProviderQuotaResult, ProviderQuotaWindow } from "../../quota/quota-contracts";
 import { cleanError, percentWindow, text } from "../../quota/quota-contracts";
 import type { QuotaCollectionContext } from "../../quota/quota-support";
+import { quotaUnreadable, readJsonOk } from "../shared/cli-client-kit";
 import { PERCH_APP_URL } from "./perch-realm";
 import { parsePerchCredentialToken } from "./perch-credential";
-
-async function readAccount(
-  baseUrl: string,
-  token: string,
-  fetcher: FetchLike,
-): Promise<Record<string, unknown> | null> {
-  if (!token) return null;
-  return fetcher(`${baseUrl}/api/perchai/account`, {
-    method: "GET",
-    headers: {
-      accept: "application/json",
-      authorization: `Bearer ${token}`,
-    },
-    signal: AbortSignal.timeout(15_000),
-  })
-    .then(async (res) => {
-      if (!res.ok) return null;
-      try {
-        return (await res.json()) as Record<string, unknown>;
-      } catch {
-        return null;
-      }
-    })
-    .catch(() => null);
-}
 
 const USD_WINDOW_KIND = "usd_monthly";
 
@@ -48,9 +24,15 @@ export async function fetchPerchQuota(
 ): Promise<ProviderQuotaResult> {
   try {
     const token = parsePerchCredentialToken(credential) ?? "";
-    const account = await readAccount(PERCH_APP_URL, token, fetcher);
+    if (!token) {
+      return quotaUnreadable("perch", "Perch account endpoint unavailable");
+    }
+    const account = await readJsonOk(fetcher, `${PERCH_APP_URL}/api/perchai/account`, {
+      accept: "application/json",
+      authorization: `Bearer ${token}`,
+    });
     if (!account) {
-      return { source: "perch", plan: null, windows: [], error: "Perch account endpoint unavailable" };
+      return quotaUnreadable("perch", "Perch account endpoint unavailable");
     }
     const session = account["session"] as Record<string, unknown> | undefined;
     const plan = session && typeof session["planCode"] === "string" ? text(session["planCode"]) : null;
@@ -118,6 +100,6 @@ export async function fetchPerchQuota(
       ...(email ? { accountLabel: email } : {}),
     };
   } catch (error) {
-    return { source: "perch", plan: null, windows: [], error: cleanError(error) };
+    return quotaUnreadable("perch", cleanError(error));
   }
 }

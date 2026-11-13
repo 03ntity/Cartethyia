@@ -262,23 +262,28 @@ export abstract class OAuthClient implements OAuthLoginClient, OAuthTokenRefresh
   // ---------------------------------------------------------------------------
 
   protected toExchangeResult(normalized: NormalizedTokenResponse): OAuthExchangeResult {
+    const { refresh, ...rest } = this.toResult(normalized);
+    // The exchange contract requires the refresh slot even when the provider
+    // issued none — an empty string is the "no refresh token" spelling there.
+    return { ...rest, refresh };
+  }
+
+  protected toRefreshResult(normalized: NormalizedTokenResponse): OAuthTokenRefreshResult {
+    const { refresh, ...rest } = this.toResult(normalized);
+    // The refresh contract omits the slot entirely when the provider kept the
+    // existing refresh token valid, so an empty value must not round-trip.
+    return refresh ? { ...rest, refresh } : rest;
+  }
+
+  /**
+   * The fields both result shapes share, with `refresh` always present so the
+   * callers decide how "no refresh token" is spelled.
+   */
+  private toResult(normalized: NormalizedTokenResponse): OAuthTokenRefreshResult & { refresh: string } {
     const { access, refresh, expiresAt, accountLabel, accountEmail, accountName, auth_state } = normalized;
     return {
       access,
       refresh,
-      expiresAt,
-      ...(accountEmail === undefined ? {} : { accountEmail }),
-      ...(accountName === undefined ? {} : { accountName }),
-      ...(accountLabel ? { accountLabel } : {}),
-      ...(auth_state === undefined ? {} : { auth_state }),
-    };
-  }
-
-  protected toRefreshResult(normalized: NormalizedTokenResponse): OAuthTokenRefreshResult {
-    const { access, refresh, expiresAt, accountLabel, accountEmail, accountName, auth_state } = normalized;
-    return {
-      access,
-      ...(refresh ? { refresh } : {}),
       expiresAt,
       ...(accountEmail === undefined ? {} : { accountEmail }),
       ...(accountName === undefined ? {} : { accountName }),

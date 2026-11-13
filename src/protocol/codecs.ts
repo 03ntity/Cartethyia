@@ -92,15 +92,16 @@ export function hash32(input: string): number {
 const CLAUDE_TOOL_PREFIX = "_";
 
 /**
- * Per-request tool-name rename map, mirroring the two-way alias pattern the
- * OpenCode free-tier fingerprint uses: a caller tool whose name collides with
- * an upstream-reserved name (or with the built-in prefix) travels under an
- * alias, and the response side restores the caller's original name.
+ * Per-request tool-name rename map. `claudeToolName` renames a caller tool
+ * whose name collides with an upstream-reserved name (or with the built-in
+ * prefix) under an alias, and `restoreClaudeToolName` restores the caller's
+ * original name on the way back — the same two-way pattern the OpenCode
+ * free-tier fingerprint uses (conceal on the way out, restore on the way
+ * back).
  *
- * The map is a bag of `{ sent, original }` pairs so a provider can rename at
- * build time and restore at decode time without guessing from a fixed prefix
- * (a fixed prefix collides when a caller already uses it — `_bash` from a
- * caller named `bash` vs a caller already named `_bash`).
+ * The map is a bag of `{ sent, original }` pairs rather than a fixed-prefix
+ * strip because the prefix alone is ambiguous: a caller that already uses it
+ * (`_bash`) would restore to the wrong name without the recorded pair.
  */
 export interface ToolNameAlias {
   /** Name sent to the upstream wire. */
@@ -439,7 +440,17 @@ export const ANTHROPIC_BUILTIN_TOOL_NAMES = new Set([
   "mcp_toolset",
 ]);
 
-export function prefixClaudeToolName(name: string, isOAuth: boolean): string {
+/**
+ * The single name-mapping owner for the Claude wire: returns the name sent
+ * upstream for `name` under the given auth mode. OAuth traffic prefixes every
+ * non-built-in name with `_`; API-key traffic passes names through verbatim.
+ *
+ * The restore side is `restoreClaudeToolName` in `response/messages.ts`, which
+ * consults the per-request alias registry first and falls back to
+ * `unprefixClaudeToolName` — the two rules can never disagree because both
+ * live next to this function.
+ */
+export function claudeToolName(name: string, isOAuth: boolean): string {
   if (!isOAuth || ANTHROPIC_BUILTIN_TOOL_NAMES.has(name.toLowerCase())) return name;
   return `${CLAUDE_TOOL_PREFIX}${name}`;
 }
@@ -715,20 +726,46 @@ export function escapeHarmonyControlTokensDeep(value: unknown): unknown {
 }
 
 function escapeHarmonyWalk(value: unknown, walk: RewriteWalk): unknown {
-  if (typeof value === "string") return escapeHarmonyControlTokens(value);
+  if (typeof value === "string") {
+    // Cheap reject before the regex: most strings carry no control token, and
+    // `replace` on a clean string still allocates — skip it entirely so the
+    // Codex encode path returns the input graph untouched.
+    return value.includes("<|") ? escapeHarmonyControlTokens(value) : value;
+  }
   if (Array.isArray(value)) {
     if (shouldStop(walk, value)) return value;
     const inner = descend(walk, value);
-    return value.map((v) => escapeHarmonyWalk(v, inner));
+    let changed = false;
+    const next = value.map((v) => {
+      const escaped = escapeHarmonyWalk(v, inner);
+      if (escaped !== v) changed = true;
+      return escaped;
+    });
+    return changed ? next : value;
   }
   if (value !== null && typeof value === "object") {
     if (shouldStop(walk, value)) return value;
     const inner = descend(walk, value);
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = escapeHarmonyWalk(v, inner);
+    const source = value as Record<string, unknown>;
+    let out: Record<string, unknown> | undefined;
+    for (const [k, v] of Object.entries(source)) {
+      const escaped = escapeHarmonyWalk(v, inner);
+      if (escaped === v) {
+        if (out !== undefined) out[k] = escaped;
+        continue;
+      }
+      // Copy-on-change: the copy is built lazily at the first differing leaf,
+      // and entries before it are filled from the source on demand below.
+      if (out === undefined) {
+        out = {};
+        for (const [pk, pv] of Object.entries(source)) {
+          if (pk === k) break;
+          out[pk] = pv;
+        }
+      }
+      out[k] = escaped;
     }
-    return out;
+    return out ?? value;
   }
   return value;
 }

@@ -813,9 +813,8 @@ function cleanupBuddyOrphanToolPairs(messages: Array<Record<string, unknown>>): 
       if (kept.length === 0 && toolCallIds.size > 0 && (m["tool_calls"] as unknown[]).length > 0) {
         // Drop empty tool_calls key — keep message without it
         const { tool_calls: _drop, ...rest } = m as Record<string, unknown> & { tool_calls: unknown };
-        if (Object.keys(kept).length === 0) changed = true;
+        changed = true;
         out.push(rest as Record<string, unknown>);
-        if (kept.length !== (m["tool_calls"] as unknown[]).length) changed = true;
         continue;
       }
       if (kept.length !== (m["tool_calls"] as unknown[]).length) {

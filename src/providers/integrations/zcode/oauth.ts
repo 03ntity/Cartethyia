@@ -27,6 +27,7 @@ import {
   readJsonResponse,
 } from "../../authentication/oauth-flow-store";
 import { asRecord as record } from "../../../shared/coerce";
+import { zaiEnvelopeOk } from "./zai-envelope";
 import type {
   OAuthAuthorizeRequest,
   OAuthExchangeResult,
@@ -34,6 +35,7 @@ import type {
 import { OAuthClient } from "../../authentication/oauth-client";
 import type { FetchLike } from "../../authentication/oauth-client";
 import { GatewayError } from "../../../protocol/gateway-error";
+import { staticExchangeResult } from "../shared/oauth-exchange";
 
 export const ZCODE_AUTHORIZE_URL = "https://chat.z.ai/api/oauth/authorize" as const;
 export const ZCODE_TOKEN_URL = "https://zcode.z.ai/api/v1/oauth/token" as const;
@@ -62,14 +64,10 @@ function unwrapEnvelope(body: unknown, operation: string): unknown {
   const root = record(body);
   if (root === undefined) return body;
   if ("code" in root || "success" in root) {
-    const code = root.code;
-    const ok =
-      code === undefined ||
-      code === 0 ||
-      code === 200 ||
-      code === "0" ||
-      code === "200";
-    if (root.success === false || !ok) {
+    // The shared predicate owns the ok-code set (`0`/`200`, string or number)
+    // and the `success: false` veto; this wrapper adds the `data` unwrap and
+    // the provider-labelled failure.
+    if (!zaiEnvelopeOk(root)) {
       const message = nonEmptyTrimmedString(root.msg) ?? `${operation} failed`;
       // `cartethyia` origin so the dialog shows the provider's own reason
       // instead of the generic "check the console log" fallback.
@@ -246,16 +244,14 @@ export class ZcodeOAuthClient extends OAuthClient {
     // The durable key replaces the OAuth token as the stored credential; the
     // account label is read from the exchange response before that replacement.
     const durableKey = await mintZaiApiKey(oauthAccess, this.fetchFn);
-    return {
+    // Durable key, no refresh grant: the shared builder mirrors `access` into
+    // the NOT NULL refresh slot (Z.AI publishes `refresh "none"` upstream — the
+    // value is never posted to a token endpoint) and applies the documented
+    // storage horizon.
+    return staticExchangeResult({
       access: durableKey,
-      // The durable key does not expire and Z.AI publishes no refresh grant for
-      // it (`refresh "none"` upstream). Mirrored into `refresh` only because
-      // `refresh_ciphertext` is NOT NULL; no refresher is registered, so it is
-      // never posted to a token endpoint.
-      refresh: durableKey,
-      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-      ...(email === undefined ? {} : { accountLabel: email }),
-    };
+      accountLabel: email,
+    });
   }
 }
 

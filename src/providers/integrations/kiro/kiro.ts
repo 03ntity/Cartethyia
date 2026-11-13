@@ -411,7 +411,7 @@ class KiroAdapter implements ProviderAdapter {
       }, "upstream");
     }
 
-    yield* this.#stream(response.body, built.value, request, conversationId);
+    yield* this.#stream(response.body, built.value, request, conversationId, modelId);
   }
 
   /**
@@ -469,6 +469,7 @@ class KiroAdapter implements ProviderAdapter {
     built: KiroWireRequest,
     request: CanonicalRequest,
     conversationId: string,
+    modelId: string,
   ): AsyncIterable<CanonicalEvent> {
     const decoder = new KiroStreamDecoder();
     const reader = stream.getReader();
@@ -602,7 +603,9 @@ class KiroAdapter implements ProviderAdapter {
       reader.releaseLock();
     }
 
-    const finalUsage = kiroUsage(usage, request.model, outputText, request.messages, conversationId);
+    // The routed model id — not the request's alias — selects the context
+    // window the upstream percentage is scaled against.
+    const finalUsage = kiroUsage(usage, modelId, outputText, request.messages, conversationId);
     yield {
       type: "usage",
       sequence_number: sequence++,

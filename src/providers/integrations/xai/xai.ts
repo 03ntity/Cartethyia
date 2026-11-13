@@ -18,7 +18,6 @@ import type { CanonicalRequest } from "../../../protocol/canonical-model";
 import type { ProviderAdapter, ProviderDispatchContext } from "../../provider-contracts";
 import { providerBaseUrl } from "../../provider-metadata";
 import { getGrokVersion } from "../../operations/client-versions";
-import { defineModel } from "../../provider-model-definition";
 import type { ModelDefinition } from "../../provider-model-definition";
 
 export const XAI_PROVIDER_ID = "xai" as const;
@@ -56,22 +55,29 @@ function normalizeXaiPayload(payload: Record<string, unknown>): void {
   if (mapped !== undefined) (reasoning as Record<string, unknown>).effort = mapped;
 }
 
-const xaiModel = (
-  modelId: string,
+import { catalogRows } from "../shared/catalog-rows";
+
+type XaiCatalogRow = readonly [
+  id: string,
   contextLimit: number,
   outputLimit: number,
-  options: { readonly vision?: boolean; readonly reasoning?: boolean } = {},
-): ModelDefinition =>
-  defineModel({
-    id: modelId,
-    providerId: XAI_PROVIDER_ID,
+  options?: { readonly vision?: boolean; readonly reasoning?: boolean },
+];
+
+const xaiModel = catalogRows<XaiCatalogRow>({
+  providerId: XAI_PROVIDER_ID,
+  caps: {
     wireFamily: "responses",
     endpoint: XAI_RESPONSES_PATH,
+    toolCall: true,
+  },
+  translate: ([, contextLimit, outputLimit, options]) => ({
     ctx: contextLimit,
     out: outputLimit,
-    vision: options.vision ?? true,
-    reasoning: options.reasoning ?? true,
-    toolCall: true,});
+    vision: options?.vision ?? true,
+    reasoning: options?.reasoning ?? true,
+  }),
+});
 
 /**
  * Static fallback catalog.
@@ -80,13 +86,13 @@ const xaiModel = (
  * use; this list is the offline floor, and its limits come from the models.dev
  * snapshot's `xai` rows where it knows the id.
  */
-export const XAI_MODELS: readonly ModelDefinition[] = [
-  xaiModel("grok-4.7", 500_000, 64_000),
-  xaiModel("grok-4.6", 500_000, 64_000),
-  xaiModel("grok-4.5", 500_000, 64_000),
-  xaiModel("grok-4.3", 1_000_000, 64_000),
-  xaiModel("grok-build", 512_000, 64_000),
-];
+export const XAI_MODELS: readonly ModelDefinition[] = ([
+  ["grok-4.7", 500_000, 64_000],
+  ["grok-4.6", 500_000, 64_000],
+  ["grok-4.5", 500_000, 64_000],
+  ["grok-4.3", 1_000_000, 64_000],
+  ["grok-build", 512_000, 64_000],
+] as const satisfies readonly XaiCatalogRow[]).map(xaiModel);
 
 const xaiConfig = withBearerAuthentication({
   provider_id: XAI_PROVIDER_ID,

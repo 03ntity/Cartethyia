@@ -380,7 +380,16 @@ export async function buddyGenerateVideo(
     if (!statusRes.ok) {
       throw await mapUpstreamHttpError(statusRes, "codebuddy");
     }
-    const payload: unknown = await statusRes.json();
+    const payload: unknown = await statusRes.json().catch(() => null);
+    if (!isRecord(payload)) {
+      throw new GatewayError(
+        "platform_unavailable",
+        502,
+        `CodeBuddy video status returned a non-JSON body (request {requestId}). The upstream came back empty-handed — retry 🌙`,
+        {},
+        "upstream",
+      );
+    }
     const url = videoUrlOf(payload);
     if (url !== undefined) return { data: [{ url }], task_id: taskId };
     const status = videoStatusOf(payload);

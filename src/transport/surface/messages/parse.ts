@@ -3,6 +3,7 @@ import { getHeader as readHeader } from "../../../protocol/canonical-model";
 import { requiredObject } from "../adapters";
 import { isRecord } from "../../../protocol/codecs";
 import { parseToolDefinition } from "../dialects";
+import { documentContentPart } from "../content-parts";
 import { canContainToolResult } from "../../../protocol/canonical-model";
 import { MessagesLedgerError } from "./errors";
 import { finiteNumber, stringValue } from "../../../protocol/codecs";
@@ -60,7 +61,7 @@ function contentArray(value: unknown, label: string): unknown[] {
   return value;
 }
 
-export function parseGeneration(model: string, explicit: string | undefined): number | undefined {
+function parseGeneration(model: string, explicit: string | undefined): number | undefined {
   const source = explicit ?? model;
   if (explicit !== undefined && /^\d+(?:[.-]\d+)?$/.test(explicit))
     return Number(explicit.replace("-", "."));
@@ -69,11 +70,11 @@ export function parseGeneration(model: string, explicit: string | undefined): nu
   return Number(`${match[1]}.${match[2] ?? "0"}`);
 }
 
-export function textPart(value: unknown): ContentPart {
+function textPart(value: unknown): ContentPart {
   return { kind: "text", text: stringValue(value) ? value : String(value) };
 }
 
-export function parseBlock(value: unknown): ContentPart {
+function parseBlock(value: unknown): ContentPart {
   if (stringValue(value)) return textPart(value);
   if (!isRecord(value)) return { kind: "extension", name: "unknown", payload: value };
   const type = value.type;
@@ -84,23 +85,22 @@ export function parseBlock(value: unknown): ContentPart {
     const sourceType = typeof source.type === "string" ? source.type : undefined;
     const fileId = typeof source.file_id === "string" ? source.file_id : undefined;
     const url = typeof source.url === "string" ? source.url : undefined;
-    return {
-      kind: "document",
+    // Keep the source discriminator so a `file_id`/`url` document is not
+    // flattened into inline base64 on the way back out.
+    const documentSourceType =
+      sourceType === "base64" || sourceType === "url" || sourceType === "file" || sourceType === "text"
+        ? sourceType
+        : undefined;
+    return documentContentPart({
       data: source.data ?? fileId ?? url ?? "",
       media_type: stringValue(source.media_type) ? source.media_type : "application/octet-stream",
-      ...(stringValue(value.title) ? { title: value.title } : {}),
-      ...(isRecord(value.citations) && value.citations.enabled === true ? { citations: true } : {}),
-      // Keep the source discriminator so a `file_id`/`url` document is not
-      // flattened into inline base64 on the way back out.
-      ...(sourceType === "base64" ||
-      sourceType === "url" ||
-      sourceType === "file" ||
-      sourceType === "text"
-        ? { source_type: sourceType }
-        : {}),
-      ...(url === undefined ? {} : { url }),
-      ...(fileId === undefined ? {} : { file_id: fileId }),
-    };
+      title: stringValue(value.title) ? value.title : undefined,
+      citations:
+        isRecord(value.citations) && value.citations.enabled === true ? true : undefined,
+      source_type: documentSourceType,
+      url,
+      file_id: fileId,
+    });
   }
   if (type === "audio")
     return {

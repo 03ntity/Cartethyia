@@ -168,12 +168,22 @@ function isDir(p: string): boolean {
   }
 }
 
+/**
+ * Cuts `text` to at most `maxBytes` UTF-8 bytes without splitting a sequence.
+ *
+ * The budget is enforced in one pass on the encoded bytes: slicing the string
+ * char-by-char and re-measuring each step was O(chars × bytes) per truncation.
+ * `subarray` + `toString("utf8")` drops any partial trailing sequence, so the
+ * result can only undershoot, never overshoot or split.
+ */
 function truncate(text: string, maxBytes: number): { text: string; truncated: boolean } {
-  const bytes = Buffer.byteLength(text, "utf8");
-  if (bytes <= maxBytes) return { text, truncated: false };
-  // Trim by characters so we never split a UTF-8 sequence.
-  let out = text;
-  while (Buffer.byteLength(out, "utf8") > maxBytes) {
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.byteLength <= maxBytes) return { text, truncated: false };
+  // toString("utf8") may substitute U+FFFD (3 bytes) for a split trailing
+  // sequence, which can itself overshoot the budget on tiny limits — walk
+  // back one code point until the result fits.
+  let out = bytes.subarray(0, maxBytes).toString("utf8");
+  while (Buffer.byteLength(out, "utf8") > maxBytes && out.length > 0) {
     out = out.slice(0, -1);
   }
   return { text: out, truncated: true };
@@ -391,6 +401,7 @@ function globFiles(args: Record<string, unknown>, root: string): Record<string, 
   if (target === null) return { error: "target directory escapes the workspace root" };
   if (!isDir(target)) return { error: `not a directory: ${target}` };
   const pattern = String(args["glob_pattern"] ?? "**/*");
+  const globMatch = compileGlob(pattern);
   const out: string[] = [];
   const walk = (dir: string, depth: number) => {
     if (depth > 12) return;
@@ -410,12 +421,10 @@ function globFiles(args: Record<string, unknown>, root: string): Record<string, 
         continue;
       }
       if (isDirEntry) {
-        const match = simpleGlobMatch(pattern, rel);
-        if (match) out.push(rel);
+        if (globMatch(rel)) out.push(rel);
         walk(full, depth + 1);
       } else {
-        const match = simpleGlobMatch(pattern, rel);
-        if (match) out.push(rel);
+        if (globMatch(rel)) out.push(rel);
       }
     }
   };
@@ -425,21 +434,24 @@ function globFiles(args: Record<string, unknown>, root: string): Record<string, 
 }
 
 /**
- * Minimal glob matcher: `*` (within a segment), `**` (any depth), `?`.
- * The value is normalized to forward slashes first, so a Windows `\` path
- * matches exactly like a POSIX `/` path — otherwise `*.ts` matches
- * `src\a.ts` on Windows but not `src/a.ts`, and the same pattern behaves
- * differently depending on which separator `relative()` happened to emit.
+ * Compiles one glob pattern into a test over normalized values.
+ *
+ * `*` (within a segment), `**` (any depth), `?`. The value is normalized to
+ * forward slashes first, so a Windows `\` path matches exactly like a POSIX
+ * `/` path — otherwise `*.ts` matches `src\a.ts` on Windows but not
+ * `src/a.ts`, and the same pattern behaves differently depending on which
+ * separator `relative()` happened to emit. Callers compile once per request;
+ * compiling per walked entry was one RegExp per file.
  */
-function simpleGlobMatch(pattern: string, value: string): boolean {
-  const normalized = value.replace(/\\/g, "/");
+function compileGlob(pattern: string): (value: string) => boolean {
   const re = pattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
     .replace(/\*\*/g, "__GLOBSTAR__")
     .replace(/\*/g, "[^/]*")
     .replace(/__GLOBSTAR__/g, ".*")
     .replace(/\?/g, ".");
-  return new RegExp(`^${re}$`).test(normalized);
+  const matcher = new RegExp(`^${re}$`);
+  return (value) => matcher.test(value.replace(/\\/g, "/"));
 }
 
 function grepFiles(args: Record<string, unknown>, root: string, pi: boolean): Record<string, unknown> {
@@ -451,6 +463,7 @@ function grepFiles(args: Record<string, unknown>, root: string, pi: boolean): Re
     return pi ? { error: { error: "path escapes the workspace root" } } : { error: { error: "path escapes the workspace root" } };
   }
   const glob = String(args["glob"] ?? "");
+  const globMatch = glob === "" ? undefined : compileGlob(glob);
   const ignoreCase = args["ignore_case"] === true || args["case_insensitive"] === true;
   const literal = args["literal"] === true;
   const limit = typeof args["limit"] === "number" ? args["limit"] : 200;
@@ -482,7 +495,7 @@ function grepFiles(args: Record<string, unknown>, root: string, pi: boolean): Re
         walk(full, depth + 1);
         continue;
       }
-      if (glob && !simpleGlobMatch(glob, rel)) continue;
+      if (globMatch !== undefined && !globMatch(rel)) continue;
       try {
         const content = readFileSync(full, "utf8");
         const lines = content.split("\n");

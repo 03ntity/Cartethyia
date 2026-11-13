@@ -57,8 +57,29 @@ function injectHermesTags(
 
 
 
-import { defineModel } from "../../provider-model-definition";
+import { catalogRows } from "../shared/catalog-rows";
 import type { ModelDefinition } from "../../provider-model-definition";
+
+type HermesCatalogRow = readonly [
+  id: string,
+  ctx: number,
+  out: number,
+  options?: { readonly vision?: boolean },
+];
+
+const hermesModel = catalogRows<HermesCatalogRow>({
+  providerId: HERMES_PROVIDER_ID,
+  caps: {
+    reasoning: true,
+    free: true,
+    freeTier: true,
+  },
+  translate: ([, ctx, out, options]) => ({
+    ctx,
+    out,
+    vision: options?.vision ?? false,
+  }),
+});
 
 /**
  * Offline fallback: the free rows as the live catalog last reported them.
@@ -72,7 +93,7 @@ import type { ModelDefinition } from "../../provider-model-definition";
  * from the catalog entirely) and `upstage/solar-pro4:free` (only the billed
  * `upstage/solar-pro4` and the free `upstage/solar-mini4:free` exist).
  */
-export const HERMES_MODELS: readonly ModelDefinition[] = [
+export const HERMES_MODELS: readonly ModelDefinition[] = ([
   // The live `/models` free rows, with the limits the catalog states. Verified
   // against the API: every id here answers 200.
   //
@@ -93,12 +114,12 @@ export const HERMES_MODELS: readonly ModelDefinition[] = [
   // 256k `max_completion_tokens` makes every request exceed the endpoint and
   // fail with "you requested about 259137 tokens". Clamped to 128k output the
   // row fits the endpoint.
-  defineModel({ id: "stepfun/step-3.7-flash:free", ctx: 256_000, out: 128_000, reasoning: true, free: true, freeTier: true }),
-  defineModel({ id: "upstage/solar-mini4:free", ctx: 524288, out: 131072, reasoning: true, free: true, freeTier: true }),
+  ["stepfun/step-3.7-flash:free", 256_000, 128_000],
+  ["upstage/solar-mini4:free", 524_288, 131_072],
   // Vision-corrected against the live catalog: `architecture.input_modalities`
   // lists `image` for this row, so it was published without vision it has.
-  defineModel({ id: "meituan/longcat-2.5:free", ctx: 1048576, out: 131072, vision: true, reasoning: true, free: true, freeTier: true }),
-];
+  ["meituan/longcat-2.5:free", 1_048_576, 131_072, { vision: true }],
+] as const satisfies readonly HermesCatalogRow[]).map(hermesModel);
 
 
 /**

@@ -112,11 +112,50 @@ function sleepBeforeOpenRetry(ms: number, signal: AbortSignal): Promise<void> {
       "abort",
       () => {
         clearTimeout(timer);
-        reject(new GatewayError("transport_closed", 499, "The request was cancelled (request {requestId}). Send it again whenever ready 🙃"));
+        reject(cursorRequestCancelledError());
       },
       { once: true },
     );
   });
+}
+
+/**
+ * The refusal every leg raises when the client's abort signal fires. One
+ * message for all paths so a cancelled request cannot answer differently
+ * depending on where it was parked.
+ */
+function cursorRequestCancelledError(): GatewayError {
+  return new GatewayError(
+    "transport_closed",
+    499,
+    "The request was cancelled (request {requestId}). Send it again whenever ready 🙃",
+  );
+}
+
+/**
+ * The upstream-refusal shape every Cursor Run surface shares: an unexpected
+ * failure becomes `platform_unavailable` with the same headline, suffix, and
+ * provider detail, so the surfaces cannot drift apart on copy.
+ */
+function cursorRunUpstreamFailure(error: unknown): GatewayError {
+  return error instanceof GatewayError
+    ? error
+    : new GatewayError(
+        "platform_unavailable",
+        502,
+        `Cursor Run failed (request {requestId}): ${error instanceof Error ? error.message : String(error)}. The upstream came back empty-handed — retry 🌙`,
+        { providerId: CURSOR_PROVIDER_ID },
+        "upstream",
+      );
+}
+
+/** The refusal every continuation leg raises when the held Run is gone. */
+function cursorRunGoneError(): GatewayError {
+  return new GatewayError(
+    "invalid_request",
+    400,
+    "Cursor Run is no longer live (request {requestId}). The session went cold — reconnect or resend 🔌",
+  );
 }
 
 /**
@@ -463,8 +502,11 @@ function isHeartbeatFrame(item: unknown): boolean {
  * them. Without this, a request that ends between the tool call and its
  * answer disposed the body reader and the heartbeat timer, leaving the Cursor
  * edge fed by nothing and the turn waiting on a result nobody could deliver.
+ *
+ * Exported for unit tests of the queue bound; production code reaches it only
+ * through `#startReader`.
  */
-class RunFrameStream {
+export class RunFrameStream {
   private items: RunFrameItem[] = [];
   private waiters: Array<{
     resolve: (result: IteratorResult<RunFrameItem>) => void;
@@ -478,11 +520,28 @@ class RunFrameStream {
 
   push(message: RunFrame): void {
     if (this.closed) return;
-    if (this.subscribers === 0 && this.items.length > 0) {
+    if (this.subscribers === 0 && this.items.length >= RunFrameStream.MAX_IDLE_ITEMS) {
       // An idle Run only accumulates keepalives; drop them first so a bounded
       // queue survives a long tool-result gap without losing real frames.
       while (this.items.length >= RunFrameStream.MAX_IDLE_ITEMS && isHeartbeatFrame(this.items[0])) {
         this.items.shift();
+      }
+      if (this.items.length >= RunFrameStream.MAX_IDLE_ITEMS) {
+        // The gap carried more semantic frames than the queue can hold.
+        // Dropping real frames silently would corrupt the turn, so the stream
+        // ends in an error instead and the pump surfaces it: the bound above
+        // is real in both directions.
+        this.end(
+          { kind: "remote-error", error: new Error("Cursor Run frame queue overflowed") },
+          new GatewayError(
+            "platform_unavailable",
+            502,
+            "Cursor Run produced more frames than the gateway can buffer between tool legs (request {requestId}). The upstream came back empty-handed — retry 🌙",
+            { providerId: CURSOR_PROVIDER_ID },
+            "upstream",
+          ),
+        );
+        return;
       }
     }
     this.items.push(message);
@@ -620,16 +679,18 @@ class CursorAdapter implements ProviderAdapter {
     // multiple live Runs. A hard refusal there is what stalled the client loop
     // every time Cursor replays a superseded transcript; the donor instead
     // closes the parked runs and answers with a fresh turn.
-    if (!allSameRun && !foreignLive && isCompleteToolHistoryReplay(request, pending)) {
-      for (const entry of resolved) {
-        cursorRunSessions.terminate(entry.session.runId, "Cursor Run superseded by a rebase");
-        this.#cleanupRun(entry.session.runId);
-      }
-      yield* this.#startRun(request, candidate, context);
-      return;
-    }
-    const runId = resolved[0]?.session.runId;
     if (!allSameRun) {
+      // One scan of the conversation serves both the rebase check and the
+      // refusal below.
+      const calledIds = toolCallIds(request);
+      if (!foreignLive && isCompleteToolHistoryReplay(calledIds, pending)) {
+        for (const entry of resolved) {
+          cursorRunSessions.terminate(entry.session.runId, "Cursor Run superseded by a rebase");
+          this.#cleanupRun(entry.session.runId);
+        }
+        yield* this.#startRun(request, candidate, context);
+        return;
+      }
       // Not a safe rebase. Two distinct cases:
       // 1. A partial tail — a result whose `toolCall` is absent from the sent
       //    conversation. That is not a complete replay, so there is nothing
@@ -639,7 +700,7 @@ class CursorAdapter implements ProviderAdapter {
       //    id live under another scope (foreignLive, hard refusal) or results
       //    spanning more than one live Run with a transcript that is not a
       //    complete replay. Both stay refused rather than partially applied.
-      const missing = missingToolCallIds(request, pending);
+      const missing = missingToolCallIds(calledIds, pending);
       if (missing.length > 0) {
         throw new GatewayError(
           "invalid_request",
@@ -655,14 +716,17 @@ class CursorAdapter implements ProviderAdapter {
         { callIds: pending.map((item) => item.callId) },
       );
     }
-    if (runId === undefined) {
+    const runId = resolved[0]?.session.runId;
+    if (runId === undefined || cursorRunSessions.get(runId) === undefined) {
       // Unreachable: every path that leaves `allSameRun` false throws above or
       // rebases. This keeps the non-null narrowing legible for the rest.
-      throw new GatewayError("invalid_request", 400, "Cursor Run is no longer live (request {requestId}). The session went cold — reconnect or resend 🔌");
+      throw cursorRunGoneError();
     }
     const session = cursorRunSessions.get(runId);
     if (session === undefined) {
-      throw new GatewayError("invalid_request", 400, "Cursor Run is no longer live (request {requestId}). The session went cold — reconnect or resend 🔌");
+      // Same "gone" state as above; the narrowing keeps the rest of the leg
+      // non-null without a cast.
+      throw cursorRunGoneError();
     }
     const handle = this.#handles.get(runId);
     if (handle === undefined) {
@@ -786,7 +850,7 @@ class CursorAdapter implements ProviderAdapter {
     let openError: unknown;
     for (let openAttempt = 0; openAttempt <= CURSOR_MAX_OPEN_RETRIES; openAttempt += 1) {
       if (context.abort_signal.aborted) {
-        throw new GatewayError("transport_closed", 499, "The request was cancelled (request {requestId}). Send it again whenever ready 🙃");
+        throw cursorRequestCancelledError();
       }
       try {
         opened = await openCursorRunWithFallback({
@@ -887,15 +951,7 @@ class CursorAdapter implements ProviderAdapter {
       });
     } catch (error) {
       const state = this.#frameState.get(runId);
-      const failure = error instanceof GatewayError
-        ? error
-        : new GatewayError(
-            "platform_unavailable",
-            502,
-            `Cursor Run failed (request {requestId}): ${error instanceof Error ? error.message : String(error)}. The upstream came back empty-handed — retry 🌙`,
-            { providerId: CURSOR_PROVIDER_ID },
-            "upstream",
-          );
+      const failure = cursorRunUpstreamFailure(error);
       const classification = classifyCursorFailure(
         failure,
         state?.transport ?? transport.mode,
@@ -1054,17 +1110,7 @@ class CursorAdapter implements ProviderAdapter {
         // server close so every pump sees an end marker either way.
         frames.end({ kind: "remote-clean-close" }, undefined);
       } catch (error) {
-        const failure =
-          error instanceof GatewayError
-            ? error
-            : new GatewayError(
-                "platform_unavailable",
-                502,
-                `Cursor Run failed (request {requestId}): ${error instanceof Error ? error.message : String(error)}. The upstream came back empty-handed — retry 🌙`,
-                { providerId: CURSOR_PROVIDER_ID },
-                "upstream",
-              );
-        frames.end({ kind: "remote-error", error: error instanceof Error ? error : new Error(String(error)) }, failure);
+        frames.end({ kind: "remote-error", error: error instanceof Error ? error : new Error(String(error)) }, cursorRunUpstreamFailure(error));
       } finally {
         unsubscribeTerminal();
         finish();
@@ -1159,6 +1205,38 @@ class CursorAdapter implements ProviderAdapter {
     }
   }
 
+  /**
+   * Hands the queued exec calls to the client and closes the leg with the
+   * interim `tool_use` terminal.
+   *
+   * The Run stays open for the result leg; waiting for `turn_ended` here
+   * deadlocked the original tool loop. Every pump exit that carries unflushed
+   * calls (stream end, mid-loop batch, post-loop drain) routes through here.
+   */
+  async *#flushToolCalls(
+    runId: string,
+    next: () => number,
+    pendingToolCalls: Array<{ callId: string; toolName: string; arguments: string }>,
+  ): AsyncIterable<CanonicalEvent> {
+    for (const pending of pendingToolCalls.splice(0)) {
+      yield {
+        type: "tool_call_delta",
+        sequence_number: next(),
+        call_id: pending.callId,
+        name: pending.toolName,
+        arguments_delta: pending.arguments,
+      };
+    }
+    cursorRunSessions.touch(runId);
+    yield {
+      type: "terminal",
+      sequence_number: next(),
+      state: "complete",
+      stop_reason: "tool_use" as const,
+      usage_deferred: true,
+    };
+  }
+
   async *#pump(input: {
     readonly request: CanonicalRequest;
     readonly candidate: ProviderDispatchTarget;
@@ -1194,24 +1272,7 @@ class CursorAdapter implements ProviderAdapter {
           // chunk is still registering a call: drain before deciding.
           await this.#drainDispatches(runId, context.abort_signal);
           if (pendingToolCalls.length > 0) {
-            for (const pending of pendingToolCalls.splice(0)) {
-              yield {
-                type: "tool_call_delta",
-                sequence_number: input.next(),
-                call_id: pending.callId,
-                name: pending.toolName,
-                arguments_delta: pending.arguments,
-              };
-            }
-            sawToolCall = true;
-            cursorRunSessions.touch(runId);
-            yield {
-              type: "terminal",
-              sequence_number: input.next(),
-              state: "complete",
-              stop_reason: "tool_use" as const,
-              usage_deferred: true,
-            };
+            yield* this.#flushToolCalls(runId, input.next, pendingToolCalls);
             return;
           }
           if (item.failure !== undefined && item.__streamEnd.kind !== "remote-clean-close") {
@@ -1223,7 +1284,7 @@ class CursorAdapter implements ProviderAdapter {
         const message = item;
         this.#trace(runId, message);
         if (context.abort_signal.aborted) {
-          failure = new GatewayError("transport_closed", 499, "The request was cancelled (request {requestId}). Send it again whenever ready 🙃");
+          failure = cursorRequestCancelledError();
           state.completion.settle("timeout");
           break;
         }
@@ -1306,26 +1367,7 @@ class CursorAdapter implements ProviderAdapter {
         // client's interim terminal must carry the whole batch (donor park).
         if (pendingToolCalls.length > 0) {
           await this.#drainDispatches(runId, context.abort_signal);
-          for (const pending of pendingToolCalls.splice(0)) {
-            yield {
-              type: "tool_call_delta",
-              sequence_number: input.next(),
-              call_id: pending.callId,
-              name: pending.toolName,
-              arguments_delta: pending.arguments,
-            };
-          }
-          // Interim terminal the moment the calls are registered: the Run stays
-          // open for the result leg; waiting for `turn_ended` here deadlocked
-          // the original tool loop.
-          cursorRunSessions.touch(runId);
-          yield {
-            type: "terminal",
-            sequence_number: input.next(),
-            state: "complete",
-            stop_reason: "tool_use" as const,
-            usage_deferred: true,
-          };
+          yield* this.#flushToolCalls(runId, input.next, pendingToolCalls);
           return;
         }
 
@@ -1413,16 +1455,7 @@ class CursorAdapter implements ProviderAdapter {
         }
       }
     } catch (error) {
-      failure =
-        error instanceof GatewayError
-          ? error
-          : new GatewayError(
-              "platform_unavailable",
-              502,
-              `Cursor Run failed (request {requestId}): ${error instanceof Error ? error.message : String(error)}. The upstream came back empty-handed — retry 🌙`,
-              { providerId: CURSOR_PROVIDER_ID },
-              "upstream",
-            );
+      failure = cursorRunUpstreamFailure(error);
       state.completion.settle("error");
     }
     // BOTH exits drain: an exec handler decoded from the last chunk can still
@@ -1431,24 +1464,7 @@ class CursorAdapter implements ProviderAdapter {
     // A dispatch that settled during the drain may have queued a call. Hand it
     // to the client before any terminal event, so a call is never lost.
     if (pendingToolCalls.length > 0) {
-      for (const pending of pendingToolCalls.splice(0)) {
-        yield {
-          type: "tool_call_delta",
-          sequence_number: input.next(),
-          call_id: pending.callId,
-          name: pending.toolName,
-          arguments_delta: pending.arguments,
-        };
-      }
-      sawToolCall = true;
-      cursorRunSessions.touch(runId);
-      yield {
-        type: "terminal",
-        sequence_number: input.next(),
-        state: "complete",
-        stop_reason: "tool_use" as const,
-        usage_deferred: true,
-      };
+      yield* this.#flushToolCalls(runId, input.next, pendingToolCalls);
       return;
     }
 
@@ -1802,6 +1818,17 @@ function readPendingToolResult(
   return results.length > 0 ? results : undefined;
 }
 
+/** Every `toolCall` call id the conversation carries, in one scan. */
+function toolCallIds(request: CanonicalRequest): Set<string> {
+  const calledIds = new Set<string>();
+  for (const message of request.messages) {
+    for (const part of message.content) {
+      if (part.kind === "toolCall") calledIds.add(part.call_id);
+    }
+  }
+  return calledIds;
+}
+
 /**
  * Marks a request as a complete conversation replay rather than a tail
  * continuation: every `call_cursor_*` tool result it carries is answered by a
@@ -1818,29 +1845,17 @@ function readPendingToolResult(
  * (mirrors `isCompleteContinuationReplay` in the preparer).
  */
 function isCompleteToolHistoryReplay(
-  request: CanonicalRequest,
+  calledIds: ReadonlySet<string>,
   pending: readonly PendingToolResult[],
 ): boolean {
-  const calledIds = new Set<string>();
-  for (const message of request.messages) {
-    for (const part of message.content) {
-      if (part.kind === "toolCall") calledIds.add(part.call_id);
-    }
-  }
   return pending.every((item) => calledIds.has(item.callId));
 }
 
 /** The `call_cursor_*` result ids with no matching `toolCall` in the conversation. */
 function missingToolCallIds(
-  request: CanonicalRequest,
+  calledIds: ReadonlySet<string>,
   pending: readonly PendingToolResult[],
 ): string[] {
-  const calledIds = new Set<string>();
-  for (const message of request.messages) {
-    for (const part of message.content) {
-      if (part.kind === "toolCall") calledIds.add(part.call_id);
-    }
-  }
   return pending.filter((item) => !calledIds.has(item.callId)).map((item) => item.callId);
 }
 

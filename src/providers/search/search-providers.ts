@@ -10,7 +10,15 @@
  */
 import type { SearchParams, SearchProviderSpec, SearchRequestInit } from "./search-provider";
 import { stringField } from "./search-provider";
+import type { WebSearchResult } from "../provider-contracts";
 import { asRecord } from "../../shared/coerce";
+
+/**
+ * One normalized search hit as the specs' `normalize` functions produce it —
+ * the shared `WebSearchResult` vocabulary from `provider-contracts`, named
+ * locally so the per-provider mappers read against the shape they fill.
+ */
+type SearchHit = WebSearchResult;
 
 function domainFilterParams(filter: readonly string[] | undefined): {
   includes: string[];
@@ -77,7 +85,7 @@ function exaResultItems(data: unknown): readonly unknown[] {
   return [];
 }
 
-function exaNormalize(data: unknown): readonly { title: string; url: string; snippet: string; published_at?: string | null; score?: number | null }[] {
+function exaNormalize(data: unknown): readonly SearchHit[] {
   const structured = exaResultItems(data).flatMap((raw) => {
     const item = asRecord(raw);
     if (!item) return [];
@@ -102,7 +110,7 @@ function exaNormalize(data: unknown): readonly { title: string; url: string; sni
 }
 
 /** The public MCP returns hits as labeled text, not JSON result objects. */
-function exaTextResults(data: unknown): readonly { title: string; url: string; snippet: string; published_at?: string | null; score?: number | null }[] {
+function exaTextResults(data: unknown): readonly SearchHit[] {
   const record = asRecord(data);
   const result = asRecord(record?.result);
   const content = Array.isArray(result?.content) ? result.content : [];
@@ -197,7 +205,7 @@ function parallelResultItems(data: unknown): readonly unknown[] {
   return [];
 }
 
-function parallelNormalize(data: unknown): readonly { title: string; url: string; snippet: string; published_at?: string | null; score?: number | null }[] {
+function parallelNormalize(data: unknown): readonly SearchHit[] {
   return parallelResultItems(data).flatMap((raw) => {
     const item = asRecord(raw);
     if (!item) return [];

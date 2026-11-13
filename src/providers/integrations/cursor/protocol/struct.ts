@@ -72,7 +72,7 @@ function writeDouble(out: number[], field: number, num: number): void {
 
 // ── Decoding (reverse): google.protobuf.Value bytes → JSON ──
 
-export type RawField = { fn: number; wt: number; varint: number; bytes?: Uint8Array; i64?: Uint8Array }
+type RawField = { fn: number; wt: number; varint: number; bytes?: Uint8Array; i64?: Uint8Array }
 
 function readVarintAt(b: Uint8Array, i: number): [number, number] {
   let r = 0, s = 0
@@ -86,7 +86,7 @@ function readVarintAt(b: Uint8Array, i: number): [number, number] {
 }
 
 /** Walk a protobuf message's top-level fields off the raw wire bytes. */
-export function readAllFields(b: Uint8Array): RawField[] {
+function readAllFields(b: Uint8Array): RawField[] {
   let i = 0
   const out: RawField[] = []
   while (i < b.length) {
@@ -141,7 +141,7 @@ function readMapEntry(b: Uint8Array): { key?: string; valBytes?: Uint8Array } {
 }
 
 /** Decode a google.protobuf.Value message (bytes) back into a JSON value. */
-export function decodeValueToJson(bytes: Uint8Array): unknown {
+function decodeValueToJson(bytes: Uint8Array): unknown {
   const fs = readAllFields(bytes)
   const f = fs[0]
   if (f === undefined) return null

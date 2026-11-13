@@ -789,14 +789,15 @@ export function createProviderCatalogOperations(config: ProviderCatalogConfig) {
         // action, so the browser session's own write scope is sufficient.
         const a = requireTenantScope(access, "dashboard:write");
         // 404 unless the account exists and belongs to this provider/tenant.
-        const accounts = await config.store.listAccounts(a.tenantId, providerId);
-        const owned = accounts.find((account) => account.id === accountId && account.tenantId === a.tenantId);
+        // Owned-only: a shared/global row must never satisfy a tenant's
+        // refresh, matching the `tenantId === a.tenantId` check this replaced.
+        const owned = await config.store.getOwnedAccount(a.tenantId, providerId, accountId);
         if (!owned)
           throw new ConsoleDomainError("account_not_found", 404, `Account ${accountId} not found`);
         // 409 for a static token (nothing to re-mint), 400 for non-OAuth —
         // before calling the refresher, so the row is never touched on a
         // rejectable request.
-        if (owned.staticToken === true)
+        if (owned.staticToken)
           throw new ConsoleDomainError("static_token", 409, "Account carries a static token that cannot be refreshed");
         if (owned.credentialKind !== "oauth")
           throw new ConsoleDomainError("not_oauth", 400, "Account is not OAuth; token refresh is not applicable");

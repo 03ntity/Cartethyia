@@ -16,8 +16,8 @@
  * All six serve the chat wire (none is a Responses-native id), and all report
  * `supported_in_api: true` on the live roster.
  */
-import { defineModel } from "../../provider-model-definition";
 import type { ModelDefinition } from "../../provider-model-definition";
+import { catalogRows } from "../shared/catalog-rows";
 
 export const OLLAMACLOUD_PROVIDER_ID = "ollamacloud" as const;
 
@@ -26,18 +26,15 @@ const CHAT_ENDPOINT = "/chat/completions";
 
 type CatalogRow = readonly [id: string, ctx: number, vision: boolean, reasoning: boolean];
 
-function ollamaCloudModel([id, ctx, vision, reasoning]: CatalogRow): ModelDefinition {
-  return defineModel({
-    id,
-    providerId: OLLAMACLOUD_PROVIDER_ID,
+const ollamaCloudModel = catalogRows<CatalogRow>({
+  providerId: OLLAMACLOUD_PROVIDER_ID,
+  caps: {
     wireFamily: "chat",
     endpoint: CHAT_ENDPOINT,
-    ctx,
-    vision,
-    reasoning,
     toolCall: true,
-  });
-}
+  },
+  translate: ([, ctx, vision, reasoning]) => ({ ctx, vision, reasoning }),
+});
 
 /** Static Ollama Cloud floor; live discovery adds to it per account. */
 export const OLLAMACLOUD_MODELS: readonly ModelDefinition[] = [

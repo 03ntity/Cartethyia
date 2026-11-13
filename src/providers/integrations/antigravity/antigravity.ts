@@ -22,24 +22,32 @@
  * Cross-brand model catalog: Antigravity serves Google Gemini SKUs,
  * Anthropic Claude SKUs, and one GPT-OSS SKU behind the same wire.
  */
-import type { CanonicalEvent, CanonicalRequest, CanonicalStopReason } from "../../../protocol/canonical-model";
+import type { CanonicalEvent, CanonicalRequest } from "../../../protocol/canonical-model";
 import { GatewayError } from "../../../protocol/gateway-error";
 import { firstUserText } from "../../../protocol/canonical-model";
 import { decodeSseEvents } from "../../../protocol/sse-decoder";
-import { geminiInlineImages, imageAspectRatio, imageCreatedSeconds, imagePrompt } from "../../../protocol/image-generation";
+import { geminiInlineImages, imageAspectRatio, imageCreatedSeconds } from "../../../protocol/image-generation";
 import { mapUpstreamHttpError } from "../../../transport/failure-policy";
-import { usageFromProvider } from "../../provider-usage";
 import { isRecord } from "../../../protocol/codecs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { buildGeminiPayload } from "../../../protocol/request/gemini";
 import {
   decodeGeminiStreamEvent,
   geminiCandidate,
-  mapGeminiUsage,
   responseParts,
 } from "../../../protocol/response/gemini";
+import { toCanonicalStopReason } from "../../../protocol/response/gemini";
+import {
+  geminiNonStreamEvents,
+  geminiStreamEvents,
+  geminiStreamTerminal,
+  groundingResults,
+  parseWebsearchRequest,
+  resolveImagePromptModel,
+} from "../shared/gemini-wire";
 import {
   ANTIGRAVITY_SANDBOX_BASE,
+  antigravityThinkingBudget,
   antigravityWireModelId,
   applySkipThoughtSignatureBypass,
   dropAntigravityUnsignedReasoning,
@@ -49,7 +57,7 @@ import {
   normalizeAntigravityToolSchemas,
 } from "./antigravity-protocol";
 import { assertCredentialKind, assertWireFamily } from "../../provider-contracts";
-import type { ImageGenerationOutcome, ProviderDispatchTarget, ProviderAdapter, ProviderDispatchContext, WebSearchOutcome, WebSearchResult } from "../../provider-contracts";
+import type { ImageGenerationOutcome, ProviderDispatchTarget, ProviderAdapter, ProviderDispatchContext, WebSearchOutcome } from "../../provider-contracts";
 import { providerBaseUrl } from "../../provider-metadata";
 import { abortGatewayError, createUpstreamDeadlineLifecycle } from "../../operations/upstream-deadline";
 import { log } from "../../../observability/logger";
@@ -140,28 +148,6 @@ export const ANTIGRAVITY_SEARCH_MODELS: readonly ModelDefinition[] = [
     toolCall: false,
   }),
 ];
-
-function normalizeAntigravityGrounding(data: unknown, maxResults: number): readonly WebSearchResult[] {
-  if (!isRecord(data)) return [];
-  const chunks = Array.isArray(data.groundingChunks) ? data.groundingChunks : [];
-  const results: WebSearchResult[] = [];
-  const seen = new Set<string>();
-  for (const chunk of chunks) {
-    if (!isRecord(chunk) || !isRecord(chunk.web)) continue;
-    const url = typeof chunk.web.uri === "string" ? chunk.web.uri : "";
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
-    results.push({
-      title: typeof chunk.web.title === "string" ? chunk.web.title : "",
-      url,
-      snippet: "",
-      published_at: null,
-      score: null,
-    });
-    if (results.length >= maxResults) break;
-  }
-  return results;
-}
 
 const STREAM_GENERATE_PATH = "/v1internal:streamGenerateContent?alt=sse" as const;
 
@@ -318,63 +304,26 @@ class AntigravityAdapter implements ProviderAdapter {
 
       if (!request.stream) {
         const json = (await response.json()) as Record<string, unknown>;
-        const { response: decoded, candidate: cand, parts } =
-          geminiCandidate(json);
-        const output = responseParts(parts);
-        let seq = 1;
-        yield {
-          type: "response_start",
-          sequence_number: seq++,
-          model: request.model,
-        } as CanonicalEvent;
-        if (output.thought) {
-          yield {
-            type: "content_delta",
-            sequence_number: seq++,
-            content: {
-              kind: "reasoning",
-              payload: null,
-              summary: output.thought,
-              ...(output.thoughtSignature ? { signature: output.thoughtSignature } : {}),
-            },
-          } as CanonicalEvent;
-        }
-        if (output.text) {
-          yield {
-            type: "content_delta",
-            sequence_number: seq++,
-            content: { kind: "text", text: output.text },
-          } as CanonicalEvent;
-        }
-        for (const call of output.calls) {
-          yield {
-            type: "tool_call_delta",
-            sequence_number: seq++,
-            call_id: call.id,
-            name: call.name,
-            arguments_delta: JSON.stringify(call.args),
-          } as CanonicalEvent;
-        }
-        const usageRec = usageFromProvider(mapGeminiUsage(decoded));
-        const finishReason =
-          typeof cand["finishReason"] === "string"
-            ? (cand["finishReason"] as string)
-            : undefined;
-        const providerStopReason = isRecord(cand["groundingMetadata"])
-          ? `grounding:${JSON.stringify(cand["groundingMetadata"])}`
+        const summary = yield* geminiNonStreamEvents(json, request.model, {
+          onEvent: (decoded) => {
+            if (typeof decoded["responseId"] === "string") {
+              sessionState.lastExecutionId = decoded["responseId"] as string;
+            }
+          },
+        });
+        const finishReason = summary.finishReason;
+        const providerStopReason = isRecord(summary.candidate["groundingMetadata"])
+          ? `grounding:${JSON.stringify(summary.candidate["groundingMetadata"])}`
           : finishReason;
-        if (typeof decoded["responseId"] === "string") {
-          sessionState.lastExecutionId = decoded["responseId"] as string;
-        }
         yield {
           type: "terminal",
-          sequence_number: seq++,
+          sequence_number: summary.nextSeq,
           // No finishReason on a full body means the upstream response was
           // truncated: never complete.
           state: finishReason === undefined ? "failed" : "complete",
-          stop_reason: toCanonicalStop(finishReason, output.calls.length),
+          stop_reason: toCanonicalStopReason(summary.candidate, summary.toolCalls),
           ...(providerStopReason ? { provider_stop_reason: providerStopReason } : {}),
-          usage: usageRec,
+          usage: summary.usage,
         } as CanonicalEvent;
         return;
       }
@@ -422,101 +371,17 @@ class AntigravityAdapter implements ProviderAdapter {
           response = recovery.response;
         }
       }
-      let seq = 1;
-      yield {
-        type: "response_start",
-        sequence_number: seq++,
-        model: request.model,
-      } as CanonicalEvent;
-      const activeCalls = new Set<string>();
-      let rawUsage: Record<string, unknown> | undefined;
-      let finishReason: string | undefined;
-      let toolCount = 0;
-      for await (const sse of decodeSseEvents(
-        response.body as ReadableStream<Uint8Array>,
-        { signal: lifecycle.signal },
-      )) {
-        const data = sse.data.trim();
-        if (data === "[DONE]") break;
-        const parsed = decodeGeminiStreamEvent(data, "antigravity stream error");
-        if (parsed === undefined) continue;
-        const { response: decoded, candidate: cand, parts } = geminiCandidate(parsed);
-        const output = responseParts(parts);
-        if (output.thought) {
-          yield {
-            type: "content_delta",
-            sequence_number: seq++,
-            content: {
-              kind: "reasoning",
-              payload: null,
-              summary: output.thought,
-              ...(output.thoughtSignature ? { signature: output.thoughtSignature } : {}),
-            },
-          } as CanonicalEvent;
-        }
-        if (output.text) {
-          yield {
-            type: "content_delta",
-            sequence_number: seq++,
-            content: { kind: "text", text: output.text },
-          } as CanonicalEvent;
-        }
-        for (const call of output.calls) {
-          if (!activeCalls.has(call.id)) {
-            activeCalls.add(call.id);
-            yield {
-              type: "tool_call_delta",
-              sequence_number: seq++,
-              call_id: call.id,
-              name: call.name,
-              arguments_delta: "",
-            } as CanonicalEvent;
+      const summary = yield* geminiStreamEvents(response.body as ReadableStream<Uint8Array>, request.model, {
+        signal: lifecycle.signal,
+        errorLabel: "antigravity stream error",
+        stopAtDoneMarker: true,
+        onEvent: (decoded) => {
+          if (typeof decoded["responseId"] === "string") {
+            sessionState.lastExecutionId = decoded["responseId"] as string;
           }
-          const argsText = JSON.stringify(call.args);
-          if (argsText !== "{}") {
-            yield {
-              type: "tool_call_delta",
-              sequence_number: seq++,
-              call_id: call.id,
-              arguments_delta: argsText,
-            } as CanonicalEvent;
-          }
-          toolCount++;
-        }
-        if (isRecord(decoded["usageMetadata"])) {
-          rawUsage = decoded["usageMetadata"] as Record<string, unknown>;
-        }
-        if (typeof decoded["responseId"] === "string") {
-          sessionState.lastExecutionId = decoded["responseId"] as string;
-        }
-        if (typeof cand["finishReason"] === "string") {
-          finishReason = cand["finishReason"] as string;
-        }
-      }
-      const usageRec = usageFromProvider(
-        rawUsage ? mapGeminiUsage({ usageMetadata: rawUsage }) : undefined,
-      );
-      if (context.abort_signal.aborted || finishReason === undefined) {
-        yield {
-          type: "terminal",
-          sequence_number: seq++,
-          // No finishReason means the stream ended without a terminal
-          // chunk: truncated, never complete.
-          state: finishReason === undefined ? "failed" : "aborted",
-          stop_reason: toCanonicalStop(finishReason, toolCount),
-          ...(finishReason ? { provider_stop_reason: finishReason } : {}),
-          usage: usageRec,
-        } as CanonicalEvent;
-      } else {
-        yield {
-          type: "terminal",
-          sequence_number: seq++,
-          state: "complete",
-          stop_reason: toCanonicalStop(finishReason, toolCount),
-          ...(finishReason ? { provider_stop_reason: finishReason } : {}),
-          usage: usageRec,
-        } as CanonicalEvent;
-      }
+        },
+      });
+      yield geminiStreamTerminal(summary, context.abort_signal.aborted);
     } catch (err: unknown) {
       const abortError = abortGatewayError(lifecycle, err, context.abort_signal);
       if (abortError) throw abortError;
@@ -531,13 +396,7 @@ class AntigravityAdapter implements ProviderAdapter {
     candidate: ProviderDispatchTarget,
     context: ProviderDispatchContext,
   ): Promise<WebSearchOutcome> {
-    const query = typeof body.query === "string" ? body.query.trim() : "";
-    if (!query) throw new GatewayError("invalid_request", 400, "search query is required (request {requestId}). Check the shape of what you sent — then resend 🪞");
-    const rawMax = body.max_results;
-    const maxResults =
-      typeof rawMax === "number" && Number.isFinite(rawMax)
-        ? Math.min(Math.max(1, Math.floor(rawMax)), 50)
-        : 10;
+    const { query, maxResults } = parseWebsearchRequest(body);
     const requested = typeof body.model === "string" ? body.model.trim() : "";
     const model = requested.length > 0 && requested !== "antigravity" ? requested : "gemini-2.5-flash";
     const request: CanonicalRequest = {
@@ -553,7 +412,7 @@ class AntigravityAdapter implements ProviderAdapter {
       const reason = event.type === "terminal" ? event.provider_stop_reason : undefined;
       if (reason?.startsWith("grounding:")) grounded = JSON.parse(reason.slice("grounding:".length));
     }
-    const results = normalizeAntigravityGrounding(grounded, maxResults);
+    const results = groundingResults(grounded, maxResults);
     if (results.length === 0)
       throw new GatewayError("platform_unavailable", 502, "Antigravity search returned no grounded results (request {requestId}). The upstream came back empty-handed — retry 🌙");
     return { results, total_results: results.length };
@@ -573,9 +432,7 @@ class AntigravityAdapter implements ProviderAdapter {
     if (!accessToken) {
       throw new GatewayError("authentication_failed", 401, "antigravity: OAuth access token is required (request {requestId}). Wrong key, right door — check the credential 🔑");
     }
-    const prompt = imagePrompt(body);
-    const model = candidate.model_id.length > 0 ? candidate.model_id : typeof body.model === "string" ? body.model : "";
-    if (model.length === 0) throw new GatewayError("invalid_request", 400, "model is required (request {requestId}). Check the shape of what you sent — then resend 🪞");
+    const { prompt, model } = resolveImagePromptModel(body, candidate);
     const outboundFetch: typeof fetch = (context.outbound_fetch as unknown as typeof fetch) ?? this.fetchFn;
     const projectId = await loadAntigravityProject(accessToken, {
       baseUrl: this.baseUrl,
@@ -675,19 +532,6 @@ class AntigravityAdapter implements ProviderAdapter {
     }
     return { created: imageCreatedSeconds(), data: images };
   }
-}
-
-function toCanonicalStop(
-  finishReason: string | undefined,
-  toolCount: number,
-): CanonicalStopReason {
-  const map: Record<string, CanonicalStopReason> = {
-    MAX_TOKENS: "length",
-    STOP: "stop",
-    SAFETY: "content_filter",
-  };
-  if (finishReason && map[finishReason]) return map[finishReason]!;
-  return toolCount > 0 ? "tool_use" : "stop";
 }
 
 /**
@@ -797,15 +641,6 @@ function signedAntigravitySessionId(seed?: string): string {
     BigInt(`0x${randomBytes(8).toString("hex")}`) % BigInt("9000000000000000000");
   const combined = (head & BigInt("0x7FFFFFFFFFFFFFFF")) | randomPart;
   return `-${combined.toString()}`;
-}
-
-/** Thinking budget per wire model, matching the client's effort tiers. */
-function antigravityThinkingBudget(modelId: string): number | undefined {
-  if (!modelId.includes("claude") && !modelId.includes("gemini-3")) return undefined;
-  if (modelId.endsWith("-low")) return 1_000;
-  if (modelId.endsWith("-medium")) return 4_000;
-  if (modelId.endsWith("-high")) return 10_000;
-  return modelId.includes("3.1-pro") ? 10_001 : 10_000;
 }
 
 // Original reference instruction (captured from the Antigravity client):

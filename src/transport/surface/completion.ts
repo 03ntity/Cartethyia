@@ -2,7 +2,7 @@ import { GatewayError } from "../../protocol/gateway-error";
 import type { CanonicalEvent, CanonicalRequest, GenerationControls } from "../../protocol/canonical-model";
 import { parseReasoningIntent } from "./dialects";
 import type { SurfaceAdapter, SurfaceInput, SurfaceOutput } from "./adapters";
-import { eventText, lastEventOfType } from "./adapters";
+import { eventText, lastEventOfType, stopDetailsError } from "./adapters";
 import { isRecord } from "../../protocol/codecs";
 import { textPart } from "./content-parts";
 import { usageToChatWire, type OpenAiUsage } from "../../providers/provider-usage";
@@ -109,23 +109,13 @@ export class CompletionStreamEncoder extends SurfaceStreamEncoder<CanonicalEvent
       // a completion with a null finish_reason. The client receives the
       // upstream's message (rate limit, quota, error) rather than a silent
       // empty completion.
-      const raw = isRecord(event.stop_details) ? event.stop_details : undefined;
-      const message =
-        typeof raw?.["message"] === "string" && raw["message"].length > 0
-          ? raw["message"]
-          : "The upstream response failed";
       return [
         {
           id: this.id,
           object: "text_completion",
           created: this.created,
           model: this.options.model ?? "",
-          error: {
-            type: "server_error",
-            code: event.stop_reason ?? "provider_error",
-            ...(typeof raw?.["status"] === "number" ? { status: raw["status"] } : {}),
-            message,
-          },
+          error: stopDetailsError(event.stop_details, event.stop_reason),
         },
       ];
     }

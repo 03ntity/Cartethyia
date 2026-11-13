@@ -57,6 +57,7 @@ export function repairMissingToolResponses(
   const repaired: CanonicalMessage[] = [];
   // Answered-by-a-later-message, resolved once instead of per assistant turn.
   const lastResultIndex = lastResultIndexByCallId(messages);
+  let changed = false;
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index] as CanonicalMessage;
     repaired.push(message);
@@ -75,6 +76,7 @@ export function repairMissingToolResponses(
     });
     if (orphanIds.length === 0) continue;
 
+    changed = true;
     for (const callId of orphanIds) {
       repaired.push({
         role: "tool",
@@ -84,7 +86,9 @@ export function repairMissingToolResponses(
       });
     }
   }
-  return repaired;
+  // Unchanged input returns the same reference so `repairRequestToolCalls`'
+  // identity check can skip cloning the request.
+  return changed ? repaired : (messages as CanonicalMessage[]);
 }
 /**
  * Drops incomplete tool rounds: an assistant message whose `tool_calls` are not
@@ -245,7 +249,9 @@ function dropOrphanToolResults(
     // A turn that carried only orphan results has nothing left to say.
     if (kept.length > 0) out.push({ ...message, content: kept });
   }
-  return changed ? out : [...messages];
+  // Same reference when nothing was dropped, so the caller's identity check
+  // in `repairRequestToolCalls` sees the unchanged history.
+  return changed ? out : (messages as CanonicalMessage[]);
 }
 
 /**
@@ -305,5 +311,5 @@ export function repackToolResultBlocks(
     }
     out.push(...results, ...between);
   }
-  return changed ? out : [...messages];
+  return changed ? out : (messages as CanonicalMessage[]);
 }

@@ -30,18 +30,20 @@ import { log } from "../observability/logger";
 import type { DailyCheckinResult } from "../providers/integrations/buddy/lifecycle";
 import { QODER_CHECKIN_PROVIDER_IDS } from "../providers/integrations/qoder/qoder-checkin";
 import { BUDDY_PROVIDER_IDS } from "../providers/provider-metadata";
+import { checkinDayKey as sharedCheckinDayKey } from "../shared/time";
 
 export type { DailyCheckinResult };
 
 /**
  * Calendar-day key in UTC, matching the provider's own day boundary.
  *
- * Mirrors `lifecycle.ts`'s `checkinDayKey` (a pure two-line util). Kept
- * local so this worker module does not statically import the heavy buddy-checkin
- * graph just for a date key (B-02).
+ * Delegates to `shared/time.ts`'s `checkinDayKey`, the single definition the
+ * buddy lifecycle and qoder check-in are expected to converge on. Kept as a
+ * re-exported wrapper so this module's existing callers (`quota-refresh-sweep`,
+ * the console marker reads, tests) keep their import site.
  */
 export function checkinDayKey(now: Date = new Date()): string {
-  return now.toISOString().slice(0, 10);
+  return sharedCheckinDayKey(now);
 }
 
 /**

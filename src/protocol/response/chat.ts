@@ -9,7 +9,7 @@ import { gatewayErrorFromStreamError } from "../stream-error-frames";
 import { mergeResponsesUsage } from "./responses";
 import { usageFromProvider, readReasoningText } from "../../providers/provider-usage";
 import { createToolEmitLedger } from "../tool-identity";
-import { ThinkingTagStripper, ThinkSplitter, stripThinkingTags } from "../think-split";
+import { ThinkingTagStripper, ThinkSplitter, stripThinkingTags, type ThinkSplit } from "../think-split";
 import { DsmlStreamParser, parseDsmlToolCalls } from "../dsml";
 import {
   OmpToolCallMarkupParser,
@@ -240,6 +240,32 @@ export function parseChatResponseToEvents(
   return events;
 }
 
+/**
+ * Emits one `ThinkSplitter` result as canonical events: a reasoning delta
+ * for the thought span (when non-empty) then a text delta for the answer.
+ * Shared by every split-emission site in this decoder so the four call
+ * sites cannot drift on field shape or ordering.
+ */
+function* emitSplit(
+  split: ThinkSplit,
+  sequence: () => number,
+): Generator<CanonicalEvent, void, undefined> {
+  if (split.reasoning.length > 0) {
+    yield {
+      type: "content_delta",
+      sequence_number: sequence(),
+      content: { kind: "reasoning", payload: null, summary: split.reasoning },
+    } as CanonicalEvent;
+  }
+  if (split.text.length > 0) {
+    yield {
+      type: "content_delta",
+      sequence_number: sequence(),
+      content: { kind: "text", text: split.text },
+    } as CanonicalEvent;
+  }
+}
+
 export async function* decodeChatSseStream(
   body: ReadableStream<Uint8Array>,
   request: CanonicalRequest,
@@ -336,20 +362,7 @@ export async function* decodeChatSseStream(
           const recovered = (qwenMarkup ?? dsmlMarkup)?.push(markup?.text ?? raw);
           const visible = recovered?.text ?? markup?.text ?? raw;
           const split = think.push(visible);
-          if (split.reasoning.length > 0) {
-            yield {
-              type: "content_delta",
-              sequence_number: seq++,
-              content: { kind: "reasoning", payload: null, summary: split.reasoning },
-            } as CanonicalEvent;
-          }
-          if (split.text.length > 0) {
-            yield {
-              type: "content_delta",
-              sequence_number: seq++,
-              content: { kind: "text", text: split.text },
-            } as CanonicalEvent;
-          }
+          yield* emitSplit(split, () => seq++);
           if (recovered !== undefined) {
             for (const call of recovered.calls) {
               yield {
@@ -493,41 +506,13 @@ export async function* decodeChatSseStream(
   if (contentMarkupTail !== undefined) {
     recoveredMarkupCalls.push(...contentMarkupTail.calls);
     if (contentMarkupTail.text.length > 0) {
-      const split = think.push(contentMarkupTail.text);
-      if (split.reasoning.length > 0) {
-        yield {
-          type: "content_delta",
-          sequence_number: seq++,
-          content: { kind: "reasoning", payload: null, summary: split.reasoning },
-        } as CanonicalEvent;
-      }
-      if (split.text.length > 0) {
-        yield {
-          type: "content_delta",
-          sequence_number: seq++,
-          content: { kind: "text", text: split.text },
-        } as CanonicalEvent;
-      }
+      yield* emitSplit(think.push(contentMarkupTail.text), () => seq++);
     }
   }
   const dsmlMarkupTail = (qwenMarkup ?? dsmlMarkup)?.flush();
   if (dsmlMarkupTail !== undefined) {
     if (dsmlMarkupTail.text.length > 0) {
-      const split = think.push(dsmlMarkupTail.text);
-      if (split.reasoning.length > 0) {
-        yield {
-          type: "content_delta",
-          sequence_number: seq++,
-          content: { kind: "reasoning", payload: null, summary: split.reasoning },
-        } as CanonicalEvent;
-      }
-      if (split.text.length > 0) {
-        yield {
-          type: "content_delta",
-          sequence_number: seq++,
-          content: { kind: "text", text: split.text },
-        } as CanonicalEvent;
-      }
+      yield* emitSplit(think.push(dsmlMarkupTail.text), () => seq++);
     }
     for (const call of dsmlMarkupTail.calls) recoveredMarkupCalls.push(call);
   }
@@ -553,20 +538,7 @@ export async function* decodeChatSseStream(
     } as CanonicalEvent;
   }
   const rest = think.flush();
-  if (rest.reasoning.length > 0) {
-    yield {
-      type: "content_delta",
-      sequence_number: seq++,
-      content: { kind: "reasoning", payload: null, summary: rest.reasoning },
-    } as CanonicalEvent;
-  }
-  if (rest.text.length > 0) {
-    yield {
-      type: "content_delta",
-      sequence_number: seq++,
-      content: { kind: "text", text: rest.text },
-    } as CanonicalEvent;
-  }
+  yield* emitSplit(rest, () => seq++);
   let recoveredMarkupToolCallsEmitted = 0;
   if (!structuredToolCallEmitted) {
     for (const call of recoveredMarkupCalls) {

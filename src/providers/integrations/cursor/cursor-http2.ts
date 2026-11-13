@@ -6,6 +6,7 @@
 // It never calls `node:http2.connect` itself — the binding owns the socket, the
 // DNS pinning, the SSRF policy, and the pool tunnel.
 import { GatewayError } from "../../../protocol/gateway-error";
+import type { GatewayErrorCode } from "../../../protocol/gateway-error";
 import type { ValidatedHttp2BidiStream, Http2BidiEndReason } from "../../../network/bidi";
 import type { ValidatedOutboundHttp2Bidi } from "../../provider-contracts";
 import { decodeFramePayload, encodeFrame, streamFrames, FLAG_END_STREAM } from "./protocol/framing";
@@ -21,8 +22,49 @@ import {
 } from "./cursor-shared";
 import { createCursorChecksumHeader, resolveCursorDeviceIds } from "./cursor-identity";
 import { fnv1a32 } from "../shared/hash";
+import { FrameBuffer } from "../shared/connect";
+import { TtlCache } from "../../../persistence/ttl-cache";
 
 import { isRecord } from "../../../protocol/codecs";
+
+/** The closing text every Cursor upstream refusal carries after its requestId. */
+const UPSTREAM_REFUSAL_SUFFIX = {
+  authentication: "Wrong key, right door — check the credential 🔑",
+  quota: "You've maxed this window — pace yourself ⏳",
+  deadline: "Some things just take longer 🐢",
+  unavailable: "The upstream came back empty-handed — retry 🌙",
+} as const;
+
+type UpstreamRefusalKind = keyof typeof UPSTREAM_REFUSAL_SUFFIX;
+
+/**
+ * The one upstream-refusal builder, shared by all three upstream surfaces
+ * (Connect JSON envelope, gRPC status, HTTP/1.1 status): a refusal kind maps
+ * to the gateway's error taxonomy code/status and the shared closing text.
+ * The headline and details stay at the call site, so the surfaces cannot
+ * drift apart on codes, statuses, or closing texts.
+ */
+function cursorUpstreamError(
+  kind: UpstreamRefusalKind,
+  headline: string,
+  details: Readonly<Record<string, unknown>>,
+): GatewayError {
+  const [code, status]: [GatewayErrorCode, number] =
+    kind === "authentication"
+      ? ["authentication_failed", 401]
+      : kind === "quota"
+        ? ["quota_exceeded", 429]
+        : kind === "deadline"
+          ? ["deadline_exceeded", 504]
+          : ["platform_unavailable", 502];
+  return new GatewayError(
+    code,
+    status,
+    `${headline} (request {requestId}). ${UPSTREAM_REFUSAL_SUFFIX[kind]}`,
+    details,
+    "upstream",
+  );
+}
 
 /**
  * The refusal Cursor sends inside an otherwise-successful 200 Run stream.
@@ -45,22 +87,10 @@ function connectErrorEnvelope(payload: Uint8Array): GatewayError | undefined {
   const error = parsed["error"];
   const code = typeof error["code"] === "string" ? error["code"] : "";
   const detail = cursorErrorDetail(error);
-  if (code === "resource_exhausted") {
-    return new GatewayError(
-      "quota_exceeded",
-      429,
-      `Cursor refused the Run: ${detail} (request {requestId}). You've maxed this window — pace yourself ⏳`,
-      { providerId: "cursor", upstreamCode: code },
-      "upstream",
-    );
-  }
-  return new GatewayError(
-    "platform_unavailable",
-    502,
-    `Cursor refused the Run: ${detail} (request {requestId}). The upstream came back empty-handed — retry 🌙`,
-    { providerId: "cursor", upstreamCode: code },
-    "upstream",
-  );
+  const details = { providerId: "cursor", upstreamCode: code };
+  return code === "resource_exhausted"
+    ? cursorUpstreamError("quota", `Cursor refused the Run: ${detail}`, details)
+    : cursorUpstreamError("unavailable", `Cursor refused the Run: ${detail}`, details);
 }
 
 /** The human-readable refusal, preferring Cursor's own `chatMessage`/`detail`. */
@@ -154,41 +184,18 @@ export async function openCursorRun(input: {
 function grpcError(status: string, message: string | undefined): GatewayError {
   const code = Number(status);
   const detail = message === undefined || message.length === 0 ? "" : `: ${message}`;
+  const details = { grpcStatus: status };
   if (code === 16 || code === 7) {
     // UNAUTHENTICATED / PERMISSION_DENIED: the credential, not the request.
-    return new GatewayError(
-      "authentication_failed",
-      401,
-      `Cursor refused the credential${detail} (request {requestId}). Wrong key, right door — check the credential 🔑`,
-      { grpcStatus: status },
-      "upstream",
-    );
+    return cursorUpstreamError("authentication", `Cursor refused the credential${detail}`, details);
   }
   if (code === 8 || code === 14) {
-    return new GatewayError(
-      "quota_exceeded",
-      429,
-      `Cursor refused the Run${detail} (request {requestId}). You've maxed this window — pace yourself ⏳`,
-      { grpcStatus: status },
-      "upstream",
-    );
+    return cursorUpstreamError("quota", `Cursor refused the Run${detail}`, details);
   }
   if (code === 4 || code === 10) {
-    return new GatewayError(
-      "deadline_exceeded",
-      504,
-      `Cursor Run ended before it finished${detail} (request {requestId}). Some things just take longer 🐢`,
-      { grpcStatus: status },
-      "upstream",
-    );
+    return cursorUpstreamError("deadline", `Cursor Run ended before it finished${detail}`, details);
   }
-  return new GatewayError(
-    "platform_unavailable",
-    502,
-    `Cursor Run failed (gRPC ${status})${detail} (request {requestId}). The upstream came back empty-handed — retry 🌙`,
-    { grpcStatus: status },
-    "upstream",
-  );
+  return cursorUpstreamError("unavailable", `Cursor Run failed (gRPC ${status})${detail}`, details);
 }
 
 /**
@@ -244,17 +251,19 @@ export function cursorRunTerminationError(input: {
 /**
  * Decodes a response byte stream into Cursor server messages.
  *
- * Buffering is bounded and the leftover is carried forward rather than
- * re-merged from scratch: a Run frame can be many megabytes, and copying the
- * whole pending buffer on every chunk is what turns a long Run into a stall.
+ * Reassembly rides on the shared `FrameBuffer`: chunks append into spare
+ * capacity and `consume` only advances an offset, so a Run frame that spans
+ * many reads no longer costs O(n²) copying — the previous implementation
+ * re-concatenated the whole pending buffer on every chunk.
  */
 export async function* decodeServerMessages(
   body: AsyncIterable<Uint8Array>,
   maxBufferedBytes = 64 * 1024 * 1024,
 ): AsyncGenerator<Record<string, unknown>, void, void> {
-  let pending: Uint8Array = new Uint8Array(0);
+  const buffered = new FrameBuffer();
   for await (const chunk of body) {
-    pending = pending.byteLength === 0 ? chunk : concat(pending, chunk);
+    buffered.append(chunk);
+    const pending = buffered.view();
     if (pending.byteLength > maxBufferedBytes) {
       throw new GatewayError(
         "platform_unavailable",
@@ -268,8 +277,9 @@ export async function* decodeServerMessages(
     if (frames.length === 0) continue;
     let consumed = 0;
     for (const frame of frames) consumed += 5 + frame.payload.byteLength;
-    const leftover = pending.subarray(consumed);
-    pending = leftover.byteLength === 0 ? new Uint8Array(0) : new Uint8Array(leftover);
+    // Frame payloads stay views of the backing store, which no append touches
+    // until the next loop iteration; consuming here just advances the offset.
+    buffered.consume(consumed);
     for (const frame of frames) {
       const payload = decodeFramePayload(frame);
       // A refusal is a Connect JSON error envelope, not protobuf: an exhausted
@@ -301,13 +311,6 @@ export async function* decodeServerMessages(
   }
 }
 
-function concat(left: Uint8Array, right: Uint8Array): Uint8Array {
-  const out = new Uint8Array(left.byteLength + right.byteLength);
-  out.set(left, 0);
-  out.set(right, left.byteLength);
-  return out;
-}
-
 // ---------------------------------------------------------------------------
 // Normalized Run transport, and the HTTP/1.1 fallback.
 //
@@ -325,6 +328,39 @@ function concat(left: Uint8Array, right: Uint8Array): Uint8Array {
 export interface CursorRunTerminal {
   readonly kind: "remote-error" | "remote-clean-close" | "local-close";
   readonly failure: GatewayError | undefined;
+}
+
+/**
+ * Listener hub for one transport's single terminal event.
+ *
+ * At most one terminal is ever delivered, listeners may unsubscribe, and a
+ * listener failure never skips the remaining listeners. Shared by both
+ * transports so their settle semantics cannot drift apart.
+ */
+function makeTerminalHub(): {
+  settle(terminal: CursorRunTerminal): void;
+  onTerminal(listener: (terminal: CursorRunTerminal) => void): () => void;
+} {
+  const listeners = new Set<(terminal: CursorRunTerminal) => void>();
+  let settled = false;
+  return {
+    settle(terminal: CursorRunTerminal): void {
+      if (settled) return;
+      settled = true;
+      for (const listener of [...listeners]) {
+        try {
+          listener(terminal);
+        } catch {
+          // A listener failure must not skip the remaining listeners.
+        }
+      }
+      listeners.clear();
+    },
+    onTerminal(listener: (terminal: CursorRunTerminal) => void): () => void {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
 }
 
 /**
@@ -348,23 +384,10 @@ export function wrapHttp2Run(
   stream: ValidatedHttp2BidiStream,
   write: (message: Uint8Array) => Promise<void>,
 ): CursorRunTransport {
-  const listeners = new Set<(terminal: CursorRunTerminal) => void>();
-  let settled = false;
-  const settle = (terminal: CursorRunTerminal): void => {
-    if (settled) return;
-    settled = true;
-    for (const listener of [...listeners]) {
-      try {
-        listener(terminal);
-      } catch {
-        // A listener failure must not skip the remaining listeners.
-      }
-    }
-    listeners.clear();
-  };
+  const hub = makeTerminalHub();
   stream.onTerminal((reason) => {
     if (reason.kind === "local-close") {
-      settle({ kind: "local-close", failure: undefined });
+      hub.settle({ kind: "local-close", failure: undefined });
       return;
     }
     if (reason.kind === "remote-clean-close") {
@@ -372,10 +395,10 @@ export function wrapHttp2Run(
       // a turn that ended without `turn_ended` is complete (text/step/tool
       // batch) or quiet. `cursorRunTerminationError` is for status/trailer
       // refusals, not for a stream the server simply closed.
-      settle({ kind: "remote-clean-close", failure: undefined });
+      hub.settle({ kind: "remote-clean-close", failure: undefined });
       return;
     }
-    settle({
+    hub.settle({
       kind: "remote-error",
       failure: cursorRunTerminationError({ stream, reason }) ?? undefined,
     });
@@ -385,10 +408,7 @@ export function wrapHttp2Run(
     body: stream.body,
     write,
     abort: () => stream.abort(),
-    onTerminal: (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
+    onTerminal: hub.onTerminal,
   };
 }
 
@@ -405,8 +425,19 @@ const H2_RETRY_AFTER_MS = 10 * 60_000;
 /** ms an HTTP/2 open may take before the transport itself is declared blocked. */
 const H2_HEAD_WAIT_MS = 15_000;
 
-/** Per-credential HTTP/1.1 window after one h2-blocked open, digest-keyed. */
-const h1UntilByCredential = new Map<string, number>();
+/**
+ * Per-credential HTTP/1.1 window after one h2-blocked open, digest-keyed.
+ *
+ * The window is the entry's TTL: a hit means HTTP/2 was declared blocked
+ * within `H2_RETRY_AFTER_MS`. Bounded (LRU) like the roster cache — without a
+ * cap, rotated credentials would grow the map forever.
+ */
+const H1_FALLBACK_MAX_CREDENTIALS = 1024;
+const h1UntilByCredential = new TtlCache<true>({
+  ttlMs: H2_RETRY_AFTER_MS,
+  maxEntries: H1_FALLBACK_MAX_CREDENTIALS,
+  lru: true,
+});
 
 function credentialDigest(credential: string): string {
   return String(fnv1a32(credential));
@@ -447,6 +478,17 @@ export function openRetryDelayMs(attempt: number): number {
 }
 
 /** Connect's code for an HTTP status that carried no Connect error of its own. */
+/** The refusal every write on an already-ended HTTP/1.1 Run raises. */
+function cursorH1TransportClosedError(): GatewayError {
+  return new GatewayError(
+    "transport_unavailable",
+    502,
+    "Cursor Run transport is closed (request {requestId}). The connection ghosted us — come back in a moment 👻",
+    {},
+    "network",
+  );
+}
+
 function connectCodeForStatus(status: number): string {
   return { 400: "invalid_argument", 401: "unauthenticated", 403: "permission_denied", 429: "resource_exhausted" }[
     status
@@ -456,30 +498,12 @@ function connectCodeForStatus(status: number): string {
 /** Maps an HTTP/1.1 Run failure onto the gateway's error taxonomy. */
 function h1OpenFailure(status: number, message: string): GatewayError {
   if (status === 401 || status === 403) {
-    return new GatewayError(
-      "authentication_failed",
-      401,
-      `Cursor refused the credential over HTTP/1.1: ${message} (request {requestId}). Wrong key, right door — check the credential 🔑`,
-      {},
-      "upstream",
-    );
+    return cursorUpstreamError("authentication", `Cursor refused the credential over HTTP/1.1: ${message}`, {});
   }
   if (status === 429) {
-    return new GatewayError(
-      "quota_exceeded",
-      429,
-      `Cursor refused the Run over HTTP/1.1: ${message} (request {requestId}). You've maxed this window — pace yourself ⏳`,
-      {},
-      "upstream",
-    );
+    return cursorUpstreamError("quota", `Cursor refused the Run over HTTP/1.1: ${message}`, {});
   }
-  return new GatewayError(
-    "platform_unavailable",
-    502,
-    `Cursor Run failed over HTTP/1.1: ${message} (request {requestId}). The upstream came back empty-handed — retry 🌙`,
-    {},
-    "upstream",
-  );
+  return cursorUpstreamError("unavailable", `Cursor Run failed over HTTP/1.1: ${message}`, {});
 }
 
 /** varint encoding for the BidiAppend body builder. */
@@ -546,9 +570,8 @@ export async function openCursorRunH1(input: {
     "x-cursor-streaming": "true",
   };
 
-  const listeners = new Set<(terminal: CursorRunTerminal) => void>();
+  const hub = makeTerminalHub();
   let ended = false;
-  let settled = false;
   let seqno = 0;
   const inflight = new Set<Promise<void>>();
 
@@ -560,18 +583,6 @@ export async function openCursorRunH1(input: {
     waiter = undefined;
     wake?.();
   };
-  const settle = (terminal: CursorRunTerminal): void => {
-    if (settled) return;
-    settled = true;
-    for (const listener of [...listeners]) {
-      try {
-        listener(terminal);
-      } catch {
-        // A listener failure must not skip the remaining listeners.
-      }
-    }
-    listeners.clear();
-  };
 
   const failStream = (code: string, message: string, status: number): void => {
     if (ended) return;
@@ -581,14 +592,14 @@ export async function openCursorRunH1(input: {
     const json = new TextEncoder().encode(JSON.stringify({ error: { code, message } }));
     pushDown(encodeFrame(FLAG_END_STREAM, json));
     pushDown(null);
-    settle({ kind: "remote-error", failure: h1OpenFailure(status, message) });
+    hub.settle({ kind: "remote-error", failure: h1OpenFailure(status, message) });
   };
 
   const endCleanly = (): void => {
     if (ended || inflight.size > 0) return;
     ended = true;
     pushDown(null);
-    settle({ kind: "remote-clean-close", failure: undefined });
+    hub.settle({ kind: "remote-clean-close", failure: undefined });
   };
 
   const append = async (message: Uint8Array): Promise<void> => {
@@ -661,13 +672,7 @@ export async function openCursorRunH1(input: {
     },
     write: async (message: Uint8Array): Promise<void> => {
       if (ended || ac.signal.aborted) {
-        throw new GatewayError(
-          "transport_unavailable",
-          502,
-          "Cursor Run transport is closed (request {requestId}). The connection ghosted us — come back in a moment 👻",
-          {},
-          "network",
-        );
+        throw cursorH1TransportClosedError();
       }
       // KV blob replies never wait: nothing else depends on them, and Cursor
       // asks for a fresh Run's whole history at once (donor kvReply rule).
@@ -681,13 +686,7 @@ export async function openCursorRunH1(input: {
         await Promise.race([...inflight]);
       }
       if (ended || ac.signal.aborted) {
-        throw new GatewayError(
-          "transport_unavailable",
-          502,
-          "Cursor Run transport is closed (request {requestId}). The connection ghosted us — come back in a moment 👻",
-          {},
-          "network",
-        );
+        throw cursorH1TransportClosedError();
       }
       await appendTracked(message);
     },
@@ -696,13 +695,10 @@ export async function openCursorRunH1(input: {
       if (!ended) {
         ended = true;
         pushDown(null);
-        settle({ kind: "local-close", failure: undefined });
+        hub.settle({ kind: "local-close", failure: undefined });
       }
     },
-    onTerminal: (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
+    onTerminal: hub.onTerminal,
   };
 
   // Down stream: RunSSE, opened with one Connect frame carrying the request
@@ -757,7 +753,7 @@ export async function openCursorRunH1(input: {
         if (!ended) {
           ended = true;
           pushDown(null);
-          settle({ kind: "local-close", failure: undefined });
+          hub.settle({ kind: "local-close", failure: undefined });
         }
         return;
       }
@@ -788,9 +784,9 @@ export async function openCursorRunWithFallback(input: {
   readonly forceH1?: boolean;
 }): Promise<{ transport: CursorRunTransport; requestId: string }> {
   const digest = credentialDigest(input.credential);
-  const h1Until = h1UntilByCredential.get(digest) ?? 0;
-  if (input.forceH1 === true) h1UntilByCredential.set(digest, Date.now() + H2_RETRY_AFTER_MS);
-  if (input.forceH1 === true || Date.now() < h1Until || input.outboundHttp2 === undefined) {
+  const onH1Window = h1UntilByCredential.get(digest) !== undefined;
+  if (input.forceH1 === true) h1UntilByCredential.set(digest, true);
+  if (input.forceH1 === true || onH1Window || input.outboundHttp2 === undefined) {
     return openH1OrThrow(input, input.requestId ?? crypto.randomUUID());
   }
   let openedPromise: ReturnType<typeof openCursorRun> | undefined;
@@ -830,7 +826,7 @@ export async function openCursorRunWithFallback(input: {
     };
   } catch (error) {
     if (!isH2BlockedOpen(error)) throw error;
-    h1UntilByCredential.set(digest, Date.now() + H2_RETRY_AFTER_MS);
+    h1UntilByCredential.set(digest, true);
     // The donor keeps one request id across the fallback: RunSSE's opener and
     // every BidiAppend repeat the id the HTTP/2 Run was opened with.
     return openH1OrThrow(

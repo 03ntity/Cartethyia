@@ -11,6 +11,7 @@
 // a slot the way Copilot's `/auto` does, so there is nothing to ask at runtime.
 
 import type { ModelWarning } from "../../provider-model-definition";
+import { virtualModelTable } from "../shared/virtual-models";
 
 /**
  * Three provider-level caveats (D37), attached to every `qoder`/`qodercn` row —
@@ -88,15 +89,8 @@ export const QODER_VIRTUAL_MODELS: readonly QoderVirtualModel[] = [
   { id: "lite-qwen-3.7-plus", target: "lite", displayName: "Lite-Qwen-3.7-Plus", free: true, outputLimit: 65536, vision: true },
 ];
 
-/** Virtual id → roster key. */
-const VIRTUAL_TARGETS: ReadonlyMap<string, string> = new Map(
-  QODER_VIRTUAL_MODELS.map((entry) => [entry.id, entry.target]),
-);
-
-/** Roster key → virtual id, for labelling a discovered row. */
-const VIRTUAL_BY_TARGET: ReadonlyMap<string, string> = new Map(
-  QODER_VIRTUAL_MODELS.map((entry) => [entry.target, entry.id]),
-);
+/** Shared lookup table for the virtual roster (see `shared/virtual-models`). */
+const virtualTable = virtualModelTable(QODER_VIRTUAL_MODELS);
 
 /**
  * Resolves a caller-supplied model id to the roster key to dispatch.
@@ -106,16 +100,15 @@ const VIRTUAL_BY_TARGET: ReadonlyMap<string, string> = new Map(
  * not a gate on the old one.
  */
 export function qoderDispatchModelId(modelId: string): string {
-  const trimmed = modelId.trim();
-  return VIRTUAL_TARGETS.get(trimmed) ?? trimmed;
+  return virtualTable.dispatchModelId(modelId);
 }
 
 /** True when the id is a virtual name rather than a roster key. */
 export function isQoderVirtualModel(modelId: string): boolean {
-  return VIRTUAL_TARGETS.has(modelId.trim());
+  return virtualTable.isVirtualModel(modelId);
 }
 
 /** The virtual name for a roster key, when one exists. */
 export function qoderVirtualIdFor(target: string): string | undefined {
-  return VIRTUAL_BY_TARGET.get(target.trim());
+  return virtualTable.virtualIdFor(target);
 }

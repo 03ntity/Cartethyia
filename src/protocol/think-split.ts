@@ -34,11 +34,13 @@
  */
 
 /** Tags whose enclosed span is reasoning, longest-first so `</thinking>` is never split as `<t`. */
-const OPEN_TAGS = ["<thinking>", "<think>"] as const;
-const CLOSE_TAGS = ["</thinking>", "</think>"] as const;
+const OPEN_TAGS = ["<" + "thinking" + ">", "<" + "think" + ">"] as const;
+const CLOSE_TAGS = ["<" + "/" + "thinking" + ">", "<" + "/" + "think" + ">"] as const;
 
 /** An opening tag, with optional attributes between the name and the `>`. */
 const THINK_OPEN_RE = /^<think(?:ing)?\b[^>]*>/;
+/** A closing tag with optional whitespace before `>` (`</think >`). */
+const THINK_CLOSE_RE = /^<\/(?:think|thinking)\s*>/;
 
 /**
  * Fail-open cap for an unclosed thinking span. Past it the span is treated as
@@ -46,6 +48,144 @@ const THINK_OPEN_RE = /^<think(?:ing)?\b[^>]*>/;
  * `maxBlockBytes` reference guard.
  */
 const MAX_THINK_BLOCK_BYTES = 64 * 1024;
+
+/** Every tag spelling a dangling suffix may be a prefix of. */
+const ALL_TAGS: readonly string[] = [...OPEN_TAGS, ...CLOSE_TAGS];
+
+/**
+ * The longest suffix of `text` that is a proper prefix of any entry in
+ * `frontier` — the trailing run that could still grow into a tag on the next
+ * chunk. One home for the hold-back rule shared by the think splitters and
+ * the generic markup stream parser.
+ */
+export function longestDanglingPrefix(text: string, frontier: readonly string[]): string {
+  const limit = Math.min(
+    frontier.reduce((max, tag) => Math.max(max, tag.length - 1), 0),
+    text.length,
+  );
+  for (let length = limit; length > 0; length -= 1) {
+    const suffix = text.slice(-length);
+    if (frontier.some((tag) => tag.startsWith(suffix))) return suffix;
+  }
+  return "";
+}
+
+/** The longest suffix of `text` that is a proper prefix of any think tag. */
+function danglingTagPrefix(text: string): string {
+  return longestDanglingPrefix(text, ALL_TAGS);
+}
+
+/**
+ * Code-span state the scanner carries between positions. Backtick runs open
+ * an inline span (a single backtick) or a fence (three or more); a newline
+ * closes an inline span that never closed on its own line while a fence runs
+ * to a closing line.
+ */
+interface CodeState {
+  ticks: number;
+  fenced: boolean;
+}
+
+/**
+ * A tag match plus the code state at the match, so the caller can commit it.
+ * `kind` is `"open"` or `"close"` — which frontier the tag came from.
+ */
+interface TagMatch {
+  readonly index: number;
+  readonly length: number;
+  readonly kind: "open" | "close";
+  readonly codeTicks: number;
+  readonly codeFenced: boolean;
+}
+
+/**
+ * Matches one tag spelling at `index`. `strict` selects the spelling set: the
+ * stream splitters accept only the literal `OPEN_TAGS`/`CLOSE_TAGS` entries,
+ * while the one-shot stripper also accepts the relaxed `</think >` whitespace
+ * form and attribute-carrying openers — the historical regex-backed strip.
+ * Only `<` positions reach here, and a think tag's second byte is always `t`
+ * or `/`, so the match is a prefix test plus two anchored regexes — no slice
+ * per candidate.
+ */
+function matchThinkTag(
+  value: string,
+  index: number,
+  strict: boolean,
+): { readonly kind: "open" | "close"; readonly length: number } | undefined {
+  const second = value[index + 1];
+  if (second === "/") {
+    // Closing tags: `</thinking>` / `</think>`, longest first so `</thinking>`
+    // is never split as `</think` + `ing>`.
+    for (const tag of CLOSE_TAGS) {
+      if (value.startsWith(tag, index)) return { kind: "close", length: tag.length };
+    }
+    if (!strict) {
+      const relaxed = THINK_CLOSE_RE.exec(value.slice(index));
+      if (relaxed !== null) return { kind: "close", length: relaxed[0].length };
+    }
+    return undefined;
+  }
+  if (second !== "t") return undefined;
+  if (!strict) {
+    const opened = THINK_OPEN_RE.exec(value.slice(index));
+    return opened === null ? undefined : { kind: "open", length: opened[0].length };
+  }
+  for (const tag of OPEN_TAGS) {
+    if (value.startsWith(tag, index)) return { kind: "open", length: tag.length };
+  }
+  return undefined;
+}
+
+/**
+ * The first think tag at or after `from` that is *not* inside a code span or
+ * fence, scanning left to right so code state is tracked exactly once per
+ * position. `state` carries the code position in from earlier scans and is
+ * advanced through every byte examined — including the matched tag's own
+ * bytes, which never carry code state — so it is exact for the next call.
+ * Returns `undefined` when no tag exists.
+ */
+function scanThinkTag(
+  value: string,
+  from: number,
+  state: CodeState,
+  strict: boolean,
+): TagMatch | undefined {
+  for (let i = from; i < value.length; i++) {
+    const char = value[i]!;
+    if (char === "`") {
+      let run = 1;
+      while (value[i + run] === "`") run++;
+      if (state.ticks === 0) {
+        state.ticks = run;
+        state.fenced = run >= 3;
+      } else if (run === state.ticks) {
+        state.ticks = 0;
+        state.fenced = false;
+      }
+      i += run - 1;
+      continue;
+    }
+    // A newline closes an inline span that never closed on its own line; a
+    // fence runs to a closing line instead.
+    if (char === "\n" && state.ticks > 0 && !state.fenced) state.ticks = 0;
+    if (char !== "<" || state.ticks > 0) continue;
+    const tag = matchThinkTag(value, i, strict);
+    if (tag === undefined) continue;
+    const match: TagMatch = {
+      index: i,
+      length: tag.length,
+      kind: tag.kind,
+      codeTicks: state.ticks,
+      codeFenced: state.fenced,
+    };
+    // Tag spellings hold no backtick or newline, so the code state at the
+    // match is the state the scan carried in — but the scan position must
+    // move past the tag or the next call would refind it.
+    i += tag.length - 1;
+    return match;
+  }
+  return undefined;
+}
 
 /**
  * Removes visible thinking tags, leaving any that sit inside a code span or
@@ -57,99 +197,68 @@ const MAX_THINK_BLOCK_BYTES = 64 * 1024;
  * code sample showing the tag — not markup the upstream leaked, so stripping it
  * would silently rewrite the answer. The same goes for an opening tag whose
  * closing tag never arrived or a closing tag with no opener.
+ *
+ * Single pass: the code-span state is tracked once per position and both the
+ * opening tag and its paired close are found by the same scanner, so a string
+ * full of unclosed `<think>` openers costs one walk, not one walk per opener.
  */
 export function stripThinkingTags(value: string): string {
   if (!value.includes("<")) return value;
   let out = "";
+  const state: CodeState = { ticks: 0, fenced: false };
   let i = 0;
-  let ticks = 0;
-  let fenced = false;
   while (i < value.length) {
-    const char = value[i];
-    if (char === "`") {
-      let run = 1;
-      while (value[i + run] === "`") run++;
-      if (ticks === 0) {
-        ticks = run;
-        fenced = run >= 3;
-      } else if (run === ticks) {
-        ticks = 0;
-        fenced = false;
+    const match = scanThinkTag(value, i, state, false);
+    if (match === undefined) {
+      out += value.slice(i);
+      break;
+    }
+    out += value.slice(i, match.index);
+    const tagEnd = match.index + match.length;
+    if (match.kind === "close") {
+      // A closing tag with no opener is literal output.
+      out += value.slice(match.index, tagEnd);
+      i = tagEnd;
+      continue;
+    }
+    // Look for the paired close, resuming code state where the open left it.
+    // The state object already reflects every byte through the opener; the
+    // inner text cannot contain a tag (the close is the first one found), but
+    // it can contain backticks that change code state — the shared scan
+    // tracks them exactly once.
+    let close: TagMatch | undefined;
+    let from = tagEnd;
+    for (;;) {
+      const next = scanThinkTag(value, from, state, false);
+      if (next === undefined) break;
+      if (next.kind === "close") {
+        close = next;
+        break;
       }
-      out += value.slice(i, i + run);
-      i += run;
-      continue;
+      // An opening tag inside the span is literal content, not a nested span:
+      // resume after it. `state` already sits past its bytes.
+      from = next.index + next.length;
     }
-    // A newline closes an inline span that never closed on its own line; a
-    // fence runs to a closing line instead.
-    if (char === "\n" && ticks > 0 && !fenced) ticks = 0;
-    if (char !== "<" || ticks > 0) {
-      out += char;
-      i += 1;
-      continue;
-    }
-    const opened = THINK_OPEN_RE.exec(value.slice(i))?.[0];
-    if (opened === undefined) {
-      out += char;
-      i += 1;
-      continue;
-    }
-    const innerStart = i + opened.length;
-    const closed = pairedClose(value, innerStart, ticks, fenced);
-    if (closed === undefined) {
-      // No matching close: the opening tag is literal output, keep it.
-      out += char;
-      i += 1;
+    if (close === undefined) {
+      // No matching close: the opening tag is literal output, keep it and
+      // resume scanning after it. `state` already reflects every byte the
+      // failed close scan examined, so continuing from `tagEnd` is exact.
+      out += value.slice(match.index, tagEnd);
+      i = tagEnd;
       continue;
     }
     // A complete paired span is reasoning markup: keep the inner text, drop
-    // the tag bytes.
-    out += value.slice(innerStart, closed.index);
-    i = closed.index + closed.length;
+    // the tag bytes. `state` carries the code position at the close because
+    // the shared scan tracked it through the inner text.
+    out += value.slice(tagEnd, close.index);
+    i = close.index + close.length;
   }
   return out;
 }
 
-interface PairedClose {
-  readonly index: number;
-  readonly length: number;
-}
-
-/** The first closing tag at or after `from`, outside any code span/fence. */
-function pairedClose(
-  value: string,
-  from: number,
-  ticksIn: number,
-  fencedIn: boolean,
-): PairedClose | undefined {
-  let ticks = ticksIn;
-  let fenced = fencedIn;
-  for (let i = from; i < value.length; i++) {
-    const char = value[i];
-    if (char === "`") {
-      let run = 1;
-      while (value[i + run] === "`") run++;
-      if (ticks === 0) {
-        ticks = run;
-        fenced = run >= 3;
-      } else if (run === ticks) {
-        ticks = 0;
-        fenced = false;
-      }
-      i += run - 1;
-      continue;
-    }
-    if (char === "\n" && ticks > 0 && !fenced) ticks = 0;
-    if (char !== "<" || ticks > 0) continue;
-    for (const tag of CLOSE_TAGS) {
-      if (value.startsWith(tag, i)) return { index: i, length: tag.length };
-    }
-    // `</think >` / `</thinking >`: whitespace before the closing `>` is
-    // accepted, same as the historical regex-backed strip.
-    const relaxed = /^<\/(?:think|thinking)\s*>/.exec(value.slice(i));
-    if (relaxed !== null) return { index: i, length: relaxed[0].length };
-  }
-  return undefined;
+/** Strips the NUL padding MiMo Studio injects into thought streams. */
+function stripNul(text: string): string {
+  return text.includes("\u0000") ? text.replace(/\u0000/g, "") : text;
 }
 
 /**
@@ -234,55 +343,21 @@ export class ThinkingTagStripper {
     return rest;
   }
 
+  /** The earliest tag in `tags` outside code, with the code state at it. */
   #findTag(tags: readonly string[]): TagMatch | undefined {
-    const buffer = this.#buffer;
-    let ticks = this.#codeTicks;
-    let fenced = this.#codeFenced;
-    for (let i = 0; i < buffer.length; i++) {
-      const char = buffer[i];
-      if (char === "`") {
-        let run = 1;
-        while (buffer[i + run] === "`") run++;
-        if (ticks === 0) {
-          ticks = run;
-          fenced = run >= 3;
-        } else if (run === ticks) {
-          ticks = 0;
-          fenced = false;
-        }
-        i += run - 1;
-        continue;
+    const state: CodeState = { ticks: this.#codeTicks, fenced: this.#codeFenced };
+    let from = 0;
+    for (;;) {
+      const match = scanThinkTag(this.#buffer, from, state, true);
+      if (match === undefined) return undefined;
+      // A tag of the other frontier is literal content here: resume after it.
+      // `state` already sits just past its bytes.
+      if (tags.includes(this.#buffer.slice(match.index, match.index + match.length))) {
+        return match;
       }
-      if (char === "\n" && ticks > 0 && !fenced) ticks = 0;
-      if (char !== "<" || ticks > 0) continue;
-      for (const tag of tags) {
-        if (!buffer.startsWith(tag, i)) continue;
-        return { index: i, length: tag.length, codeTicks: ticks, codeFenced: fenced };
-      }
+      from = match.index + match.length;
     }
-    return undefined;
   }
-}
-
-/** Every tag spelling a dangling suffix may be a prefix of. */
-const ALL_TAGS: readonly string[] = [...OPEN_TAGS, ...CLOSE_TAGS];
-
-/** Longest suffix worth holding back: one shorter than the longest tag. */
-const MAX_DANGLING_PREFIX = Math.max(...ALL_TAGS.map((tag) => tag.length)) - 1;
-
-/** The longest suffix of `text` that is a proper prefix of any tag. */
-function danglingTagPrefix(text: string): string {
-  const limit = Math.min(MAX_DANGLING_PREFIX, text.length);
-  for (let length = limit; length > 0; length -= 1) {
-    const suffix = text.slice(-length);
-    if (ALL_TAGS.some((tag) => tag.startsWith(suffix))) return suffix;
-  }
-  return "";
-}
-
-/** Strips the NUL padding MiMo Studio injects into thought streams. */
-function stripNul(text: string): string {
-  return text.includes("\u0000") ? text.replace(/\u0000/g, "") : text;
 }
 
 export interface ThinkSplit {
@@ -296,14 +371,6 @@ export interface ThinkSplit {
    * that render must not emit it; a loop guard may still watch it.
    */
   readonly pendingReasoning: string;
-}
-
-/** A tag match plus the code state at the match, so the caller commits it. */
-interface TagMatch {
-  readonly index: number;
-  readonly length: number;
-  readonly codeTicks: number;
-  readonly codeFenced: boolean;
 }
 
 /**
@@ -427,37 +494,21 @@ export class ThinkSplitter {
    * The earliest occurrence of any of `tags` that is *not* inside a code span
    * or fence, scanning left to right so code state is tracked exactly once per
    * position. Returns the match and the code state at it, so `push` can commit
-   * that state when it consumes the tag.
+   * that state when it consumes the tag. Tags of the other frontier are
+   * literal content and skipped, matching the historical per-tag scan.
    */
   #findTag(tags: readonly string[]): TagMatch | undefined {
-    const buffer = this.#buffer;
-    let ticks = this.#codeTicks;
-    let fenced = this.#codeFenced;
-    for (let i = 0; i < buffer.length; i++) {
-      const char = buffer[i];
-      if (char === "`") {
-        let run = 1;
-        while (buffer[i + run] === "`") run++;
-        if (ticks === 0) {
-          ticks = run;
-          // Three or more backticks open a fence rather than an inline span.
-          fenced = run >= 3;
-        } else if (run === ticks) {
-          ticks = 0;
-          fenced = false;
-        }
-        i += run - 1;
-        continue;
+    const state: CodeState = { ticks: this.#codeTicks, fenced: this.#codeFenced };
+    let from = 0;
+    for (;;) {
+      const match = scanThinkTag(this.#buffer, from, state, true);
+      if (match === undefined) return undefined;
+      if (tags.includes(this.#buffer.slice(match.index, match.index + match.length))) {
+        return match;
       }
-      // A newline closes an inline span that never closed on its own line; a
-      // fence runs to a closing line instead.
-      if (char === "\n" && ticks > 0 && !fenced) ticks = 0;
-      if (char !== "<" || ticks > 0) continue;
-      for (const tag of tags) {
-        if (!buffer.startsWith(tag, i)) continue;
-        return { index: i, length: tag.length, codeTicks: ticks, codeFenced: fenced };
-      }
+      // A tag of the other frontier: skip it and keep scanning. `state`
+      // already sits just past its bytes.
+      from = match.index + match.length;
     }
-    return undefined;
   }
 }

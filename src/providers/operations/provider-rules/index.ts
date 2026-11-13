@@ -2,6 +2,12 @@ export { traeRules } from "./trae";
 
 export { qoderPlanGatedRule, qoderModelQuotaRule } from "./qoder";
 
+export { buddyRules } from "./buddy";
+
+export { deploymentInfraErrorRule, modelFrequencyWindowRule } from "./generic";
+
+export { zcodeStartPlanTrialRule } from "./zcode";
+
 export { githubRules } from "./github";
 
 export { inceptionRules } from "./inception";

@@ -26,6 +26,7 @@ import type {
 import type { OAuthTokenRefreshResult } from "../../authentication/oauth-refresh-service";
 import { OAuthDeviceFlow } from "../../authentication/oauth-device-flow";
 import type { FetchLike } from "../../authentication/oauth-client";
+import { staticExchangeResult } from "../shared/oauth-exchange";
 import { encodeMuseCodeCredential } from "./muse";
 
 export const MUSE_CODE_CLIENT_ID = "1031625952748946";
@@ -170,17 +171,16 @@ export class MuseCodeOAuthClient extends OAuthDeviceFlow {
     }
     return {
       status: "complete",
-      result: {
-        // Meta subscription tokens do not expire; use a far-future date so
-        // the refresh worker never treats the credential as stale.
+      // Meta subscription tokens do not expire; the shared builder applies the
+      // documented storage horizon so the refresh worker never treats the
+      // credential as stale. `refresh` carries the OAuth access token so
+      // `OAuthTokenRefresher.refresh` can re-mint the api_key — Meta rejects
+      // refresh_token grants.
+      result: staticExchangeResult({
         access: encodeMuseCodeCredential(accessToken, apiKey),
-        // Meta rejects refresh_token grants; retain the OAuth access as the
-        // "refresh" slot so `OAuthTokenRefresher.refresh` can re-mint the
-        // api_key if the row is ever refreshed.
         refresh: accessToken,
-        expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-        ...(accountId ? { accountLabel: accountId } : {}),
-      },
+        accountLabel: accountId,
+      }),
     };
   }
 
@@ -190,11 +190,10 @@ export class MuseCodeOAuthClient extends OAuthDeviceFlow {
   ): Promise<OAuthTokenRefreshResult> {
     const keyPayload = await requestMuseCodeKey(refreshToken, this.fetchFn, signal);
     const { apiKey } = extractApiKey(keyPayload);
-    return {
+    return staticExchangeResult({
       access: encodeMuseCodeCredential(refreshToken, apiKey),
       refresh: refreshToken,
-      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-    };
+    });
   }
 }
 

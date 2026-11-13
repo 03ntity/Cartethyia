@@ -19,12 +19,12 @@ import type {
   OAuthLoginClient,
   OAuthLoginField,
 } from "../../authentication/oauth-flow-store";
-import { readJsonResponse } from "../../authentication/oauth-flow-store";
 import type { FetchLike } from "../../authentication/oauth-client";
 import {
   encodeAlibabaCodingPlanCredential,
   type AlibabaCodingPlanEnvelope,
 } from "../../../security/credential-codec";
+import { staticExchangeResult, validateBearerByModelList } from "../shared/oauth-exchange";
 
 /**
  * The two plan regions and the host each is served from.
@@ -78,16 +78,13 @@ async function validateToken(
   // `/models` on the chosen region's host proves both the token and that the
   // region matches the key, and costs no tokens. Validating against the other
   // region would report a working key as broken.
-  const response = await fetchFn(`${baseUrl}/models`, {
-    headers: { accept: "application/json", authorization: `Bearer ${envelope.token}` },
-    signal: AbortSignal.timeout(20_000),
+  await validateBearerByModelList({
+    url: `${baseUrl}/models`,
+    bearer: envelope.token,
+    fetchFn,
+    rejectionMessage: `Alibaba rejected the token for the ${envelope.region} plan; the two plans' keys are not interchangeable`,
+    bodyLabel: "Alibaba Token Plan model list",
   });
-  if (response.status === 401 || response.status === 403) {
-    throw new Error(
-      `Alibaba rejected the token for the ${envelope.region} plan; the two plans' keys are not interchangeable`,
-    );
-  }
-  await readJsonResponse(response, "Alibaba Token Plan model list");
 }
 
 /** Alibaba Coding Plan login: a durable plan key bound to one region. */
@@ -108,19 +105,13 @@ export class AlibabacpOAuthClient implements OAuthLoginClient {
       throw new Error(`Unknown Alibaba Token Plan region "${envelope.region}"`);
     }
     await validateToken(envelope, this.fetchFn);
-    const access = encodeAlibabaCodingPlanCredential(envelope);
-    return {
-      access,
-      // No refresh grant. Mirrored because `refresh_ciphertext` is NOT NULL and
-      // the value is never presented to a token endpoint.
-      refresh: access,
-      // The plan publishes no token expiry, so a far-future value keeps the
-      // freshness check from scheduling a refresh nothing can perform.
-      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-      ...(input.accountLabel === undefined || input.accountLabel.trim() === ""
-        ? {}
-        : { accountLabel: input.accountLabel.trim() }),
-    };
+    // Durable plan key, no refresh grant: the shared builder mirrors `access`
+    // into the NOT NULL refresh slot and applies the documented storage
+    // horizon (the plan publishes no token expiry).
+    return staticExchangeResult({
+      access: encodeAlibabaCodingPlanCredential(envelope),
+      accountLabel: input.accountLabel,
+    });
   }
 }
 

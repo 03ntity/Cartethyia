@@ -7,7 +7,10 @@ import {
   createDiscoveryBackedProviderCapabilities,
   discoveryBackedCapabilities,
   createApiKeyAdapter,
+  discoveryCapability,
+  withStaticRosterFallback,
   type ApiKeyProviderSpec,
+  type ModelDiscoveryRequest,
 } from "./configured-provider";
 import { BUDDY_PROVIDER_CAPABILITIES } from "./integrations/buddy/capabilities";
 import {
@@ -200,27 +203,33 @@ export const PROVIDER_CAPABILITIES = {
     loadModels: async () => (await import("./integrations/claude/claude")).CLAUDE_MODELS,
     loadAuthentication: oauthCapability(() => import("./integrations/claude/claude-oauth"), "claudeOAuthClient", { withRefresher: true }),
     loadQuotaCollector: quotaCapability(() => import("./integrations/claude/claude-quota"), "fetchClaudeQuota"),
-    loadModelDiscovery: async () => async ({ credential, fetcher }) => {
-      const { discoverClaudeModels } = await import("./integrations/claude/claude-oauth");
-      const { modelIds } = await discoverClaudeModels(credential, ...(fetcher ? [fetcher] : []));
-      // `defineModel` resolves limits/pricing by model name: an exact catalog
-      // row first, then the bare id, then the most-agreed row for that name
-      // (date suffixes stripped). The live listing carries dated ids
-      // (`claude-sonnet-4-5-20250929`) the catalog files undated, so a name
-      // match is what fills their limits — a hardcoded `null` here is what
-      // rendered "n/a ctx · n/a out".
-      return modelIds.map((modelId) =>
-        defineModel({
-          id: modelId,
-          providerId: "claude",
-          wireFamily: "messages",
-          endpoint: "/v1/messages",
-          vision: true,
-          reasoning: true,
-          toolCall: true,
-        }),
-      );
-    },
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/claude/claude-oauth"),
+      (module) => async ({ credential, fetchFn }: { credential: string; fetchFn: typeof fetch }) => {
+        const { modelIds } = await module.discoverClaudeModels(credential, fetchFn);
+        // `defineModel` resolves limits/pricing by model name: an exact catalog
+        // row first, then the bare id, then the most-agreed row for that name
+        // (date suffixes stripped). The live listing carries dated ids
+        // (`claude-sonnet-4-5-20250929`) the catalog files undated, so a name
+        // match is what fills their limits — a hardcoded `null` here is what
+        // rendered "n/a ctx · n/a out".
+        return modelIds.map((modelId) =>
+          defineModel({
+            id: modelId,
+            providerId: "claude",
+            wireFamily: "messages",
+            endpoint: "/v1/messages",
+            vision: true,
+            reasoning: true,
+            toolCall: true,
+          }),
+        );
+      },
+      ({ credential, fetcher }: ModelDiscoveryRequest) => ({
+        credential,
+        fetchFn: fetcher ?? globalThis.fetch,
+      }),
+    ),
   },
   codex: {
     loadAdapter: async () => (await import("./integrations/codex/codex")).createCodexAdapter({ provider_id: "codex" }),
@@ -230,33 +239,30 @@ export const PROVIDER_CAPABILITIES = {
     },
     loadAuthentication: oauthCapability(() => import("./integrations/codex/codex-oauth"), "codexOAuthClient", { withRefresher: true }),
     loadQuotaCollector: quotaCapability(() => import("./integrations/codex/codex-quota"), "fetchCodexQuota"),
-    loadModelDiscovery: async () => async ({ credential, fetcher }) =>
-      (await import("./integrations/codex/codex")).discoverCodexModels({
-        credential,
-        ...(fetcher === undefined ? {} : { fetcher }),
-      }),
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/codex/codex"),
+      (module) => module.discoverCodexModels,
+    ),
   },
   grok: {
     loadAdapter: async () => (await import("./integrations/grok/grok")).grokAdapter,
     loadModels: async () => (await import("./integrations/grok/grok")).GROK_MODELS,
     loadAuthentication: oauthCapability(() => import("./integrations/grok/grok-oauth"), "grokOAuthClient", { withRefresher: true }),
     loadQuotaCollector: quotaCapability(() => import("./integrations/grok/grok-quota"), "fetchGrokQuota"),
-    loadModelDiscovery: async () => async ({ credential, fetcher }) =>
-      (await import("./integrations/grok/grok")).fetchGrokModels({
-        credential,
-        ...(fetcher === undefined ? {} : { fetcher }),
-      }),
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/grok/grok"),
+      (module) => module.fetchGrokModels,
+    ),
   },
   xai: {
     endpointPathsByWireFamily: { responses: "/responses" },
     loadAdapter: async () => (await import("./integrations/xai/xai")).xaiAdapter,
     loadModels: async () => (await import("./integrations/xai/xai")).XAI_MODELS,
     loadAuthentication: oauthCapability(() => import("./integrations/xai/xai-oauth"), "xaiOAuthClient", { withRefresher: true }),
-    loadModelDiscovery: async () => async ({ credential, fetcher }) =>
-      (await import("./integrations/xai/xai-discovery")).discoverXaiModels({
-        credential,
-        ...(fetcher === undefined ? {} : { fetcher }),
-      }),
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/xai/xai-discovery"),
+      (module) => module.discoverXaiModels,
+    ),
   },
   antigravity: {
     loadAdapter: async () => (await import("./integrations/antigravity/antigravity")).antigravityAdapter,
@@ -266,20 +272,22 @@ export const PROVIDER_CAPABILITIES = {
     },
     loadAuthentication: oauthCapability(() => import("./integrations/antigravity/antigravity-oauth"), "antigravityOAuthClient", { withRefresher: true }),
     loadQuotaCollector: quotaCapability(() => import("./integrations/antigravity/antigravity-quota"), "fetchAntigravityQuota"),
-    loadModelDiscovery: async () => async ({ baseUrl, credential, fetcher }) => {
-      const { discoverAntigravityModels, loadAntigravityProject } = await import("./integrations/antigravity/antigravity-protocol");
-      // The reference client resolves the project before catalog calls; the
-      // live backend accepts both, but sending it matches the captured wire.
-      const projectId = await loadAntigravityProject(credential, {
-        ...(baseUrl === undefined ? {} : { baseUrl }),
-        ...(fetcher ? { fetcher } : {}),
-      }).catch(() => undefined);
-      return discoverAntigravityModels(credential, {
-        baseUrl,
-        ...(fetcher ? { fetcher } : {}),
-        ...(projectId === undefined ? {} : { projectId }),
-      });
-    },
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/antigravity/antigravity-protocol"),
+      (module) => async ({ credential, baseUrl, fetcher }: ModelDiscoveryRequest) => {
+        // The reference client resolves the project before catalog calls; the
+        // live backend accepts both, but sending it matches the captured wire.
+        const projectId = await module.loadAntigravityProject(credential, {
+          ...(baseUrl === undefined ? {} : { baseUrl }),
+          ...(fetcher ? { fetcher } : {}),
+        }).catch(() => undefined);
+        return module.discoverAntigravityModels(credential, {
+          ...(baseUrl === undefined ? {} : { baseUrl }),
+          ...(fetcher ? { fetcher } : {}),
+          ...(projectId === undefined ? {} : { projectId }),
+        });
+      },
+    ),
   },
   muse: {
     loadAdapter: async () => (await import("./integrations/muse/muse")).museCodeAdapter,
@@ -304,12 +312,10 @@ export const PROVIDER_CAPABILITIES = {
     // Kiro's model list is per-account: which models a credential reaches
     // depends on the plan it is bound to, so discovery needs the credential and
     // the account's region.
-    loadModelDiscovery: async () => async ({ credential, fetcher, authState }) =>
-      (await import("./integrations/kiro/kiro-discovery")).fetchKiroModels({
-        credential,
-        ...(fetcher === undefined ? {} : { fetcher }),
-        ...(authState === undefined ? {} : { authState }),
-      }),
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/kiro/kiro-discovery"),
+      (module) => module.fetchKiroModels,
+    ),
   },
   kimi: {
     loadAdapter: async () => (await import("./integrations/kimi/kimi")).kimiCodeAdapter,
@@ -331,11 +337,10 @@ export const PROVIDER_CAPABILITIES = {
     loadQuotaCollector: quotaCapability(() => import("./integrations/cursor/cursor-quota"), "fetchCursorQuota"),
     // The roster is per-account and per-plan, and Cursor declares each model's
     // capabilities, so discovery is the catalog rather than a static list.
-    loadModelDiscovery: async () => async ({ credential, fetcher }) =>
-      (await import("./integrations/cursor/cursor-catalog")).discoverCursorModels({
-        credential,
-        ...(fetcher === undefined ? {} : { fetcher }),
-      }),
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/cursor/cursor-catalog"),
+      (module) => module.discoverCursorModels,
+    ),
   },
   devin: {
     // Devin's chat wire is a Connect-RPC protobuf stream; the path is pinned
@@ -345,11 +350,10 @@ export const PROVIDER_CAPABILITIES = {
     loadModels: async () => (await import("./integrations/devin/devin-catalog")).DEVIN_MODELS,
     loadAuthentication: oauthCapability(() => import("./integrations/devin/devin-auth"), "devinOAuthClient"),
     loadQuotaCollector: quotaCapability(() => import("./integrations/devin/devin-quota"), "fetchDevinQuota"),
-    loadModelDiscovery: async () => async ({ credential, fetcher }) =>
-      (await import("./integrations/devin/devin-catalog")).discoverDevinModels({
-        credential,
-        ...(fetcher === undefined ? {} : { fetcher }),
-      }),
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/devin/devin-catalog"),
+      (module) => module.discoverDevinModels,
+    ),
   },
   cerebras: {
     endpointPathsByWireFamily: { chat: "/chat/completions" },
@@ -393,16 +397,17 @@ export const PROVIDER_CAPABILITIES = {
     },
     loadAdapter: async () => createApiKeyAdapter((await import("./integrations/opencode/provider")).OPENCODE_FREE_SPEC),
     loadModels: async () => (await import("./integrations/opencode/provider")).OPENCODE_FREE_MODELS,
-    // Free-tier filtered, unlike the generic OpenAI discovery: this provider
-    // serves the free tier only, and the shared Zen listing publishes the whole
-    // billed catalog alongside it.
-    loadModelDiscovery: async () => async ({ baseUrl, fetcher }) => {
-      const { discoverOpenCodeFreeModels } = await import("./integrations/opencode/provider");
-      return discoverOpenCodeFreeModels({
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/opencode/provider"),
+      (module) => module.discoverOpenCodeFreeModels,
+      ({ baseUrl, fetcher }: ModelDiscoveryRequest) => ({
+        // Free-tier filtered, unlike the generic OpenAI discovery: this
+        // provider serves the free tier only, and the shared Zen listing
+        // publishes the whole billed catalog alongside it.
         baseUrl: `${baseUrl.replace(/\/+$/, "")}/zen/v1`,
         ...(fetcher === undefined ? {} : { fetcher }),
-      });
-    },
+      }),
+    ),
   },
   "opencode-zen": {
     endpointPathsByWireFamily: {
@@ -443,7 +448,10 @@ export const PROVIDER_CAPABILITIES = {
       // importing the module twice would load it twice.
       return [...gemini.GEMINI_MODELS, ...gemini.GEMINI_SEARCH_MODELS];
     },
-    loadModelDiscovery: async () => async ({ credential }) => (await import("./integrations/gemini")).discoverGeminiModels({ credential }),
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/gemini"),
+      (module) => module.discoverGeminiModels,
+    ),
   },
   aihubmix: {
     loadAdapter: async () => createApiKeyAdapter((await import("./integrations/aihubmix")).AIHUBMIX_SPEC),
@@ -462,16 +470,18 @@ export const PROVIDER_CAPABILITIES = {
     loadModels: async () => (await import("./integrations/cline/cline")).CLINE_MODELS,
     loadAuthentication: oauthCapability(() => import("./integrations/cline/cline-oauth"), "clineOAuthClient", { withRefresher: true }),
     loadQuotaCollector: quotaCapability(() => import("./integrations/cline/cline-quota"), "fetchClineQuota"),
-    loadModelDiscovery: async () => async ({ credential, fetcher }) => {
-      const { fetchClineRecommendedModels, clineAccountHasPass } = await import("./integrations/cline/cline");
-      const transport = fetcher ?? globalThis.fetch;
-      // A pass account may use every bucket the roster publishes, including
-      // `clinePass` and `clineCloud`; a free account must not have those rows
-      // persisted, because dispatching one can only 401. The plan endpoint is
-      // the same one the quota collector already reads.
-      const pass = credential.length > 0 && (await clineAccountHasPass(credential, transport));
-      return fetchClineRecommendedModels(undefined, pass, transport);
-    },
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/cline/cline"),
+      (module) => async ({ credential, fetcher }: ModelDiscoveryRequest) => {
+        const transport = fetcher ?? globalThis.fetch;
+        // A pass account may use every bucket the roster publishes, including
+        // `clinePass` and `clineCloud`; a free account must not have those rows
+        // persisted, because dispatching one can only 401. The plan endpoint is
+        // the same one the quota collector already reads.
+        const pass = credential.length > 0 && (await module.clineAccountHasPass(credential, transport));
+        return module.fetchClineRecommendedModels(undefined, pass, transport);
+      },
+    ),
   },
   kilo: {
     loadAdapter: async () => (await import("./integrations/kilo/kilo")).kiloAdapter,
@@ -484,19 +494,20 @@ export const PROVIDER_CAPABILITIES = {
     // Registering one would make the 401 retry path call a method that always
     // throws, turning a recoverable auth failure into a permanent one.
     loadAuthentication: oauthCapability(() => import("./integrations/kilo/kilo-oauth"), "kiloOAuthClient"),
-    loadModelDiscovery: async () => async ({ credential, fetcher }) =>
-      (await import("./integrations/kilo/kilo-discovery")).discoverKiloModels({
-        credential,
-        ...(fetcher === undefined ? {} : { fetcher }),
-      }),
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/kilo/kilo-discovery"),
+      (module) => module.discoverKiloModels,
+    ),
   },
   commandcode: {
     loadAdapter: async () => (await import("./integrations/commandcode/commandcode")).createCommandCodeAdapter(),
     loadModels: async () => (await import("./integrations/commandcode/commandcode")).COMMANDCODE_MODELS,
     // The Provider API publishes the real roster with each model's wire, so the
     // static seed above is the offline floor rather than the catalog.
-    loadModelDiscovery: async () => async (input) =>
-      (await import("./integrations/commandcode/discovery")).discoverCommandCodeModels(input),
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/commandcode/discovery"),
+      (module) => module.discoverCommandCodeModels,
+    ),
     loadQuotaCollector: quotaCapability(
       () => import("./integrations/commandcode/quota"),
       "fetchCommandCodeQuota",
@@ -558,17 +569,17 @@ export const PROVIDER_CAPABILITIES = {
     loadQuotaCollector: quotaCapability(() => import("./integrations/freepi/freepi-quota"), "fetchFreepiQuota"),
     // Live `/client-version` (Bearer) is the catalog source; the static roster
     // is the offline fallback.
-    loadModelDiscovery: async () => async (request: Parameters<ProviderModelDiscovery>[0]) => {
-      const { discoverFreepiModels } = await import("./integrations/freepi/freepi-discovery");
-      const { FREEPI_MODELS } = await import("./integrations/freepi/freepi-catalog");
-      const secret = request.credential.trim();
-      const fetcher = request.fetcher as unknown as typeof fetch | undefined;
-      if (secret.length === 0 || fetcher === undefined) return FREEPI_MODELS;
-      const token = extractJsonCredentialToken(secret);
-      const rows = await discoverFreepiModels({ token, fetcher });
-      if (rows.length === 0) return FREEPI_MODELS;
-      return rows;
-    },
+    loadModelDiscovery: async () => withStaticRosterFallback(
+      async ({ credential, fetcher }) => {
+        if (credential.trim().length === 0 || fetcher === undefined) return null;
+        const { discoverFreepiModels } = await import("./integrations/freepi/freepi-discovery");
+        return discoverFreepiModels({
+          token: extractJsonCredentialToken(credential),
+          fetcher,
+        });
+      },
+      async () => (await import("./integrations/freepi/freepi-catalog")).FREEPI_MODELS,
+    ),
   },
   perch: {
     loadAdapter: async () => (await import("./integrations/perch/perch")).createPerchAdapter(),
@@ -593,14 +604,14 @@ export const PROVIDER_CAPABILITIES = {
     loadQuotaCollector: quotaCapability(() => import("./integrations/clixad/clixad-quota"), "fetchClixadQuota"),
     // `/v1/models` is unauthenticated and lists all rows; the static roster
     // carries the live-verified free tier and discovery keeps the list current.
-    loadModelDiscovery: async () => async (request: Parameters<ProviderModelDiscovery>[0]) => {
-      const { discoverClixadModels, CLIXAD_DEFAULT_MODELS } = await import("./integrations/clixad/provider");
-      const fetcher = request.fetcher as unknown as typeof fetch | undefined;
-      if (fetcher === undefined) return CLIXAD_DEFAULT_MODELS;
-      const rows = await discoverClixadModels({ baseUrl: request.baseUrl, fetcher });
-      if (rows === null || rows.length === 0) return CLIXAD_DEFAULT_MODELS;
-      return rows;
-    },
+    loadModelDiscovery: async () => withStaticRosterFallback(
+      async ({ baseUrl, fetcher }) => {
+        if (fetcher === undefined) return null;
+        const { discoverClixadModels } = await import("./integrations/clixad/provider");
+        return discoverClixadModels({ baseUrl, fetcher });
+      },
+      async () => (await import("./integrations/clixad/provider")).CLIXAD_DEFAULT_MODELS,
+    ),
   },
   deepai: {
     loadAdapter: async () => createApiKeyAdapter((await import("./integrations/deepai/provider")).DEEPAI_SPEC),
@@ -612,14 +623,14 @@ export const PROVIDER_CAPABILITIES = {
     loadQuotaCollector: quotaCapability(() => import("./integrations/deepai/deepai-quota"), "fetchDeepAIQuota"),
     // `/deepai_code/models` is unauthenticated; the static roster carries the
     // live-verified free tier and discovery keeps the list current.
-    loadModelDiscovery: async () => async (request: Parameters<ProviderModelDiscovery>[0]) => {
-      const { discoverDeepAIModels, DEEPAI_DEFAULT_MODELS } = await import("./integrations/deepai/deepai-catalog");
-      const fetcher = request.fetcher as unknown as typeof fetch | undefined;
-      if (fetcher === undefined) return DEEPAI_DEFAULT_MODELS;
-      const rows = await discoverDeepAIModels({ baseUrl: request.baseUrl, fetcher });
-      if (rows === null || rows.length === 0) return DEEPAI_DEFAULT_MODELS;
-      return rows;
-    },
+    loadModelDiscovery: async () => withStaticRosterFallback(
+      async ({ baseUrl, fetcher }) => {
+        if (fetcher === undefined) return null;
+        const { discoverDeepAIModels } = await import("./integrations/deepai/deepai-catalog");
+        return discoverDeepAIModels({ baseUrl, fetcher });
+      },
+      async () => (await import("./integrations/deepai/deepai-catalog")).DEEPAI_DEFAULT_MODELS,
+    ),
   },
   inferhub: {
     loadAdapter: async () => (await import("./integrations/inferhub")).createInferhubAdapter(),
@@ -640,13 +651,10 @@ export const PROVIDER_CAPABILITIES = {
     // `/v1/models` is open and states each row's real limits, so the free
     // allowance tracks upstream instead of a hand-kept list. The static list
     // above stays as the offline fallback for a fetch that fails.
-    loadModelDiscovery: async () => async ({ baseUrl, fetcher }) => {
-      const { discoverHermesFreeModels } = await import("./integrations/hermes");
-      return discoverHermesFreeModels({
-        baseUrl,
-        ...(fetcher === undefined ? {} : { fetcher }),
-      });
-    },
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/hermes"),
+      (module) => module.discoverHermesFreeModels,
+    ),
   },
   inception: {
     // Chat only: Mercury 3 / 2.5 / 2 answer the OpenAI-compatible chat wire.
@@ -656,38 +664,49 @@ export const PROVIDER_CAPABILITIES = {
     loadModels: async () => (await import("./integrations/inception/provider")).INCEPTION_MODELS,
     // The listing is bearer-authenticated and the whole provider is pinned to
     // its free allowance, so every fetched row is stamped free-tier.
-    loadModelDiscovery: async () => async ({ baseUrl, credential, fetcher }) =>
-      (await import("./integrations/inception/provider")).discoverInceptionFreeModels({
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/inception/provider"),
+      (module) => module.discoverInceptionFreeModels,
+      ({ baseUrl, credential, fetcher }: ModelDiscoveryRequest) => ({
         baseUrl,
-        ...(typeof credential === "string" && credential.length > 0 ? { credential } : {}),
+        ...(typeof credential === "string" && credential.trim().length > 0
+          ? { credential }
+          : {}),
         ...(fetcher === undefined ? {} : { fetcher }),
       }),
+    ),
   },
   sensenova: {
     loadAdapter: async () => createApiKeyAdapter((await import("./integrations/sensenova/provider")).SENSENOVA_SPEC),
     loadModels: async () => (await import("./integrations/sensenova/provider")).SENSENOVA_MODELS,
-    loadModelDiscovery: async () => async (input) =>
-      (await import("./integrations/sensenova/provider")).discoverSensenovaModels({
-        baseUrl: input.baseUrl,
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/sensenova/provider"),
+      (module) => module.discoverSensenovaModels,
+      ({ baseUrl, credential, fetcher }: ModelDiscoveryRequest) => ({
+        baseUrl,
         providerId: "sensenova",
-        ...(typeof input.credential === "string" && input.credential.trim().length > 0
-          ? { credential: input.credential }
+        ...(typeof credential === "string" && credential.trim().length > 0
+          ? { credential }
           : {}),
-        ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+        ...(fetcher === undefined ? {} : { fetcher }),
       }),
+    ),
   },
   "sensenova-intl": {
     loadAdapter: async () => createApiKeyAdapter((await import("./integrations/sensenova/provider")).SENSENOVA_INTL_SPEC),
     loadModels: async () => (await import("./integrations/sensenova/provider")).SENSENOVA_INTL_MODELS,
-    loadModelDiscovery: async () => async (input) =>
-      (await import("./integrations/sensenova/provider")).discoverSensenovaModels({
-        baseUrl: input.baseUrl,
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/sensenova/provider"),
+      (module) => module.discoverSensenovaModels,
+      ({ baseUrl, credential, fetcher }: ModelDiscoveryRequest) => ({
+        baseUrl,
         providerId: "sensenova-intl",
-        ...(typeof input.credential === "string" && input.credential.trim().length > 0
-          ? { credential: input.credential }
+        ...(typeof credential === "string" && credential.trim().length > 0
+          ? { credential }
           : {}),
-        ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+        ...(fetcher === undefined ? {} : { fetcher }),
       }),
+    ),
   },
   openrouter: {
     loadAdapter: async () => createApiKeyAdapter((await import("./integrations/openrouter/provider")).OPENROUTER_SPEC),
@@ -719,14 +738,17 @@ export const PROVIDER_CAPABILITIES = {
   vercel: {
     loadAdapter: async () => createApiKeyAdapter((await import("./integrations/vercel/provider")).VERCEL_SPEC),
     loadModels: async () => (await import("./integrations/vercel/provider")).VERCEL_DEFAULT_MODELS,
-    loadModelDiscovery: async () => async (input) =>
-      (await import("./integrations/vercel/provider")).discoverVercelModels({
-        baseUrl: input.baseUrl,
-        ...(typeof input.credential === "string" && input.credential.trim().length > 0
-          ? { credential: input.credential }
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/vercel/provider"),
+      (module) => module.discoverVercelModels,
+      ({ baseUrl, credential, fetcher }: ModelDiscoveryRequest) => ({
+        baseUrl,
+        ...(typeof credential === "string" && credential.trim().length > 0
+          ? { credential }
           : {}),
-        ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+        ...(fetcher === undefined ? {} : { fetcher }),
       }),
+    ),
     loadQuotaCollector: quotaCapability(() => import("./integrations/vercel/vercel-quota"), "fetchVercelQuota"),
   },
   xiaomipg: {
@@ -740,11 +762,10 @@ export const PROVIDER_CAPABILITIES = {
   zcode: {
     loadAdapter: async () => createApiKeyAdapter((await import("./integrations/zcode/provider")).ZCODE_SPEC),
     loadModels: async () => (await import("./integrations/zcode/provider")).ZCODE_MODELS,
-    loadModelDiscovery: async () => async ({ credential, fetcher }) =>
-      (await import("./integrations/zcode/provider")).discoverZcodeModels({
-        credential,
-        ...(fetcher === undefined ? {} : { fetcher }),
-      }),
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/zcode/provider"),
+      (module) => module.discoverZcodeModels,
+    ),
     // No `withRefresher`: the sign-in flow ends by minting a durable API key,
     // and Z.AI publishes no refresh grant for it (`refresh "none"` upstream).
     loadAuthentication: oauthCapability(() => import("./integrations/zcode/oauth"), "zcodeOAuthClient"),
@@ -848,11 +869,10 @@ export const PROVIDER_CAPABILITIES = {
     loadAuthentication: oauthCapability(() => import("./integrations/github/github-oauth"), "githubOAuthClient", { withRefresher: true }),
     // The account's own `/models` is authoritative: it names the SKUs the
     // subscription may use and the surface each answers on.
-    loadModelDiscovery: async () => async ({ credential, fetcher }) =>
-      (await import("./integrations/github/github-discovery")).discoverGithubModels({
-        credential,
-        ...(fetcher === undefined ? {} : { fetcher }),
-      }),
+    loadModelDiscovery: discoveryCapability(
+      () => import("./integrations/github/github-discovery"),
+      (module) => module.discoverGithubModels,
+    ),
     loadQuotaCollector: quotaCapability(() => import("./integrations/github/github-quota"), "fetchGithubQuota"),
   },
   ollamacloud: {

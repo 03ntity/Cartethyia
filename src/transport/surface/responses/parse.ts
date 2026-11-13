@@ -1,6 +1,6 @@
 import type { CanonicalMessage, CanonicalRequest, ContentPart, GenerationControls, ToolDefinition } from "../../../protocol/canonical-model";
 import { isRecord } from "../../../protocol/codecs";
-import { decodeWireBody, textPart, normalizeInlineFile } from "../content-parts";
+import { decodeWireBody, textPart, normalizeInlineFile, fileContentPart, documentContentPart } from "../content-parts";
 import {
   isServiceTier,
   parseReasoningIntent,
@@ -153,14 +153,15 @@ function parseInputContent(value: unknown): { parts: ContentPart[]; contentTypes
         data: rawPart["file_data"] ?? url ?? "",
         media_type: readString(rawPart, "mime_type") ?? readString(rawPart, "media_type"),
       });
-      parts.push({
-        kind: "file",
-        data: normalized.data,
-        media_type: normalized.media_type,
-        ...(filename === undefined ? {} : { filename }),
-        ...(fileId === undefined ? {} : { file_id: fileId }),
-        ...(url === undefined ? {} : { url }),
-      });
+      parts.push(
+        fileContentPart({
+          data: normalized.data,
+          media_type: normalized.media_type,
+          filename,
+          file_id: fileId,
+          url,
+        }),
+      );
       contentTypes.push(type);
       continue;
     }
@@ -175,20 +176,20 @@ function parseInputContent(value: unknown): { parts: ContentPart[]; contentTypes
           (isRecord(source) && typeof source.media_type === "string" ? source.media_type : undefined) ??
           (typeof rawPart.mime_type === "string" ? rawPart.mime_type : undefined),
       });
-      parts.push({
-        kind: "document",
-        data: normalized.data,
-        media_type: normalized.media_type,
-        ...(typeof rawPart.title === "string" ? { title: rawPart.title } : {}),
-        ...(sourceType === "base64" ||
-        sourceType === "url" ||
-        sourceType === "file" ||
-        sourceType === "text"
-          ? { source_type: sourceType }
-          : {}),
-        ...(url === undefined ? {} : { url }),
-        ...(fileId === undefined ? {} : { file_id: fileId }),
-      });
+      const documentSourceType =
+        sourceType === "base64" || sourceType === "url" || sourceType === "file" || sourceType === "text"
+          ? sourceType
+          : undefined;
+      parts.push(
+        documentContentPart({
+          data: normalized.data,
+          media_type: normalized.media_type,
+          title: typeof rawPart.title === "string" ? rawPart.title : undefined,
+          source_type: documentSourceType,
+          url,
+          file_id: fileId,
+        }),
+      );
       contentTypes.push(type);
       continue;
     }

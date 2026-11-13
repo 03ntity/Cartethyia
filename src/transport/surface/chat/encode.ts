@@ -2,7 +2,7 @@ import type { CanonicalEvent, CanonicalStopReason } from "../../../protocol/cano
 import { jsonrepair } from "jsonrepair";
 import { reasoningSummaryIdentity, reasoningSummarySeparator, type ReasoningSummaryIdentity } from "../reasoning-summary";
 import { reasoningTextOf } from "../../../protocol/reasoning-text";
-import { eventText } from "../adapters";
+import { eventText, stopDetailsError } from "../adapters";
 import { isRecord } from "../../../protocol/codecs";
 import {
   createToolCallTracker,
@@ -141,7 +141,7 @@ function mergedReasoningText(events: readonly CanonicalEvent[]): string {
  * error frame/envelope, so the table's words cover both and no reason defaults
  * to `stop`.
  */
-export function finishReason(stopReason: CanonicalStopReason | undefined): string {
+function finishReason(stopReason: CanonicalStopReason | undefined): string {
   return chatFinishReason(stopReason);
 }
 function eventToolCall(
@@ -177,7 +177,7 @@ function eventToolCall(
   return undefined;
 }
 
-export function chunk(
+function chunk(
   base: Omit<ChunkBase, "choices" | "usage">,
   choices: unknown[],
   usage: OpenAiUsage | null,
@@ -262,11 +262,6 @@ export function jsonCompletion(
   };
   const terminal = events.findLast((event) => event.type === "terminal");
   if (terminal?.type === "terminal" && terminal.state === "failed") {
-    const raw = isRecord(terminal.stop_details) ? terminal.stop_details : undefined;
-    const errorMessage =
-      typeof raw?.["message"] === "string" && raw["message"].length > 0
-        ? raw["message"]
-        : "The upstream response failed";
     // A failed terminal returns an error response, not a completion with a
     // finish_reason: the client must be able to tell the refusal/limit from a
     // finished answer. OpenAI error responses carry no `choices`.
@@ -276,12 +271,7 @@ export function jsonCompletion(
       created,
       model,
       usage,
-      error: {
-        type: "server_error",
-        code: terminal.stop_reason ?? "provider_error",
-        ...(typeof raw?.["status"] === "number" ? { status: raw["status"] } : {}),
-        message: errorMessage,
-      },
+      error: stopDetailsError(terminal.stop_details, terminal.stop_reason),
     };
     const serviceTier = options.service_tier ?? options.serviceTier;
     if (serviceTier !== undefined) errorResult.service_tier = serviceTier;
@@ -501,22 +491,8 @@ export class ChatStreamEncoder extends SurfaceStreamEncoder<CanonicalEvent, Json
       // the failure details when the adapter set them; otherwise the stop
       // reason is the only signal.
       if (event.state === "failed") {
-        const raw = isRecord(event.stop_details) ? event.stop_details : undefined;
-        const message =
-          typeof raw?.["message"] === "string" && raw["message"].length > 0
-            ? raw["message"]
-            : "The upstream response failed";
         this.emittedAny = true;
-        return [
-          {
-            error: {
-              type: "server_error",
-              code: event.stop_reason ?? "provider_error",
-              ...(typeof raw?.["status"] === "number" ? { status: raw["status"] } : {}),
-              message,
-            },
-          },
-        ];
+        return [{ error: stopDetailsError(event.stop_details, event.stop_reason) }];
       }
       if (!this.cancelled && event.state !== "aborted" && event.usage)
         this.finalUsage = usageToChatWire(event.usage);

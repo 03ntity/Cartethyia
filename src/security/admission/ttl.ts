@@ -47,6 +47,14 @@ export const MONTHLY_COUNTER_TTL_SECONDS = 3024000;
 export const LIFETIME_COUNTER_TTL_SECONDS = 3024000;
 /** RPM window plus slack; concurrency slots are held for the request duration. */
 export const RPM_WINDOW_TTL_SECONDS = 65;
+/**
+ * Sliding RPM window in milliseconds. Both admission stores must agree on this
+ * exactly: the Redis Lua script prunes the ZSET at `now - window` and the
+ * in-memory store prunes its timestamp queue at the same cutoff, so the value
+ * is defined once here and passed into the script as an argument — a second
+ * literal in either place is how the two drift apart.
+ */
+export const RPM_WINDOW_MS = 60_000;
 // Must exceed the lease's own lifetime (`LEASE_TTL_MS` + grace), otherwise a
 // request held longer than this lets its concurrency counter expire underneath
 // a still-live lease and a later reserve INCRs from zero. Derived rather than

@@ -52,12 +52,21 @@ export function buddyEnterprise(context?: ProviderDispatchContext): string | und
   return undefined;
 }
 
+/**
+ * The deterministic qimei36 device binding for an account id: sha256 of
+ * `wb2a:qimei36:<accountId>`, first 32 hex chars. Single derivation shared by
+ * dispatch resolution and auth-state materialization.
+ */
+export function deriveBuddyDeviceBinding(accountId: string): string {
+  return createHash("sha256").update(`wb2a:qimei36:${accountId}`).digest("hex").slice(0, 32);
+}
+
 export function resolveBuddyDeviceBinding(context?: ProviderDispatchContext): string | undefined {
   const explicit = context?.credential.auth_state?.["qimei36"];
   if (typeof explicit === "string" && explicit.trim().length > 0) return explicit.trim();
   const accountId = context?.credential.account_id;
   if (accountId === undefined || accountId.length === 0) return undefined;
-  return createHash("sha256").update(`wb2a:qimei36:${accountId}`).digest("hex").slice(0, 32);
+  return deriveBuddyDeviceBinding(accountId);
 }
 
 export function materializeBuddyDeviceBinding(
@@ -67,7 +76,7 @@ export function materializeBuddyDeviceBinding(
   const existing = authState?.["qimei36"];
   if (typeof existing === "string" && existing.trim().length > 0) return undefined;
   if (accountId.length === 0) return undefined;
-  const derived = createHash("sha256").update(`wb2a:qimei36:${accountId}`).digest("hex").slice(0, 32);
+  const derived = deriveBuddyDeviceBinding(accountId);
   return { ...(authState ?? {}), qimei36: derived };
 }
 

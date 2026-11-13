@@ -103,13 +103,14 @@ export function parseAnthropicBeta(value: AnthropicBetaInput | null): readonly s
  *
  * The route profile this is matched against is built by
  * `buildCapabilityProfile`, which spells its keys in camelCase
- * (`promptCaching`, `parallelToolCalls`), while this module's beta alias table
- * is snake_case (`prompt_caching`, `prompt_caching_scope`). Comparing them
- * literally matched nothing, so a route that *explicitly disabled* a capability
- * still had its beta forwarded — the declaration was silently ignored. Case and
- * separators carry no meaning here, so both sides drop them before comparing.
+ * (`promptCaching`, `parallelToolCalls`), while the beta alias table is
+ * snake_case (`prompt_caching`, `prompt_caching_scope`). Comparing them
+ * literally matched nothing, so a route that *explicitly disabled* a
+ * capability still had its beta forwarded — the declaration was silently
+ * ignored. Case and separators carry no meaning here, so both sides drop
+ * them before comparing.
  */
-function canonicalCapabilityName(name: string): string {
+export function canonicalCapabilityName(name: string): string {
   return name.toLowerCase().replace(/[_-]/g, "");
 }
 
@@ -161,6 +162,24 @@ function baselineSupports(beta: string, options: AnthropicBetaNegotiationOptions
   return false;
 }
 
+/**
+ * Resolves the route's declared value for a beta: the first candidate key
+ * (the beta name itself, its `anthropic-beta:` form, then every alias) that
+ * the capability profile spells — in any case/separator style — returns its
+ * declared boolean. `undefined` means the route never declared the capability.
+ */
+function declaredCapabilityValue(
+  beta: string,
+  capabilities: Map<string, boolean>,
+): boolean | undefined {
+  const keys = [beta, `anthropic-beta:${beta}`, ...aliasesFor(beta)];
+  const declaredKey = keys.find((key) =>
+    capabilities.has(canonicalCapabilityName(key)),
+  );
+  if (declaredKey === undefined) return undefined;
+  return capabilities.get(canonicalCapabilityName(declaredKey));
+}
+
 function targetSupports(
   beta: string,
   options: AnthropicBetaNegotiationOptions,
@@ -168,23 +187,14 @@ function targetSupports(
 ): boolean {
   // Subscription credentials carry no long-context credit balance: Anthropic
   // hard-429s any beta-gated 1M request, so the reference client never
-  // advertises it. A catalog that explicitly declares the capability opts
-  // back in.
+  // advertises it. Unlike every other beta there is no baseline fallback — a
+  // catalog must explicitly declare the capability, and only for OAuth.
   if (beta.toLowerCase() === "context-1m-2025-08-07") {
-    // Subscription credentials carry no long-context credit balance: Anthropic
-    // hard-429s any beta-gated 1M request, so the reference client never
-    // advertises it. A catalog that explicitly declares the capability opts
-    // back in for OAuth only.
     if (!credentialSupportsOauth(options.credential_kind)) return false;
-    const keys = [beta, `anthropic-beta:${beta}`, ...aliasesFor(beta)];
-    const declaredKey = keys.find((key) => capabilities.has(canonicalCapabilityName(key)));
-    if (declaredKey === undefined)
-      return false;
-    return capabilities.get(canonicalCapabilityName(declaredKey)) === true;
+    return declaredCapabilityValue(beta, capabilities) === true;
   }
-  const keys = [beta, `anthropic-beta:${beta}`, ...aliasesFor(beta)];
-  const declaredKey = keys.find((key) => capabilities.has(canonicalCapabilityName(key)));
-  if (declaredKey !== undefined) return capabilities.get(canonicalCapabilityName(declaredKey)) === true;
+  const declared = declaredCapabilityValue(beta, capabilities);
+  if (declared !== undefined) return declared;
   return baselineSupports(beta, options);
 }
 

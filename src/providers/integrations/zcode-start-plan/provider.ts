@@ -20,8 +20,8 @@
 import { randomUUID } from "node:crypto";
 import { release as osRelease } from "node:os";
 
-import { defineModel } from "../../provider-model-definition";
 import type { ModelDefinition } from "../../provider-model-definition";
+import { catalogRows } from "../shared/catalog-rows";
 import { getOrCreateInstallId } from "../shared/install-id";
 import { resolveInboundSessionId } from "../../operations/session-resolution";
 import { assertCredentialKind, assertWireFamily } from "../../provider-contracts";
@@ -36,6 +36,7 @@ import { parseClaudeSseStream, claudeResponseToEvents } from "../../../protocol/
 import { createUpstreamDeadlineLifecycle } from "../../operations/upstream-deadline";
 import type { CanonicalEvent, CanonicalRequest } from "../../../protocol/canonical-model";
 import { parseJwt } from "../../authentication/jwt-validator";
+import { zaiEnvelopeOk } from "../zcode/zai-envelope";
 import prompt from "./zcode_prompt.json";
 
 const CLI_PREFIX: string = prompt.cliPrefix;
@@ -151,35 +152,36 @@ function dress(payload: Loose, provider = "zcode"): void {
   ];
 }
 
-export const ZCODE_START_PLAN_MODELS: readonly ModelDefinition[] = [
-  defineModel({
-    id: "glm-5.3",
-    providerId: ZCODE_START_PLAN_PROVIDER_ID,
-    wireFamily: "messages",
-    endpoint: ZCODE_START_PLAN_ENDPOINT_PATH,
-    ctx: 1_000_000,
-    out: 131_072,
-    reasoning: true,
-    toolCall: true,
-  }),
-  defineModel({
-    id: "glm-5.3-flash",
-    providerId: ZCODE_START_PLAN_PROVIDER_ID,
-    wireFamily: "messages",
-    endpoint: ZCODE_START_PLAN_ENDPOINT_PATH,
-    ctx: 1_000_000,
-    out: 131_072,
-    vision: true,
-    reasoning: true,
-    toolCall: true,
-  }),
+type ZcodeStartPlanCatalogRow = readonly [
+  id: string,
+  contextLimit: number,
+  outputLimit: number,
+  options?: { readonly vision?: boolean },
 ];
+
+const zcodeStartPlanModel = catalogRows<ZcodeStartPlanCatalogRow>({
+  providerId: ZCODE_START_PLAN_PROVIDER_ID,
+  caps: {
+    wireFamily: "messages",
+    endpoint: ZCODE_START_PLAN_ENDPOINT_PATH,
+    reasoning: true,
+    toolCall: true,
+  },
+  translate: ([, contextLimit, outputLimit, options]) => ({
+    ctx: contextLimit,
+    out: outputLimit,
+    vision: options?.vision ?? false,
+  }),
+});
+
+export const ZCODE_START_PLAN_MODELS: readonly ModelDefinition[] = ([
+  ["glm-5.3", 1_000_000, 131_072],
+  ["glm-5.3-flash", 1_000_000, 131_072, { vision: true }],
+] as const satisfies readonly ZcodeStartPlanCatalogRow[]).map(zcodeStartPlanModel);
 
 /** True when the body is the ZCode `{code,msg,logid}` business-error envelope. */
 function isZcodeEnvelopeError(body: Record<string, unknown>): boolean {
-  if (body["success"] === false) return true;
-  const code = body["code"];
-  return code !== undefined && ![0, 200, "0", "200"].includes(code as string | number);
+  return !zaiEnvelopeOk(body);
 }
 
 /**

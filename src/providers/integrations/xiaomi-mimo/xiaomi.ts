@@ -5,30 +5,34 @@ const XIAOMITP_PROVIDER_ID = "xiaomitp" as const;
 
 
 
-import { defineModel } from "../../provider-model-definition";
+import { catalogRows } from "../shared/catalog-rows";
 import type { ModelDefinition } from "../../provider-model-definition";
 
-export const XIAOMI_MODELS: readonly ModelDefinition[] = [
-  defineModel({
-    id: "mimo-v2.5-pro",
-    wireFamily: "chat",
-    endpoint: "/chat/completions",
-    ctx: 131072,
-    out: 16384,
-    reasoning: true,
-    toolCall: true,
-  }),
-  defineModel({
-    id: "mimo-v2.5",
-    wireFamily: "chat",
-    endpoint: "/chat/completions",
-    ctx: 131072,
-    out: 16384,
-    vision: true,
-    reasoning: true,
-    toolCall: true,
-  }),
+type XiaomiCatalogRow = readonly [
+  id: string,
+  contextLimit: number,
+  outputLimit: number,
+  options?: { readonly vision?: boolean },
 ];
+
+const xiaomiModel = catalogRows<XiaomiCatalogRow>({
+  caps: {
+    wireFamily: "chat",
+    endpoint: "/chat/completions",
+    reasoning: true,
+    toolCall: true,
+  },
+  translate: ([, contextLimit, outputLimit, options]) => ({
+    ctx: contextLimit,
+    out: outputLimit,
+    vision: options?.vision ?? false,
+  }),
+});
+
+export const XIAOMI_MODELS: readonly ModelDefinition[] = ([
+  ["mimo-v2.5-pro", 131_072, 16_384],
+  ["mimo-v2.5", 131_072, 16_384, { vision: true }],
+] as const satisfies readonly XiaomiCatalogRow[]).map(xiaomiModel);
 
 
 /** Xiaomi MiMo (PAYG) — own upstream origin via `BUNDLED_PROVIDER_METADATA`. */

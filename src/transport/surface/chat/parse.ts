@@ -2,7 +2,7 @@ import type { CanonicalMessage, ContentPart, GenerationControls } from "../../..
 import type { SurfaceInput } from "../adapters";
 import { isRecord } from "../../../protocol/codecs";
 import { asNumber } from "../../../shared/coerce";
-import { decodeWireBody, textPart, normalizeInlineFile } from "../content-parts";
+import { decodeWireBody, textPart, normalizeInlineFile, fileContentPart, documentContentPart } from "../content-parts";
 import { SERVICE_TIERS } from "../dialects";
 import { readNumber, readString } from "../../../protocol/codecs";
 import type { OpenAiUsage } from "../../../providers/provider-usage";
@@ -120,14 +120,13 @@ function parseContentPart(value: unknown): ContentPart {
       data: nested.file_data ?? nested.data ?? url ?? "",
       media_type: readString(nested, "mime_type") ?? readString(nested, "media_type"),
     });
-    return {
-      kind: "file",
+    return fileContentPart({
       data: normalized.data,
       media_type: normalized.media_type,
-      ...(filename === undefined ? {} : { filename }),
-      ...(fileId === undefined ? {} : { file_id: fileId }),
-      ...(url === undefined ? {} : { url }),
-    };
+      filename,
+      file_id: fileId,
+      url,
+    });
   }
   if (type === "document") {
     const source = isRecord(value.source) ? value.source : value;
@@ -138,12 +137,11 @@ function parseContentPart(value: unknown): ContentPart {
         (typeof rawSource.media_type === "string" ? rawSource.media_type : undefined) ??
         (typeof value.mime_type === "string" ? value.mime_type : undefined),
     });
-    return {
-      kind: "document",
+    return documentContentPart({
       data: normalized.data,
       media_type: normalized.media_type,
-      ...(typeof value.title === "string" ? { title: value.title } : {}),
-    };
+      title: typeof value.title === "string" ? value.title : undefined,
+    });
   }
   // Reasoning replayed from another surface. The Messages wire calls it
   // `thinking`/`redacted_thinking`; the Responses wire nests it as a
@@ -169,7 +167,7 @@ function parseContent(value: unknown): ContentPart[] {
   return value.map((part) => parseContentPart(part));
 }
 
-export function parseToolCall(value: unknown, index: number): ParsedToolCall | undefined {
+function parseToolCall(value: unknown, index: number): ParsedToolCall | undefined {
   if (!isRecord(value)) return undefined;
   const id = readString(value, "id");
   const type = readString(value, "type");

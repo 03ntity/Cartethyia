@@ -57,6 +57,26 @@ describe("stripThinkingTags — the reasoning path's defence against upstream do
   test("handles multiple wrapped segments in one string", () => {
     expect(stripThinkingTags("<think>a</think>mid<think>b</think>")).toBe("amidb");
   });
+
+  test("an opening tag inside a paired span stays literal", () => {
+    // Non-nesting: the first `</think>` closes the outer span, so the inner
+    // `<think>` is content, not a nested reasoning block.
+    expect(stripThinkingTags("<think>a<think>b</think>c")).toBe("a<think>bc");
+  });
+
+  test("a paired span followed by an unclosed opener keeps the opener", () => {
+    expect(stripThinkingTags("<think>a</think><think>b")).toBe("a<think>b");
+  });
+
+  test("tags inside a code span are never stripped, even when paired outside", () => {
+    // Both tags sit inside backticks: they are the subject of the answer.
+    const value = "`<think>`x`</think>`";
+    expect(stripThinkingTags(value)).toBe(value);
+  });
+
+  test("a relaxed close with whitespace still pairs", () => {
+    expect(stripThinkingTags("<think>a</think  >b")).toBe("ab");
+  });
 });
 
 describe("ThinkingTagStripper — order-preserving reasoning-channel strip", () => {

@@ -72,6 +72,7 @@ import {
   toQuotaView,
 } from "./quota-view";
 import {
+  loadAccountRow,
   resolveNextAccountStatus,
   type AccountQuotaRoutesDeps,
 } from "./account-quota-shared";
@@ -507,14 +508,7 @@ export function registerAccountQuotaTenantRoutes(
     .get("/accounts/:id/quota", async ({ request, params, set }) => {
       const access = requireTenantScope(accessResolver(request), "dashboard:read");
       const accountId = params.id;
-      const rows = await db
-        .select()
-        .from(providerAccounts)
-        .where(
-          and(eq(providerAccounts.id, accountId), eq(providerAccounts.tenantId, access.tenantId)),
-        )
-        .limit(1);
-      const account = rows[0];
+      const account = await loadAccountRow(db, accountId, access.tenantId);
       if (!account) {
         set.status = 404;
         return { error: `Account ${accountId} not found`, code: "not_found" };
@@ -584,14 +578,7 @@ export function registerAccountQuotaTenantRoutes(
     .post("/accounts/:id/quota/refresh", async ({ request, params, set }) => {
       const access = requireTenantScope(accessResolver(request), "dashboard:write");
       const accountId = params.id;
-      const rows = await db
-        .select()
-        .from(providerAccounts)
-        .where(
-          and(eq(providerAccounts.id, accountId), eq(providerAccounts.tenantId, access.tenantId)),
-        )
-        .limit(1);
-      const account = rows[0];
+      const account = await loadAccountRow(db, accountId, access.tenantId);
       if (!account) {
         set.status = 404;
         return { error: `Account ${accountId} not found`, code: "not_found" };
@@ -607,7 +594,7 @@ export function registerAccountQuotaTenantRoutes(
         throw new GatewayError(
           "proxy_pool_unavailable",
           503,
-          "Account test cannot select a proxy because proxy routing is not configured (request {requestId}). No bridge to cross — configure a pool first 🏗️",
+          "Account test cannot select a proxy because proxy routing is not configured. No bridge to cross — configure a pool first 🏗️",
           { reason: "proxy_routing_unconfigured" },
           "network",
         );
@@ -993,14 +980,7 @@ export function registerAccountQuotaTenantRoutes(
     })
     .post("/accounts/:id/checkin", async ({ request, params, set }) => {
       const access = requireTenantScope(accessResolver(request), "dashboard:write");
-      const rows = await db
-        .select()
-        .from(providerAccounts)
-        .where(
-          and(eq(providerAccounts.id, params.id), eq(providerAccounts.tenantId, access.tenantId)),
-        )
-        .limit(1);
-      const account = rows[0];
+      const account = await loadAccountRow(db, params.id, access.tenantId);
       if (!account) {
         set.status = 404;
         return { error: `Account ${params.id} not found`, code: "not_found" };
@@ -1063,14 +1043,7 @@ export function registerAccountQuotaTenantRoutes(
     // Gift grants are an explicit action, not a side effect of a quota read.
     .post("/accounts/:id/claim-gifts", async ({ request, params, set }) => {
       const access = requireTenantScope(accessResolver(request), "dashboard:write");
-      const rows = await db
-        .select()
-        .from(providerAccounts)
-        .where(
-          and(eq(providerAccounts.id, params.id), eq(providerAccounts.tenantId, access.tenantId)),
-        )
-        .limit(1);
-      const account = rows[0];
+      const account = await loadAccountRow(db, params.id, access.tenantId);
       if (!account) {
         set.status = 404;
         return { error: `Account ${params.id} not found`, code: "not_found" };
@@ -1134,14 +1107,7 @@ export function registerAccountQuotaTenantRoutes(
     // mints/binds a native identity first (same store the check-in worker uses).
     .post("/accounts/:id/claim-qoder-credits", async ({ request, params, set }) => {
       const access = requireTenantScope(accessResolver(request), "dashboard:write");
-      const rows = await db
-        .select()
-        .from(providerAccounts)
-        .where(
-          and(eq(providerAccounts.id, params.id), eq(providerAccounts.tenantId, access.tenantId)),
-        )
-        .limit(1);
-      const account = rows[0];
+      const account = await loadAccountRow(db, params.id, access.tenantId);
       if (!account) {
         set.status = 404;
         return { error: `Account ${params.id} not found`, code: "not_found" };
@@ -1200,14 +1166,7 @@ export function registerAccountQuotaTenantRoutes(
     })
     .post("/accounts/:id/activity-report", async ({ request, params, set }) => {
       const access = requireTenantScope(accessResolver(request), "dashboard:write");
-      const rows = await db
-        .select()
-        .from(providerAccounts)
-        .where(
-          and(eq(providerAccounts.id, params.id), eq(providerAccounts.tenantId, access.tenantId)),
-        )
-        .limit(1);
-      const account = rows[0];
+      const account = await loadAccountRow(db, params.id, access.tenantId);
       if (!account) {
         set.status = 404;
         return { error: `Account ${params.id} not found`, code: "not_found" };
@@ -1298,14 +1257,7 @@ export function registerAccountQuotaTenantRoutes(
     })
     .get("/accounts/:id/resets", async ({ request, params, set }) => {
       const access = requireTenantScope(accessResolver(request), "dashboard:read");
-      const rows = await db
-        .select()
-        .from(providerAccounts)
-        .where(
-          and(eq(providerAccounts.id, params.id), eq(providerAccounts.tenantId, access.tenantId)),
-        )
-        .limit(1);
-      const account = rows[0];
+      const account = await loadAccountRow(db, params.id, access.tenantId);
       if (!account) {
         set.status = 404;
         return { error: `Account ${params.id} not found`, code: "not_found" };
@@ -1331,14 +1283,7 @@ export function registerAccountQuotaTenantRoutes(
     })
     .post("/accounts/:id/reset", async ({ request, params, set, body }) => {
       const access = requireTenantScope(accessResolver(request), "dashboard:write");
-      const rows = await db
-        .select()
-        .from(providerAccounts)
-        .where(
-          and(eq(providerAccounts.id, params.id), eq(providerAccounts.tenantId, access.tenantId)),
-        )
-        .limit(1);
-      const account = rows[0];
+      const account = await loadAccountRow(db, params.id, access.tenantId);
       if (!account) {
         set.status = 404;
         return { error: `Account ${params.id} not found`, code: "not_found" };
