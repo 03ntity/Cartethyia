@@ -24,7 +24,7 @@ import type {
   SetModelEnabledRequest,
   UpdateModelMetadataRequest,
   UpdateProviderAccountRequest,
-} from "./contracts-dto";
+} from "./contracts";
 
 export interface ProviderCatalogStore {
   list(tenantId: string): Promise<readonly ProviderRecord[]>;
