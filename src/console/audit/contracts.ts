@@ -1,6 +1,6 @@
-import type { ConsoleAccessResolver } from "../auth/access";
 // Audit domain: read-only, tenant-scoped audit-log API for platform admins.
 
+import type { ConsoleRouteConfig } from "../shared/route-factory";
 import type { AccessDecision } from "../../security/access-control";
 
 /**
@@ -70,8 +70,7 @@ export interface AuditSink {
   }): Promise<void>;
 }
 
-export interface AuditRoutesConfig {
+export interface AuditRoutesConfig extends ConsoleRouteConfig {
   readonly store: AuditReadStore;
-  readonly accessResolver: ConsoleAccessResolver;
 }
 

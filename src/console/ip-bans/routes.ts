@@ -9,7 +9,7 @@
 import { Elysia, t, type AnyElysia } from "elysia";
 import { errorResponse, requireGlobalAdmin } from "../shared/errors";
 import type { IpAbuseStore } from "../../security/abuse";
-import type { ConsoleAccessResolver } from "../auth/access";
+import type { ConsoleRouteConfig } from "../shared/route-factory";
 import { BAN_DURATION_CHOICES } from "../api-keys/ban-constants";
 
 /** One active IP ban, as the console returns it. */
@@ -22,8 +22,7 @@ export interface IpBanResponse {
   readonly manual: boolean;
 }
 
-export interface IpBanRoutesConfig {
-  readonly accessResolver: ConsoleAccessResolver;
+export interface IpBanRoutesConfig extends ConsoleRouteConfig {
   readonly store: IpAbuseStore;
 }
 

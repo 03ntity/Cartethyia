@@ -1,4 +1,4 @@
-import type { ConsoleAccessResolver } from "../auth/access";
+import type { ConsoleRouteConfig } from "../shared/route-factory";
 import type { AuditSink } from "../audit/contracts";
 // Runtime-settings control-plane contracts and routes.
 import { ConsoleDomainError, errorResponse, requireTenantScope } from "../shared/errors";
@@ -110,9 +110,8 @@ export interface RuntimeSettingsStore {
 
 
 
-export interface RuntimeSettingsConfig {
+export interface RuntimeSettingsConfig extends ConsoleRouteConfig {
   readonly store: RuntimeSettingsStore;
-  readonly accessResolver: ConsoleAccessResolver;
   readonly auditSink?: AuditSink;
   /**
    * Structurally satisfied by `InMemoryRouteSnapshotService`.
