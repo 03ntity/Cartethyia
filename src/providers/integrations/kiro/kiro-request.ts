@@ -190,8 +190,6 @@ export function buildKiroWireRequest(
 }
 
 /**
- * Builds the text that precedes the opening user turn: the thinking marker and
-/**
  * Builds the text that opens the ledger: the thinking marker and the caller's
  * system text.
  *
@@ -212,15 +210,6 @@ function buildStablePrefix(request: CanonicalRequest, options: KiroWireRequestOp
   if (systemText.trim().length > 0) parts.push(systemText);
   return parts.join("\n\n");
 }
-
-/**
- * The line that tells the model when this turn was sent.
- *
- * It is built per request and placed on the current turn only, never in the
- * cached prefix: an opening turn carrying a fresh timestamp would make the
- * prefix differ on every request, so the upstream could never reuse the cached
- * one and the whole conversation would be re-read each turn.
- */
 
 /** The marker the upstream reads to enable thinking with a budget. */
 export function buildThinkingMarker(budget: number): string {

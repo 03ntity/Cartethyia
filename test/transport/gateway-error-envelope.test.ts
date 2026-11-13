@@ -12,10 +12,12 @@
  *    "an internal map of the deployment" — provider ids, pool ids, account
  *    scope, and routing reasons are all on it deliberately, and everything else
  *    (including a future field nobody re-checked) must be dropped.
- * 2. **An upstream body that echoes a credential must be redacted.** `raw` is
- *    the one allowlisted field that carries attacker-controlled text: an
- *    upstream 401 body frequently repeats the API key it rejected. That is why
- *    it alone passes through `redactTelemetryValue` before being bounded.
+ * 2. **An upstream body that echoes a credential is published verbatim.** `raw`
+ *    is the one allowlisted field that carries attacker-controlled text: an
+ *    upstream 401 body frequently repeats the API key it rejected. It is still
+ *    passed through unmodified - rewriting part of the body makes the echoed
+ *    error unreadable (see "raw is published verbatim" below). Credential
+ *    scrubbing happens at the log sink, not on the wire.
  *
  * The message shaper is the third surface: clients branch on the code, and a
  * legacy brand prefix leaking into the text tells a client which product is in

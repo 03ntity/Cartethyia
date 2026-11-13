@@ -770,15 +770,33 @@ describe("readJsonFile and writeJsonFile", () => {
     expect(await readJsonFile(path)).toEqual({ a: 1 });
   });
 
+  test("keeps a string value that contains a comma-brace sequence intact", async () => {
+    // The trailing-comma fallback scans textually; a regex version ate the
+    // `,}` inside string values and corrupted valid JSON into a different
+    // document. Strict-first parsing must never let the fallback touch this.
+    const path = join(dir, "strings.json");
+    await writeTextFile(path, `{\n  "a": "x,}",\n  "b": "y,]",\n  "c": "z, }"\n}`);
+    expect(await readJsonFile(path)).toEqual({ a: "x,}", b: "y,]", c: "z, }" });
+  });
+
+  test("still tolerates a trailing comma beside a string holding `,}`", async () => {
+    const path = join(dir, "hand-edited.json");
+    await writeTextFile(path, `{\n  "a": "x,}",\n  "b": 1,\n}`);
+    expect(await readJsonFile(path)).toEqual({ a: "x,}", b: 1 });
+  });
+
   test("returns null for a missing file rather than throwing", async () => {
     expect(await readJsonFile(join(dir, "absent.json"))).toBeNull();
     expect(await readTextFile(join(dir, "absent.txt"))).toBeNull();
   });
 
-  test("returns null for unparseable content rather than throwing", async () => {
+  test("throws for unparseable content rather than reporting it missing", async () => {
+    // `null` reads as "no file yet", and every injector's apply path writes a
+    // fresh config over a missing one — a corrupt file would be silently
+    // overwritten. It must fail loudly instead.
     const path = join(dir, "broken.json");
     await writeTextFile(path, "{ not json");
-    expect(await readJsonFile(path)).toBeNull();
+    await expect(readJsonFile(path)).rejects.toThrow("Invalid JSON");
   });
 
   test("a written file can be read back through readTextFile", async () => {

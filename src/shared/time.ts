@@ -3,5 +3,5 @@
  * and as the hour comparison key on both sides of retention.
  */
 export function hourStamp(date: Date): string {
-  return date.toISOString().slice(0, 13).replaceAll(":", "-");
+  return date.toISOString().slice(0, 13);
 }

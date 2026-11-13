@@ -17,6 +17,7 @@ import {
   FREEBUFF_CHAT_COMPLETIONS_PATH,
   FREEBUFF_CLIENT_HEADER,
   FREEBUFF_CLIENT_HEADER_VALUE,
+  FREEBUFF_MODEL_CATALOG_PATH,
 } from "./freebuff";
 import { FREEBUFF_VIRTUAL_MODELS } from "./freebuff-virtual";
 
@@ -53,7 +54,7 @@ export function freebuffModelDiscovery(): ProviderModelDiscovery {
   return async ({ credential, fetcher }) => {
     if (credential.trim().length === 0) return null;
     const fetchFn = fetcher ?? globalThis.fetch;
-    const res = await fetchFn(`${FREEBUFF_API_HOST}/api/v1/freebuff/models`, {
+    const res = await fetchFn(`${FREEBUFF_API_HOST}${FREEBUFF_MODEL_CATALOG_PATH}`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${credential.trim()}`,
@@ -104,5 +105,3 @@ export function freebuffModelDiscovery(): ProviderModelDiscovery {
     return models.length > 0 ? models : null;
   };
 }
-
-export { defineModel };

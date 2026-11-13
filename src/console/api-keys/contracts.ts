@@ -337,8 +337,19 @@ export function parseSharePopupImage(
   return { image, mime };
 }
 
+/** Validated create/edit request: scopes plus the once-parsed popup art. */
+export interface ValidatedApiKeyRequest {
+  readonly scopes: readonly AccessScope[];
+  /**
+   * Parsed share-popup art. `undefined` when the request leaves the stored
+   * image untouched (edit), `null` when it clears it or supplies none. Parsed
+   * exactly once here so the routes do not decode the upload again.
+   */
+  readonly popupImage: { image: Buffer; mime: SharePopupImageMime } | null | undefined;
+}
+
 /** Validates scopes and quota fields before persistence. */
-export function validateApiKeyRequest(request: CreateApiKeyRequest): readonly AccessScope[] {
+export function validateApiKeyRequest(request: CreateApiKeyRequest): ValidatedApiKeyRequest {
   const keyMode = request.keyMode ?? "personal";
   if (!(API_KEY_MODES as readonly string[]).includes(keyMode)) {
     throw new ConsoleDomainError("invalid_key_mode", 400, "keyMode must be personal or share");
@@ -379,7 +390,8 @@ export function validateApiKeyRequest(request: CreateApiKeyRequest): readonly Ac
       throw new ConsoleDomainError("invalid_limits", 400, "maxChildren is only valid for share templates");
     }
   }
-  parseSharePopupImage(request.sharePopupImage);
+  const popupImage =
+    request.sharePopupImage === undefined ? undefined : parseSharePopupImage(request.sharePopupImage);
   if (request.sharePopupTitle != null && request.sharePopupTitle.length > 120) {
     throw new ConsoleDomainError("invalid_share_popup", 400, "Share popup title is too long");
   }
@@ -427,7 +439,7 @@ export function validateApiKeyRequest(request: CreateApiKeyRequest): readonly Ac
       }
     }
   }
-  return scopes as AccessScope[];
+  return { scopes: scopes as AccessScope[], popupImage };
 }
 
 /** Serializes a persisted record without credential material or IP-key digests. */

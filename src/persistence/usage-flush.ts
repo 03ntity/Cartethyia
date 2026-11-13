@@ -124,7 +124,13 @@ export class UsageFlushBuffer {
     this.pending.set(apiKeyId, (this.pending.get(apiKeyId) ?? 0) + delta);
     if (this.pending.size > FLUSH_PENDING_MAX_KEYS) {
       const oldest = this.pending.keys().next();
-      if (!oldest.done) this.pending.delete(oldest.value);
+      if (!oldest.done) {
+        // The evicted key's accumulated delta is abandoned, so it is counted
+        // into `droppedDelta` first: the drop accounting must cover every delta
+        // the buffer accepted and never wrote, not only write failures.
+        this.droppedDelta += this.pending.get(oldest.value) ?? 0;
+        this.pending.delete(oldest.value);
+      }
     }
   }
 
@@ -208,7 +214,9 @@ export class UsageFlushBuffer {
     }
   }
 
-  /** Total usage delta abandoned after sustained write failure. */
+  /** Total usage delta the buffer accepted and abandoned: deltas it could not
+   * write within the retry cap, and the accumulated delta of the oldest key
+   * evicted when the pending map is full. */
   get droppedTotal(): number {
     return this.droppedDelta;
   }

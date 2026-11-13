@@ -166,7 +166,7 @@ async function ensureStatus(
   if (fresh !== undefined) return { ...fresh, meta: metaFor(now, "status", now) };
 
   const payload = await fetchStatus(
-    config === undefined ? {} : { ...(config.fetchFn === undefined ? {} : { fetchFn: config.fetchFn }) },
+    config.fetchFn === undefined ? {} : { fetchFn: config.fetchFn },
   );
   if (payload === undefined) {
     const stale = getStaleStatus();

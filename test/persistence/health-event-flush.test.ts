@@ -103,6 +103,22 @@ describe("HealthEventFlushBuffer", () => {
     expect(s.written[0]).toHaveLength(1);
   });
 
+  test("stop waits out an in-flight flush and writes what queued behind it", async () => {
+    const s = sink();
+    const buffer = new HealthEventFlushBuffer(s.db as never, 60_000);
+    buffer.enqueue(row("a1"));
+    // Started but not awaited: while this write is in flight a second `flush()`
+    // returns early, so a shutdown that flushed only once would drop a2 -
+    // exactly the rows queued during a write.
+    const inflight = buffer.flush();
+    buffer.enqueue(row("a2"));
+    await buffer.stop();
+    await inflight;
+    expect(s.written).toHaveLength(2);
+    expect(s.written[0]?.map((entry) => entry.accountId)).toEqual(["a1"]);
+    expect(s.written[1]?.map((entry) => entry.accountId)).toEqual(["a2"]);
+  });
+
   test("drain drops the queue without writing, for a purge barrier", async () => {
     const s = sink();
     const buffer = new HealthEventFlushBuffer(s.db as never, 60_000);

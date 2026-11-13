@@ -11,8 +11,12 @@
  * cookie should not be enough to walk away with the secrets or overwrite them,
  * so this is the one console surface that re-authenticates.
  *
- * The body bound is enforced here, before the JSON parse, because the whole
- * point of the limit is to not buffer an unbounded file.
+ * The body bound is enforced where the bytes actually are: the listener admits
+ * at most `resolveMaxBodyBytes()` (the same number `MAX_BACKUP_BYTES` tracks)
+ * and cuts anything larger before the body is parsed. `enforceBodyLimit`
+ * below only turns a declared over-limit length into the clean 413 the
+ * contract promises — it runs after Elysia has parsed the body and never
+ * re-measures parsed bytes, because the wire cap already bounds them.
  */
 import { Elysia, t, type AnyElysia } from "elysia";
 import type { ConsoleAccessResolver } from "../auth/access";
@@ -119,20 +123,21 @@ function parseSections(raw: string | undefined): readonly BackupSection[] | unde
 }
 
 /**
- * Enforces the byte bound against actual received bytes, not just the declared
- * header: a missing or spoofed content-length would otherwise bypass the 413
- * and buffer an unbounded file into JSON.parse. Elysia has already parsed the
- * body here, so measure the re-serialized form — an over-limit file still
- * fails closed before any restore/inspection touches the DB. Returns the 413
- * response when over the limit, or `null` when the body is accepted.
+ * Answers a clean 413 for an upload that declares more bytes than the bound.
+ *
+ * Actual received bytes are already capped: the listener admits at most
+ * `resolveMaxBodyBytes()` — the same number `MAX_BACKUP_BYTES` tracks — and
+ * cuts anything larger before the body is parsed, so the parsed body this
+ * handler sees cannot exceed the limit. The declared `content-length` is
+ * checked only to answer the promised 413 (with its message) instead of that
+ * connection cut-off. No re-serialization of the parsed body is needed: its
+ * size is bounded by the wire cap, not by anything this function must measure.
+ * Returns the 413 body when the declared length is over the limit, or `null`
+ * when the request is accepted.
  */
-function enforceBodyLimit(request: Request, body: unknown, set: { status?: number | string }): { error: string; code: string } | null {
+function enforceBodyLimit(request: Request, set: { status?: number | string }): { error: string; code: string } | null {
   const declared = Number(request.headers.get("content-length") ?? "0");
-  const actualBytes = JSON.stringify(body ?? null).length;
-  if (
-    (Number.isFinite(declared) && declared > MAX_BACKUP_BYTES) ||
-    actualBytes > MAX_BACKUP_BYTES
-  ) {
+  if (Number.isFinite(declared) && declared > MAX_BACKUP_BYTES) {
     set.status = 413;
     return {
       error: `backup exceeds the ${MAX_BACKUP_BYTES} byte limit`,
@@ -218,7 +223,7 @@ export function createBackupRoutes(config: BackupRoutesConfig): AnyElysia {
         if (access.tenantId === null) {
           throw new ConsoleDomainError("tenant_required", 403, "Tenant isolation required");
         }
-        const tooLarge = enforceBodyLimit(request, body, set);
+        const tooLarge = enforceBodyLimit(request, set);
         if (tooLarge !== null) return tooLarge;
         // The restoring tenant comes from the caller's own access decision and
         // from nowhere else. A request body may not name the tenant it writes
@@ -292,7 +297,7 @@ export function createBackupRoutes(config: BackupRoutesConfig): AnyElysia {
         if (access.tenantId === null) {
           throw new ConsoleDomainError("tenant_required", 403, "Tenant isolation required");
         }
-        const tooLarge = enforceBodyLimit(request, body, set);
+        const tooLarge = enforceBodyLimit(request, set);
         if (tooLarge !== null) return tooLarge;
         // Reads nothing and writes nothing: the checklist the restore wizard
         // shows, so an operator can pick sections before typing a password.

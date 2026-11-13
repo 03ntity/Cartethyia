@@ -55,13 +55,14 @@ export async function fetchFreepiQuota(
     if (typeof capUsd === "number" && typeof remainingUsd === "number") {
       const limit = capUsd as number;
       const remaining = remainingUsd as number;
+      const used = limit - remaining;
       windows.push(
         percentWindow(
           "usd_daily",
           "Daily USD budget",
-          remaining,
+          used > 0 && limit > 0 ? (used / limit) * 100 : 0,
           refillAt === undefined ? null : text(refillAt),
-          limit - remaining,
+          used,
           limit,
           "pooled",
         ),
@@ -73,13 +74,14 @@ export async function fetchFreepiQuota(
     if (typeof allowance === "number" && typeof remainingCredits === "number") {
       const limit = allowance as number;
       const remaining = remainingCredits as number;
+      const used = limit - remaining;
       windows.push(
         percentWindow(
           "credits_daily",
           "Daily credits",
-          remaining,
+          used > 0 && limit > 0 ? (used / limit) * 100 : 0,
           refillAt === undefined ? null : text(refillAt),
-          limit - remaining,
+          used,
           limit,
           "pooled",
         ),

@@ -22,7 +22,8 @@ import { oauthAccountIdentity } from "./oauth-flow-store";
 import type { OAuthTokenRefreshResult, OAuthTokenRefresher } from "./oauth-refresh-service";
 
 /** Minimal fetch surface accepted by the generic OAuth client. */
-export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+import type { FetchLike } from "./oauth-flow-store";
+export type { FetchLike };
 
 /** Normalized token shape returned by provider token endpoints. */
 export interface NormalizedTokenResponse extends OAuthAccountIdentity {

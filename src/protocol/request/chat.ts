@@ -180,6 +180,26 @@ function markLatestChatCacheBreakpoint(messages: Array<Record<string, unknown>>)
   });
 }
 
+/**
+ * Remaining documented top-level Chat parameters, forwarded verbatim when the
+ * caller supplied them (they have no canonical generation-control slot).
+ * Module-level so the table is not rebuilt per request.
+ */
+const CHAT_EXTENSION_PASSTHROUGH: ReadonlyArray<readonly [string, string]> = [
+  ["extension:store", "store"],
+  ["extension:prediction", "prediction"],
+  ["extension:moderation", "moderation"],
+  ["extension:safety_identifier", "safety_identifier"],
+  ["extension:verbosity", "verbosity"],
+  ["extension:web_search_options", "web_search_options"],
+  ["extension:frequency_penalty", "frequency_penalty"],
+  ["extension:presence_penalty", "presence_penalty"],
+  ["extension:logit_bias", "logit_bias"],
+  ["extension:prompt_cache_options", "prompt_cache_options"],
+  ["extension:prompt_cache_retention", "prompt_cache_retention"],
+  ["extension:prompt_cache_key", "prompt_cache_key"],
+];
+
 export function canonicalToChatPayload(
   request: CanonicalRequest,
   options: {
@@ -535,23 +555,7 @@ export function canonicalToChatPayload(
   if (isRecord(metadata)) payload["metadata"] = metadata;
   const user = request.generation_controls["extension:user"] ?? request.generation_controls["extension:responses.user"];
   if (typeof user === "string") payload["user"] = user;
-  // Remaining documented top-level Chat parameters, forwarded verbatim when
-  // the caller supplied them (they have no canonical generation-control slot).
-  const passthrough: ReadonlyArray<readonly [string, string]> = [
-    ["extension:store", "store"],
-    ["extension:prediction", "prediction"],
-    ["extension:moderation", "moderation"],
-    ["extension:safety_identifier", "safety_identifier"],
-    ["extension:verbosity", "verbosity"],
-    ["extension:web_search_options", "web_search_options"],
-    ["extension:frequency_penalty", "frequency_penalty"],
-    ["extension:presence_penalty", "presence_penalty"],
-    ["extension:logit_bias", "logit_bias"],
-    ["extension:prompt_cache_options", "prompt_cache_options"],
-    ["extension:prompt_cache_retention", "prompt_cache_retention"],
-    ["extension:prompt_cache_key", "prompt_cache_key"],
-  ];
-  for (const [extension, field] of passthrough) {
+  for (const [extension, field] of CHAT_EXTENSION_PASSTHROUGH) {
     if (!supportsPromptCaching && field.startsWith("prompt_cache_")) continue;
     const value =
       request.generation_controls[extension as `extension:${string}`] ??

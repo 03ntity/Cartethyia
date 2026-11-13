@@ -3,8 +3,8 @@
  * selection plus inflight accounting (local map + Redis counters for
  * multi-process correctness).
  *
- * Role files: `pool-scripts.ts` (Redis scripts + key builders),
- * `pool-state.ts` (local inflight/rotation/cooldown state). This file keeps
+ * Role files: `scripts.ts` (Redis scripts + key builders),
+ * `state.ts` (local inflight/rotation/cooldown state). This file keeps
  * the selection algorithm and the `NetworkPoolSelector` public surface.
  */
 import { redisEvalNumber, type RedisClient } from "../../persistence/redis";

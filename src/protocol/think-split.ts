@@ -264,14 +264,18 @@ export class ThinkingTagStripper {
   }
 }
 
+/** Every tag spelling a dangling suffix may be a prefix of. */
+const ALL_TAGS: readonly string[] = [...OPEN_TAGS, ...CLOSE_TAGS];
+
+/** Longest suffix worth holding back: one shorter than the longest tag. */
+const MAX_DANGLING_PREFIX = Math.max(...ALL_TAGS.map((tag) => tag.length)) - 1;
+
 /** The longest suffix of `text` that is a proper prefix of any tag. */
 function danglingTagPrefix(text: string): string {
-  const tags = [...OPEN_TAGS, ...CLOSE_TAGS];
-  const maxLength = Math.max(...tags.map((tag) => tag.length)) - 1;
-  const limit = Math.min(maxLength, text.length);
+  const limit = Math.min(MAX_DANGLING_PREFIX, text.length);
   for (let length = limit; length > 0; length -= 1) {
     const suffix = text.slice(-length);
-    if (tags.some((tag) => tag.startsWith(suffix))) return suffix;
+    if (ALL_TAGS.some((tag) => tag.startsWith(suffix))) return suffix;
   }
   return "";
 }

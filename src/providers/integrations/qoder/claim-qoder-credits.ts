@@ -24,6 +24,7 @@ import {
   buildCampaignHeaders,
   normalizeCampaign,
   safeParse,
+  QODER_CHECKIN_PROVIDER_IDS,
 } from "./qoder-checkin";
 import { qoderMachineHeaders } from "./qoder-umid";
 import {
@@ -38,7 +39,11 @@ export interface QoderCreditClaimResult {
   readonly detail: string | null;
 }
 
-export const QODER_CREDIT_PROVIDER_IDS = ["qoder", "qodercn"] as const;
+/**
+ * Providers running the Qoder daily-credit surface. The list has a single
+ * owner (`qoder-checkin.ts`); this alias keeps the console's import working.
+ */
+export const QODER_CREDIT_PROVIDER_IDS: readonly string[] = QODER_CHECKIN_PROVIDER_IDS;
 
 const PAT_PREFIX = "pt-";
 

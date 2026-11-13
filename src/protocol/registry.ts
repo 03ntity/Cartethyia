@@ -107,31 +107,17 @@ type CodecModule =
 /**
  * Loads the codec for one wire family, caching the module after the first load.
  *
- * Only one family is ever needed per gateway instance, so the other two stay
- * unloaded — each codec is ~10 MiB of module graph and loading all three
- * eagerly cost ~50 MiB of resident memory for no benefit.
- *
- * The dynamic import is awaited by the caller. Wire encoding happens before the
- * upstream request is issued, so the cost is paid once, on the first request,
- * The cost is paid once, on the first request for that family, because wire
- * encoding happens before the upstream request is issued. There is no preload
- * at boot: no family is knowable then, and eagerly loading all three codecs
- * would defeat the ~50 MiB of resident memory this indirection removes.
- */
-const codecCache = new Map<WireFamily, Promise<CodecModule>>();
-
-/**
- * Loads the codec for one wire family, caching the module after the first load.
- *
  * Dynamic import is required rather than a style choice: the specifier is
  * selected by the runtime `wireFamily` value, and a static import of all three
  * codecs is exactly the ~50 MiB of resident memory this indirection removes —
- * a gateway instance only ever serves one family.
- *
- * The cost is paid once, on the first request for that family, because wire
- * encoding happens before the upstream request is issued. No boot-time preload
- * exists — see the note on `codecCache` above.
+ * each codec is ~10 MiB of module graph and a gateway instance only ever serves
+ * one family. The cost is paid once, on the first request for that family,
+ * because wire encoding happens before the upstream request is issued. No
+ * boot-time preload exists: no family is knowable at boot.
  */
+const codecCache = new Map<WireFamily, Promise<CodecModule>>();
+
+/** Resolves (and memoizes in `codecCache`) the codec for one wire family. */
 async function loadCodec(wireFamily: WireFamily): Promise<CodecModule> {
   const cached = codecCache.get(wireFamily);
   if (cached !== undefined) return cached;

@@ -38,15 +38,63 @@ export async function fileExists(path: string): Promise<boolean> {
   return Bun.file(path).exists();
 }
 
-/** Read and parse a JSON file, tolerating trailing commas. Returns null if missing or unparseable. */
+/**
+ * Read and parse a JSON file. Returns null when the file does not exist, and
+ * tolerates trailing commas (hand-edited configs) via a string-aware fallback.
+ * A file that exists but parses under neither form throws: returning null for
+ * it would read as "missing", and every injector's apply path treats a missing
+ * file as `{}` — silently overwriting a corrupt-but-valuable config.
+ */
 export async function readJsonFile(path: string): Promise<unknown | null> {
+  const file = Bun.file(path);
+  if (!(await file.exists())) return null;
+  const text = await file.text();
   try {
-    const text = await Bun.file(path).text();
-    const stripped = text.replace(/,(\s*[}\]])/g, "$1");
-    return JSON.parse(stripped);
+    // Strict parse first. The trailing-comma fallback below scans textually,
+    // so running it on already-valid JSON could only change it — a string
+    // value such as `"a,}"` must never be touched.
+    return JSON.parse(text);
   } catch {
-    return null;
+    // Fall through to the tolerant parse for hand-edited files.
   }
+  try {
+    return JSON.parse(stripTrailingCommas(text));
+  } catch {
+    throw new Error(`Invalid JSON in ${path}`);
+  }
+}
+
+/**
+ * Removes a comma that directly precedes a closing `}`/`]` outside of any
+ * string. A plain regex would also eat the `,}` inside a string value like
+ * `"a,}"`, so the scan tracks string state instead.
+ */
+function stripTrailingCommas(text: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === ",") {
+      let j = i + 1;
+      while (j < text.length && (text[j] === " " || text[j] === "\t" || text[j] === "\n" || text[j] === "\r")) j += 1;
+      if (text[j] === "}" || text[j] === "]") continue;
+    }
+    out += ch;
+  }
+  return out;
 }
 
 /** Write JSON to a file with 2-space indentation. */

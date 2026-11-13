@@ -20,7 +20,7 @@ import { providerBaseUrl } from "../../provider-metadata";
 import { defineModel, type ModelDefinition } from "../../provider-model-definition";
 import { isRecord } from "../../../protocol/codecs";
 import { modelsDevCatalog } from "../../discovery/models-dev-catalog";
-import type { CanonicalRequest, ReasoningIntent } from "../../../protocol/canonical-model";
+import type { CanonicalRequest } from "../../../protocol/canonical-model";
 import type { FetchLike } from "../../authentication/oauth-client";
 import { getAntigravityVersion } from "../../operations/client-versions";
 export { getAntigravityVersion };
@@ -214,45 +214,6 @@ export function antigravityWireModelId(modelId: string): string {
   return modelId;
 }
 
-// Claude-route `anthropic-beta` passthrough (`interleaved-thinking`).
-
-/**
- * The one beta the reference client adds on Claude reasoning routes
- * (`google-gemini-cli.ts:601-603`). Named to match the vocabulary in
- * `claude-betas.ts` (`ANTHROPIC_BETA_CAPABILITIES`) rather than re-spelled
- * here; that module is the single owner of beta names, so this is a literal
- * of an entry it already declares.
- *
- * UNCONFIRMED: that `daily-cloudcode-pa` gates Claude thinking on this header.
- * The reference sends it, and a thinking request that omits it is untested
- * against the live backend. It is only sent when the turn actually carries a
- * thinking intent, so a non-thinking Claude route is byte-identical to before.
- */
-export const ANTIGRAVITY_CLAUDE_THINKING_BETA = "interleaved-thinking-2025-05-14";
-
-/**
- * Whether a Claude-via-Antigravity turn should advertise interleaved thinking.
- *
- * Thinking is "requested" in either of the two ways the canonical request can
- * express it: an explicit enabled/adaptive `thinking_type`, or a thinking
- * budget. `disabled` is excluded — it is an affirmative request for no
- * thinking, not a thinking request.
- */
-export function antigravityClaudeThinkingBeta(
-  request: { readonly reasoning?: ReasoningIntent | undefined },
-  isClaudeRoute: boolean,
-): string | undefined {
-  if (!isClaudeRoute) return undefined;
-  const reasoning = request.reasoning;
-  if (reasoning === undefined || reasoning === null) return undefined;
-  if (reasoning.thinking_type === "disabled") return undefined;
-  const wantsThinking =
-    reasoning.thinking_type === "enabled" ||
-    reasoning.thinking_type === "adaptive" ||
-    reasoning.budget_tokens !== undefined;
-  return wantsThinking ? ANTIGRAVITY_CLAUDE_THINKING_BETA : undefined;
-}
-
 // Tool schema normalization (`parametersJsonSchema` → `parameters`).
 
 /**
@@ -424,70 +385,11 @@ export function dropAntigravityUnsignedReasoning(
   return changed ? { ...request, messages: next } : request;
 }
 
-// Last-good-endpoint stickiness
-
-/**
- * Endpoint that answered successfully most recently, per base URL.
- *
- * The reference client probes endpoints in a fixed order and remembers the one
- * that last worked (`google-gemini-cli.ts:556-571,:1076-1081`), so a dead
- * production host is not re-probed on every turn — only the first request after
- * a failover pays the extra round trip.
- *
- * Keyed by base URL (not by account) because reachability is a property of the
- * host the deployment talks to, and the value is only ever an endpoint this
- * process has already resolved from that base.
- */
-const lastGoodEndpoints = new Map<string, string>();
-const LAST_GOOD_ENDPOINT_MAX = 256;
-
-/**
- * Records the endpoint that just served a successful turn. Call this with the
- * `endpoint` reported by empty-stream recovery (or the URL that produced a
- * non-empty stream) so the next turn can start there.
- */
-export function rememberAntigravityEndpoint(baseUrl: string, endpoint: string): void {
-  if (typeof endpoint !== "string" || endpoint.length === 0) return;
-  lastGoodEndpoints.set(baseUrl, endpoint);
-  while (lastGoodEndpoints.size > LAST_GOOD_ENDPOINT_MAX) {
-    const oldest = lastGoodEndpoints.keys().next().value;
-    if (oldest === undefined) break;
-    lastGoodEndpoints.delete(oldest);
-  }
-}
-
-/** Clears the sticky endpoint for one base, or for every base when omitted. */
-export function resetAntigravityEndpointMemory(baseUrl?: string): void {
-  if (baseUrl === undefined) lastGoodEndpoints.clear();
-  else lastGoodEndpoints.delete(baseUrl);
-}
-
-/**
- * Orders `endpoints` so the last one known to have worked is tried first.
- *
- * Pure with respect to the caller's list: every entry is preserved exactly
- * once, only the order changes, and an endpoint no longer in the list (a base
- * URL whose sandbox twin disappeared) is ignored rather than injected. A
- * sticky entry equal to the first endpoint is a no-op, so the steady state is
- * the caller's own order.
- */
-export function orderAntigravityEndpoints(
-  baseUrl: string,
-  endpoints: readonly string[],
-): readonly string[] {
-  if (endpoints.length <= 1) return endpoints;
-  const sticky = lastGoodEndpoints.get(baseUrl);
-  if (sticky === undefined) return endpoints;
-  const index = endpoints.indexOf(sticky);
-  if (index <= 0) return endpoints;
-  return [sticky, ...endpoints.slice(0, index), ...endpoints.slice(index + 1)];
-}
-
 // Model discovery (`v1internal:fetchAvailableModels`) — live catalog.
 
 const ANTIGRAVITY_DISCOVERY_PATH = "/v1internal:fetchAvailableModels";
-const ANTIGRAVITY_DISCOVERY_SANDBOX_ENDPOINT =
-  "https://daily-cloudcode-pa.sandbox.googleapis.com";
+/** Sandbox twin of the production Antigravity host (only the prod host has one). */
+export const ANTIGRAVITY_SANDBOX_BASE = "https://daily-cloudcode-pa.sandbox.googleapis.com";
 const ANTIGRAVITY_DEFAULT_CONTEXT_WINDOW = 200_000;
 const ANTIGRAVITY_DEFAULT_MAX_OUTPUT_TOKENS = 64_000;
 const ANTIGRAVITY_GENERATE_PATH = "/v1internal:generateContent";
@@ -590,7 +492,7 @@ export async function discoverAntigravityModels(
     /\/+$/,
     "",
   );
-  for (const endpoint of [primary, ANTIGRAVITY_DISCOVERY_SANDBOX_ENDPOINT]) {
+  for (const endpoint of [primary, ANTIGRAVITY_SANDBOX_BASE]) {
     try {
       const timeoutSignal = AbortSignal.timeout(3_000);
       const signal =

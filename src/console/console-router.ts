@@ -17,6 +17,7 @@ import { createConsoleAuthRoutes } from "./auth/session";
 import { createConsoleCsrfMiddleware } from "./console-router-guards";
 import { createConsoleMutationLimiterMiddleware } from "./console-router-guards";
 import { registerConsoleDomains, type ConsoleDomainContext } from "./domain-registration";
+import type { UpdateShutdownCoordinator } from "./updates/routes";
 import type { ConsoleAccessResolver } from "./auth/access";
 import type { CartethyiaDatabase } from "../persistence/db-handle";
 import { createAccessDecision, type AccessDecision } from "../security/access-control";
@@ -91,11 +92,9 @@ export interface ConsoleApiCompositionDeps {
    * The process shutdown coordinator, narrowed to the surface the update apply
    * route needs. Declared structural (not the class) so the console composition
    * root does not import the boot layer; `ShutdownCoordinator` satisfies it.
+   * The shape is owned by `UpdateShutdownCoordinator` in `./updates/routes`.
    */
-  readonly shutdownCoordinator?: {
-    readonly begin: (reason: "update") => Promise<void>;
-    readonly totalShutdownBudgetMs: () => number;
-  };
+  readonly shutdownCoordinator?: UpdateShutdownCoordinator;
 }
 /**
  * Extracts a bearer API key from a console request, or `undefined`.

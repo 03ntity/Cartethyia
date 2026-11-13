@@ -1,8 +1,8 @@
 /**
  * Shared Qoder types.
  *
- * Kept as a separate module so the transports (gRPC, IDE/HTTP, legacy COSY)
- * and the auth layer share one shape without importing each other.
+ * Kept as a separate module so the chat transport and the auth layer share
+ * one shape without importing each other.
  */
 import type { QoderRealm } from "./qoder-realm";
 

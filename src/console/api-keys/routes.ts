@@ -25,7 +25,6 @@ import {
   DEFAULT_BAN_MINUTES,
   generateApiKeySecret,
   isDefaultGatewayApiKey,
-  parseSharePopupImage,
   sanitizeApiKeyResponse,
   validateApiKeyRequest,
   parseRequest,
@@ -178,8 +177,7 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
       request: CreateApiKeyRequest,
     ): Promise<CreateApiKeyResponse> {
       const authorized = requireTenantScope(access, "dashboard:write");
-      const scopes = validateApiKeyRequest(request);
-      const popupImage = parseSharePopupImage(request.sharePopupImage);
+      const { scopes, popupImage } = validateApiKeyRequest(request);
       const keyMode = request.keyMode ?? "personal";
       const keyPrefix =
         keyMode === "share"
@@ -258,7 +256,7 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
           "Edit or revoke this key through its share parent",
         );
 
-      validateApiKeyRequest(patchRequest);
+      const validated = validateApiKeyRequest(patchRequest);
       finitePositive(patchRequest.requestsPerMinute, "requestsPerMinute");
       finitePositive(patchRequest.dailyTokenLimit, "dailyTokenLimit");
       finitePositive(patchRequest.monthlyTokenLimit, "monthlyTokenLimit");
@@ -311,12 +309,8 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
         credentialPatch = { keyPrefix: nextPrefix };
       }
 
-      const scopes =
-        patchRequest.scopes === undefined ? undefined : validateApiKeyRequest(patchRequest);
-      const popupImage =
-        patchRequest.sharePopupImage === undefined
-          ? undefined
-          : parseSharePopupImage(patchRequest.sharePopupImage);
+      const scopes = patchRequest.scopes === undefined ? undefined : validated.scopes;
+      const popupImage = validated.popupImage;
       const updated = await config.store.update(authorized.tenantId, keyId, {
         ...(patchRequest.enabled === undefined ? {} : { enabled: patchRequest.enabled }),
         ...(isDefaultGatewayApiKey(current) ? { isDefault: true } : {}),

@@ -94,7 +94,12 @@ export interface OAuthDeviceFlowContext {
   readonly fetchFn?: FetchLike | undefined;
 }
 
-/** Minimal fetch surface accepted by the OAuth flow contracts. */
+/**
+ * Minimal fetch surface accepted by the OAuth flow contracts: the plain fetch
+ * call signature. Single owner of this shape — `oauth-client.ts` re-exports it
+ * instead of restating it. (The quota lane's `FetchLike` in `quota-contracts`
+ * is `typeof fetch`, a deliberately wider shape — see `kiro-quota.ts`.)
+ */
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export type OAuthDevicePollResult =

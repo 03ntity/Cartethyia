@@ -1,8 +1,8 @@
 // Daily check-in ride-along.
 //
-// dynamic-import-ok: the qoder/buddy check-in imports are lazy-loaded
-// inside the account loop (B-02) so the boot graph stays clean — this runs
-// as a ride-along with the quota sweep, not at startup.
+// dynamic-import-ok: the buddy/qoder check-in fetches are lazy-loaded
+// inside the account loop (B-02); only the provider-id list is imported
+// statically. This runs as a ride-along with the quota sweep, not at startup.
 //
 // CodeBuddy grants a free credit package once per calendar day. This
 // claims it for every stored account and logs one line per account, so an
@@ -28,6 +28,7 @@ import { dailyCheckinLedger, networkPools } from "../persistence/schema";
 import type { ProviderId } from "../providers/provider-contracts";
 import { log } from "../observability/logger";
 import type { DailyCheckinResult } from "../providers/integrations/buddy/lifecycle";
+import { QODER_CHECKIN_PROVIDER_IDS } from "../providers/integrations/qoder/qoder-checkin";
 import { BUDDY_PROVIDER_IDS } from "../providers/provider-metadata";
 
 export type { DailyCheckinResult };
@@ -35,7 +36,7 @@ export type { DailyCheckinResult };
 /**
  * Calendar-day key in UTC, matching the provider's own day boundary.
  *
- * Mirrors `buddy-checkin.ts`'s `checkinDayKey` (a pure two-line util). Kept
+ * Mirrors `lifecycle.ts`'s `checkinDayKey` (a pure two-line util). Kept
  * local so this worker module does not statically import the heavy buddy-checkin
  * graph just for a date key (B-02).
  */
@@ -46,12 +47,9 @@ export function checkinDayKey(now: Date = new Date()): string {
 /**
  * The Buddy and Qoder providers the daily check-in claims a credit for.
  *
- * Derived from the shared buddy family set plus the Qoder check-in list, the
- * same shape as `buddy-checkin.ts`'s `DAILY_CHECKIN_PROVIDER_IDS`. Kept local
- * so this worker module does not statically import the heavy buddy/qoder
- * graphs for a constant id list (B-02).
+ * The shared buddy family set plus `QODER_CHECKIN_PROVIDER_IDS`, the single
+ * source in `providers/integrations/qoder/qoder-checkin.ts`.
  */
-const QODER_CHECKIN_PROVIDER_IDS: readonly string[] = ["qoder", "qodercn"];
 export const DAILY_CHECKIN_PROVIDER_IDS: readonly string[] = [
   ...BUDDY_PROVIDER_IDS,
   ...QODER_CHECKIN_PROVIDER_IDS,
@@ -464,9 +462,9 @@ export async function attemptDailyGrowthPass(args: {
   }
   let checkin: DailyCheckinResult;
   try {
-    // The buddy/qoder check-in graphs are lazy-loaded: only the provider on
-    // this account needs its surface, and neither should sit on the boot graph
-    // (B-02).
+    // The buddy/qoder check-in fetches are lazy-loaded: only the provider on
+    // this account needs its surface (B-02). The qoder module itself is
+    // already loaded for the provider-id list imported at the top.
     const isQoderCheckinProvider = (
       await import("../providers/integrations/qoder/qoder-checkin")
     ).isQoderCheckinProvider;

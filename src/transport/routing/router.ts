@@ -629,13 +629,13 @@ export class RoutingEngine {
    * Stamps one candidate with its provider's usage floor + quota windows (the
    * per-candidate half of the old `applyUsageFloor`).
    */
-  private async applyUsageFloorToCandidate(
+  private applyUsageFloorToCandidate(
     candidate: RouteCandidate,
     snapshot: RouteSnapshot,
     tenantId: string | null,
     quotaCache: ReadonlyMap<string, CachedQuotaEntry>,
     snapshotMap: ReadonlyMap<string, ProviderQuotaResultSnapshot>,
-  ): Promise<RouteCandidate> {
+  ): RouteCandidate {
     const accountId = candidate.provider_account_id;
     if (accountId === undefined) return candidate;
     const setting = this.resolveProviderRouting(
@@ -843,7 +843,7 @@ export class RoutingEngine {
    */
   private applyProviderRoutingSorted(
     eligible: readonly RouteCandidate[],
-    decisions: ReadonlyMap<string, RoutingDecision>,
+    decisions: ReadonlyMap<RouteCandidate, RoutingDecision>,
     snapshot: RouteSnapshot,
     tid: string | null,
   ): RouteCandidate[] {
@@ -852,11 +852,11 @@ export class RoutingEngine {
     let i = 0;
     while (i < eligible.length) {
       const cur = eligible[i]!;
-      const rank = decisions.get(admissionKey(cur))?.rank ?? ROUTING_RANK.FRESH_KNOWN;
+      const rank = decisions.get(cur)?.rank ?? ROUTING_RANK.FRESH_KNOWN;
       let j = i + 1;
       while (j < eligible.length) {
         const next = eligible[j]!;
-        const nextRank = decisions.get(admissionKey(next))?.rank ?? ROUTING_RANK.FRESH_KNOWN;
+        const nextRank = decisions.get(next)?.rank ?? ROUTING_RANK.FRESH_KNOWN;
         if (
           next.provider_id !== cur.provider_id ||
           next.model_id !== cur.model_id ||
@@ -943,10 +943,10 @@ export class RoutingEngine {
         },
       );
     }
-    const decisions = new Map<string, RoutingDecision>();
+    const decisions = new Map<RouteCandidate, RoutingDecision>();
     for (const candidate of pinned) {
       const decision = pinnedDecisions.find((d) => d.candidate === candidate);
-      decisions.set(admissionKey(candidate), {
+      decisions.set(candidate, {
         eligible: true,
         rank: ROUTING_RANK.FRESH_KNOWN,
         reason: "healthy",
@@ -983,16 +983,6 @@ export class RoutingEngine {
       allowCliMappings,
       keyId,
     );
-    // Continuation affinity is applied first and absolutely.
-    //
-    // A request carrying a tool result for a provider session this process is
-    // holding MUST reach the exact live account that owns that session. Routing
-    // it anywhere else is not a degraded choice — it is a correctness failure:
-    // the result would be written onto a different account's upstream turn
-    // (corrupting both conversations and leaking the first account's context),
-    // or into a fresh turn that never asked for the call. So the candidate set
-    // is restricted before any health, cooling, or rotation logic runs, and an
-    // empty result is a refusal rather than a fallback to normal routing.
     // Continuation affinity is applied first and absolutely.
     //
     // A request carrying a tool result for a provider session this process is
@@ -1060,30 +1050,27 @@ export class RoutingEngine {
         for (const [accountId, snap] of snaps) snapshotByAccount.set(accountId, snap);
       }
     }
-    const evaluations = await Promise.all(
-      matching.map(async (candidate) => {
-        const stamped = await this.applyUsageFloorToCandidate(
-          candidate,
-          snapshot,
-          tid,
-          quotaCacheByAccount,
-          snapshotByAccount,
-        );
-        return this.evaluateCandidate(stamped, snapshot, tid, requiredCapabilities);
-      }),
-    );
-    const decisions = new Map<string, RoutingDecision>();
+    const evaluations = matching.map((candidate) => {
+      const stamped = this.applyUsageFloorToCandidate(
+        candidate,
+        snapshot,
+        tid,
+        quotaCacheByAccount,
+        snapshotByAccount,
+      );
+      return this.evaluateCandidate(stamped, snapshot, tid, requiredCapabilities);
+    });
+    const decisions = new Map<RouteCandidate, RoutingDecision>();
     for (const evaluation of evaluations) {
-      decisions.set(admissionKey(evaluation.candidate), evaluation.decision);
+      decisions.set(evaluation.candidate, evaluation.decision);
     }
     // Saturation is read once (inflight counters) and merged into the same
     // decision map rather than a second sort pass.
     const saturated = await this.saturatedCandidates(matching);
     for (const candidate of saturated) {
-      const key = admissionKey(candidate);
-      const existing = decisions.get(key);
+      const existing = decisions.get(candidate);
       if (existing !== undefined) {
-        decisions.set(key, {
+        decisions.set(candidate, {
           ...existing,
           eligible: existing.eligible,
           rank: ROUTING_RANK.SATURATED,
@@ -1093,7 +1080,7 @@ export class RoutingEngine {
     }
     let eligible = evaluations
       .map((evaluation) => evaluation.candidate)
-      .filter((candidate) => decisions.get(admissionKey(candidate))?.eligible === true);
+      .filter((candidate) => decisions.get(candidate)?.eligible === true);
 
     if (eligible.length === 0) {
       // Time-bounded exclusions answer 429, not 503. See the long comment that
@@ -1148,8 +1135,8 @@ export class RoutingEngine {
     const stickyAccountId = stickyEntry?.accountId;
     const stickyWarm = stickyEntry !== undefined && Date.now() - stickyEntry.lastUsedAtMs < stickyWarmMs;
     eligible = [...eligible].sort((left, right) => {
-      const leftRank = decisions.get(admissionKey(left))?.rank ?? ROUTING_RANK.FRESH_KNOWN;
-      const rightRank = decisions.get(admissionKey(right))?.rank ?? ROUTING_RANK.FRESH_KNOWN;
+      const leftRank = decisions.get(left)?.rank ?? ROUTING_RANK.FRESH_KNOWN;
+      const rightRank = decisions.get(right)?.rank ?? ROUTING_RANK.FRESH_KNOWN;
       if (leftRank !== rightRank) return leftRank - rightRank;
       // A free-tier model routes to any account: skip every quota-derived
       // preference (credit, reserve, hot-window, drain) so the original order

@@ -9,6 +9,7 @@ import {
   type ReasoningSummaryIdentity,
 } from "../reasoning-summary";
 import type { MessagesWireObject } from "./parse";
+import { lastEventOfType } from "../adapters";
 import { GatewayError } from "../../../protocol/gateway-error";
 
 /**
@@ -259,14 +260,8 @@ export function stopData(events: readonly CanonicalEvent[]): {
   usage?: UsageRecord;
   failed: boolean;
 } {
-  const terminal = [...events]
-    .reverse()
-    .find(
-      (event): event is Extract<CanonicalEvent, { type: "terminal" }> => event.type === "terminal",
-    );
-  const usageEvent = [...events]
-    .reverse()
-    .find((event): event is Extract<CanonicalEvent, { type: "usage" }> => event.type === "usage");
+  const terminal = lastEventOfType(events, "terminal");
+  const usageEvent = lastEventOfType(events, "usage");
   // A failed terminal — `failed`, or `aborted` (upstream stream error) —
   // marks the response as failed. An explicit canonical `error` event before
   // the terminal also fails it: the upstream declared a failure even when the

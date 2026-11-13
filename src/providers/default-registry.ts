@@ -62,15 +62,6 @@ function extractJsonCredentialToken(secret: string): string {
 }
 
 /**
- * Qoder's live model list for one realm.
- *
- * The request has to be signed with the account's COSY identity and has to
- * carry the body that was signed — a bare GET is refused — so discovery cannot
- * use the generic bearer helper. It resolves the same identity dispatch uses
- * (PAT exchange or the persisted OAuth state) and then lists against the
- * realm's own gateway hosts.
- */
-/**
  * Trae model discovery for one realm.
  *
  * The listing is per account region: it answers on CN and on the intl region
@@ -121,6 +112,15 @@ function traeDiscovery(
   };
 }
 
+/**
+ * Qoder's live model list for one realm.
+ *
+ * The request has to be signed with the account's COSY identity and has to
+ * carry the body that was signed — a bare GET is refused — so discovery cannot
+ * use the generic bearer helper. It resolves the same identity dispatch uses
+ * (PAT exchange or the persisted OAuth state) and then lists against the
+ * realm's own gateway hosts.
+ */
 function qoderDiscovery(
   realm: QoderRealm,
   providerId: string,

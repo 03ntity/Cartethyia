@@ -27,12 +27,12 @@ import {
   existsSync,
   lstatSync,
   readdirSync,
+  readlinkSync,
   unlinkSync,
   mkdirSync,
   realpathSync,
 } from "node:fs";
 import { resolve, join, relative, dirname, isAbsolute } from "node:path";
-import { createHash } from "node:crypto";
 
 /** Max output bytes a tool result carries before truncation is reported. */
 export const CURSOR_TOOL_MAX_OUTPUT_BYTES = 64 * 1024;
@@ -98,13 +98,48 @@ function canonicalToolArgumentsFrom(value: unknown): Record<string, unknown> {
   );
 }
 
-/** Resolves a tool path against the workspace root; null when it escapes. */
+/** Resolves one symlink (even a dangling one) to its lexical target; else `p`. */
+function resolveSymlink(p: string): string {
+  try {
+    if (!lstatSync(p).isSymbolicLink()) return p;
+    return resolve(dirname(p), readlinkSync(p));
+  } catch {
+    return p;
+  }
+}
+
+/** The deepest existing ancestor of `p` (or `p` itself when it exists). */
+function deepestExisting(p: string): string {
+  let current = p;
+  while (!existsSync(current)) {
+    const parent = dirname(current);
+    if (parent === current) return current;
+    current = parent;
+  }
+  return current;
+}
+
+/**
+ * Resolves a tool path against the workspace root; null when it escapes.
+ *
+ * Two containment checks: the lexical one (`relative` must not leave `root`)
+ * and a realpath one. A symlink inside the workspace can point outside it
+ * while the lexical path stays inside, and a write through a dangling symlink
+ * would create the file at the link's target. The target (or, when it does
+ * not exist yet, its deepest existing ancestor) must therefore canonicalize
+ * inside the canonical workspace root.
+ */
 function resolveInside(root: string, input: string | undefined): string | null {
   if (input === undefined || input.trim().length === 0) return null;
   const raw = input.trim();
   const abs = isAbsolute(raw) ? raw : resolve(root, raw);
   const rel = relative(root, abs);
   if (rel.startsWith("..") || isAbsolute(rel)) return null;
+  const rootReal = safeRealpath(root);
+  const target = resolveSymlink(abs);
+  const anchor = safeRealpath(existsSync(target) ? target : deepestExisting(target));
+  const relReal = relative(rootReal, anchor);
+  if (relReal.startsWith("..") || isAbsolute(relReal)) return null;
   return abs;
 }
 
@@ -733,13 +768,4 @@ export async function executeNativeTool(
   }
 
   return { field, message };
-}
-
-/** Blobs a file for output-blob results (unused here; kept for symmetry). */
-export function fileDigest(path: string): string {
-  try {
-    return createHash("sha256").update(readFileSync(path)).digest("hex");
-  } catch {
-    return "";
-  }
 }

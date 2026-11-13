@@ -12,7 +12,12 @@
  * allocates megabytes to describe an error makes the error worse. Every
  * dimension gets a cap, and every marker is the same stable `[truncated]` so a
  * bounded line is recognizable as bounded rather than looking like content.
+ *
+ * String values are also secret-scrubbed here (see `redaction.ts`): this copy
+ * sits on the write path of both log sinks, Pino and the console ring, so
+ * scrubbing it cannot be bypassed by a new caller.
  */
+import { scrubSecrets } from "./redaction";
 
 /** Nesting levels kept. */
 export const LOG_MAX_DEPTH = 5;
@@ -38,6 +43,14 @@ export const LOG_RING_MAX_CODE_UNITS = 8_192;
 export const LOG_TRUNCATED_MARKER = "[truncated]";
 const LOG_CIRCULAR_MARKER = "[circular]";
 
+/**
+ * Input ceiling for the secret scrub.
+ *
+ * Keeps the regex walk bounded; the slack over `LOG_MAX_STRING_CODE_UNITS`
+ * lets the scrubber see a whole credential run that straddles the kept window.
+ */
+const LOG_SCRUB_INPUT_CODE_UNITS = 65_536;
+
 function isHighSurrogate(code: number): boolean {
   return code >= 0xd800 && code <= 0xdbff;
 }
@@ -59,11 +72,26 @@ export function truncateLogString(value: string, maxCodeUnits: number): string {
 }
 
 /**
+ * Scrubs credential-shaped runs out of one string, then applies the kept cap.
+ *
+ * Scrub before the cap, not after: a secret straddling the cut would leave its
+ * readable head in the kept window (a JWT's claims are only base64url). The
+ * scrubber's input is pre-bounded so its regex walk never touches an unbounded
+ * string - a log call must stay bounded in every dimension - and everything
+ * past the cap is dropped from the output anyway.
+ */
+function scrubLogString(value: string): string {
+  return truncateLogString(
+    scrubSecrets(truncateLogString(value, LOG_SCRUB_INPUT_CODE_UNITS)),
+    LOG_MAX_STRING_CODE_UNITS,
+  );
+}
+
+/**
  * A circular-safe, bounded copy.
  *
- * Cycle-guarded because the canonical redactor applied downstream recurses
- * without one: a circular log arg would overflow the stack before redaction
- * ran. Errors collapse to name+message — a stack is far too long for a tail
+ * Cycle-guarded because a circular log arg would otherwise overflow the stack
+ * mid-copy. Errors collapse to name+message — a stack is far too long for a tail
  * line, and the message already carries the cause.
  *
  * The node budget is a mutable counter object rather than a returned value:
@@ -80,7 +108,7 @@ function decycle(
   seen: WeakSet<object>,
   depth: number,
 ): unknown {
-  if (typeof value === "string") return truncateLogString(value, LOG_MAX_STRING_CODE_UNITS);
+  if (typeof value === "string") return scrubLogString(value);
   if (value === null || typeof value !== "object") return value;
   if (seen.has(value)) return LOG_CIRCULAR_MARKER;
   if (depth > LOG_MAX_DEPTH) return LOG_TRUNCATED_MARKER;
@@ -88,8 +116,8 @@ function decycle(
   budget.remaining -= 1;
   if (value instanceof Error) {
     return {
-      name: truncateLogString(value.name, LOG_MAX_STRING_CODE_UNITS),
-      message: truncateLogString(value.message, LOG_MAX_STRING_CODE_UNITS),
+      name: scrubLogString(value.name),
+      message: scrubLogString(value.message),
     };
   }
   seen.add(value);
@@ -112,7 +140,7 @@ function decycle(
       out[LOG_TRUNCATED_MARKER] = entries.length - LOG_MAX_KEYS;
       break;
     }
-    out[truncateLogString(key, LOG_MAX_STRING_CODE_UNITS)] = decycle(entry, budget, seen, depth + 1);
+    out[scrubLogString(key)] = decycle(entry, budget, seen, depth + 1);
   }
   return out;
 }

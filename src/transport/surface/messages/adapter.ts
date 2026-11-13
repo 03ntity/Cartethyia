@@ -1,6 +1,6 @@
 import type { CanonicalEvent, CanonicalRequest, GenerationControls, ReasoningIntent } from "../../../protocol/canonical-model";
 import type { SurfaceAdapter } from "../adapters";
-import { requiredObject } from "../adapters";
+import { lastEventOfType, requiredObject } from "../adapters";
 import { isRecord } from "../../../protocol/codecs";
 import { TEXT_ENCODER } from "../../../protocol/sse-frame";
 import type { MessagesEncodingContext, MessagesErrorResponse, MessagesParseOptions, MessagesResponse } from "./parse";
@@ -153,9 +153,7 @@ export class MessagesAdapter implements SurfaceAdapter {
         : data.reason;
     const usage = usageToMessagesWire(data.usage);
     if (data.failed) {
-      const errorEvent = [...events]
-        .reverse()
-        .find((event): event is Extract<CanonicalEvent, { type: "error" }> => event.type === "error");
+      const errorEvent = lastEventOfType(events, "error");
       return {
         id: responseId,
         type: "error",

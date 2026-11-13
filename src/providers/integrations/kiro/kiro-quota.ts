@@ -153,11 +153,10 @@ function parseUsage(payload: unknown): ProviderQuotaResult {
 }
 
 /**
- * Reads Kiro's usage limits.
+ * Reads Kiro's usage limits from the management surface.
  *
- * Three surfaces are attempted in turn because which one answers depends on the
- * account's auth family and region; an auth refusal is remembered so the
- * reported error names the real cause instead of the last transport failure.
+ * An auth refusal is remembered so the reported error names the real cause
+ * instead of the last transport failure.
  */
 export async function fetchKiroQuota(
   credential: string,
@@ -180,40 +179,26 @@ export async function fetchKiroQuota(
   if (auth.profileArn.length > 0) query.set("profileArn", auth.profileArn);
 
   const managementHost = KIRO_MANAGEMENT_HOST_TEMPLATE.replace("{region}", auth.region);
-  const attempts: readonly { readonly name: string; readonly run: () => Promise<Response> }[] = [
-    {
-      name: "management-get",
-      run: () =>
-        fetcher(`${managementHost}/Get-Usage-Limits?${query.toString()}`, {
-          method: "GET",
-          headers,
-          signal: AbortSignal.timeout(15_000),
-        }),
-    },
-  ];
 
   let sawAuthRefusal = false;
   let lastError = "Unable to fetch Kiro usage right now.";
-  for (const attempt of attempts) {
-    let response: Response;
-    try {
-      response = await attempt.run();
-    } catch (error) {
-      lastError = `${attempt.name}: ${error instanceof Error ? error.message : String(error)}`;
-      continue;
-    }
+  try {
+    const response = await fetcher(`${managementHost}/Get-Usage-Limits?${query.toString()}`, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(15_000),
+    });
     if (!response.ok) {
       await response.text().catch(() => "");
       if (response.status === 401 || response.status === 403) sawAuthRefusal = true;
-      lastError = `${attempt.name}: HTTP ${response.status}`;
-      continue;
+      lastError = `management-get: HTTP ${response.status}`;
+    } else {
+      const payload = await response.json().catch(() => undefined);
+      if (payload !== undefined) return parseUsage(payload);
+      lastError = "management-get: response was not JSON";
     }
-    const payload = await response.json().catch(() => undefined);
-    if (payload === undefined) {
-      lastError = `${attempt.name}: response was not JSON`;
-      continue;
-    }
-    return parseUsage(payload);
+  } catch (error) {
+    lastError = `management-get: ${error instanceof Error ? error.message : String(error)}`;
   }
 
   // A refused credential is the actionable answer, and it is the same whichever

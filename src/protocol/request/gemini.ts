@@ -312,18 +312,21 @@ export function buildGeminiPayload(
   const functionTools = (request.tools ?? []).filter(
     (t) => t.name && !HOSTED_TOOL_NAMES.has(t.name) && t.tool_type !== "web_search",
   );
-  if (hostedTools.length > 0) payload["tools"] = hostedTools;
+  // Hosted declarations and function declarations are separate `tools` entries
+  // and can coexist in one array; assigning the function block over the hosted
+  // block silently dropped the hosted capability (websearch grounding vanished
+  // whenever the request also declared a function tool). Merge instead.
+  const tools: Record<string, unknown>[] = [...hostedTools];
   if (functionTools.length > 0) {
-    payload["tools"] = [
-      {
-        functionDeclarations: functionTools.map((tool) => ({
-          name: tool.name,
-          description: tool.description ?? "",
-          parameters: sanitizeGeminiSchema(tool.jsonSchema),
-        })),
-      },
-    ];
+    tools.push({
+      functionDeclarations: functionTools.map((tool) => ({
+        name: tool.name,
+        description: tool.description ?? "",
+        parameters: sanitizeGeminiSchema(tool.jsonSchema),
+      })),
+    });
   }
+  if (tools.length > 0) payload["tools"] = tools;
   const generationConfig: Record<string, unknown> = {};
   const controls = request.generation_controls as Record<string, unknown>;
   const maxOut = controls["max_tokens"] ?? controls["max_output_tokens"] ?? controls["max_completion_tokens"];

@@ -2,7 +2,7 @@ import type {
   AccountErrorRule,
   AccountErrorSignals,
 } from "../account-error-classification";
-import { unsupportedModelCooldownMs } from "../account-error-classification";
+import { modelUnreachableEscalating } from "../account-error-classification";
 
 /**
  * Qoder's quota verdicts (`110` billing-daily-count, pricing-url refusals)
@@ -28,18 +28,7 @@ export const qoderPlanGatedRule: AccountErrorRule = {
   match: (s) =>
     isQoder(s) &&
     (s.providerCode === "112" || s.lower.includes("pricingurl")),
-  decide: (s) => {
-    const cooldownMs = unsupportedModelCooldownMs(s.modelBlockHits);
-    return s.result(
-      "model_unreachable",
-      "cooldown",
-      cooldownMs,
-      new Date(Date.now() + cooldownMs),
-      s.reason("Model not included in this account's plan"),
-      s.origin === "upstream" && s.modelId !== undefined,
-      true,
-    );
-  },
+  decide: (s) => modelUnreachableEscalating(s, "Model not included in this account's plan"),
 };
 
 /**
@@ -63,8 +52,3 @@ export const qoderModelQuotaRule: AccountErrorRule = {
     );
   },
 };
-
-export const qoderRules: readonly AccountErrorRule[] = [
-  qoderPlanGatedRule,
-  qoderModelQuotaRule,
-];

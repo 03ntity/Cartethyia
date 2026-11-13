@@ -2,8 +2,7 @@
  * Qoder legacy COSY chat builder & transport.
  *
  * `buildQoderRequest` translates one canonical request into the legacy
- * `/algo/.../agent_chat_generation` body (and, by reuse, the messages/tools
- * shared by the IDE and gRPC surfaces). `callQoder` signs and sends it over
+ * `/algo/.../agent_chat_generation` body. `callQoder` signs and sends it over
  * the COSY surface with the app/worker's headers (undici UA, machine
  * identity, business/scene app profile, `x-model-key/source`, SSE accept)
  * and a zstd-compressed body (capture 2026-11-11).
@@ -63,31 +62,14 @@ function qoderStableRecordId(modelId: string, messages: CanonicalRequest["messag
 }
 
 /**
- * The widest selectable context window for one model key.
- *
- * The live list's `context_config` is the authority when discovery has run:
- * it names every window the account can switch to, and the widest one is what
- * a dispatch should send (`model_config.max_input_tokens`) so a conversation is
- * never capped at the *currently active* window (often 180k) when the account
- * can use 1M. Falls back to the static roster's stated window otherwise.
+ * Clamps the caller's requested output budget to the model's stated ceiling
+ * (`outputCeiling`, computed once in `buildQoderRequest` so the request's
+ * `max_tokens` and `model_config.max_output_tokens` can never disagree).
  */
 function qoderRequestedMaxTokens(
   request: CanonicalRequest,
-  modelConfig: QoderModelConfig,
-  realm: QoderRealm,
+  configured: number,
 ): number {
-  /**
-   * The ceiling is the roster's stated one. A fixed 32k fallback would clamp
-   * every model alike, so a request asking for more would be silently lowered
-   * no matter which model it named. A discovered row carries no
-   * `max_output_tokens` (upstream's model list reports none), so consult the
-   * static roster for the key before the 65_536 last resort — and keep that
-   * last resort only when neither the caller nor the roster states a limit.
-   */
-  const configured =
-    typeof modelConfig.max_output_tokens === "number"
-      ? modelConfig.max_output_tokens
-      : qoderRosterMaxOutput(realm === "cn" ? "qodercn" : "qoder", modelConfig.id) ?? 65_536;
   const controls = request.generation_controls as Record<string, unknown>;
   const requested =
     typeof controls["max_tokens"] === "number"
@@ -359,7 +341,17 @@ export function buildQoderRequest(
   }
   const latestUserMessage = [...qoderMessages].reverse().find((m) => m["role"] === "user");
   const latestUserText = typeof latestUserMessage?.["content"] === "string" ? (latestUserMessage["content"] as string) : "";
-  const maxTokens = qoderRequestedMaxTokens(request, modelConfig, realm);
+  /**
+   * The model's output ceiling, computed once. A fixed 32k fallback would
+   * clamp every model alike, so a request asking for more would be silently
+   * lowered no matter which model it named. A discovered row carries no
+   * `max_output_tokens` (upstream's model list reports none), so consult the
+   * static roster for the key before the 65_536 last resort — and keep that
+   * last resort only when neither the caller nor the roster states a limit.
+   */
+  const outputCeiling =
+    modelConfig.max_output_tokens ?? qoderRosterMaxOutput(realm === "cn" ? "qodercn" : "qoder", modelConfig.id) ?? 65_536;
+  const maxTokens = qoderRequestedMaxTokens(request, outputCeiling);
   const reasoning = modelConfig.is_reasoning === true;
   // 1:1 with the IDE worker's `FTn` legacy builder, which sends reasoning
   // effort as a top-level camelCase field (`reasoningEffort`), derived from
@@ -431,11 +423,8 @@ export function buildQoderRequest(
       // request would declare the *currently active* window — often 180k — even
       // when the account can use 1M, capping the conversation the upstream sees.
       max_input_tokens: qoderMaxContextFor(modelId, modelConfig, realm),
-      // Mirrors the roster's stated ceiling. A fixed 32k fallback would be sent
-      // for every model alike, so the request would declare a cap the catalog
-      // does not publish. A discovered model's config carries no output limit,
-      // so consult the roster for the key before the 65_536 last resort.
-      max_output_tokens: modelConfig.max_output_tokens ?? qoderRosterMaxOutput(realm === "cn" ? "qodercn" : "qoder", modelId) ?? 65_536,
+      // The same ceiling `max_tokens` clamps to (see `outputCeiling`).
+      max_output_tokens: outputCeiling,
       source: modelConfig.source ?? "system",
     },
     messages: qoderMessages,

@@ -196,10 +196,3 @@ export function summarizePerchStream(events: readonly PerchSseEvent[]): PerchMod
   }
   return { ok: ok || text.length > 0, text, model, provider, ...(usage ? { usage } : {}), ...(error ? { error } : {}), ...(errorCode ? { errorCode } : {}) };
 }
-
-/** Renders a canonical message list into a debug label (for capture). */
-export function summarizeMessages(request: CanonicalRequest): string {
-  return request.messages
-    .map((m) => `${m.role}:${m.content.map((p) => (p.kind === "text" ? p.text.length : 0)).reduce((a, b) => a + b, 0)}`)
-    .join("|");
-}

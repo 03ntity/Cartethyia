@@ -291,6 +291,8 @@ const RE_GIT_LOG = /^[*|/\\ ]*commit [0-9a-f]{7,40}$/m;
 const RE_PORCELAIN = /^[ MADRCU?!][ MADRCU?!] \S/m;
 const RE_TREE_GLYPH = /[├└]──|│  /;
 const RE_LS_ROW = /^[-dlbcps][rwx-]{9}/m;
+/** `RE_LS_ROW` as a global /m match for counting rows — compiled once, not per call. */
+const RE_LS_ROW_GLOBAL = new RegExp(RE_LS_ROW.source, "gm");
 const RE_LS_TOTAL = /^total \d+$/m;
 const RE_READ_NUMBERED = /^\s*\d+\|/;
 
@@ -343,13 +345,14 @@ export function autoDetectFilter(
   if (RE_GIT_STATUS.test(head)) return gitStatusFilter;
   if (isMostlyPorcelain(head)) return gitStatusFilter;
 
-  const nonEmpty = head.split("\n").filter((l) => l.trim().length > 0);
+  const lines = head.split("\n");
+  const nonEmpty = lines.filter((l) => l.trim().length > 0);
   if (nonEmpty.slice(0, 5).some(isGrepLine)) return grepFilter;
   if (nonEmpty.length >= 3 && nonEmpty.every(isPathLike)) return findFilter;
   if (RE_TREE_GLYPH.test(head)) return treeFilter;
-  if (RE_LS_TOTAL.test(head) || (head.match(new RegExp(RE_LS_ROW.source, "gm")) ?? []).length >= 3)
+  if (RE_LS_TOTAL.test(head) || (head.match(RE_LS_ROW_GLOBAL) ?? []).length >= 3)
     return lsFilter;
-  if (head.split("\n").length >= SMART_TRUNCATE_MIN_LINES && isLineNumbered(head.split("\n")))
+  if (lines.length >= SMART_TRUNCATE_MIN_LINES && isLineNumbered(lines))
     return smartTruncateFilter;
   if (!genericFallback) return null;
   if (nonEmpty.length >= 5) return dedupLogFilter;

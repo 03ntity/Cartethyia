@@ -430,7 +430,7 @@ export class OAuthCallbackListener {
 }
 
 /** Escapes the few characters that can break out of the message paragraph. */
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => {
     const entities: Record<string, string> = {
       "&": "&amp;",

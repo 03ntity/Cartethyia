@@ -8,7 +8,6 @@
 import type {
   CanonicalEvent,
   CanonicalRequest,
-  CanonicalMessage,
   CanonicalStopReason,
 } from "../../../protocol/canonical-model";
 import { GatewayError } from "../../../protocol/gateway-error";
@@ -149,10 +148,8 @@ export class FreepiAdapter implements ProviderAdapter {
         events = [];
         for await (const event of this.#events(
           response.body as ReadableStream<Uint8Array>,
-          lifecycle.signal,
           request.model,
           `${modelId}:${activeOwner.affinity ?? "fresh"}`,
-          activeRequest.messages,
         )) {
           events.push(event);
         }
@@ -182,10 +179,8 @@ export class FreepiAdapter implements ProviderAdapter {
 
   async *#events(
     body: ReadableStream<Uint8Array>,
-    _signal: AbortSignal,
     requestModel: string,
     sessionId?: string,
-    _messages?: readonly CanonicalMessage[],
   ): AsyncIterable<CanonicalEvent> {
     let seq = 1;
     yield { type: "response_start", sequence_number: seq++, model: requestModel } as CanonicalEvent;

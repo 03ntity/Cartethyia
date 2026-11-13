@@ -81,11 +81,6 @@ function cursorErrorDetail(error: Record<string, unknown>): string {
   return raw.length > 0 ? raw : "Cursor refused the Run";
 }
 
-/** One decoded Cursor server message. */
-export interface CursorServerMessage {
-  readonly raw: Record<string, unknown>;
-}
-
 /** Read-idle bound for one Run stream. */
 const DEFAULT_READ_IDLE_MS = 120_000;
 
@@ -451,24 +446,6 @@ export function openRetryDelayMs(attempt: number): number {
   return Math.min(500 * 2 ** attempt, 8_000);
 }
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new GatewayError("transport_closed", 499, "The request was cancelled (request {requestId}). Send it again whenever ready 🙃"));
-      },
-      { once: true },
-    );
-  });
-}
-
-/** Applies the open-retry backoff; exported as part of the transport policy. */
-export { sleep as cursorSleep };
-
 /** Connect's code for an HTTP status that carried no Connect error of its own. */
 function connectCodeForStatus(status: number): string {
   return { 400: "invalid_argument", 401: "unauthenticated", 403: "permission_denied", 429: "resource_exhausted" }[
@@ -814,7 +791,7 @@ export async function openCursorRunWithFallback(input: {
   const h1Until = h1UntilByCredential.get(digest) ?? 0;
   if (input.forceH1 === true) h1UntilByCredential.set(digest, Date.now() + H2_RETRY_AFTER_MS);
   if (input.forceH1 === true || Date.now() < h1Until || input.outboundHttp2 === undefined) {
-    return openH1OrThrow(input, input.requestId ?? crypto.randomUUID(), digest);
+    return openH1OrThrow(input, input.requestId ?? crypto.randomUUID());
   }
   let openedPromise: ReturnType<typeof openCursorRun> | undefined;
   try {
@@ -859,7 +836,6 @@ export async function openCursorRunWithFallback(input: {
     return openH1OrThrow(
       input,
       input.requestId ?? openedPromise?.then((o) => o.requestId).catch(() => crypto.randomUUID()) ?? crypto.randomUUID(),
-      digest,
     );
   }
 }
@@ -874,7 +850,6 @@ async function openH1OrThrow(
     readonly readIdleMs?: number;
   },
   requestId: string | Promise<string>,
-  digest: string,
 ): Promise<{ transport: CursorRunTransport; requestId: string }> {
   const id = await requestId;
   if (input.outboundFetch === undefined) {
@@ -893,6 +868,5 @@ async function openH1OrThrow(
     ...(input.clientVersion === undefined ? {} : { clientVersion: input.clientVersion }),
     ...(input.readIdleMs === undefined ? {} : { readIdleMs: input.readIdleMs }),
   });
-  void digest;
   return { transport, requestId: id };
 }

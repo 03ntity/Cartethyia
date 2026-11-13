@@ -265,7 +265,7 @@ class GeminiAdapter implements ProviderAdapter {
       if (!response.body) throw new GatewayError("platform_unavailable", 502, "Gemini returned empty stream (request {requestId}). The upstream came back empty-handed — retry 🌙", {}, "upstream");
       let seq = 1;
       yield { type: "response_start", sequence_number: seq++, model: request.model } as CanonicalEvent;
-      const state = { started: true, stopped: false, activeCalls: new Set<string>() };
+      const activeCalls = new Set<string>();
       let rawUsage: Record<string, unknown> | undefined;
       let finishReason: string | undefined;
       let outputCalls = 0;
@@ -283,8 +283,8 @@ class GeminiAdapter implements ProviderAdapter {
           yield { type: "content_delta", sequence_number: seq++, content: { kind: "text", text: output.text } } as CanonicalEvent;
         }
         for (const call of output.calls) {
-          if (!state.activeCalls.has(call.id)) {
-            state.activeCalls.add(call.id);
+          if (!activeCalls.has(call.id)) {
+            activeCalls.add(call.id);
             yield { type: "tool_call_delta", sequence_number: seq++, call_id: call.id, name: call.name, arguments_delta: "" } as CanonicalEvent;
           }
           const argsText = JSON.stringify(call.args);
@@ -296,7 +296,6 @@ class GeminiAdapter implements ProviderAdapter {
         if (isRecord(parsed["usageMetadata"])) rawUsage = parsed["usageMetadata"] as Record<string, unknown>;
         if (typeof cand["finishReason"] === "string") {
           finishReason = cand["finishReason"] as string;
-          state.stopped = true;
         }
       }
       const stopMap: Record<string, CanonicalStopReason> = { MAX_TOKENS: "length", STOP: "stop", SAFETY: "content_filter" };

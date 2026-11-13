@@ -39,6 +39,7 @@ import {
   responseParts,
 } from "../../../protocol/response/gemini";
 import {
+  ANTIGRAVITY_SANDBOX_BASE,
   antigravityWireModelId,
   applySkipThoughtSignatureBypass,
   dropAntigravityUnsignedReasoning,
@@ -100,7 +101,6 @@ export const ANTIGRAVITY_MODELS: readonly ModelDefinition[] = [
   antigravityModel("gemini-2.5-flash", 1_000_000, 65_535, true),
   antigravityModel("gemini-2.5-flash-thinking", 1_000_000, 65_535, true),
   antigravityModel("gemini-2.5-flash-lite", 1_000_000, 65_535, true),
-  antigravityModel("gemini-2.5-pro", 1_000_000, 65_535, true),
   antigravityModel("gemini-3-flash", 1_000_000, 65_536, true),
   antigravityModel("gemini-3.1-flash-lite", 1_000_000, 65_535, true),
   antigravityModel("gemini-3.5-flash-lite", 1_000_000, 65_535, true),
@@ -888,7 +888,7 @@ export function failoverAntigravityUrl(url: string, baseUrl: string): string | u
   if (!baseUrl.includes("daily-cloudcode-pa.googleapis.com")) return undefined;
   const sandboxBase = baseUrl.replace(
     "daily-cloudcode-pa.googleapis.com",
-    "daily-cloudcode-pa.sandbox.googleapis.com",
+    new URL(ANTIGRAVITY_SANDBOX_BASE).host,
   );
   return url.startsWith(baseUrl) ? `${sandboxBase}${url.slice(baseUrl.length)}` : undefined;
 }

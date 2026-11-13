@@ -75,7 +75,7 @@ import type { CursorContinuationScope, CursorRunSession } from "./cursor-session
 import { fetchCursorRunOrigin } from "./cursor-catalog";
 import { defaultParameterValues, fetchCursorModels } from "./cursor-catalog";
 import type { CursorModelInfo } from "./cursor-catalog";
-import { decodeValueToJson, decodeStructEntriesToJson } from "./protocol/struct";
+import { decodeStructEntriesToJson } from "./protocol/struct";
 import { encodeMessage } from "./protocol/messages";
 import { executeNativeTool, resolveExecFrame } from "./cursor-exec";
 import { fnv1a32 } from "../shared/hash";
@@ -623,8 +623,7 @@ class CursorAdapter implements ProviderAdapter {
     if (!allSameRun && !foreignLive && isCompleteToolHistoryReplay(request, pending)) {
       for (const entry of resolved) {
         cursorRunSessions.terminate(entry.session.runId, "Cursor Run superseded by a rebase");
-        this.#handles.delete(entry.session.runId);
-        this.cleanupReader(entry.session.runId);
+        this.#cleanupRun(entry.session.runId);
       }
       yield* this.#startRun(request, candidate, context);
       return;
@@ -671,6 +670,7 @@ class CursorAdapter implements ProviderAdapter {
       // failure the pump did not observe). Rebase rather than answer into a
       // dead stream.
       cursorRunSessions.terminate(runId, "Cursor Run transport is gone");
+      this.#cleanupRun(runId);
       yield* this.#startRun(request, candidate, context);
       return;
     }
@@ -705,8 +705,7 @@ class CursorAdapter implements ProviderAdapter {
           runId,
           `Cursor Run rejected a tool result: ${error instanceof Error ? error.message : String(error)}`,
         );
-        this.#handles.delete(runId);
-        this.cleanupReader(runId);
+        this.#cleanupRun(runId);
         yield* this.#startRun(request, candidate, context);
         return;
       }
@@ -724,12 +723,10 @@ class CursorAdapter implements ProviderAdapter {
       // The Run stays open only while it still owes an answer. A terminal close
       // is the session manager's single release path.
       if (cursorRunSessions.get(runId) === undefined) {
-        this.#handles.delete(runId);
-        this.cleanupReader(runId);
+        this.#cleanupRun(runId);
       } else if (session.pending.size === 0) {
         cursorRunSessions.terminate(runId);
-        this.#handles.delete(runId);
-        this.cleanupReader(runId);
+        this.#cleanupRun(runId);
       }
     }
   }
@@ -848,8 +845,6 @@ class CursorAdapter implements ProviderAdapter {
       descriptors,
       pending: new Map(),
       calls: new Map(),
-      usage: undefined,
-      failure: undefined,
     };
     let sequence = 0;
     const next = (): number => (sequence += 1);
@@ -920,11 +915,7 @@ class CursorAdapter implements ProviderAdapter {
         const checkpoint = state?.checkpoint.bytes;
         await this.#drainDispatches(runId, context.abort_signal);
         cursorRunSessions.terminate(runId, failure.message);
-        this.#handles.delete(runId);
-        this.cleanupReader(runId);
-        this.#frameState.delete(runId);
-        this.#dispatches.delete(runId);
-        this.#wireTraces.delete(runId);
+        this.#cleanupRun(runId);
         await sleepBeforeOpenRetry(openRetryDelayMs(nextAttempt - 1), context.abort_signal);
         yield* this.#startRun(request, candidate, context, {
           attempt: nextAttempt,
@@ -937,12 +928,11 @@ class CursorAdapter implements ProviderAdapter {
       }
       await this.#drainDispatches(runId, context.abort_signal);
       cursorRunSessions.terminate(runId, failure.message);
-      this.#handles.delete(runId);
+      this.#cleanupRun(runId);
       throw structuredCursorFailure(failure, classification, state, runId);
     } finally {
       if (cursorRunSessions.get(runId) === undefined) {
-        this.#handles.delete(runId);
-        this.cleanupReader(runId);
+        this.#cleanupRun(runId);
       }
       // A Run whose tool call is registered and unanswered is *held*, not
       // finished. Its pump ended at the interim `tool_use` terminal, but the
@@ -951,11 +941,7 @@ class CursorAdapter implements ProviderAdapter {
       // it just handed out, and the next request's tool result resolves nothing.
       else if (session.pending.size === 0) {
         cursorRunSessions.terminate(runId);
-        this.#handles.delete(runId);
-        this.cleanupReader(runId);
-        this.#frameState.delete(runId);
-        this.#dispatches.delete(runId);
-        this.#wireTraces.delete(runId);
+        this.#cleanupRun(runId);
       }
     }
   }
@@ -1094,6 +1080,22 @@ class CursorAdapter implements ProviderAdapter {
   }
 
   /**
+   * Removes every per-Run trace of a finished Run: handle, reader, frame
+   * state, exec dispatch set, and wire trace. Idempotent, and called from
+   * every terminal path (finish, failure, retry, rebase) — a Run the session
+   * manager released must not keep checkpoint bytes and sets alive in these
+   * maps for the life of the process. A held Run (pending tool calls) is
+   * never cleaned here: its state belongs to the result leg that answers them.
+   */
+  #cleanupRun(runId: string): void {
+    this.#handles.delete(runId);
+    this.cleanupReader(runId);
+    this.#frameState.delete(runId);
+    this.#dispatches.delete(runId);
+    this.#wireTraces.delete(runId);
+  }
+
+  /**
    * Resolves the Run origin for one account.
    *
    * Cursor routes an account to a region-specific host, and the wrong host
@@ -1170,7 +1172,7 @@ class CursorAdapter implements ProviderAdapter {
     const { context, handle, runId, session } = input;
     let sawToolCall = false;
     let terminalUsage: UsageRecord | undefined;
-    let stopReason: CanonicalStopReason = "stop";
+    const stopReason: CanonicalStopReason = "stop";
     let failure: GatewayError | undefined;
     const state = this.#frameState.get(runId) ?? {
       completion: createRunCompletion(),
@@ -1383,8 +1385,8 @@ class CursorAdapter implements ProviderAdapter {
           state.serverToolCount += 1;
           const callId = typeof completed["call_id"] === "string" ? completed["call_id"] : "";
           if (callId.length > 0) state.checkpoint.completedCallIds.add(callId);
-          const reconciled = reconcileToolCount(state.checkpoint, state.serverToolCount);
-          if (reconciled.endStep) {
+          const endStep = reconcileToolCount(state.checkpoint, state.serverToolCount);
+          if (endStep) {
             state.checkpoint.step = 0;
             state.quietBeats = 0;
           }
@@ -1841,9 +1843,6 @@ function missingToolCallIds(
   }
   return pending.filter((item) => !calledIds.has(item.callId)).map((item) => item.callId);
 }
-
-/** Reconstructs one tool result's text and images for the adapter's tests. */
-export { decodeStructEntriesToJson, decodeValueToJson };
 
 export function createCursorAdapter(): ProviderAdapter {
   return new CursorAdapter();

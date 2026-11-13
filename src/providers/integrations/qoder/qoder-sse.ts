@@ -377,12 +377,7 @@ export async function* qoderBodyToCanonicalEvents(
   let lastSeenToolId: string | undefined = undefined;
 
   for await (const sse of decodeQoderSseEvents(body, signal)) {
-    let frames: Array<{ event: string | null; data: string }>;
-    try {
-      frames = qoderEnvelopeToFrames(sse.data);
-    } catch (e) {
-      throw e;
-    }
+    const frames = qoderEnvelopeToFrames(sse.data);
     for (const frame of frames) {
       const data = frame.data.trim();
       if (!data) continue;
@@ -525,7 +520,6 @@ export async function* qoderBodyToCanonicalEvents(
   if (hasTerminal && finishReason === undefined) finishReason = "stop";
   const stopReason = mapQoderFinishReason(finishReason);
   const _providerStop = typeof finishReason === "string" ? finishReason : undefined;
-  void hasTerminal;
   yield {
     type: "terminal",
     sequence_number: seq++,

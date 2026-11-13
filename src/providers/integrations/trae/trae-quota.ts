@@ -80,20 +80,23 @@ interface TraeQuotaAuth {
  */
 function quotaAuth(context: QuotaCollectionContext | undefined): TraeQuotaAuth {
   const raw = context?.auth_state ?? {};
-  // `realm` is not persisted by the OAuth client — it is a property of which
-  // provider id the account was registered under, so the CN wrapper forces it
-  // rather than trusting an absent field.
-  const realm = raw["realm"] === "cn" || raw["region"] === "CN" ? "cn" : "intl";
-  // The OAuth client stores the account id as `userId`; `uid` is the name the
-  // dispatch header builder uses. Reading only one of them left the device
-  // fingerprint empty for every account.
-  const uidRaw = raw["uid"] ?? raw["userId"] ?? raw["user_id"];
-  const uid = typeof uidRaw === "string" && uidRaw.trim() ? uidRaw.trim() : "";
   // `region` is provisioned, not chosen: an intl account is created into one
   // and its token only authenticates against that region's core host. `us` and
   // `cn` are served by the realm's default host, but `sg` is a different host
   // entirely — sending it to the US core answers 401 code 1001.
   const region = typeof raw["region"] === "string" ? raw["region"].trim().toLowerCase() : "";
+  // `realm` is not persisted by the OAuth client — it is a property of which
+  // provider id the account was registered under, so the CN wrapper forces it
+  // rather than trusting an absent field. Both fields are compared
+  // case-insensitively: a stored `cn` region must select the cn realm exactly
+  // as `CN` does.
+  const realmField = typeof raw["realm"] === "string" ? raw["realm"].trim().toLowerCase() : "";
+  const realm: TraeRealm = realmField === "cn" || region === "cn" ? "cn" : "intl";
+  // The OAuth client stores the account id as `userId`; `uid` is the name the
+  // dispatch header builder uses. Reading only one of them left the device
+  // fingerprint empty for every account.
+  const uidRaw = raw["uid"] ?? raw["userId"] ?? raw["user_id"];
+  const uid = typeof uidRaw === "string" && uidRaw.trim() ? uidRaw.trim() : "";
   return { realm, uid, region };
 }
 
@@ -317,10 +320,26 @@ function logTraeQuotaMiss(errors: readonly string[]): void {
   log.warn(`[quota] trae surfaces unavailable: ${errors.join("; ")}`);
 }
 
+/**
+ * The upstream `code` field of an error body, or `undefined` when the body
+ * carries no readable one. Read off the full body before it is sliced for
+ * display, so the auth-invalidation match never depends on a truncated copy.
+ */
+function traeResponseCode(body: string): number | string | undefined {
+  try {
+    const code = record(JSON.parse(body) as unknown)?.["code"];
+    if (typeof code === "number" && Number.isFinite(code)) return code;
+    if (typeof code === "string" && code.trim().length > 0) return code.trim();
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Only this exact response from both quota surfaces on both realms is terminal auth evidence. */
 function isTraeAuthInvalidation(errors: readonly string[]): boolean {
   return errors.length === 4 && errors.every((error) =>
-    /HTTP 401\s+\{[^}]*"code"\s*:\s*1001\b/i.test(error),
+    /HTTP 401\s+\{[^}]*"code"\s*:\s*"?1001\b/i.test(error),
   );
 }
 
@@ -379,10 +398,15 @@ export async function fetchTraeQuota(
       // read parks the account, so it is reported as unreadable-for-now and
       // left alone by the cooldown path.
       const body = await response.text().catch(() => "");
+      // The upstream `code` is re-emitted in canonical form before the raw
+      // body: the auth-invalidation match reads `"code":1001`, and the raw
+      // body is sliced to 80 chars here (then 240 by `cleanError`) — a code
+      // past that point would be truncated out of the match.
+      const code = traeResponseCode(body);
       throw new Error(
         response.status === 403
           ? `${surface}: HTTP 403 (realm or device mismatch, not a balance)`
-          : `${surface}: HTTP ${response.status}${body ? ` ${body.slice(0, 80)}` : ""}`,
+          : `${surface}: HTTP ${response.status}${code === undefined ? "" : ` {"code":${code}}`}${body ? ` ${body.slice(0, 80)}` : ""}`,
       );
     }
     return await response.json();
@@ -413,10 +437,17 @@ export async function fetchTraeQuota(
   };
 
   const session = await tryRealms((r) => traeCoreForAccount(r, region) + TRAE_SESSION_USAGE_PATH, "session usage", parseSessionUsage);
-  // The entitlement path differs by realm: the CN realm answers v2 (v1 lacks
-  // `usage_summary` there), the intl realm answers v1 (v2 is a 404).
-  const entPath = realm === "cn" ? TRAE_ENT_USAGE_PATH_V2 : TRAE_ENT_USAGE_PATH;
-  const entitlement = await tryRealms((r) => traePayHostForAccount(r, region) + entPath, "entitlement", parseEntitlement);
+  // The entitlement path *version* is a property of the realm being asked, not
+  // of the realm we believe: the CN realm answers v2 (v1 lacks `usage_summary`
+  // there), the intl realm answers v1 — its pay host answers v2 with a 404. A
+  // cross-realm fallback probe must ask each realm its own version, or the
+  // fallback error is a 404 that can never match the 4x1001 auth-invalidation
+  // signature (dead cn tokens were never invalidated because of that).
+  const entitlement = await tryRealms(
+    (r) => traePayHostForAccount(r, region) + (r === "cn" ? TRAE_ENT_USAGE_PATH_V2 : TRAE_ENT_USAGE_PATH),
+    "entitlement",
+    parseEntitlement,
+  );
 
   const windows = [...(session?.windows ?? []), ...(entitlement?.windows ?? [])];
   if (!session && !entitlement) {

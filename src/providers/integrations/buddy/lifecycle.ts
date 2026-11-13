@@ -4,10 +4,8 @@ import { sleep } from "../../../shared/sleep";
 import { QODER_CHECKIN_PROVIDER_IDS } from "../qoder/qoder-checkin";
 import { buildCodeBuddyUserAgent } from "../../operations/client-versions";
 import { codebuddyDomain, type CodeBuddyVariant } from "./codebuddy/shared";
-import { randomUUID } from "node:crypto";
 import type { FetchLike } from "../../quota/quota-contracts";
 import { text as asText } from "../../quota/quota-contracts";
-import type { ToolDefinition } from "../../../protocol/canonical-model";
 
 // ── buddy-checkin ──────────────────────────────────────────
 
@@ -456,12 +454,6 @@ export interface BuddyGrowthCall {
   /** Which account and provider the call belongs to — needed by the activity report. */
   readonly accountId: string;
   readonly providerId: string;
-  /** Injectable idempotency token generator (tests). */
-  readonly token?: (prefix: string) => string;
-}
-
-function clientToken(call: BuddyGrowthCall, prefix: string): string {
-  return (call.token ?? ((name: string) => `${name}-${randomUUID()}`))(prefix);
 }
 
 interface Reply {
@@ -541,10 +533,6 @@ function refused(reply: Reply, status: number, markers: readonly string[]): bool
   if (reply.ok || reply.status !== status) return false;
   const lower = reply.message.toLowerCase();
   return markers.some((marker) => lower.includes(marker));
-}
-
-function coded(reply: Reply, code: number): boolean {
-  return !reply.ok && reply.code === code;
 }
 
 function done(reply: Reply, credit?: number | null): BuddyGrowthResult {
@@ -636,121 +624,6 @@ export async function useBuddyMakeupCard(
   return done(reply);
 }
 
-const REDEEM_PATH = "/activity/growth/redeem";
-
-export const BUDDY_REDEEM_TIERS = ["7d", "14d", "28d"] as const;
-
-export type BuddyRedeemTier = (typeof BUDDY_REDEEM_TIERS)[number];
-
-export type BuddyTierStatus = "available" | "claimed" | "locked" | "unknown";
-
-export interface BuddyRedemptionStatus {
-  readonly tiers: Readonly<Record<BuddyRedeemTier, BuddyTierStatus>>;
-  readonly remainingDays: number | null;
-}
-
-const TIER_FIELDS: Readonly<Record<BuddyRedeemTier, string>> = {
-  "7d": "tier_7d_status",
-  "14d": "tier_14d_status",
-  "28d": "tier_28d_status",
-};
-
-export async function readBuddyRedemption(
-  options: BuddyGrowthCall,
-): Promise<BuddyRedemptionStatus | null> {
-  const reply = await call(options, "GET", STREAK_PATH);
-  if (!reply.ok || reply.data === null) return null;
-  const status = asRecord(reply.data["redemption_status"]) ?? {};
-  const tiers = {} as Record<BuddyRedeemTier, BuddyTierStatus>;
-  for (const tier of BUDDY_REDEEM_TIERS) {
-    const value = asText(status[TIER_FIELDS[tier]])?.toLowerCase();
-    tiers[tier] =
-      value === "available" || value === "claimed" || value === "locked" ? value : "unknown";
-  }
-  const remaining = Number(status["remaining_days"]);
-  return { tiers, remainingDays: Number.isFinite(remaining) ? remaining : null };
-}
-
-export async function redeemBuddyStreakTier(
-  options: BuddyGrowthCall,
-  tier: BuddyRedeemTier,
-): Promise<BuddyGrowthResult> {
-  const reply = await call(options, "POST", REDEEM_PATH, {
-    tier,
-    client_token: clientToken(options, `redeem-${tier}`),
-  });
-  if (coded(reply, 409) || refused(reply, 409, ["duplicate", "已领取"])) {
-    return { state: "already", error: null, credit: null };
-  }
-  if (refused(reply, 403, ["not enough", "insufficient", "未达标", "天数不足"])) {
-    return { state: "not_eligible", error: null, credit: null };
-  }
-  return done(reply);
-}
-
-const TRAVEL_STATUS_PATH = "/activity/growth/buddy/travel/status";
-
-const TRAVEL_CONFIG_PATH = "/activity/growth/buddy/travel/config";
-
-const TRAVEL_DEPART_PATH = "/activity/growth/buddy/travel/depart";
-
-const TRAVEL_CLAIM_PATH = "/activity/growth/buddy/travel/claim";
-
-const TRAVEL_LOCATION_ID = 4;
-
-export type BuddyTravelState = "idle" | "traveling" | "arrived" | "unknown";
-
-export interface BuddyTravelStatus {
-  readonly state: BuddyTravelState;
-  readonly dailyLimitReached: boolean;
-  readonly recordId: number | null;
-  readonly rewardCredit: number | null;
-}
-
-export async function readBuddyTravelStatus(
-  options: BuddyGrowthCall,
-): Promise<BuddyTravelStatus | null> {
-  const reply = await call(options, "GET", TRAVEL_STATUS_PATH);
-  if (!reply.ok || reply.data === null) return null;
-  const raw = asText(reply.data["state"])?.toLowerCase();
-  const state: BuddyTravelState =
-    raw === "idle" || raw === "traveling" || raw === "arrived" ? raw : "unknown";
-  const record = Number(reply.data["record_id"]);
-  const reward = Number(reply.data["reward_credit"]);
-  return {
-    state,
-    dailyLimitReached: reply.data["daily_limit_reached"] === true,
-    recordId: Number.isFinite(record) ? record : null,
-    rewardCredit: Number.isFinite(reward) ? reward : null,
-  };
-}
-
-export async function readBuddyTravelConfig(
-  options: BuddyGrowthCall,
-): Promise<Record<string, unknown> | null> {
-  const reply = await call(options, "GET", TRAVEL_CONFIG_PATH);
-  return reply.ok ? reply.data : null;
-}
-
-export async function departBuddyTravel(
-  options: BuddyGrowthCall,
-  locationId: number = TRAVEL_LOCATION_ID,
-): Promise<BuddyGrowthResult> {
-  const reply = await call(options, "POST", TRAVEL_DEPART_PATH, { location_id: locationId });
-  if (refused(reply, 400, ["already traveling", "location not available", "limit"])) {
-    return { state: "already", error: null, credit: null };
-  }
-  return done(reply);
-}
-
-export async function claimBuddyTravel(
-  options: BuddyGrowthCall,
-  recordId: number,
-): Promise<BuddyGrowthResult> {
-  const reply = await call(options, "POST", TRAVEL_CLAIM_PATH, { record_id: recordId });
-  return done(reply);
-}
-
 const BUDDY_INFO_PATH = "/activity/growth/buddy/info";
 
 const BUDDY_TASKS_PATH = "/v2/activity/growth/tasks";
@@ -796,13 +669,6 @@ export async function readBuddyFirstTask(
   return task;
 }
 
-export async function readBuddyAgreement(
-  options: BuddyGrowthCall,
-): Promise<Record<string, unknown> | null> {
-  const reply = await call(options, "GET", BUDDY_AGREEMENT_PATH);
-  return reply.ok ? reply.data : null;
-}
-
 export async function agreeBuddyAgreement(
   options: BuddyGrowthCall,
 ): Promise<BuddyGrowthResult> {
@@ -820,199 +686,3 @@ export async function adoptFirstBuddy(
   return done(reply);
 }
 
-// ── buddy-server-tools ──────────────────────────────────────────
-
-export type ServerToolKind = "web_search" | "web_fetch";
-
-export interface ServerToolDeclaration {
-  readonly kind: ServerToolKind;
-  readonly name: string;
-}
-
-export interface ServerToolInvocation {
-  readonly id: string;
-  readonly kind: ServerToolKind;
-  readonly rawArguments: string;
-}
-
-export interface ServerToolRunResult {
-  /** Text handed back upstream as the tool's result message. */
-  readonly content: string;
-  readonly toolCallId: string;
-}
-
-export interface ServerToolExecutor {
-  /** Runs one web fetch; `null` means the backend is unavailable. */
-  readonly fetch?: ((input: { url: string }) => Promise<string>) | undefined;
-  /** Runs one web search; `null` means the backend is unavailable. */
-  readonly search?: ((input: { query: string }) => Promise<string>) | undefined;
-}
-
-const SEARCH_TYPE_PREFIX = "web_search_";
-
-const FETCH_TYPE_PREFIX = "web_fetch_";
-
-function normalizeTypeName(value: string): string {
-  return value.trim().toLowerCase().replace(/[_-]+/g, " ");
-}
-
-function classifyByType(type: string): ServerToolKind | null {
-  const normalized = normalizeTypeName(type);
-  if (normalized.startsWith(normalizeTypeName(SEARCH_TYPE_PREFIX))) return "web_search";
-  if (normalized.startsWith(normalizeTypeName(FETCH_TYPE_PREFIX))) return "web_fetch";
-  return null;
-}
-
-export function classifyServerToolDeclaration(tool: ToolDefinition): ServerToolKind | null {
-  const raw = tool.native_type?.trim();
-  if (raw !== undefined && raw.length > 0) {
-    const byRaw = classifyByType(raw);
-    if (byRaw !== null) return byRaw;
-  }
-  if (tool.tool_type === "web_search") return "web_search";
-  if (tool.tool_type !== undefined && tool.tool_type !== "function") {
-    const byType = classifyByType(tool.tool_type);
-    if (byType !== null) return byType;
-  }
-  return null;
-}
-
-export function findServerToolDeclarations(
-  tools: readonly ToolDefinition[] | undefined,
-): Map<string, ServerToolKind> {
-  const out = new Map<string, ServerToolKind>();
-  for (const tool of tools ?? []) {
-    const kind = classifyServerToolDeclaration(tool);
-    if (kind !== null) out.set(tool.name, kind);
-  }
-  return out;
-}
-
-export function isServerToolCall(
-  name: string,
-  declared: ReadonlyMap<string, ServerToolKind>,
-): boolean {
-  return declared.has(name);
-}
-
-function parseJsonArguments(raw: string): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    // fall through
-  }
-  return {};
-}
-
-export function buildServerToolInvocation(
-  callId: string,
-  name: string,
-  kind: ServerToolKind,
-  rawArguments: string,
-): ServerToolInvocation {
-  return { id: callId || `server_tool_${name}`, kind, rawArguments };
-}
-
-function textOf(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function safeFetchUrl(url: string): string | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
-  return parsed.toString();
-}
-
-async function runOne(
-  executor: ServerToolExecutor,
-  invocation: ServerToolInvocation,
-): Promise<ServerToolRunResult> {
-  const args = parseJsonArguments(invocation.rawArguments);
-  if (invocation.kind === "web_fetch") {
-    const url = safeFetchUrl(textOf(args["url"] ?? args["target"]));
-    if (url === null) {
-      return {
-        toolCallId: invocation.id,
-        content: "web_fetch failed: the model supplied an invalid or unsupported URL and nothing was fetched.",
-      };
-    }
-    if (executor.fetch === undefined) {
-      return {
-        toolCallId: invocation.id,
-        content: "web_fetch unavailable: the gateway has no fetch backend configured.",
-      };
-    }
-    try {
-      const content = await executor.fetch({ url });
-      return { toolCallId: invocation.id, content };
-    } catch (error) {
-      return {
-        toolCallId: invocation.id,
-        content: `web_fetch failed: ${error instanceof Error ? error.message : String(error)}`,
-      };
-    }
-  }
-  const query = textOf(args["query"]);
-  if (query.length === 0) {
-    return {
-      toolCallId: invocation.id,
-      content: "web_search failed: the model supplied an empty query and nothing was searched.",
-    };
-  }
-  if (executor.search === undefined) {
-    return {
-      toolCallId: invocation.id,
-      content: "web_search unavailable: the gateway has no search backend configured.",
-    };
-  }
-  try {
-    const content = await executor.search({ query });
-    return { toolCallId: invocation.id, content };
-  } catch (error) {
-    return {
-      toolCallId: invocation.id,
-      content: `web_search failed: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-}
-
-export async function executeServerToolInvocations(
-  executor: ServerToolExecutor,
-  invocations: readonly ServerToolInvocation[],
-): Promise<readonly ServerToolRunResult[]> {
-  return Promise.all(invocations.map((invocation) => runOne(executor, invocation)));
-}
-
-export function buildServerToolFollowUpMessages(
-  assistantToolCalls: Array<{ id: string; name: string; arguments: string }>,
-  results: readonly ServerToolRunResult[],
-): Array<Record<string, unknown>> {
-  const messages: Array<Record<string, unknown>> = [];
-  if (assistantToolCalls.length > 0) {
-    messages.push({
-      role: "assistant",
-      content: "",
-      tool_calls: assistantToolCalls.map((call) => ({
-        id: call.id,
-        type: "function",
-        function: { name: call.name, arguments: call.arguments },
-      })),
-    });
-  }
-  for (const result of results) {
-    messages.push({
-      role: "tool",
-      tool_call_id: result.toolCallId,
-      content: result.content,
-    });
-  }
-  return messages;
-}

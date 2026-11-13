@@ -14,7 +14,15 @@ import {
 } from "./apply-update";
 import { CARTETHYIA_VERSION } from "../../version";
 
-/** Minimal drain surface the apply route needs from the process coordinator. */
+/**
+ * Minimal drain surface the apply route needs from the process coordinator.
+ *
+ * The one definition of this structural surface: `console-router.ts` and
+ * `domain-registration.ts` declare their optional `shutdownCoordinator` fields
+ * as this type rather than re-declaring its shape. Declared structural (not
+ * the boot-layer class) so the console composition root does not import the
+ * boot layer; `ShutdownCoordinator` satisfies it.
+ */
 export interface UpdateShutdownCoordinator {
   readonly begin: (reason: "update") => Promise<void>;
   readonly totalShutdownBudgetMs: () => number;

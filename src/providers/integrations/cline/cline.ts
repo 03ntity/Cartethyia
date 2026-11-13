@@ -28,7 +28,8 @@ const CLINE_MODELS_CATALOG_PATH = "/ai/cline/models" as const;
 
 
 
-function workosToken(token: string): string {
+/** The WorkOS bearer spelling Cline's API expects: `workos:`-prefixed token. */
+export function workosToken(token: string): string {
   return token.startsWith("workos:") ? token : `workos:${token}`;
 }
 
@@ -78,7 +79,6 @@ async function clineExtraHeaders(context: ProviderDispatchContext): Promise<Reco
     "x-client-type": "cline-cli",
     "x-client-version": clientVersion,
     "x-core-version": sdkVersion,
-    "X-Title": "Cline",
     "x-is-multi-root": "false",
     ...(taskId ? { "x-task-id": taskId } : {}),
     accept: "text/event-stream, application/json",
@@ -433,7 +433,7 @@ export async function clineAccountHasPass(
   fetcher: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> = globalThis.fetch,
 ): Promise<boolean> {
   try {
-    const token = credential.startsWith("workos:") ? credential : `workos:${credential}`;
+    const token = workosToken(credential);
     const res = await fetcher("https://api.cline.bot/api/v1/users/me/plan", {
       headers: { accept: "application/json", authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(10_000),

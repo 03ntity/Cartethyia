@@ -61,7 +61,6 @@ export interface QoderRealmConfig {
  * `QODER_UA_APP`; the CLI/device-flow surfaces keep `QODER_UA_CLI`.
  */
 export const QODER_UA_CLI = "Bun/1.4.2";
-export const QODER_UA_IDE = "Bun/1.4.4";
 export const QODER_UA_APP = "undici";
 
 /** Chat + model-list paths, identical across realms. */

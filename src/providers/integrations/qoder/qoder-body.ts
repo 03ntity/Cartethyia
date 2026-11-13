@@ -1,8 +1,8 @@
 /**
  * Shared canonical→Qoder message helpers.
  *
- * Kept in a separate module so both transports (`qoder.ts` HTTP and
- * `qoder-grpc.ts`) build and flatten message content the same way.
+ * Kept in a separate module so the chat transport and the request builder
+ * build and flatten message content the same way.
  */
 import type { ContentPart, ToolChoice, ToolDefinition } from "../../../protocol/canonical-model";
 
@@ -20,8 +20,7 @@ export function flattenCanonicalContent(content: readonly ContentPart[]): string
 
 /**
  * Projects the canonical tools onto Qoder's chat-completions `tools` array
- * (the same OpenAI-shaped declaration both the HTTP and the gRPC surface
- * expect).
+ * (the OpenAI-shaped declaration the COSY surface expects).
  *
  * Without this the upstream is never told a tool exists, so a model that wants
  * one improvises markup in its prose (`<Read file_path="..." />`) instead of
@@ -59,7 +58,7 @@ export function qoderTools(
 /**
  * Projects the canonical tool choice onto the upstream's field.
  *
- * The upstream only accepts a string here (both surfaces). Given the object
+ * The upstream only accepts a string here. Given the object
  * form `{type:"function",function:{name}}` it ignores the field, and the model
  * then calls the tool with no arguments filled in.
  *

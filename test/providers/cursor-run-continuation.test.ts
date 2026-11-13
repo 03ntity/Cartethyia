@@ -498,8 +498,6 @@ function runSession(runId: string, scope: ProviderContinuationScope): CursorRunS
     descriptors: [],
     pending: new Map(),
     calls: new Map(),
-    usage: undefined,
-    failure: undefined,
   };
 }
 

@@ -454,22 +454,4 @@ export class BackupService {
       );
     }
   }
-
-  /** Counts a section without building its payload. */
-  async preview(
-    sections: readonly BackupSection[] | undefined,
-    tenantId: string,
-  ): Promise<Record<string, number>> {
-    const stream = exportBackupStream(
-      this.options.db,
-      sectionsOrDefault(sections).flatMap((section) => tablesForSection(section)),
-      tenantId,
-    );
-    // Walk the stream so the tally settles, discarding the bytes: a preview
-    // must not hold the payload either.
-    for await (const _chunk of stream.jsonChunks) {
-      // discard
-    }
-    return stream.counts;
-  }
 }

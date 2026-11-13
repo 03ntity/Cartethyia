@@ -65,6 +65,7 @@ import {
   BACKUP_APP,
   BACKUP_VERSION,
   CONFIG_TABLES,
+  MAX_BACKUP_DECOMPRESSED_BYTES,
   MAX_ROWS_PER_TABLE,
   TELEMETRY_TABLES,
   TENANT_TABLE,
@@ -632,14 +633,28 @@ function isGzipBytes(bytes: Uint8Array): boolean {
  * A file that is not gzipped is returned unchanged rather than refused, because
  * a plain `.json` export is equally restorable and the bytes are the only thing
  * that distinguishes them.
+ *
+ * Decompression is bounded by {@link MAX_BACKUP_DECOMPRESSED_BYTES}: a gzip
+ * bomb (a few MiB of repeated bytes inflating to gigabytes) must fail as a
+ * clean, sized error rather than allocating until the process dies. The bound
+ * is far above what a real backup expands to, so only a hostile or corrupt
+ * file can reach it.
  */
 export function decompressBackup(bytes: Uint8Array): string {
   if (!isGzipBytes(bytes)) return Buffer.from(bytes).toString("utf8");
   try {
-    return gunzipSync(bytes).toString("utf8");
+    return gunzipSync(bytes, { maxOutputLength: MAX_BACKUP_DECOMPRESSED_BYTES }).toString("utf8");
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const hitOutputBound =
+      (error instanceof Error && error.name === "RangeError") ||
+      (typeof (error as { code?: unknown } | null)?.code === "string" &&
+        (error as { code: string }).code === "ERR_BUFFER_TOO_LARGE") ||
+      /memory limit/i.test(message);
     throw new Error(
-      `that file is named or marked as gzip but could not be decompressed: ${error instanceof Error ? error.message : String(error)}`,
+      hitOutputBound
+        ? `that gzip backup decompresses beyond the ${MAX_BACKUP_DECOMPRESSED_BYTES} byte limit; it is either corrupt or not a real backup`
+        : `that file is named or marked as gzip but could not be decompressed: ${message}`,
     );
   }
 }

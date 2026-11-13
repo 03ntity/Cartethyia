@@ -7,7 +7,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   FREEBUFF_WORKER_SYSTEM_PROMPT,
-  FREEBUFF_MANAGER_SYSTEM_PROMPT,
   FREEBUFF_OFFICIAL_TOOLS,
 } from "../../src/providers/integrations/freebuff/freebuff-constants";
 import {
@@ -33,10 +32,6 @@ describe("Freebuff worker system prompt (locked)", () => {
     ];
     const ok = OPENINGS.some((o) => FREEBUFF_WORKER_SYSTEM_PROMPT.trimStart().startsWith(o));
     expect(ok).toBe(true);
-  });
-
-  test("manager template is present (13443 chars) for future use", () => {
-    expect(FREEBUFF_MANAGER_SYSTEM_PROMPT.length).toBe(13443);
   });
 });
 

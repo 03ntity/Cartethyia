@@ -278,7 +278,7 @@ export function convert9RouterBackup(
       skipped.push(`${label}: no provider id`);
       return;
     }
-    if (!isNodeProviderId(rawProvider) && rawProvider !== null && rawProvider in UNSUPPORTED_PROVIDERS) {
+    if (!isNodeProviderId(rawProvider) && rawProvider in UNSUPPORTED_PROVIDERS) {
       skipped.push(`${label}: provider "${rawProvider}" (${UNSUPPORTED_PROVIDERS[rawProvider]})`);
       return;
     }

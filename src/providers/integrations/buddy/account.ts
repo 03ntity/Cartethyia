@@ -20,9 +20,10 @@ import type {
   ProviderQuotaWindow,
 } from "../../quota/quota-contracts";
 import { cleanError, percentWindow, record as asRecord, text as asText } from "../../quota/quota-contracts";
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, gte, inArray, lt, sql } from "drizzle-orm";
 import type { CartethyiaDatabase } from "../../../persistence/db-handle";
 import { buddyUsageSnapshots } from "../../../persistence/schema";
+import { log } from "../../../observability/logger";
 
 // ── buddy-oauth-shared ──────────────────────────────────────────
 
@@ -54,11 +55,6 @@ export function strictResponseCode(payload: unknown): number | undefined {
   return undefined;
 }
 
-export function coercingResponseCode(payload: unknown): number | undefined {
-  const n = Number(record(payload)?.code);
-  return Number.isFinite(n) ? n : undefined;
-}
-
 export interface BuddyOAuthVariant {
   readonly providerId: string;
   /** Display name for error messages (`OAuthClient.providerLabel`). */
@@ -72,7 +68,7 @@ export interface BuddyOAuthVariant {
   readonly deviceStartUrl: string;
   readonly devicePollUrl: string;
   readonly refreshUrl: string;
-  /** Reads the envelope `code`; see `strictResponseCode` / `coercingResponseCode`. */
+  /** Reads the envelope `code`; see `strictResponseCode`. */
   readonly responseCode: (payload: unknown) => number | undefined;
 }
 
@@ -328,6 +324,14 @@ export interface TencentBillingAccount {
 
 const REFILL_GAP_MS = 2 * 24 * 60 * 60 * 1000;
 
+/**
+ * Far-future bound for the package-expiry query window. The range must cover
+ * every unexpired package whatever its life, so the end is a sentinel roughly
+ * a century out, not a real horizon (the previous `365 * 101 * …` product was
+ * a garbled spelling of the same intent).
+ */
+const PACKAGE_END_HORIZON_MS = 100 * 365 * 24 * 60 * 60 * 1000;
+
 const TIMEOUT_MS = 15_000;
 
 export function parseBillingResetTime(value: unknown): string | null {
@@ -498,7 +502,7 @@ export async function fetchTencentBillingQuota(
 
   let response: Response;
   const now = new Date();
-  const end = new Date(now.getTime() + 365 * 101 * 24 * 3600 * 1000);
+  const end = new Date(now.getTime() + PACKAGE_END_HORIZON_MS);
   const stamp = (value: Date): string => value.toISOString().slice(0, 19).replace("T", " ");
   try {
     response = await fetcher(url, {
@@ -886,7 +890,10 @@ export async function saveBuddyUsageSnapshots(
         },
       });
     return rows.length;
-  } catch {
+  } catch (error) {
+    log.warn("buddy: usage snapshot save failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return 0;
   }
 }
@@ -927,7 +934,10 @@ export async function readBuddyUsageSnapshots(
       )
       .orderBy(desc(buddyUsageSnapshots.dayKey))
       .limit(accountIds.length * limitPerAccount * MODELS_PER_DAY_CEILING);
-  } catch {
+  } catch (error) {
+    log.warn("buddy: usage snapshot read failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return result;
   }
   for (const row of rows) {
@@ -950,20 +960,20 @@ export async function pruneBuddyUsageSnapshots(
   db: CartethyiaDatabase,
   now: Date = new Date(),
 ): Promise<number> {
-  const cutoff = new Date(now.getTime() - RETENTION_DAYS * 86_400_000)
-    .toISOString()
-    .slice(0, 10);
+  const cutoff = retentionCutoff(now);
   try {
+    // Days strictly older than the cutoff: the reader keeps `dayKey >= cutoff`
+    // (`gte` above), so the prune boundary is the matching strict inequality —
+    // one delete that also reports the real deleted count.
     const deleted = await db
       .delete(buddyUsageSnapshots)
-      .where(and(eq(buddyUsageSnapshots.dayKey, cutoff)))
+      .where(lt(buddyUsageSnapshots.dayKey, cutoff))
       .returning({ accountId: buddyUsageSnapshots.accountId });
-    // Days strictly older than the cutoff, which a single equality cannot reach.
-    await db
-      .delete(buddyUsageSnapshots)
-      .where(sql`${buddyUsageSnapshots.dayKey} < ${cutoff}`);
     return deleted.length;
-  } catch {
+  } catch (error) {
+    log.warn("buddy: usage snapshot prune failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return 0;
   }
 }

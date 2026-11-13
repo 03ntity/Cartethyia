@@ -743,8 +743,9 @@ export class DrizzleNetworkPoolStore implements NetworkPoolStore {
    *
    * The transfer runs through the same SSRF-validated agent dispatch uses, so
    * a measurement cannot be taken over a path production would refuse. The
-   * whole payload is pulled into memory (5 MB) — bounded by the endpoint's
-   * fixed size, not by what the peer chooses to send.
+   * whole payload is pulled into memory — bounded by the requested size (the
+   * `SPEED_TEST_MAX_BYTES` ceiling, 100 MB, is enforced by the operations
+   * layer), not by what the peer chooses to send.
    */
   async speedTest(tenantId: string, poolId: string, bytes: number): Promise<PoolSpeedTestResult> {
     const rows = await this.db

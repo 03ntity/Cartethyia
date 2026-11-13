@@ -600,18 +600,24 @@ export function createFreebuffAdapter(): ProviderAdapter {
         }
       }
 
-      // 3. Agent-runs START.
-      const agentRun = await freebuffAgentRunStart(secret, authState, context);
-      const session: FreebuffSession = {
-        admission,
-        agentRun,
-        instanceId: admission.instanceId,
-        runId: agentRun.runId,
-        catalogFetchId: fetchId,
-        modelHandle,
-      };
-
+      // 3-5. Agent-runs START, chat, and teardown. Everything after a
+      // successful admission runs under one finally so the session is
+      // released even when the agent run never starts — a held admission
+      // locks the model purchase upstream until it expires.
+      let runId: string | undefined;
       try {
+        // 3. Agent-runs START.
+        const agentRun = await freebuffAgentRunStart(secret, authState, context);
+        runId = agentRun.runId;
+        const session: FreebuffSession = {
+          admission,
+          agentRun,
+          instanceId: admission.instanceId,
+          runId: agentRun.runId,
+          catalogFetchId: fetchId,
+          modelHandle,
+        };
+
         // 4. Build payload via the standard OpenAI chat encoder.
         const dialectPolicy = resolveDialect(candidate.model_id, candidate.provider_id, candidate.wire_family, candidate.dialect);
         const payload = await encodeWireRequest(candidate.wire_family, request, {
@@ -673,9 +679,12 @@ export function createFreebuffAdapter(): ProviderAdapter {
           upstream.release();
         }
       } finally {
-        // 6. Teardown.
-        await freebuffAgentRunFinish(secret, authState, session.runId, context);
-        await freebuffReleaseSession(secret, authState, session.instanceId, fetchId, context);
+        // 6. Teardown (best-effort): finish the agent run only when one
+        // started, and always release the admitted session.
+        if (runId !== undefined) {
+          await freebuffAgentRunFinish(secret, authState, runId, context);
+        }
+        await freebuffReleaseSession(secret, authState, admission.instanceId, fetchId, context);
       }
     },
   };

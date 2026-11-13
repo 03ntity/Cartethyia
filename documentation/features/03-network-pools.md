@@ -43,11 +43,11 @@ The role files are split on purpose:
 | File | Holds |
 | --- | --- |
 | `selector.ts` | The selection algorithm and the `NetworkPoolSelector` surface |
-| `pool-state.ts` | Local inflight, rotation cursor, cooldown entries |
-| `pool-scripts.ts` | Redis scripts and key builders (`POOL_ADMIT_SCRIPT`) |
+| `state.ts` | Local inflight, rotation cursor, cooldown entries |
+| `scripts.ts` | Redis scripts and key builders (`POOL_ADMIT_SCRIPT`) |
 | `loader.ts` | `DrizzleNetworkPoolLoader` — the read the selector is given |
 | `agent.ts` | Building the agent, and the errors that classify a failed CONNECT |
-| `byte-accounting.ts` | In-memory sent/received counters |
+| `accounting.ts` | In-memory sent/received counters |
 | `resolver.ts` | Turning a resolved endpoint into an outbound connection |
 
 Strategy is per tenant: `least_loaded` (the default) does a weighted scan with a
@@ -85,9 +85,9 @@ bundled provider declaring `ipScopedRateLimit`.
 **Cooldown state survives a restart through the row, not just memory.** The
 selector's per-`(pool, provider)` map is process-local (mirrored to Redis when
 Redis exists), so dispatch-side flagging (`flagPoolCooldown`, `flagPoolBlocked`
-in `pool-health.ts`) also writes each marker into
+in `health.ts`) also writes each marker into
 `network_pools.provider_cooldowns`, keyed by lowercased provider id. Boot
-(`restoreProviderCooldownMarkers` in `pool-cooldown-store.ts`) reads that column
+(`restoreProviderCooldownMarkers` in `cooldown-store.ts`) reads that column
 back into the selector and drops whatever already expired, so the gateway
 keeps remembering an egress the upstream is still refusing. Probe clears flow
 to the same mirror through the store's `dropProviderCooldownMarker` (and a
@@ -133,7 +133,7 @@ same check, and a provider registered after boot resolves its binding on first
 use rather than at boot. Console-side endpoint validation is
 `validateEndpoint` in `src/console/routing/pools/contracts.ts`.
 
-`src/network/retry.ts` is the *outbound* retry policy. It is distinct from the
+`src/network/util/retry.ts` is the *outbound* retry policy. It is distinct from the
 routing failover loop in `router.ts` — one decides whether to re-dial a
 connection, the other whether to try another candidate.
 
@@ -184,8 +184,8 @@ straight off the selector.
 
 | Change | Start here |
 | --- | --- |
-| Selection or cooldown behaviour | `src/network/pool/selector.ts`, then `pool-state.ts` |
-| Transport or relay fallback | `src/network/pool/agent.ts`, `src/network/outbound-fetch.ts` |
+| Selection or cooldown behaviour | `src/network/pool/selector.ts`, then `state.ts` |
+| Transport or relay fallback | `src/network/pool/agent.ts`, `src/network/egress/fetch.ts` |
 | SSRF rules | `src/network/ssrf.ts`, `validateEndpoint` in `pools/contracts.ts` |
 | Byte metering | `src/network/pool/byte-accounting.ts` |
 | Console routes | `src/console/routing/pools/routes.ts` |

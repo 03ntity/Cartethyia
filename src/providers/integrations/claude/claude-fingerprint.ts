@@ -23,7 +23,3 @@ export const CLAUDE_CODE_SDK_VERSION = VERSION_SOURCES.claudeSdk.fallback;
 
 /** User-Agent emitted by the assistant OAuth inference path. */
 export const CLAUDE_CODE_USER_AGENT = `claude-cli/${CLAUDE_CODE_VERSION} (external, cli)`;
-
-/** Prefix used to isolate custom Anthropic OAuth tools from built-in tools. */
-
-/** the assistant's per-request output-token ceiling. */

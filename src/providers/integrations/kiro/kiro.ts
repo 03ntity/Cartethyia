@@ -56,6 +56,7 @@ import { resolveKiroProfileArn } from "./kiro-profile";
 import {
   AWS_REGION_PATTERN,
   KIRO_DEFAULT_REGION,
+  KIRO_PROVIDER_ID,
   kiroContextWindow,
   KIRO_GENERATE_PATH,
   KIRO_RUNTIME_HOST_TEMPLATE,
@@ -64,8 +65,8 @@ import {
 import { resolveInboundSessionId } from "../../operations/session-resolution";
 import { KiroStreamDecoder, isKiroTruncationReason, type KiroUsage } from "./kiro-stream";
 
-/** Provider id this adapter registers under. */
-export const KIRO_PROVIDER_ID = "kiro";
+/** Provider id this adapter registers under. Owned by `kiro-catalog.ts`. */
+export { KIRO_PROVIDER_ID };
 
 /** Longest single message this adapter will buffer before treating the stream as corrupt. */
 const KIRO_MAX_STREAM_BUFFER_BYTES = 24 * 1024 * 1024;

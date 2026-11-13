@@ -37,5 +37,3 @@ export async function readUsers(db: CartethyiaDatabase, username?: string): Prom
 export async function readUser(db: CartethyiaDatabase, userId: string): Promise<unknown> {
   return new ConsoleUserStore(db).findById(userId);
 }
-
-// ---- credentials.ts ----

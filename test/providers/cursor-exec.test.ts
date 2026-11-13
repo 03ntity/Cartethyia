@@ -6,7 +6,7 @@
  * field names the exec frame expects.
  */
 import { beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { executeNativeTool } from "../../src/providers/integrations/cursor/cursor-exec";
@@ -66,6 +66,50 @@ describe("Cursor native tool executor", () => {
   test("read escaping the root is rejected", async () => {
     const result = await run("read", { path: "../outside.ts" });
     expect(result?.message["rejected"]).toBeDefined();
+  });
+
+  test("symlinks cannot escape the workspace root (read/write/edit)", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "cursor-exec-outside-"));
+    try {
+      writeFileSync(join(outside, "secret.txt"), "outside secret\n");
+      let linked = true;
+      try {
+        // Junctions need no elevated privileges on Windows; POSIX ignores the type.
+        symlinkSync(outside, join(WORKSPACE, "escape-hatch"), "junction");
+      } catch {
+        linked = false;
+      }
+      if (linked) {
+        // Lexically inside the workspace, canonically outside it: refused.
+        const read = await executeNativeTool("ct_read_args", { path: "escape-hatch/secret.txt" }, WORKSPACE);
+        expect(read?.message["error"]).toBeDefined();
+        const legacyRead = await run("read", { path: "escape-hatch/secret.txt" });
+        expect(legacyRead?.message["rejected"]).toBeDefined();
+        const write = await executeNativeTool("ct_write_args", { path: "escape-hatch/evil.txt", content: "x" }, WORKSPACE);
+        expect(write?.message["rejected"]).toBeDefined();
+        expect(existsSync(join(outside, "evil.txt"))).toBe(false);
+        const edit = await executeNativeTool("ct_edit_args", {
+          path: "escape-hatch/secret.txt",
+          edits: [{ old_text: "outside", new_text: "inside" }],
+        }, WORKSPACE);
+        expect(edit?.message["rejected"]).toBeDefined();
+        expect(readFileSync(join(outside, "secret.txt"), "utf8")).toBe("outside secret\n");
+      }
+      // A write through a dangling symlink must not create the link's target.
+      let dangled = true;
+      try {
+        symlinkSync(join(outside, "never-created.txt"), join(WORKSPACE, "dangle"), "file");
+      } catch {
+        dangled = false;
+      }
+      if (dangled) {
+        const write = await executeNativeTool("ct_write_args", { path: "dangle", content: "x" }, WORKSPACE);
+        expect(write?.message["rejected"]).toBeDefined();
+        expect(existsSync(join(outside, "never-created.txt"))).toBe(false);
+      }
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   test("ct_read returns pi_read_result with output (modern wire arm)", async () => {

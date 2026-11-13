@@ -3,6 +3,7 @@ import { authCredential, getJson, record, text } from "../../quota/quota-contrac
 import { parseLimitWindows } from "../../quota/quota-limit-windows";
 import { getClineCliVersion, getClineSdkVersion } from "../../operations/client-versions";
 import { clinePlatform, clinePlatformVersion } from "../../operations/cli-platform";
+import { workosToken } from "./cline";
 
 /**
  * Quota headers always carry the currently resolved CLI version.
@@ -106,7 +107,7 @@ export async function fetchClineQuota(
     if (!access) throw new Error("Cline credential has no access token.");
     headers = {
       ...clineQuotaHeaders(),
-      authorization: `Bearer ${access.startsWith("workos:") ? access : `workos:${access}`}`,
+      authorization: `Bearer ${workosToken(access)}`,
     };
   }
   const me = record(await getJson("https://api.cline.bot/api/v1/users/me", headers, fetcher));

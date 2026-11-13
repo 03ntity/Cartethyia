@@ -16,7 +16,7 @@
  * set of OpenSSL options that reproduce a target client's ClientHello.
  *
  * Profiles are pure data + one helper. They never open sockets; the dial
- * paths (`outbound-fetch.ts`, `pool/resolver.ts`) apply them.
+ * paths (`egress/fetch.ts`, `pool/resolver.ts`) apply them.
  */
 
 /**

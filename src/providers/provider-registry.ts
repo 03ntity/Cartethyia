@@ -140,6 +140,36 @@ export class ProviderRegistry {
   #quotaLoading = new Map<ProviderId, Promise<QuotaFetcher>>();
   #modelDiscovery = new Map<ProviderId, ProviderModelDiscovery>();
   #modelDiscoveryLoading = new Map<ProviderId, Promise<ProviderModelDiscovery>>();
+  /**
+   * Bumped on every registration mutation (register/upsert/unregister). A lazy
+   * load captures the value at start and publishes its result only while the
+   * value still matches, so a load that outlives a re-registration cannot
+   * repopulate the caches the mutation just cleared with the old module.
+   */
+  #generation = new Map<ProviderId, number>();
+
+  #currentGeneration(providerId: ProviderId): number {
+    return this.#generation.get(providerId) ?? 0;
+  }
+
+  /**
+   * Drops one provider's cached *and in-flight* derived state and advances the
+   * generation that guards it. In-flight loads go too: a caller that starts
+   * after a re-registration must load from the new registration instead of
+   * awaiting the previous one — and a superseded load that eventually settles
+   * writes nothing (see {@link #currentGeneration}).
+   */
+  #invalidate(providerId: ProviderId): void {
+    this.#generation.set(providerId, this.#currentGeneration(providerId) + 1);
+    this.#loaded.delete(providerId);
+    this.#loading.delete(providerId);
+    this.#authentication.delete(providerId);
+    this.#authenticationLoading.delete(providerId);
+    this.#quotaCollectors.delete(providerId);
+    this.#quotaLoading.delete(providerId);
+    this.#modelDiscovery.delete(providerId);
+    this.#modelDiscoveryLoading.delete(providerId);
+  }
 
   /** Adds one registration and rejects duplicate canonical IDs. */
   register(registration: ProviderRegistration): void {
@@ -156,14 +186,11 @@ export class ProviderRegistry {
     }
     this.#registrations.set(providerId, registration);
   }
-  /** Removes one registration and any cached adapter/auth/quota/discovery state. */
+  /** Removes one registration and any cached or in-flight adapter/auth/quota/discovery state. */
   unregister(providerId: string): boolean {
     const normalized = parseProviderId(providerId);
     const removed = this.#registrations.delete(normalized);
-    this.#loaded.delete(normalized);
-    this.#authentication.delete(normalized);
-    this.#quotaCollectors.delete(normalized);
-    this.#modelDiscovery.delete(normalized);
+    this.#invalidate(normalized);
     return removed;
   }
 
@@ -185,12 +212,11 @@ export class ProviderRegistry {
     }
     const replaced = this.#registrations.has(providerId);
     this.#registrations.set(providerId, registration);
-    // Drop cached derived state: the adapter (and any auth/quota/discovery
-    // closure) was built from the registration being replaced.
-    this.#loaded.delete(providerId);
-    this.#authentication.delete(providerId);
-    this.#quotaCollectors.delete(providerId);
-    this.#modelDiscovery.delete(providerId);
+    // Drop cached and in-flight derived state: the adapter (and any
+    // auth/quota/discovery closure) was built from the registration being
+    // replaced, and a load still running for it must not publish its result
+    // after this point.
+    this.#invalidate(providerId);
     return replaced;
   }
 
@@ -224,12 +250,22 @@ export class ProviderRegistry {
     if (loader === undefined) return undefined;
     const inFlight = this.#authenticationLoading.get(normalized);
     if (inFlight !== undefined) return inFlight;
+    const generation = this.#currentGeneration(normalized);
     const task = loader()
       .then((authentication) => {
-        this.#authentication.set(normalized, authentication);
+        // Publish only while this registration is still the one in force.
+        if (this.#currentGeneration(normalized) === generation) {
+          this.#authentication.set(normalized, authentication);
+        }
         return authentication;
       })
-      .finally(() => this.#authenticationLoading.delete(normalized));
+      .finally(() => {
+        // Identity check: a superseded load must not delete its replacement's
+        // in-flight entry.
+        if (this.#authenticationLoading.get(normalized) === task) {
+          this.#authenticationLoading.delete(normalized);
+        }
+      });
     this.#authenticationLoading.set(normalized, task);
     return task;
   }
@@ -276,12 +312,19 @@ export class ProviderRegistry {
     if (loader === undefined) return undefined;
     const inFlight = this.#quotaLoading.get(normalized);
     if (inFlight !== undefined) return inFlight;
+    const generation = this.#currentGeneration(normalized);
     const task = loader()
       .then((collector) => {
-        this.#quotaCollectors.set(normalized, collector);
+        if (this.#currentGeneration(normalized) === generation) {
+          this.#quotaCollectors.set(normalized, collector);
+        }
         return collector;
       })
-      .finally(() => this.#quotaLoading.delete(normalized));
+      .finally(() => {
+        if (this.#quotaLoading.get(normalized) === task) {
+          this.#quotaLoading.delete(normalized);
+        }
+      });
     this.#quotaLoading.set(normalized, task);
     return task;
   }
@@ -295,12 +338,19 @@ export class ProviderRegistry {
     if (loader === undefined) return undefined;
     const inFlight = this.#modelDiscoveryLoading.get(normalized);
     if (inFlight !== undefined) return inFlight;
+    const generation = this.#currentGeneration(normalized);
     const task = loader()
       .then((discovery) => {
-        this.#modelDiscovery.set(normalized, discovery);
+        if (this.#currentGeneration(normalized) === generation) {
+          this.#modelDiscovery.set(normalized, discovery);
+        }
         return discovery;
       })
-      .finally(() => this.#modelDiscoveryLoading.delete(normalized));
+      .finally(() => {
+        if (this.#modelDiscoveryLoading.get(normalized) === task) {
+          this.#modelDiscoveryLoading.delete(normalized);
+        }
+      });
     this.#modelDiscoveryLoading.set(normalized, task);
     return task;
   }
@@ -316,6 +366,7 @@ export class ProviderRegistry {
   ): Promise<ProviderAdapter> {
     const inFlight = this.#loading.get(providerId);
     if (inFlight !== undefined) return inFlight;
+    const generation = this.#currentGeneration(providerId);
     const startedAt = performance.now();
     const task = (async () => {
       const adapter = await registration.load();
@@ -323,10 +374,18 @@ export class ProviderRegistry {
       const durationMs = performance.now() - startedAt;
       metrics.proxy_provider_adapter_load_ms.observe(durationMs);
       trackAdapterLoad(providerId, durationMs);
-      this.#loaded.set(providerId, adapter);
+      // Publish only while this registration is still the one in force; a load
+      // that outlived a re-registration must not resurrect the old adapter.
+      if (this.#currentGeneration(providerId) === generation) {
+        this.#loaded.set(providerId, adapter);
+      }
       return adapter;
     })().finally(() => {
-      this.#loading.delete(providerId);
+      // Identity check: a superseded load must not delete its replacement's
+      // in-flight entry.
+      if (this.#loading.get(providerId) === task) {
+        this.#loading.delete(providerId);
+      }
     });
     this.#loading.set(providerId, task);
     return task;

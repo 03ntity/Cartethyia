@@ -416,7 +416,7 @@ type RouteCatalogSnapshotResult = Omit<RouteSnapshot, "revision" | "created_at">
 class RouteCatalogRepository {
   constructor(private readonly db: CartethyiaDatabase) {}
 
-  async loadRouteCatalogSnapshot(tenantId?: string): Promise<RouteCatalogSnapshotResult> {
+  async loadRouteCatalogSnapshot(): Promise<RouteCatalogSnapshotResult> {
     const [providerRows, modelRows, accountRows, aliasRows, comboRows, routingRows, poolRows, poolAccountRows, disabledModelRows, cliMappingRows, cliMappingSettingRows, poolSettingRows, settingsRows] =
       await Promise.all([
         this.db.select(PROVIDER_COLUMNS).from(providers).where(eq(providers.enabled, true)),
@@ -531,9 +531,7 @@ class RouteCatalogRepository {
     // per-candidate during the build; it is NOT stored in RouteSnapshot.
     const poolRouting: Record<string, PoolRoutingSetting> = {};
     for (const row of poolSettingRows) {
-      if (tenantId === undefined || row.tenantId === tenantId) {
-        poolRouting[row.tenantId] = { strategy: row.strategy, rotateCount: row.rotateCount };
-      }
+      poolRouting[row.tenantId] = { strategy: row.strategy, rotateCount: row.rotateCount };
     }
 
     // Build per-tenant per-provider routing preferences before the
@@ -806,9 +804,7 @@ class RouteCatalogRepository {
                   tenantCandidate.cooldown_until = first.cooldownUntil.getTime();
                 }
               }
-              if (tenantId === undefined || tenantId === tenantOwnerId) {
-                candidates.push(tenantCandidate);
-              }
+              candidates.push(tenantCandidate);
             }
           }
           if (emittedPoolAccount) continue;
@@ -825,9 +821,7 @@ class RouteCatalogRepository {
                   routing: tenantPools.routing,
                 },
               });
-              if (tenantId === undefined || tenantId === tId) {
-                candidates.push(tenantCandidate);
-              }
+              candidates.push(tenantCandidate);
             }
           }
         }
@@ -845,9 +839,7 @@ class RouteCatalogRepository {
         if (providerRequiresAccount) {
           candidate.health_status = "disabled";
         }
-        if (tenantId === undefined || candidate.tenant_id === null || candidate.tenant_id === tenantId) {
-          candidates.push(candidate);
-        }
+        candidates.push(candidate);
         continue;
       }
       for (const account of accounts) {
@@ -956,18 +948,14 @@ class RouteCatalogRepository {
           candidate.health_status = "model_cooldown";
           candidate.cooldown_until = new Date(modelCooldownUntil).getTime();
         }
-        if (tenantId === undefined || candidate.tenant_id === null || candidate.tenant_id === tenantId) {
-          candidates.push(candidate);
-        }
+        candidates.push(candidate);
       }
     }
 
     const aliases: Record<string, Record<string, string>> = {};
     const cliAliases: Record<string, Record<string, string>> = {};
     for (const row of aliasRows) {
-      if (tenantId === undefined || row.tenantId === tenantId) {
-        (aliases[row.tenantId] ??= {})[row.alias] = row.targetModel;
-      }
+      (aliases[row.tenantId] ??= {})[row.alias] = row.targetModel;
     }
     // CLI-tool mappings are per-(tenant, key): each API key can route the same
     // CLI slot to a different target. The snapshot keys the alias bucket by
@@ -984,19 +972,15 @@ class RouteCatalogRepository {
     for (const row of cliMappingRows) {
       if (!row.enabled) continue;
       if (!enabledMappingBuckets.has(`${row.tenantId}:${row.apiKeyId}`)) continue;
-      if (tenantId === undefined || row.tenantId === tenantId) {
-        const bucketKey = `${row.tenantId}:${row.apiKeyId}`;
-        const aliasBucket = (cliAliases[bucketKey] ??= {});
-        for (const sourceKey of cliMappingSourceKeys(row.toolId, row.sourceModel)) {
-          aliasBucket[sourceKey] = row.targetModel;
-        }
+      const bucketKey = `${row.tenantId}:${row.apiKeyId}`;
+      const aliasBucket = (cliAliases[bucketKey] ??= {});
+      for (const sourceKey of cliMappingSourceKeys(row.toolId, row.sourceModel)) {
+        aliasBucket[sourceKey] = row.targetModel;
       }
     }
     const combos: Record<string, Record<string, ComboDefinition>> = {};
     for (const row of comboRows) {
-      if (tenantId === undefined || row.tenantId === tenantId) {
-        (combos[row.tenantId] ??= {})[row.name] = { members: row.members, strategy: row.strategy };
-      }
+      (combos[row.tenantId] ??= {})[row.name] = { members: row.members, strategy: row.strategy };
     }
 
     const routingMap: ProviderRoutingMap | undefined =
@@ -1021,7 +1005,7 @@ export function createDatabaseSnapshotBuilder(
   const repository = new RouteCatalogRepository(db);
   return async () => {
     await refreshActiveCatalogs?.();
-    return repository.loadRouteCatalogSnapshot(undefined);
+    return repository.loadRouteCatalogSnapshot();
   };
 }
 

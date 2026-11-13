@@ -478,7 +478,7 @@ export function createConsoleAuthRoutes(
         newPassword: t.String(),
       }),
     },
-    async ({ body, cookie, set }) => {
+    async ({ body, cookie, set, request }) => {
       const sessionToken = readSessionCookie(cookie);
       if (!sessionToken) {
         set.status = 401;
@@ -494,6 +494,23 @@ export function createConsoleAuthRoutes(
         set.status = 401;
         return { status: "failed", message: "Not authenticated" } satisfies ChangePasswordResponse;
       }
+      // A wrong current password is the same brute-force surface as a wrong
+      // login password, so it is accounted against the same lockout key the
+      // login route uses (`username:clientIp`): a stolen session must not buy
+      // unbounded guesses at the password it wants to replace. Unresolvable
+      // peer identity falls back to one shared bucket rather than skipping
+      // accounting entirely.
+      const peerAddress = resolvePeerAddress(request);
+      const clientIp = peerAddress
+        ? resolveClientIdentity(request, trustedProxyBoundary, peerAddress)
+        : "unknown";
+      const lockoutKey = `${user.username.trim().toLowerCase()}:${clientIp}`;
+      const remainingLock = await lockoutService.remainingLockSeconds(lockoutKey);
+      if (remainingLock > 0) {
+        set.status = 429;
+        set.headers["retry-after"] = String(remainingLock);
+        return await lockedOutMessage(lockoutService, lockoutKey);
+      }
       const { currentPassword, newPassword } = body;
       if (newPassword.length < 8) {
         set.status = 400;
@@ -504,12 +521,19 @@ export function createConsoleAuthRoutes(
       }
       const valid = await credentialService.verifyPassword(currentPassword, user.passwordHash);
       if (!valid) {
+        const isBanned = await lockoutService.recordFailure(lockoutKey, "invalid_current_password");
+        if (isBanned) {
+          set.status = 429;
+          set.headers["retry-after"] = String(await lockoutService.remainingLockSeconds(lockoutKey));
+          return await lockedOutMessage(lockoutService, lockoutKey);
+        }
         set.status = 401;
         return {
           status: "failed",
           message: "Current password is incorrect",
         } satisfies ChangePasswordResponse;
       }
+      await lockoutService.clearFailures(lockoutKey);
       const newHash = await credentialService.hashPassword(newPassword);
       const rotateInScope = async (scope: CartethyiaDatabase): Promise<number> => {
         const result = await returningRows(

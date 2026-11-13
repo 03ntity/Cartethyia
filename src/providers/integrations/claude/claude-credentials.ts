@@ -27,11 +27,6 @@ function decodeSecret(secret: Uint8Array | undefined): string | undefined {
   return token.length > 0 ? token : undefined;
 }
 
-/**
- * Resolves the Claude credential mode without reading any client-provided auth
- * value. Missing material is rejected for authenticated kinds and accepted
- * only for the explicit `none` kind.
- */
 /** Header-construction inputs shared by ClaudeAdapter and deterministic tests. */
 export interface ClaudeHeaderOptions {
   readonly credential_kind?: CredentialKind;
@@ -147,6 +142,11 @@ function standardClaudeHeaders(
   options: ClaudeHeaderOptions,
 ): { headers: Record<string, string>; negotiation: AnthropicBetaNegotiation } {
   const credentialKind = options.credential_kind ?? "oauth";
+  /**
+   * Resolves the Claude credential mode without reading any client-provided
+   * auth value. Missing material is rejected for authenticated kinds and
+   * accepted only for the explicit `none` kind.
+   */
   const credential =
     credentialKind === "none"
       ? { mode: "none" as const }

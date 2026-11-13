@@ -43,7 +43,6 @@ const TIER_ROOST_TIERS: Readonly<Record<string, string>> = {
 
 const PERCH_ROWS: readonly PerchRow[] = [
   { id: "standard", displayName: "Roost Standard", ctx: PERCH_CONTEXT_STANDARD },
-  { id: "standard 1m", displayName: "Roost Standard 1M", ctx: PERCH_CONTEXT_STANDARD_1M },
   // Starter-pool pins — context/output per the client's published cards
   // (2.4.125): glm-5.3-flash 1048576, crouton-alpha 1048576 / 943718,
   // beam-1.0 1048576 / 131072, deepseek-v4.1-flash-1017-starter 1048576 /

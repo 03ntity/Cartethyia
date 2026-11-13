@@ -263,17 +263,16 @@ export async function drainInFlightDispatches(
 }
 
 /**
- * A step ends when the server's own tool count covers the calls this client
- * dispatched (donor/magpie 0.2.35): waiting out the heartbeats after that is
- * what made a finished tool round look hung. Server-owned calls are already
- * in the count and are never re-sent.
+ * Whether a step has ended: the server's own tool count covers the calls this
+ * client dispatched (donor/magpie 0.2.35). Waiting out the heartbeats after
+ * that is what made a finished tool round look hung. Server-owned calls are
+ * already in the count.
  */
 export function reconcileToolCount(
   checkpoint: CursorCheckpointState,
   serverToolCount: number,
-): { endStep: boolean; resend: string[] } {
-  const resend = [...checkpoint.pendingCallIds].filter((id) => !checkpoint.completedCallIds.has(id));
+): boolean {
   const expected = checkpoint.expectedCallCount ?? serverToolCount;
   const counted = serverToolCount + checkpoint.serverOwnedCount;
-  return { endStep: counted >= Math.max(checkpoint.dispatchedCount, expected), resend };
+  return counted >= Math.max(checkpoint.dispatchedCount, expected);
 }

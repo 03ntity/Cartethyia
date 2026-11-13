@@ -24,9 +24,11 @@ import { describe, expect, test } from "bun:test";
 import {
   InMemoryIpAbuseStore,
   IpAbuseProtectionService,
+  RedisIpAbuseStore,
 } from "../../src/security/abuse";
 import { GatewayError } from "../../src/protocol/gateway-error";
 import type { ClientIdentity } from "../../src/security/abuse";
+import type { RedisClient } from "../../src/persistence/redis";
 
 /** A controllable clock, so a window can be crossed without waiting. */
 function createClock(startMs = 1_700_000_000_000) {
@@ -302,6 +304,96 @@ describe("manual IP bans (console)", () => {
     expect(await store.listBans()).toHaveLength(0);
     const err = await attempt(service, "10.1.2.5");
     expect(err).toBeNull();
+  });
+});
+
+describe("RedisIpAbuseStore.listBans - the non-blocking listing", () => {
+  /**
+   * Minimal Redis double: SCAN, one pipelined GET batch, SET, DEL.
+   *
+   * `keys()` throws on purpose: the property under test is that the listing
+   * never issues the blocking command. A double that silently supported `KEYS`
+   * would let the old implementation pass.
+   */
+  function fakeRedis(initial: Record<string, string> = {}) {
+    const store = new Map<string, string>(Object.entries(initial));
+    let pipelineBatches = 0;
+    const client = {
+      keys: (): never => {
+        throw new Error("KEYS blocks Redis; the listing must use SCAN");
+      },
+      set: async (key: string, value: string): Promise<string> => {
+        store.set(key, value);
+        return "OK";
+      },
+      get: async (key: string): Promise<string | null> => store.get(key) ?? null,
+      del: async (...keys: string[]): Promise<number> => {
+        let removed = 0;
+        for (const key of keys) if (store.delete(key)) removed += 1;
+        return removed;
+      },
+      scan: async (cursor: string): Promise<[string, string[]]> => {
+        if (cursor !== "0") return ["0", []];
+        return ["0", [...store.keys()].filter((key) => key.startsWith("cartethyia:ip:ban:"))];
+      },
+      pipeline: () => {
+        const requested: string[] = [];
+        const chain = {
+          get(key: string) {
+            requested.push(key);
+            return chain;
+          },
+          async exec(): Promise<[null, string | null][]> {
+            pipelineBatches += 1;
+            return requested.map((key) => [null, store.get(key) ?? null]);
+          },
+        };
+        return chain;
+      },
+    };
+    return {
+      redis: client as unknown as RedisClient,
+      store,
+      pipelineBatches: () => pipelineBatches,
+    };
+  }
+
+  test("lists a ban the store wrote, via SCAN and one pipelined GET batch", async () => {
+    const { redis, pipelineBatches } = fakeRedis();
+    const store = new RedisIpAbuseStore(redis);
+    await store.ban("10.1.2.3", 60_000);
+    const bans = await store.listBans();
+    expect(bans).toHaveLength(1);
+    expect(bans[0]?.identity).toBe("10.1.2.3");
+    expect(bans[0]?.bannedUntil).toBeGreaterThan(Date.now());
+    expect(pipelineBatches()).toBe(1);
+  });
+
+  test("a permanent ban lists with null bannedUntil and is kept", async () => {
+    const { redis, store: backing } = fakeRedis({
+      "cartethyia:ip:ban:10.1.2.4": String(Number.MAX_SAFE_INTEGER),
+    });
+    const store = new RedisIpAbuseStore(redis);
+    const bans = await store.listBans();
+    expect(bans[0]?.bannedUntil).toBeNull();
+    expect(backing.size).toBe(1);
+  });
+
+  test("expired and malformed markers are deleted during the listing", async () => {
+    const { redis, store: backing } = fakeRedis({
+      "cartethyia:ip:ban:10.1.2.3": String(Date.now() - 1),
+      "cartethyia:ip:ban:10.1.2.4": "not-a-number",
+    });
+    const store = new RedisIpAbuseStore(redis);
+    expect(await store.listBans()).toHaveLength(0);
+    expect(backing.size).toBe(0);
+  });
+
+  test("an empty keyspace answers without a pipeline round trip", async () => {
+    const { redis, pipelineBatches } = fakeRedis();
+    const store = new RedisIpAbuseStore(redis);
+    expect(await store.listBans()).toEqual([]);
+    expect(pipelineBatches()).toBe(0);
   });
 });
 

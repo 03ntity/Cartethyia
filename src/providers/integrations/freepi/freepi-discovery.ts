@@ -18,6 +18,7 @@
 
 import { defineModel, type ModelDefinition } from "../../provider-model-definition";
 import {
+  FREEPI_BASE_URL,
   FREEPI_CHAT_PATH,
   FREEPI_CONTEXT_WINDOW,
   FREEPI_DEFAULT_MODEL,
@@ -38,7 +39,7 @@ export async function discoverFreepiModels(input: {
   readonly signal?: AbortSignal;
   readonly providerId?: string;
 }): Promise<readonly ModelDefinition[]> {
-  const url = new URL("/client-version", "https://api.freepi.ai");
+  const url = new URL("/client-version", FREEPI_BASE_URL);
   const response = await input.fetcher(url, {
     method: "GET",
     headers: {

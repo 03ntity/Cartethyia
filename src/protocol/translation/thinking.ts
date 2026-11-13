@@ -201,9 +201,6 @@ export function withThinkingSuffixIntent(
   return { ...request, reasoning };
 }
 
-/** Standard OpenAI Responses wire supported efforts (OpenAI, OpenCode, Azure). Responses API has no 'max' tier. */
-
-
 interface ThinkingNormalizationOptions {
   /** Resolved thinking config (from `resolveThinkingForModel`). Absent = no clamp. */
   readonly thinking?: ThinkingConfig;

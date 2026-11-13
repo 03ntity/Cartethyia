@@ -38,7 +38,7 @@ import { createAuditRoutes } from "./audit/routes";
 import { DrizzleAuditReadStore } from "./audit/store";
 import { createIpBanRoutes } from "./ip-bans/routes";
 import type { IpAbuseStore } from "../security/abuse";
-import { createUpdateRoutes } from "./updates/routes";
+import { createUpdateRoutes, type UpdateShutdownCoordinator } from "./updates/routes";
 import { createRemoteSupportRoutes } from "./remote-support/routes";
 import { createRemoteSupportService } from "./remote-support/service";
 import { resolvePort } from "../config/runtime";
@@ -137,10 +137,7 @@ export interface ConsoleDomainContext {
    * build a console that cannot apply updates; the apply route answers 503
    * rather than exiting undrained when it is absent.
    */
-  readonly shutdownCoordinator?: {
-    readonly begin: (reason: "update") => Promise<void>;
-    readonly totalShutdownBudgetMs: () => number;
-  };
+  readonly shutdownCoordinator?: UpdateShutdownCoordinator;
 }
 import { and, eq, isNull, or } from "drizzle-orm";
 import { networkPools, providerRoutingSettings } from "../persistence/schema";

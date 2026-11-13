@@ -52,6 +52,9 @@ const ANTHROPIC_IMAGE_MEDIA_TYPES = new Set([
   "image/webp",
 ]);
 
+/** Anthropic `source.type` is a closed set: `base64` | `url` | `file`. */
+const ANTHROPIC_SOURCE_TYPES: ReadonlySet<string> = new Set(["base64", "url", "file"]);
+
 /** Common aliases that resolve to a supported Anthropic media type. */
 const IMAGE_MEDIA_TYPE_ALIASES: Readonly<Record<string, string>> = {
   "image/jpg": "image/jpeg",
@@ -198,7 +201,7 @@ function normalizeImageBlock(payload: unknown): ClaudeWireObject {
 
   // A `source` that is already Anthropic-shaped keeps its own fields; anything
   // else is re-projected from whichever origin vocabulary it arrived in.
-  const sourceIsAnthropic = ["base64", "url", "file"].includes(String(rawSource["type"]));
+  const sourceIsAnthropic = ANTHROPIC_SOURCE_TYPES.has(String(rawSource["type"]));
   const source: Record<string, unknown> = sourceIsAnthropic ? { ...rawSource } : {};
   // A `url` source carrying a data URI is not a URL: the bytes are in the
   // string. Leaving it as `type: "url"` hands the upstream a data URI in a
@@ -246,7 +249,7 @@ function normalizeImageBlock(payload: unknown): ClaudeWireObject {
   }
   // A source still lacking a valid discriminator cannot be repaired into one;
   // preserve the origin payload rather than fabricating a transport.
-  if (!["base64", "url", "file"].includes(String(source["type"]))) {
+  if (!ANTHROPIC_SOURCE_TYPES.has(String(source["type"]))) {
     return rawSource === payload ? { type: "image", source } : { ...payload, source };
   }
   return rawSource === payload

@@ -23,7 +23,6 @@ const KILO_PROVIDER_ID = "cartethyia";
 
 function resolveKiloConfigDirectory(): string {
   if (IS_WIN) return join(process.env.USERPROFILE ?? homeDir(), ".config", "kilo");
-  if (IS_MAC) return join(homeDir(), ".config", "kilo");
   return join(homeDir(), ".config", "kilo");
 }
 

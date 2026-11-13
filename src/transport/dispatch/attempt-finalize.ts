@@ -284,21 +284,40 @@ export function captureProviderExchange(
   };
 }
 
-async function resolvedProviderResponse(
+/**
+ * Resolves the captured provider payload with a bounded wait.
+ *
+ * Exported for the fake-timer suite, which pins that the race timer is
+ * cleared as soon as the race settles.
+ */
+export async function resolvedProviderResponse(
   provider: ProviderExchangeCapture | undefined,
 ): Promise<unknown> {
   if (!provider) return null;
   let timedOut = false;
-  const settled = await Promise.race([
-    provider.response,
-    new Promise<null>((resolve) => setTimeout(() => { timedOut = true; resolve(null); }, PROVIDER_CAPTURE_AWAIT_MS)),
-  ]);
-  if (settled === null || settled === undefined) {
-    // Distinguish "slow payload" from "no payload": a bare null cannot tell the
-    // two apart, so the timeout is reported explicitly.
-    return timedOut ? { _truncated: true, _reason: "provider_capture_timeout" } : null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const settled = await Promise.race([
+      provider.response,
+      new Promise<null>((resolve) => {
+        // Cleared in `finally` on every exit: an uncleared timer would
+        // outlive the attempt, retain the capture's promise chain, and keep
+        // the event loop busy for the capture window after the response.
+        timer = setTimeout(() => {
+          timedOut = true;
+          resolve(null);
+        }, PROVIDER_CAPTURE_AWAIT_MS);
+      }),
+    ]);
+    if (settled === null || settled === undefined) {
+      // Distinguish "slow payload" from "no payload": a bare null cannot tell the
+      // two apart, so the timeout is reported explicitly.
+      return timedOut ? { _truncated: true, _reason: "provider_capture_timeout" } : null;
+    }
+    return settled;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
-  return settled;
 }
 
 /**
@@ -785,10 +804,12 @@ export async function completeAttempt(
     ...(completion.usage === undefined ? {} : { usage: completion.usage }),
     ...(completion.ttfbMs === undefined ? {} : { ttfbMs: completion.ttfbMs }),
     ...(completion.tokensPerSec === undefined ? {} : { tokensPerSec: completion.tokensPerSec }),
+    // The outcome's `reportedModel` key appears exactly once: the precedence
+    // lives in the resolution above (completion's own attribution first, then
+    // the value read from the upstream bytes).
     ...(reportedModel === undefined ? {} : { reportedModel }),
     ...(completion.firstContentDeltaAtMs === undefined ? {} : { firstContentDeltaAtMs: completion.firstContentDeltaAtMs }),
     ...(completion.lastEventAtMs === undefined ? {} : { lastEventAtMs: completion.lastEventAtMs }),
-    ...(completion.reportedModel === undefined ? {} : { reportedModel: completion.reportedModel }),
     ...(completion.status === "completed" &&
     isDegenerateStop(
       completion.usage,

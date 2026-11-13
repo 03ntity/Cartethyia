@@ -64,6 +64,20 @@ export const BACKUP_VERSION = 1;
  */
 export const MAX_BACKUP_BYTES = resolveMaxBodyBytes();
 
+/**
+ * Upper bound for the *decompressed* size of an uploaded backup.
+ *
+ * A gzip stream can expand far past its compressed size — a few MiB of
+ * repeated bytes inflate to gigabytes — and `gunzipSync` allocates the whole
+ * output before anything gets to inspect it. Real backups are JSON that gzip
+ * compresses roughly 20–100×, so 128× the body cap leaves headroom for every
+ * legitimate file while turning a decompression bomb into a clean, bounded
+ * error instead of an OOM. Like {@link MAX_BACKUP_BYTES} it follows
+ * `CARTETHYIA_SERVER_MAX_BODY_BYTES`: raising the body cap raises what a
+ * restore may decompress.
+ */
+export const MAX_BACKUP_DECOMPRESSED_BYTES = MAX_BACKUP_BYTES * 128;
+
 /** Defense-in-depth row cap per table, after the byte bound. */
 export const MAX_ROWS_PER_TABLE = 500_000;
 

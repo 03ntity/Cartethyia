@@ -5,10 +5,9 @@
  * (2026-11-05) into focused modules; this barrel keeps every existing import
  * path (`src/providers/integrations/qoder/qoder.ts`) working unchanged.
  *
- * Surface contract (see `qoder-adapter.ts`):
- * - `grpc` — default billed carrier (1M-token context).
- * - `cosy` — free/lite + forced legacy (COSY Bearer signing).
- * - `ide` — probe/testing only, never production.
+ * Surface contract (see `qoder-adapter.ts`): `cosy`, the legacy COSY chat
+ * surface (`/algo/.../agent_chat_generation`), is the only live transport —
+ * the gRPC and IDE surfaces died with 2.8.1 and are not dispatched anymore.
  */
 
 // Auth: PAT detection, machine id, OAuth auth, PAT→jt exchange v1, session id

@@ -53,7 +53,7 @@ export const ZCODE_START_PLAN_BASE_URL = "https://zcode.z.ai/api/v1/zcode-plan/a
  * (e.g. 3.16.3 headers over 3.14.5 blocks) risks the 3012 identity gate. Bump
  * both together only after re-capturing the live blocks and re-verifying.
  */
-const APP_VERSION = "3.14.5";
+const PROMPT_APP_VERSION = "3.14.5";
 /** Anthropic beta the desktop client sends on the plan lane (captured live). */
 const ANTHROPIC_BETA = "mid-conversation-system-2026-04-07";
 /** The plan gateway enforces a serial per-account in-flight limit; 8192 is the desktop default. */
@@ -96,10 +96,10 @@ async function identityHeaders(context: ProviderDispatchContext): Promise<Record
   const queryId = `01a1${requestId.slice(4).replace(/-/g, "").slice(0, 28)}`;
   const deviceMid = await getOrCreateInstallId("zcode-start-plan");
   return {
-    "user-agent": `ZCode/${APP_VERSION} ai-sdk/anthropic/3.0.81`,
+    "user-agent": `ZCode/${PROMPT_APP_VERSION} ai-sdk/anthropic/3.0.81`,
     "http-referer": "https://zcode.z.ai",
     "x-title": "Z Code@electron",
-    "x-zcode-app-version": APP_VERSION,
+    "x-zcode-app-version": PROMPT_APP_VERSION,
     "x-zcode-agent": "glm",
     "x-release-channel": "production",
     "x-client-language": "en-US",

@@ -14,9 +14,6 @@
 // Everything the manager holds is bounded: one idle TTL, one release per
 // session, one frame pump per Run, and one terminal path that closes the stream
 // and releases the borrowed lease exactly once.
-import { GatewayError } from "../../../protocol/gateway-error";
-import type { UsageRecord } from "../../../protocol/canonical-model";
-import type { AttemptLeaseOwnership } from "../../provider-contracts";
 import { RUN_IDLE_TTL_MS } from "./cursor-shared";
 import type { CursorToolDescriptor } from "./cursor-request";
 
@@ -26,26 +23,6 @@ export interface CursorContinuationScope {
   readonly apiKeyId: string;
   readonly providerId: string;
   readonly providerAccountId: string;
-}
-
-/**
- * The host exec frame a pending call forwards: Cursor asked its executor for a
- * native host tool (shell, write, read) and the canonical client is executing
- * it locally, so the result leg must answer the variant's typed result frame —
- * not the generic `mcp_result` the MCP channel waits on.
- */
-export interface CursorHostExecDetail {
-  readonly variant: "shell" | "write" | "read";
-  /** The shell command Cursor's executor re-reports in the result echo. */
-  readonly command?: string;
-  /** The shell working directory echo, when the args carried one. */
-  readonly workingDirectory?: string;
-  /** The target path echo for write/read frames. */
-  readonly path?: string;
-  /** Line count of the written content, computed from the call's args. */
-  readonly lines?: number;
-  /** Byte size of the written content, computed from the call's args. */
-  readonly fileSize?: number;
 }
 
 /** One pending external tool call awaiting the client's result. */
@@ -61,8 +38,6 @@ export interface CursorPendingToolCall {
   readonly execIdString?: string;
   /** Bare function name the client declared. */
   readonly toolName: string;
-  /** The forwarded host exec, when this call is one. */
-  readonly host?: CursorHostExecDetail;
 }
 
 /** Everything one live Run session owns. */
@@ -76,20 +51,15 @@ export interface CursorRunSession {
   readonly pending: Map<number, string>;
   /** Pending call id → Cursor exec id and name. */
   readonly calls: Map<string, CursorPendingToolCall>;
-  /** Usage reported by the Run's `turn_ended`, when it has arrived. */
-  usage: UsageRecord | undefined;
-  /** Terminal reason this Run ended, once it has. */
-  failure: GatewayError | undefined;
 }
 
 /** Registry entry: one live Run, its expiry, and its borrowed lease release. */
 interface LiveRun {
   readonly session: CursorRunSession;
   /**
-   * The borrowed account/network-pool lease release. Optional and mutable: a
-   * continuation request that re-enters an already-registered Run hands over the
-   * lease it took, and `adoptLease` refuses when one is already stored — so the
-   * slot is released exactly once however many requests touched the Run.
+   * The borrowed account/network-pool lease release, stored once at register
+   * time — so the slot is released exactly once on the Run's single terminal
+   * path, however many requests touched the Run.
    */
   releaseLease?: (() => void) | undefined;
   readonly close: (reason?: string) => void;
@@ -244,20 +214,6 @@ export class CursorRunSessionManager {
     entry.expiryTimer.unref?.();
   }
 
-  /** Records the Run's authoritative terminal usage before it is closed. */
-  recordUsage(runId: string, usage: UsageRecord): void {
-    const entry = this.runs.get(runId);
-    if (entry === undefined) return;
-    entry.session.usage = usage;
-  }
-
-  /** Records why a Run failed, so the next request reports it rather than hanging. */
-  recordFailure(runId: string, failure: GatewayError): void {
-    const entry = this.runs.get(runId);
-    if (entry === undefined) return;
-    entry.session.failure = failure;
-  }
-
   /** Reads one live Run by id, for the frame continuation path. */
   get(runId: string): CursorRunSession | undefined {
     return this.runs.get(runId)?.session;
@@ -291,21 +247,6 @@ export class CursorRunSessionManager {
       providerId: session.scope.providerId,
       providerAccountId: session.scope.providerAccountId,
     };
-  }
-
-  /**
-   * Takes over the borrowed lease for a Run that is already registered.
-   *
-   * Idempotent: a second transfer stores nothing, so a retry of the same
-   * continuation request cannot double-release the slot.
-   */
-  adoptLease(runId: string, ownership: AttemptLeaseOwnership | undefined): void {
-    if (ownership === undefined) return;
-    const entry = this.runs.get(runId);
-    if (entry === undefined || entry.releaseLease !== undefined) return;
-    const release = ownership.transferToProviderSession();
-    if (release === undefined) return;
-    entry.releaseLease = release;
   }
 
   /** Drops every live Run. Shutdown and test seam. */

@@ -45,13 +45,18 @@ export function maskClientIp(value: string | null | undefined): string | null {
 }
 
 /**
- * Scrubs credential-shaped text before it is written to a log.
+ * Scrubs credential-shaped text before it is written to a log sink.
  *
  * Payload bodies stay verbatim — a redacted body is indistinguishable from a
  * body the upstream actually received, which is why the payload redactor was
  * removed. Logs are different: a drain failure that quotes a request line, or
  * an error whose message echoes an `Authorization` header, lands in a file an
- * operator shares. Those writes are scrubbed here, and nowhere else.
+ * operator shares. `log-sanitize.ts` runs this over every string that reaches
+ * Pino or the console ring (values, keys, error fields) and `logger.ts` over
+ * the message text itself: the log sinks are the only writers scrubbed, and
+ * this is the only scrubber they use. Non-secret text is kept verbatim - just
+ * the credential-shaped runs are rewritten, into the fixed marker
+ * `[redacted]`.
  *
  * The patterns are the ones a leaked credential actually has: an
  * `Authorization` header value, a `Bearer`/`Basic` token, a JWT (`eyJ…`), and

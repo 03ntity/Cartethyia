@@ -178,6 +178,7 @@ export class ClaudeAdapter implements ProviderAdapter {
   constructor(options: ClaudeAdapterOptions = {}) {
     this.fetchFn = options.fetch ?? globalThis.fetch;
     this.baseUrl = options.base_url;
+    this.customHeaders = options.custom_headers;
   }
 
   async *dispatch(
@@ -510,20 +511,6 @@ export class ClaudeAdapter implements ProviderAdapter {
   }
 
   /**
-   * Sends once, passing every event through, and banks a refusal's credit token
-   * against the body that was refused.
-   *
-   * Donor rule (`anthropic.ts:3287-3309`): only a refusal carries a token, and
-   * the frozen body is the request that produced it (`params: structuredClone(params)`).
-   * On this side the refusal surfaces as a terminal event whose canonical
-   * `stop_reason` is `error` (`mapClaudeStopReason`, `response/messages.ts:32-34`)
-   * carrying the provider's `stop_details`.
-   *
-   * `captureKey` is omitted for a redemption send: a body already carrying a
-   * token is never the body that was refused, so banking against it would only
-   * occupy a cache slot for five minutes with a token that cannot be replayed.
-   */
-  /**
    * Waits out a slow-lane capacity signal and reports whether to retry.
    *
    * Returns true when the failure was a capacity wait that has now elapsed and
@@ -573,6 +560,20 @@ export class ClaudeAdapter implements ProviderAdapter {
     return true;
   }
 
+  /**
+   * Sends once, passing every event through, and banks a refusal's credit token
+   * against the body that was refused.
+   *
+   * Donor rule (`anthropic.ts:3287-3309`): only a refusal carries a token, and
+   * the frozen body is the request that produced it (`params: structuredClone(params)`).
+   * On this side the refusal surfaces as a terminal event whose canonical
+   * `stop_reason` is `error` (`mapClaudeStopReason`, `response/messages.ts:32-34`)
+   * carrying the provider's `stop_details`.
+   *
+   * `captureKey` is omitted for a redemption send: a body already carrying a
+   * token is never the body that was refused, so banking against it would only
+   * occupy a cache slot for five minutes with a token that cannot be replayed.
+   */
   private async *sendWithCreditCapture(
     sendOnce: (
       headers: Record<string, string>,

@@ -85,6 +85,24 @@ export function accountLabelKindSegment(credentialMode: CredentialMode): string 
 }
 
 /**
+ * First unused `<prefix>N` label given the labels already in use.
+ *
+ * The one numbering rule for generated account labels: the catalog's
+ * `dcint-key-N`/`dcint-jwt-N` names and the OAuth re-login's `<providerId>-N`
+ * names differ only in their prefix. Counting is case-insensitive on the whole
+ * label, so a hand-typed `DCINT-KEY-2` still reserves its number.
+ */
+export function nextFreeLabel(prefix: string, existingLabels: readonly string[]): string {
+  const taken = new Set(
+    existingLabels.map((label) => label.trim().toLowerCase()),
+  );
+  for (let n = 1; ; n += 1) {
+    const candidate = `${prefix}${n}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+/**
  * First unused `dcint-key-N` / `dcint-jwt-N` label for one provider.
  *
  * Polished tokens and plain JWTs are the credentials that arrive nameless: an
@@ -106,14 +124,7 @@ export function nextGeneratedAccountLabel(
   existingLabels: readonly string[],
 ): string {
   const kind = accountLabelKindSegment(credentialMode);
-  const prefix = `${providerId}-${kind}-`;
-  const taken = new Set(
-    existingLabels.map((label) => label.trim().toLowerCase()),
-  );
-  for (let n = 1; ; n += 1) {
-    const candidate = `${prefix}${n}`;
-    if (!taken.has(candidate.toLowerCase())) return candidate;
-  }
+  return nextFreeLabel(`${providerId}-${kind}-`, existingLabels);
 }
 
 export function parsePastedOAuthCredential(raw: string): {

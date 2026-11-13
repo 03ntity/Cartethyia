@@ -13,7 +13,7 @@ import {
   number,
   isoDate,
 } from "../../quota/quota-contracts";
-import { getAntigravityUserAgent, getAntigravityVersion, collapseAntigravityVariant, loadAntigravityProject } from "./antigravity-protocol";
+import { ANTIGRAVITY_SANDBOX_BASE, getAntigravityUserAgent, getAntigravityVersion, collapseAntigravityVariant, loadAntigravityProject } from "./antigravity-protocol";
 import { ANTIGRAVITY_MODELS } from "./antigravity";
 import { log } from "../../../observability/logger";
 
@@ -279,7 +279,7 @@ export async function fetchAntigravityQuota(
     fields.projectId ?? fields.providerAccountId ?? (await loadAntigravityProject(access, { fetcher }));
   const hosts = [
     "https://daily-cloudcode-pa.googleapis.com",
-    "https://daily-cloudcode-pa.sandbox.googleapis.com",
+    ANTIGRAVITY_SANDBOX_BASE,
   ];
   // Both endpoints are read and merged, because each carries a quota the other
   // does not: `fetchAvailableModels` has the per-model windows, and

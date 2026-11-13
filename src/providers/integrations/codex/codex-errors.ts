@@ -102,7 +102,6 @@ export async function mapCodexErrorResponse(res: Response): Promise<never> {
       (parsedBody["error"] as Record<string, unknown> | undefined) ??
       (parsedBody as Record<string, unknown>);
     if (err !== null && typeof err === "object") {
-      const messageRaw = (err as Record<string, unknown>)["message"];
       const resetsAt =
         ((err as Record<string, unknown>)["resets_at"] as number | undefined) ??
         primaryReset ??
@@ -130,10 +129,10 @@ export async function mapCodexErrorResponse(res: Response): Promise<never> {
         const when = mins !== undefined ? ` Try again in ~${mins} min.` : "";
         friendlyMessage = `ChatGPT rate limit exceeded.${when}`.trim();
       }
-      // `messageRaw` is intentionally not preferred over the sanitized upstream
-      // text when a friendly override is absent — sanitized preserves formatting
-      // that consumers rely on and avoids clobbering multi-line details.
-      void messageRaw;
+      // The upstream's raw `message` is intentionally not preferred over the
+      // sanitized upstream text when a friendly override is absent — sanitized
+      // preserves formatting that consumers rely on and avoids clobbering
+      // multi-line details.
     }
   }
 

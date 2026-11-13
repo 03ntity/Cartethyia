@@ -58,6 +58,7 @@ import {
 import { deriveApiKeyMachineId, deriveOAuthMachineId, normalizeMachineId } from "./kiro-machine-id";
 import { KIRO_MANAGEMENT_HOST_TEMPLATE, AWS_REGION_PATTERN, KIRO_DEFAULT_REGION } from "./kiro-catalog";
 import { fetchKiroQuota } from "./kiro-quota";
+import { TtlCache } from "../../../persistence/ttl-cache";
 
 /** Auth methods this integration supports, as stored on the account. */
 export type KiroAuthMethod =
@@ -328,6 +329,16 @@ interface DeviceFlowRegistration {
 }
 
 /**
+ * How long an IdC/Builder-ID registration is kept for a pending phase-2 code
+ * exchange. The second browser leg follows the phase-1 redirect immediately;
+ * an abandoned login must not retain its client secret beyond this window.
+ */
+const OIDC_REGISTRATION_TTL_MS = 15 * 60 * 1000;
+
+/** Ceiling on concurrently pending OIDC registrations. */
+const OIDC_REGISTRATION_MAX_PENDING = 64;
+
+/**
  * Kiro's authentication client.
  *
  * The 1.4.62 IDE migrated every AWS family to the OAuth 2.0 authorization-code
@@ -360,8 +371,16 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
   protected override readonly tokenUrl = `${KIRO_AUTH_SERVICE}/refreshToken`;
   protected override readonly scopes = "";
 
-  /** IdC/Builder-ID registrations keyed by flow state, for the code exchange. */
-  readonly #registrationByState = new Map<string, DeviceFlowRegistration>();
+  /**
+   * IdC/Builder-ID registrations keyed by flow state, for the code exchange.
+   *
+   * TTL- and size-bounded (see {@link OIDC_REGISTRATION_TTL_MS}): an abandoned
+   * phase-1 login must not hold its client secret in memory forever.
+   */
+  readonly #registrationByState = new TtlCache<DeviceFlowRegistration>({
+    ttlMs: OIDC_REGISTRATION_TTL_MS,
+    maxEntries: OIDC_REGISTRATION_MAX_PENDING,
+  });
 
   /**
    * Fields the browser flow needs before it can start.
@@ -435,14 +454,6 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
     { key: "profileArn", label: "Profile ARN (optional)" },
   ];
 
-  /**
-   * Registers an OIDC client for the IdC/Builder-ID flow.
-   *
-   * The 1.4.62 IDE registers a public client per region/issuer, then opens a
-   * browser authorization-code flow with PKCE. The registration is retained for
-   * the code exchange and later refreshes via the flow `state`, which both the
-   * authorize URL and the callback carry.
-   */
   /**
    * Starts the AWS SSO OIDC device authorization.
    *

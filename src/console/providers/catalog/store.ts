@@ -449,15 +449,13 @@ export class DrizzleProviderCatalogStore implements ProviderCatalogStore {
       serviceKind: isServiceKind(entry.serviceKind) ? entry.serviceKind : ("llm" as const),
       ...(mode === undefined ? {} : { mode }),
     }));
-    const uniqueRequests = requests.filter(
-      (request, index, all) =>
-        all.findIndex(
-          (candidate) =>
-            candidate.modelId === request.modelId &&
-            candidate.route === request.route &&
-            candidate.serviceKind === request.serviceKind,
-        ) === index,
-    );
+    const seenRequestKeys = new Set<string>();
+    const uniqueRequests = requests.filter((request) => {
+      const key = `${request.modelId}\u0000${request.route}\u0000${request.serviceKind}`;
+      if (seenRequestKeys.has(key)) return false;
+      seenRequestKeys.add(key);
+      return true;
+    });
     return this.probing.probeAllModels(tenantId, providerId, uniqueRequests);
   }
   async probeAllAccounts(

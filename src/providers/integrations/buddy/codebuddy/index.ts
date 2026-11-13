@@ -74,7 +74,6 @@ function codeBuddyIntlPrePayload(
   }
   normalizeBuddyToolNames(payload);
   injectBuddyParallelToolCalls(payload, request);
-  void request;
 }
 
 const CODEBUDDY_INTL_RAW: readonly BuddyRawEntry[] = BUDDY_SHARED_RAW;
@@ -197,10 +196,7 @@ export function codeBuddyCnPrePayload(
   ensurePayloadModel(payload, candidate, "CodeBuddy CN");
   normalizeBuddyToolNames(payload);
   injectBuddyParallelToolCalls(payload, request);
-  void request;
 }
-
-export { CODEBUDDY_CN_RAW };
 
 export const CODEBUDDY_CN_IMAGE_MODELS: readonly ModelDefinition[] = makeBuddyCnImageModels(
   CODEBUDDY_CN_PROVIDER_ID,

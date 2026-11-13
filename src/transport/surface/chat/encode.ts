@@ -182,7 +182,7 @@ export function chunk(
   choices: unknown[],
   usage: OpenAiUsage | null,
   obfuscation?: string,
-): ChunkBase {
+): JsonObject {
   return {
     ...base,
     choices,
@@ -361,17 +361,10 @@ export class ChatStreamEncoder extends SurfaceStreamEncoder<CanonicalEvent, Json
     usage: OpenAiUsage | null,
     obfuscation?: string,
   ): JsonObject {
-    return {
-      ...chunk(
-        {
-          ...this.base,
-          ...(this.serviceTier === undefined ? {} : { service_tier: this.serviceTier }),
-        },
-        choices,
-        usage,
-        obfuscation ?? this.configuredObfuscation,
-      ),
-    };
+    // `this.base` already carries `service_tier` when configured (constructor),
+    // so one spread in `chunk` is the whole copy — the old extra tier spread
+    // and outer `{ ...chunk(...) }` wrap re-copied the base per SSE frame.
+    return chunk(this.base, choices, usage, obfuscation ?? this.configuredObfuscation);
   }
 
   push(event: CanonicalEvent): JsonObject[] {

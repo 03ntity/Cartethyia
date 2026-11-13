@@ -1,10 +1,30 @@
 import type {} from "../contracts";
 import { ensureV1Suffix, homeDir, readJsonFile, readTextFile, removeFile, textGet, textHas, textRemove, textUpsert, writeJsonFileWithBackup, writeTextFileWithBackup } from "../fs-ops";
 import type { InjectorSpec } from "../contracts";
+import { ConsoleDomainError } from "../../shared/errors";
 
 
 // Codex injector spec.
 const CODEX_PROVIDER = "cartethyia";
+
+/**
+ * Guards a value before it is interpolated into a quoted TOML string.
+ *
+ * `config.toml` is edited as text, so a `"` or a line break in a model name or
+ * endpoint would close the quoted value and let the remainder be read as TOML
+ * syntax — corrupting (or injecting into) a file the operator hand-edited.
+ * Real identifiers and URLs never carry these characters, so they are rejected
+ * outright rather than escaped.
+ */
+function assertTomlSafeValue(field: string, value: string): void {
+  if (/["\\\n\r]/.test(value)) {
+    throw new ConsoleDomainError(
+      "invalid_request",
+      400,
+      `${field} must not contain quotes, backslashes, or line breaks: it is written to config.toml as a quoted string`,
+    );
+  }
+}
 const CODEX_AUTH_HELPER_NAME = "cartethyia-auth.cjs";
 const CODEX_AUTH_HELPER_SOURCE = [
   "const fs = require('node:fs');",
@@ -58,6 +78,10 @@ export const codexSpec: InjectorSpec = {
     const subagent = input.modelSlots?.subagent ?? input.subagentModel ?? model;
     const review = input.modelSlots?.review;
     const baseUrl = ensureV1Suffix(input.endpoint);
+    assertTomlSafeValue("model", model);
+    assertTomlSafeValue("subagent model", subagent);
+    if (review !== undefined) assertTomlSafeValue("review model", review);
+    assertTomlSafeValue("endpoint", baseUrl);
 
     let text = (await readTextFile(path)) ?? "";
     text = textRemove(text, { kind: "flat", key: "model" });
@@ -71,7 +95,6 @@ export const codexSpec: InjectorSpec = {
       { kind: "flat", key: "model_provider", insertAtTop: true },
       CODEX_PROVIDER,
     );
-    text = textRemove(text, { kind: "section", section: `model_providers.${CODEX_PROVIDER}.auth` });
     text = textUpsert(
       text,
       { kind: "section", section: `model_providers.${CODEX_PROVIDER}` },
@@ -133,6 +156,10 @@ export const codexSpec: InjectorSpec = {
     const subagent = input.modelSlots?.subagent ?? input.subagentModel ?? model;
     const review = input.modelSlots?.review;
     const baseUrl = ensureV1Suffix(input.endpoint);
+    assertTomlSafeValue("model", model);
+    assertTomlSafeValue("subagent model", subagent);
+    if (review !== undefined) assertTomlSafeValue("review model", review);
+    assertTomlSafeValue("endpoint", baseUrl);
     const reviewLine = review === undefined ? "" : `review_model = "${review}"\n`;
     const toml = [
       `model = "${model}"`,

@@ -1,6 +1,7 @@
 import pino from 'pino';
 import { pushConsoleLog, type ConsoleLogLevel } from './log-ring';
 import { LOG_RING_MAX_CODE_UNITS, sanitizeLogValue, truncateLogString } from './log-sanitize';
+import { scrubSecrets } from './redaction';
 
 /**
  * Structured logger using Pino for production-ready logging.
@@ -54,23 +55,13 @@ const logger = pino({
 });
 
 /**
- * Circular-safe, depth-capped structural copy for the ring pre-pass.
- * `redactTelemetryValue` (the canonical redactor, applied next) recurses
- * without a cycle guard, so a circular log arg would overflow the stack
- * before redaction even runs. Errors collapse to name+message - stacks are
- * too long for a tail line and the message already carries the cause.
+ * Bounded, secret-scrubbed copy of a log call's values.
  *
- * Bounded in every dimension, not just depth: see the constants above. The
- * node budget is carried by a mutable counter object rather than a return
- * value, because a recursive walk that returned remaining budget would have to
- * thread it through every branch and a missed one would silently unbound a
- * subtree.
- */
-/**
- * Flatten a log call into one ring line. Args keep their real values: a log
- * line whose credential was rewritten into `***REDACTED***` is
- * indistinguishable from a payload that really carried that placeholder, so
- * redacting here destroyed the evidence a failure has to be read from.
+ * Credential-shaped runs become `[redacted]` here, at the sink, and nowhere
+ * else: payload stores keep their bodies verbatim on purpose (see
+ * `redaction.ts`), but a log line lands in a file an operator shares. Every
+ * non-secret value keeps its real shape - the evidence policy for logs is the
+ * same as for payloads.
  */
 function safeLogValue(value: unknown): unknown {
   try {
@@ -110,7 +101,7 @@ function ring(level: ConsoleLogLevel, msg: string, safeArgs: readonly unknown[])
 
 function logArgs(
   level: ConsoleLogLevel,
-  write: (args: unknown[]) => void,
+  write: (args: unknown[], msg: string) => void,
   msg: string,
   args: readonly unknown[],
 ): void {
@@ -122,8 +113,9 @@ function logArgs(
   // already too late to skip the work.
   if (!logger.isLevelEnabled(level)) return;
   const safeArgs = safeLogArgs(args);
-  ring(level, msg, safeArgs);
-  write(safeArgs);
+  const safeMsg = scrubSecrets(msg);
+  ring(level, safeMsg, safeArgs);
+  write(safeArgs, safeMsg);
 }
 
 function safeErrorForRing(error: Error): unknown {
@@ -165,18 +157,19 @@ function logError(msg: string, error: Error | undefined, args: readonly unknown[
   // this module and it used to run unconditionally.
   if (!logger.isLevelEnabled("error")) return;
   const safe = safeLogArgs(args);
+  const safeMsg = scrubSecrets(msg);
   const ringError = error === undefined ? undefined : safeErrorForRing(error);
   const pinoError = error === undefined ? undefined : safeErrorForPino(error);
-  ring("error", msg, error === undefined ? safe : [ringError, ...safe]);
-  logger.error({ ...(pinoError === undefined ? {} : { error: pinoError }), args: safe }, msg);
+  ring("error", safeMsg, error === undefined ? safe : [ringError, ...safe]);
+  logger.error({ ...(pinoError === undefined ? {} : { error: pinoError }), args: safe }, safeMsg);
 }
 
 export const log = {
   debug: (msg: string, ...args: unknown[]) =>
-    logArgs("debug", (safe) => logger.debug({ args: safe }, msg), msg, args),
+    logArgs("debug", (safe, safeMsg) => logger.debug({ args: safe }, safeMsg), msg, args),
   info: (msg: string, ...args: unknown[]) =>
-    logArgs("info", (safe) => logger.info({ args: safe }, msg), msg, args),
+    logArgs("info", (safe, safeMsg) => logger.info({ args: safe }, safeMsg), msg, args),
   warn: (msg: string, ...args: unknown[]) =>
-    logArgs("warn", (safe) => logger.warn({ args: safe }, msg), msg, args),
+    logArgs("warn", (safe, safeMsg) => logger.warn({ args: safe }, safeMsg), msg, args),
   error: (msg: string, error?: Error, ...args: unknown[]) => logError(msg, error, args),
 };

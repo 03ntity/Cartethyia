@@ -26,8 +26,7 @@
  */
 import { defineModel } from "../../provider-model-definition";
 import type { ModelDefinition } from "../../provider-model-definition";
-
-export const CLOUDFLAREAI_PROVIDER_ID = "cloudflareai" as const;
+import { CLOUDFLAREAI_PROVIDER_ID } from "./cloudflareai";
 
 /** Messages path below the account's `/anthropic` base. */
 const MESSAGES_ENDPOINT = "/v1/messages";

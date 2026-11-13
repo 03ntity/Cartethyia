@@ -10,11 +10,14 @@
  * a placeholder in a captured body is indistinguishable from a placeholder in
  * a payload that was actually sent, so one quoted JWT in a long message made
  * the whole message read as redacted — and a provider 400 looked like the
- * gateway had mangled the request. These cases pin only the masking that
- * remains.
+ * gateway had mangled the request. These cases pin the masking that remains
+ * and the log-sink scrubbing that replaced the removed redactor: only
+ * credential-shaped runs are rewritten, and only in log writes.
  */
 import { describe, expect, test } from "bun:test";
 import { maskClientIp, scrubSecrets } from "../../src/observability/redaction";
+import { log } from "../../src/observability/logger";
+import { clearConsoleLogs, getConsoleLogSnapshot } from "../../src/observability/log-ring";
 
 describe("maskClientIp", () => {
   test("keeps the first three IPv4 octets", () => {
@@ -96,5 +99,35 @@ describe("scrubSecrets", () => {
     expect(out).not.toContain("AAAA");
     expect(out).toContain("[redacted]");
     expect(out).toContain("end");
+  });
+});
+
+describe("the log sink scrubs secrets", () => {
+  // The scrubber is wired into the write path (`logger.ts` + `log-sanitize.ts`),
+  // so a credential that reaches a log call must never reach Pino or the
+  // console ring. Asserted on the ring: the sink a test can read back.
+  test("a message, a value, and an error carrying a credential arrive scrubbed", () => {
+    clearConsoleLogs();
+    log.error(
+      "upstream refused Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1MSJ9.signaturevalue",
+      new Error("request carried sk-abc1234567890"),
+      { header: "Authorization: Bearer sk-abc1234567890" },
+    );
+    const line = getConsoleLogSnapshot().at(-1)?.msg ?? "";
+    expect(line).toContain("[redacted]");
+    expect(line).not.toContain("eyJhbGci");
+    expect(line).not.toContain("sk-abc1234567890");
+    expect(line).not.toContain("Bearer eyJ");
+  });
+
+  test("non-secret values arrive verbatim at the sink", () => {
+    clearConsoleLogs();
+    log.error("the model answered in 11148 ms", undefined, {
+      status: 429,
+      reason: "rate_limit_transient",
+    });
+    const line = getConsoleLogSnapshot().at(-1)?.msg ?? "";
+    expect(line).toContain("the model answered in 11148 ms");
+    expect(line).toContain("rate_limit_transient");
   });
 });

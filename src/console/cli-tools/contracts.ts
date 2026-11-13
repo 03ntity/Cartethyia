@@ -1,5 +1,4 @@
 // CLI tool contracts and registry definitions.
-import { ensureV1Suffix } from "./fs-ops";
 
 // ── contracts.ts ──
 /**
@@ -244,47 +243,9 @@ interface StatusDetails {
 }
 
 /**
- * The three values almost every `apply` and `download` starts from.
- *
- * Nearly all of them resolved the active model and the `/v1`-normalized
- * endpoint by hand, which is why one typo in that pair could differ per tool.
- * `resolveApplyTarget` is the one place they are decided; a tool whose slot
- * naming differs passes a `model` resolver.
+ * Builds a `DownloadResult` for the common case: one JSON payload with a
+ * filename.
  */
-export interface ApplyTarget {
-  /** The model to write as active/primary. Empty when the request named none. */
-  readonly model: string;
-  /** The endpoint with its `/v1` suffix ensured. */
-  readonly baseUrl: string;
-}
-
-/** Resolves the model and endpoint one apply or download is built from. */
-export function resolveApplyTarget(input: ApplyInput): ApplyTarget {
-  return {
-    model: input.activeModel ?? input.modelIds[0] ?? "",
-    baseUrl: ensureV1Suffix(input.endpoint),
-  };
-}
-
-/**
- * Builds a `DownloadResult` for the common case: one text payload with a
- * filename and a media type.
- *
- * Eight injectors returned `{ content, filename, mimeType }` from a string they
- * had already built, differing only in those two constants.
- */
-export function textDownload(
-  content: string,
-  options: { readonly filename: string; readonly mimeType?: string | undefined },
-): DownloadResult {
-  return {
-    content,
-    filename: options.filename,
-    mimeType: options.mimeType ?? "text/plain",
-  };
-}
-
-/** Like `textDownload`, for the JSON-shaped payloads. */
 export function jsonDownload(
   value: unknown,
   options: { readonly filename: string },
@@ -485,7 +446,7 @@ export const TOOL_REGISTRY = {
     description: "Kilo Code AI Assistant (VS Code)",
     configType: "custom" as const,
     surface: "chat" as const,
-    settingsFile: "~/.local/share/kilo/auth.json",
+    settingsFile: "~/.config/kilo/kilo.jsonc",
     defaultModels: [{ id: "claude/claude-sonnet-5", name: "Claude Sonnet 5", alias: "sonnet" }],
   },
 } satisfies Record<string, ToolDef>;

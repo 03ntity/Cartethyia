@@ -99,11 +99,17 @@ export interface MarkupStreamParserOptions<Call extends { readonly id: string }>
 
 export class MarkupStreamParser<Call extends { readonly id: string }> {
   readonly #options: MarkupStreamParserOptions<Call>;
+  /** Longest opener fragment that could still grow into an opener. */
+  readonly #maxOpenerFragment: number;
   #pending = "";
   #callSequence = 0;
 
   constructor(options: MarkupStreamParserOptions<Call>) {
     this.#options = options;
+    this.#maxOpenerFragment = options.openers.reduce(
+      (max, open) => Math.max(max, open.length - 1),
+      0,
+    );
   }
 
   /** Feeds one chunk and returns only settled text and complete calls. */
@@ -180,11 +186,7 @@ export class MarkupStreamParser<Call extends { readonly id: string }> {
   /** Holds back a trailing fragment that could be the start of an opener. */
   #settledEnd(start: number): number {
     const remaining = this.#pending.slice(start);
-    const maxOpener = this.#options.openers.reduce(
-      (max, open) => Math.max(max, open.length - 1),
-      0,
-    );
-    for (let length = Math.min(maxOpener, remaining.length); length > 0; length -= 1) {
+    for (let length = Math.min(this.#maxOpenerFragment, remaining.length); length > 0; length -= 1) {
       const suffix = remaining.slice(-length);
       if (this.#options.openers.some((open) => open.startsWith(suffix))) {
         return this.#pending.length - length;

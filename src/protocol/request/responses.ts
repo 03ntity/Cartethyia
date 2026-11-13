@@ -58,6 +58,30 @@ function computerOutputForWire(content: unknown): Record<string, unknown> {
   return { type: "computer_screenshot" };
 }
 
+/**
+ * Responses top-level params carried as `extension:responses.<field>` and
+ * forwarded verbatim. Fields with a canonical slot (prompt_cache_key,
+ * previous_response_id, conversation, metadata, stream, reasoning) and nested
+ * artifacts (verbosity, read under `text` in the builder) are absent because
+ * they are re-emitted from `CanonicalRequest` instead. Module-level so the
+ * table is not rebuilt per request.
+ */
+const RESPONSES_EXTENSION_PASSTHROUGH: ReadonlyArray<string> = [
+  "store",
+  "background",
+  "truncation",
+  "max_tool_calls",
+  "include",
+  "prompt_cache_retention",
+  "stream_options",
+  "top_logprobs",
+  "moderation",
+  "safety_identifier",
+  "prompt",
+  "context_management",
+  "user",
+];
+
 export function canonicalToResponsesPayload(
   request: CanonicalRequest,
   options: {
@@ -350,27 +374,7 @@ export function canonicalToResponsesPayload(
   });
   if (bounded !== undefined) picked["max_output_tokens"] = bounded;
   Object.assign(payload, picked);
-  // Responses top-level params carried as `extension:responses.<field>` and
-  // forwarded verbatim. Fields with a canonical slot (prompt_cache_key,
-  // previous_response_id, conversation, metadata, stream, reasoning) and
-  // nested artifacts (verbosity, read under `text` below) are absent because
-  // they are re-emitted from `CanonicalRequest` instead.
-  const responsesPassthrough: ReadonlyArray<string> = [
-    "store",
-    "background",
-    "truncation",
-    "max_tool_calls",
-    "include",
-    "prompt_cache_retention",
-    "stream_options",
-    "top_logprobs",
-    "moderation",
-    "safety_identifier",
-    "prompt",
-    "context_management",
-    "user",
-  ];
-  for (const field of responsesPassthrough) {
+  for (const field of RESPONSES_EXTENSION_PASSTHROUGH) {
     if (!supportsPromptCaching && field.startsWith("prompt_cache_")) continue;
     // A bare `extension:<field>` fallback exists because the Chat parser files
     // shared top-level params (`store`, `user`, `moderation`, …) under the bare

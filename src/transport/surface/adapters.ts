@@ -20,6 +20,24 @@ export function eventText(event: CanonicalEvent): string | undefined {
     : undefined;
 }
 
+/**
+ * The last event of one canonical type in a stream, scanned backward without
+ * copying — the `[...events].reverse().find(...)` shape this replaces cloned
+ * the whole array twice per non-stream encode.
+ */
+export function lastEventOfType<T extends CanonicalEvent["type"]>(
+  events: readonly CanonicalEvent[],
+  type: T,
+): Extract<CanonicalEvent, { type: T }> | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event !== undefined && event.type === type) {
+      return event as Extract<CanonicalEvent, { type: T }>;
+    }
+  }
+  return undefined;
+}
+
 
 // Once-only surface detection with fixed precedence:
 // explicit header → endpoint path → unambiguous body shape → chat default.

@@ -1,26 +1,21 @@
 /**
- * Antigravity parity items 10, 4, 6 and 3 from
+ * Antigravity parity items 10 and 6 from
  * the provider comparison research ("Antigravity" →
- * "Missing (prioritized)").
+ * "Missing (prioritized)"), plus the envelope and wire-mapping guards.
  *
- * All four are unit-level and offline: no network, no database, no real
+ * All are unit-level and offline: no network, no database, no real
  * credential. Env reads are exercised by setting `process.env` directly and
  * restoring it afterwards.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 
 import {
-  antigravityClaudeThinkingBeta,
-  ANTIGRAVITY_CLAUDE_THINKING_BETA,
   antigravityWireModelId,
   collapseAntigravityVariant,
   getAntigravityUserAgent,
   flattenAntigravitySchema,
   normalizeAntigravityToolSchema,
   normalizeAntigravityToolSchemas,
-  orderAntigravityEndpoints,
-  rememberAntigravityEndpoint,
-  resetAntigravityEndpointMemory,
 } from "../../src/providers/integrations/antigravity/antigravity-protocol";
 import { buildAntigravityEnvelope } from "../../src/providers/integrations/antigravity/antigravity";
 import { buildGeminiPayload } from "../../src/protocol/request/gemini";
@@ -117,60 +112,6 @@ describe("10. Antigravity UA fingerprint is env-overridable", () => {
     );
     expect(before).toContain("os_type=linux");
     expect(after).toContain("os_type=win32");
-  });
-});
-
-// ─── 4. anthropic-beta passthrough on Claude thinking routes ───────────────
-
-describe("4. Claude-route interleaved-thinking beta", () => {
-  test("is the beta name claude-betas already declares", () => {
-    // Guard against spelling drift: the owner module is the vocabulary source.
-    expect(ANTIGRAVITY_CLAUDE_THINKING_BETA).toBe("interleaved-thinking-2025-05-14");
-  });
-
-  test("emitted on a Claude route with enabled thinking", () => {
-    const beta = antigravityClaudeThinkingBeta(
-      { reasoning: { thinking_type: "enabled", budget_tokens: 4096 } },
-      true,
-    );
-    expect(beta).toBe("interleaved-thinking-2025-05-14");
-  });
-
-  test("emitted on a Claude route with adaptive thinking", () => {
-    const beta = antigravityClaudeThinkingBeta({ reasoning: { thinking_type: "adaptive" } }, true);
-    expect(beta).toBe("interleaved-thinking-2025-05-14");
-  });
-
-  test("emitted on a Claude route that only declares a budget", () => {
-    const beta = antigravityClaudeThinkingBeta(
-      { reasoning: { budget_tokens: 8192 } },
-      true,
-    );
-    expect(beta).toBe("interleaved-thinking-2025-05-14");
-  });
-
-  test("omitted on a Claude route with thinking disabled", () => {
-    expect(
-      antigravityClaudeThinkingBeta({ reasoning: { thinking_type: "disabled" } }, true),
-    ).toBeUndefined();
-  });
-
-  test("omitted on a Claude route with no reasoning at all", () => {
-    expect(antigravityClaudeThinkingBeta({}, true)).toBeUndefined();
-    expect(antigravityClaudeThinkingBeta({ reasoning: undefined }, true)).toBeUndefined();
-  });
-
-  test("omitted on a Gemini route even with thinking requested", () => {
-    // Gemini routes must stay byte-identical: the beta is Claude-only.
-    const beta = antigravityClaudeThinkingBeta(
-      { reasoning: { thinking_type: "enabled", budget_tokens: 4096 } },
-      false,
-    );
-    expect(beta).toBeUndefined();
-  });
-
-  test("omitted when reasoning carries neither type nor budget", () => {
-    expect(antigravityClaudeThinkingBeta({ reasoning: { effort: "high" } }, true)).toBeUndefined();
   });
 });
 
@@ -393,109 +334,6 @@ describe("6. parametersJsonSchema normalization", () => {
   });
 });
 
-// ─── 3. Last-good-endpoint stickiness ──────────────────────────────────────
-
-const PROD = "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse";
-const SANDBOX =
-  "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:streamGenerateContent?alt=sse";
-
-describe("3. Last-good-endpoint stickiness", () => {
-  afterEach(() => {
-    resetAntigravityEndpointMemory();
-  });
-
-  test("caller order is preserved before anything is remembered", () => {
-    expect(orderAntigravityEndpoints("https://base.example.com", [PROD, SANDBOX])).toEqual([
-      PROD,
-      SANDBOX,
-    ]);
-  });
-
-  test("a remembered endpoint is tried first on the next turn", () => {
-    rememberAntigravityEndpoint("https://base.example.com", SANDBOX);
-    expect(orderAntigravityEndpoints("https://base.example.com", [PROD, SANDBOX])).toEqual([
-      SANDBOX,
-      PROD,
-    ]);
-  });
-
-  test("reordering preserves every entry exactly once", () => {
-    const endpoints = [PROD, "https://b.example.com/x", SANDBOX];
-    rememberAntigravityEndpoint("https://base.example.com", SANDBOX);
-    const ordered = orderAntigravityEndpoints("https://base.example.com", endpoints);
-    expect(ordered.length).toBe(endpoints.length);
-    expect([...ordered].sort()).toEqual([...endpoints].sort());
-    expect(ordered[0]).toBe(SANDBOX);
-  });
-
-  test("stickiness is scoped per base URL", () => {
-    rememberAntigravityEndpoint("https://base-a.example.com", SANDBOX);
-    expect(orderAntigravityEndpoints("https://base-b.example.com", [PROD, SANDBOX])).toEqual([
-      PROD,
-      SANDBOX,
-    ]);
-  });
-
-  test("a remembered endpoint that is no longer offered is ignored", () => {
-    rememberAntigravityEndpoint("https://base.example.com", "https://gone.example.com/x");
-    expect(orderAntigravityEndpoints("https://base.example.com", [PROD, SANDBOX])).toEqual([
-      PROD,
-      SANDBOX,
-    ]);
-  });
-
-  test("remembering the first endpoint is a no-op", () => {
-    rememberAntigravityEndpoint("https://base.example.com", PROD);
-    expect(orderAntigravityEndpoints("https://base.example.com", [PROD, SANDBOX])).toEqual([
-      PROD,
-      SANDBOX,
-    ]);
-  });
-
-  test("a single endpoint list is returned untouched", () => {
-    const single = [PROD];
-    rememberAntigravityEndpoint("https://base.example.com", PROD);
-    expect(orderAntigravityEndpoints("https://base.example.com", single)).toBe(single);
-  });
-
-  test("empty and blank endpoints are not remembered", () => {
-    rememberAntigravityEndpoint("https://base.example.com", "");
-    expect(orderAntigravityEndpoints("https://base.example.com", [PROD, SANDBOX])).toEqual([
-      PROD,
-      SANDBOX,
-    ]);
-  });
-
-  test("reset clears one base, or every base when omitted", () => {
-    rememberAntigravityEndpoint("https://base-a.example.com", SANDBOX);
-    rememberAntigravityEndpoint("https://base-b.example.com", SANDBOX);
-    resetAntigravityEndpointMemory("https://base-a.example.com");
-    expect(orderAntigravityEndpoints("https://base-a.example.com", [PROD, SANDBOX])).toEqual([
-      PROD,
-      SANDBOX,
-    ]);
-    expect(orderAntigravityEndpoints("https://base-b.example.com", [PROD, SANDBOX])).toEqual([
-      SANDBOX,
-      PROD,
-    ]);
-    resetAntigravityEndpointMemory();
-    expect(orderAntigravityEndpoints("https://base-b.example.com", [PROD, SANDBOX])).toEqual([
-      PROD,
-      SANDBOX,
-    ]);
-  });
-
-  test("later successes overwrite the earlier sticky endpoint", () => {
-    rememberAntigravityEndpoint("https://base.example.com", SANDBOX);
-    expect(orderAntigravityEndpoints("https://base.example.com", [PROD, SANDBOX])[0]).toBe(
-      SANDBOX,
-    );
-    // Production recovers: the next successful turn re-sticks to it.
-    rememberAntigravityEndpoint("https://base.example.com", PROD);
-    expect(orderAntigravityEndpoints("https://base.example.com", [PROD, SANDBOX])[0]).toBe(PROD);
-  });
-});
-
 // ─── 7. The envelope actually applies the normalization ────────────────────
 
 describe("7. tool schemas survive the envelope", () => {
@@ -527,8 +365,8 @@ describe("7. tool schemas survive the envelope", () => {
         reasoning: {},
       } as unknown as CanonicalRequest,
       undefined,
-      "gemini-2.5-pro",
-      "gemini-2.5-pro",
+      "gemini-2.5-flash",
+      "gemini-2.5-flash",
       {},
       "seed",
     );

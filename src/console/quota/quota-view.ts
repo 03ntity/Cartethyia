@@ -1,4 +1,5 @@
 import { providerAccounts } from "../../persistence/schema";
+import { liveModelCooldowns } from "../providers/catalog/store-helpers";
 import type { ProviderQuotaResult } from "../../providers/quota/quota-contracts";
 import { log } from "../../observability/logger";
 import { GLOBAL_QUOTA_LENS } from "../../providers/quota/cache";
@@ -171,21 +172,8 @@ export function toQuotaAccountHealth(row: {
     // Only deadlines still in force are returned: the sweep prunes the column
     // on a timer, so a raw read can carry an entry that has already elapsed and
     // would render as a cooldown that is not in force.
-    modelCooldowns: liveModelCooldowns(row.modelCooldowns),
+    modelCooldowns: liveModelCooldowns(row.modelCooldowns)?.modelCooldowns ?? {},
   };
-}
-
-/** The not-yet-elapsed entries of a `model_cooldowns` column value. */
-function liveModelCooldowns(value: unknown): Record<string, string> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
-  const now = Date.now();
-  const live: Record<string, string> = {};
-  for (const [modelId, at] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof at === "string" && Number.isFinite(new Date(at).getTime()) && new Date(at).getTime() > now) {
-      live[modelId] = at;
-    }
-  }
-  return live;
 }
 
 /** Removes credential material from global-account responses. */

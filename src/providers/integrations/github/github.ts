@@ -24,6 +24,7 @@ import { OpenAICompatibleAdapter, withBearerAuthentication } from "../../adapter
 import { postUpstreamJson } from "../../../protocol/upstream/post-json";
 import { providerBaseUrl } from "../../provider-metadata";
 import { resolveRedisClient } from "../../../persistence/redis";
+import { TtlCache } from "../../../persistence/ttl-cache";
 import { applyParamQuirks } from "../../../protocol/translation/quirks";
 import { resolveInboundSessionId } from "../../operations/session-resolution";
 import {
@@ -109,8 +110,6 @@ export const GITHUB_EXCLUDED_MODEL_IDS: ReadonlySet<string> = new Set([
   "kimi-k3",
 ]);
 
-const modelRoutesByCredential = new Map<string, ReadonlyMap<string, GithubModelRoute>>();
-
 /**
  * Shared route-map window. Discovery is per account and infrequent, so a short
  * shared entry lets a peer instance route a credential without re-running
@@ -119,6 +118,20 @@ const modelRoutesByCredential = new Map<string, ReadonlyMap<string, GithubModelR
  */
 const GITHUB_ROUTE_TTL_SECONDS = 300;
 const GITHUB_ROUTE_KEY_PREFIX = "github:routes:v1:";
+/** Hard ceiling on locally remembered route maps, keyed by credential hash. */
+const GITHUB_ROUTE_MAX_CREDENTIALS = 256;
+
+/**
+ * Per-credential model→route maps, bounded (TTL + entry cap) like the
+ * auto-decision cache below: credential hashes churn as accounts are
+ * re-created, and a plain module-level Map would grow for the life of the
+ * process. The TTL matches the shared window — an expired local entry falls
+ * through to the Redis copy and is re-cached.
+ */
+const modelRoutesByCredential = new TtlCache<ReadonlyMap<string, GithubModelRoute>>({
+  ttlMs: GITHUB_ROUTE_TTL_SECONDS * 1000,
+  maxEntries: GITHUB_ROUTE_MAX_CREDENTIALS,
+});
 
 function serializeRouteMap(routes: ReadonlyMap<string, GithubModelRoute>): string {
   return JSON.stringify([...routes]);

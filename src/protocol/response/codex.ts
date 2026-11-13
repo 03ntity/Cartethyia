@@ -563,28 +563,18 @@ export class CodexStreamFrameProcessor {
             events.push(reasoningEvent(outputItem, this.#seq++, outputIndex));
           }
         }
-        if (outputItem["type"] === "function_call") {
+        if (
+          outputItem["type"] === "function_call" ||
+          outputItem["type"] === "custom_tool_call" ||
+          outputItem["type"] === "computer_call"
+        ) {
           this.hasToolCall = true;
-
-          if (outputItemId !== undefined) this.#openItems.delete(outputItemId);
-          if (outputIndex !== undefined)
-            this.#openItemsByOutputIndex.delete(outputIndex);
-        } else if (outputItem["type"] === "custom_tool_call") {
-          this.hasToolCall = true;
-
-          if (outputItemId !== undefined) this.#openItems.delete(outputItemId);
-          if (outputIndex !== undefined)
-            this.#openItemsByOutputIndex.delete(outputIndex);
-        } else if (outputItem["type"] === "computer_call") {
-          this.hasToolCall = true;
-          if (outputItemId !== undefined) this.#openItems.delete(outputItemId);
-          if (outputIndex !== undefined)
-            this.#openItemsByOutputIndex.delete(outputIndex);
-        } else {
-          if (outputItemId !== undefined) this.#openItems.delete(outputItemId);
-          if (outputIndex !== undefined)
-            this.#openItemsByOutputIndex.delete(outputIndex);
         }
+        // Every completed item unregisters its routing entries, whatever its
+        // type; the three call kinds differ from the rest only in `hasToolCall`.
+        if (outputItemId !== undefined) this.#openItems.delete(outputItemId);
+        if (outputIndex !== undefined)
+          this.#openItemsByOutputIndex.delete(outputIndex);
       }
     } else if (
       t === "response.completed" ||

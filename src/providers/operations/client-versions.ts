@@ -17,48 +17,6 @@ import {
 } from "./cli-platform";
 
 /**
- * Newest Trae IDE version from the official changelog.
- *
- * Trae publishes no npm package and no release API, so the changelog was the
- * only machine-readable source of the current client version. It matters
- * upstream: intl `llm_raw_chat` answers `4015` unless the request carries the
- * *current* client version, so a stale pin is an outage, not a cosmetic drift.
- *
- * The page is now an SPA (2026-11-11): its HTML no longer embeds the release
- * data, so this parser returns null and the pinned fallback carries the wire
- * identity until a machine-readable feed exists again (see
- * `VERSION_SOURCES.trae`). The parser is kept for when the page re-exposes
- * its entries.
- */
-async function traeVersion(response: Response): Promise<string | null> {
-  try {
-    const text = await response.text();
-    const heading =
-      /"insert":"((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s*\d{4}\s*\([^)]*\))\\n"/g;
-    for (const match of text.matchAll(heading)) {
-      const window = text.slice(match.index ?? 0, (match.index ?? 0) + 900);
-      // A release line may name a *range* ("TRAE v3.6.1 ~ 3.6.4 are released"),
-      // and the newest entry is the newest build in it. Taking the first number
-      // reported 3.6.1 while 3.6.4 was already shipping — and on an entry whose
-      // heading carried no version at all the old pattern matched nothing, so
-      // discovery fell through to the next (older) entry and the pin drifted
-      // backwards on every refresh.
-      const range = window.match(/(\d+\.\d+\.\d+)\s*[~–-]\s*(\d+\.\d+\.\d+)/);
-      if (range) {
-        const high = range[2] ?? range[1];
-        if (high && isSemverish(high)) return high.trim();
-      }
-      const found = window.match(/TraeCode\s+v?(\d+\.\d+\.\d+)|v?(\d+\.\d+\.\d+)\s+is\s+released/i);
-      const version = found?.[1] ?? found?.[2];
-      if (version && isSemverish(version)) return version.trim();
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Newest Cursor build from the official download API, as the IDE's own header
  * spells it.
  *
@@ -344,17 +302,15 @@ export const VERSION_SOURCES = {
   trae: {
     key: "trae",
     // Fallback = the current desktop release per the official winget manifest
-    // (ByteDance.Trae 3.6.13). The docs changelog renders as an SPA and no
-    // longer exposes its newest entries to the parser below, so it is not a
-    // reliable discovery source right now — raise this pin when the desktop
+    // (ByteDance.Trae 3.6.13). Trae publishes no npm package and no release
+    // API; the docs changelog renders as an SPA and no longer exposes its
+    // entries to machine-readable parsing (the parser that once read it was
+    // removed once it started returning null), so the pin carries the wire
+    // identity until a machine-readable feed exists again. intl `llm_raw_chat`
+    // answers `4015` for a stale version, so raise this pin when the desktop
     // build moves.
     fallback: "3.6.13",
-    sources: [
-      {
-        url: "https://docs.trae.ai/ide/changelog?_lang=en",
-        extract: traeVersion,
-      },
-    ],
+    sources: [],
   },
   freepi: {
     key: "freepi",

@@ -15,7 +15,7 @@
 // Secrets are handled as little as possible — they are parsed into a
 // credential and handed straight to the store, never logged.
 
-import { POOL_KINDS, POOL_STATUSES } from "./contracts";
+import { POOL_KINDS } from "./contracts";
 
 /** One row that parsed, ready to become a pool. */
 interface ParsedProxyRow {
@@ -50,10 +50,6 @@ const DEFAULT_KIND: (typeof POOL_KINDS)[number] = "http";
 
 function isPoolKind(value: unknown): value is (typeof POOL_KINDS)[number] {
   return typeof value === "string" && (POOL_KINDS as readonly string[]).includes(value);
-}
-
-function isPoolStatus(value: unknown): value is (typeof POOL_STATUSES)[number] {
-  return typeof value === "string" && (POOL_STATUSES as readonly string[]).includes(value);
 }
 
 /**
@@ -105,10 +101,7 @@ function parseUriLine(text: string): ParsedProxyRow | null {
   const credential = userinfo
     ? decodeURIComponent(userinfo)
     : null;
-  const hasPort = /:\d+$/.test(authority);
-  const endpoint = hasPort ? authority : `${authority}`;
-  if (!endpoint) return null;
-  return { kind, endpoint: `${scheme}://${endpoint}`, credential, label: null };
+  return { kind, endpoint: `${scheme}://${authority}`, credential, label: null };
 }
 
 /** One `host:port[:user[:password]]` line. */
@@ -192,7 +185,7 @@ export function parseProxyFile(content: string): ParsedProxyFile {
     }
   }
   const rows: ParsedProxyRow[] = [];
-  const skipped: SkippedProxyRow[] = [];;
+  const skipped: SkippedProxyRow[] = [];
   trimmed.split(/\r?\n/).forEach((line, index) => {
     const parsed = parseLine(line);
     if (parsed) rows.push(parsed);
@@ -203,4 +196,4 @@ export function parseProxyFile(content: string): ParsedProxyFile {
   return { rows, skipped };
 }
 
-export { isPoolKind, isPoolStatus };
+export { isPoolKind };

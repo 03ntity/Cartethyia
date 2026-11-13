@@ -203,20 +203,6 @@ export interface ProviderRoutingSetting {
 }
 
 /**
- * Providers whose routing defaults to `skipProxy: true` when no explicit
- * settings row exists yet for a given (tenant, provider) pair. Not a hard
- * lock — an explicit `skipProxy: false` row overrides this same as any
- * other provider. Picks the starting value for providers that commonly
- * don't work through a plain HTTP/S proxy; route them via a SOCKS5 or
- * proxy pool instead if proxying is required. Consumed by both the
- * console API default (`console/domains/provider-detail.ts`) and the real
- * `transport/routing/route-catalog.ts` so the two never drift.
- *
- * Single owner is the manifest `defaultSkipProxy` flags in
- * `providers/metadata.ts`; consumers import it directly from there.
- */
-
-/**
  * Snapshot-level map carrying per-tenant per-provider routing preferences.
  * Outer key is tenantId string, inner key is providerId. Global settings
  * (tenant_id IS NULL) are stored under the sentinel "__global__".
@@ -270,14 +256,19 @@ export interface RoutePlan {
   readonly resolved_model: string;
   readonly provider_id: string;
   /**
-   * The system decision behind each candidate, keyed by the candidate's
-   * admission bucket. Written once at plan time; every later layer (dispatch,
-   * telemetry) reads this instead of re-deriving its own ordering.
+   * The system decision behind each candidate, keyed by candidate identity.
+   *
+   * Identity, not the admission bucket: two distinct candidates can share one
+   * bucket (the pool-account fan-out emits one credential-less candidate per
+   * network pool), and keying by bucket let one candidate's health verdict
+   * leak onto its sibling. Written once at plan time; `plan()`'s own ordering,
+   * eligibility filter, and error reporting are the readers — no later layer
+   * re-derives its own ordering.
    */
-  readonly decisions: ReadonlyMap<string, RoutingDecision>;
+  readonly decisions: ReadonlyMap<RouteCandidate, RoutingDecision>;
 }
 
-/** How eligible a candidate is and why — written once, read by every layer. */
+/** How eligible a candidate is and why — written once, read by plan() and its callers. */
 export const ROUTING_RANK = {
   /** Fresh candidate with a positive known quota / above its usage floor. */
   FRESH_KNOWN: 0,

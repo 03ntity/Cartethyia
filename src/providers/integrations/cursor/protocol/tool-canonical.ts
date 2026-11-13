@@ -58,9 +58,10 @@ const VARIANT = (
 /**
  * Every Cursor-native tool variant this layer speaks, keyed by oneof field.
  *
- * MCP (`McpToolCall`) is intentionally absent: the gateway no longer speaks
- * the MCP meta-tool channel. Client-declared tools have no native slot in
- * `agent.proto`; they are not advertised and any inbound MCP arm is refused.
+ * MCP (`McpToolCall`) is intentionally absent: it is not a native host tool.
+ * Client-declared tools have no native slot in `agent.proto`; they travel on
+ * the MCP exec channel and are relayed to the client (see cursor.ts), so the
+ * native-tool table has no row for them.
  */
 export const CURSOR_TOOL_VARIANTS: ReadonlyMap<number, CursorToolVariant> = new Map([
   VARIANT(1, "ShellToolCall", "ShellArgs", "ShellResult", "shell"),

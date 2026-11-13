@@ -340,6 +340,59 @@ describe("Trae quota — the two surfaces are independent", () => {
     expect(targetUrls.filter((u) => u.includes("api/v1/pay/ide_user_ent_usage"))).toHaveLength(1);
     expect(targetUrls.filter((u) => u.includes("api/v2/pay/ide_user_ent_usage"))).toHaveLength(1);
   });
+
+  test("a cn account's dead token invalidates auth even though the intl host 404s v2", async () => {
+    // The cn realm's entitlement surface is v2; the intl pay host answers v2
+    // with 404 (its surface is v1). Asking the cross-realm fallback for the
+    // believed realm's path version produced a 404 error that broke the 4x1001
+    // signature — so a dead cn token was never auth-invalidated. The fallback
+    // must ask each realm its own path version.
+    const fetcher = (async (url: unknown) => {
+      const target = String(url);
+      if (
+        target.includes("ide_user_ent_usage") &&
+        target.includes("/api/v2/") &&
+        !target.includes("api.trae.com.cn")
+      ) {
+        // The intl pay host's v2 surface does not exist.
+        return new Response("not found", { status: 404 });
+      }
+      return jsonResponse(
+        { code: 1001, message: "we are not able to authenticate you" },
+        401,
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await fetchTraeQuota("token", fetcher, {
+      auth_state: { realm: "cn", uid: "u1", region: "CN" },
+    });
+
+    expect(result.windows).toHaveLength(0);
+    expect(result.authInvalidated).toBe(true);
+    expect(result.error).toContain("HTTP 401");
+    expect(result.error).toContain('"code":1001');
+  });
+
+  test("a lowercase cn region without a realm field still selects the cn realm", async () => {
+    // Realm inference compared `region === "CN"` case-sensitively, so a stored
+    // `cn` region fell through to the intl realm. The candidate order is the
+    // observable: the believed realm's core host is asked first.
+    const urls: string[] = [];
+    const fetcher = (async (url: unknown) => {
+      urls.push(String(url));
+      return jsonResponse({
+        remain_usage: { advanced_model: 40 },
+        usage: { advanced_model: { limit: 100 } },
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await fetchTraeQuota("token", fetcher, {
+      auth_state: { uid: "u1", region: "cn" },
+    });
+
+    expect(result.error).toBeNull();
+    expect(urls[0]).toContain("trae-api-cn.mchost.guru");
+  });
 });
 
 describe("Qoder quota — an unreadable body is not a zero balance", () => {

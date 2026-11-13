@@ -266,6 +266,33 @@ describe("the codex injector against a temp HOME", () => {
     expect(download.content).toContain("[model_providers.cartethyia]");
     expect(download.filename).toBe("codex-config.txt");
   });
+
+  test("apply refuses values that would break out of a quoted TOML string", async () => {
+    // `config.toml` is edited as text: a quote or line break in a model name or
+    // endpoint would close the quoted value and let the remainder be read as
+    // TOML syntax. Real identifiers never carry these characters, so they are
+    // rejected before anything is written.
+    const path = await seedConfig();
+    const before = (await readTextFile(path)) ?? "";
+    const injector = createFileInjector(codexSpec);
+    await expect(
+      injector.apply({ ...APPLY_INPUT, modelSlots: { session: `bad"\nkey = "injected` } }),
+    ).rejects.toThrow("must not contain quotes");
+    await expect(injector.apply({ ...APPLY_INPUT, endpoint: `http://host/\ninjected = "1` })).rejects.toThrow(
+      "must not contain quotes",
+    );
+    // Nothing was written: the user's file is untouched.
+    expect((await readTextFile(path)) ?? "").toBe(before);
+  });
+
+  test("download refuses the same values", async () => {
+    await expect(
+      createFileInjector(codexSpec).download({
+        ...APPLY_INPUT,
+        modelSlots: { session: `bad"]\nother = "` },
+      }),
+    ).rejects.toThrow("must not contain quotes");
+  });
 });
 
 describe("the generic driver's status branches", () => {

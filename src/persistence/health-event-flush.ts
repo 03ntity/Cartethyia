@@ -65,6 +65,13 @@ export function healthEventBuffer(): HealthEventFlushBuffer | undefined {
 
 export class HealthEventFlushBuffer {
   private readonly pending: HealthEventRow[] = [];
+  /**
+   * Start index of the live window. Cap eviction advances this pointer instead
+   * of `shift()`-ing the whole array one row left per drop (same pattern as
+   * `observability/log-ring.ts`); the dead prefix is compacted in `enqueue`
+   * and consumed by `flush`.
+   */
+  private pendingStart = 0;
   private timer: ReturnType<typeof setInterval> | undefined;
   private flushing = false;
   private dropped = 0;
@@ -92,11 +99,17 @@ export class HealthEventFlushBuffer {
 
   /** Records one audit row. Never touches the database; safe per attempt. */
   enqueue(row: HealthEventRow): void {
-    if (this.pending.length >= MAX_PENDING_ROWS) {
-      this.pending.shift();
+    if (this.pending.length - this.pendingStart >= MAX_PENDING_ROWS) {
+      this.pendingStart += 1;
       this.dropped += 1;
     }
     this.pending.push(row);
+    // Compact the dead prefix once it outweighs the live window, so a long
+    // outage cannot grow the array past the cap plus this slack.
+    if (this.pendingStart > 256 && this.pendingStart > this.pending.length / 2) {
+      this.pending.splice(0, this.pendingStart);
+      this.pendingStart = 0;
+    }
   }
 
   /** Rows discarded because the queue was full. Observability for the buffer. */
@@ -108,9 +121,11 @@ export class HealthEventFlushBuffer {
   clear(accountId?: string): void {
     if (accountId === undefined) {
       this.pending.length = 0;
+      this.pendingStart = 0;
       return;
     }
-    for (let i = this.pending.length - 1; i >= 0; i -= 1) {
+    // Only the live window: the prefix before `pendingStart` is already dropped.
+    for (let i = this.pending.length - 1; i >= this.pendingStart; i -= 1) {
       if (this.pending[i]?.accountId === accountId) this.pending.splice(i, 1);
     }
   }
@@ -137,8 +152,11 @@ export class HealthEventFlushBuffer {
       settle = resolve;
     });
     // Drained before the await: rows enqueued while the insert runs stay for
-    // the next pass rather than being lost if this one throws.
-    const batch = this.pending.splice(0, this.pending.length);
+    // the next pass rather than being lost if this one throws. Only the live
+    // window; the dropped prefix is not written.
+    const batch = this.pending.slice(this.pendingStart);
+    this.pending.length = 0;
+    this.pendingStart = 0;
     try {
       await this.db.insert(healthEvents).values(
         batch.map((row) => ({
@@ -170,6 +188,10 @@ export class HealthEventFlushBuffer {
       clearInterval(this.timer);
       this.timer = undefined;
     }
+    // Drain-after-inflight: `flush()` is a no-op while a write is in flight, so
+    // a plain flush would drop exactly the rows that queued behind that write.
+    // Wait the write out, then flush what accumulated behind it.
+    await this.inflightDone;
     await this.flush();
   }
 }

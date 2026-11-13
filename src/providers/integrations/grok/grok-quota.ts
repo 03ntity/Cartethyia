@@ -191,7 +191,17 @@ async function probeRateLimit(
     let note: string | null = null;
     if (response.status === 429) {
       const body = await response.text();
-      const verdict = parseGrokFreeUsageVerdict(parsePayload(body), body);
+      // A refusal body is not guaranteed to be JSON. A parse failure must not
+      // discard the header reading captured above (the outer catch would
+      // return an all-null probe): the verdict parser also reads the raw body
+      // text directly, which is where the prose allowance lives.
+      let parsed: unknown;
+      try {
+        parsed = parsePayload(body);
+      } catch {
+        parsed = undefined;
+      }
+      const verdict = parseGrokFreeUsageVerdict(parsed, body);
       authoritative = verdict ? grokAuthoritativeWindow(verdict) : null;
       note = GROK_FREE_USAGE_EXHAUSTED;
     } else if (response.status === 402) {

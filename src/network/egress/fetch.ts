@@ -72,6 +72,48 @@ function isBodyReplaySafe(body: BodyInit | null | undefined): boolean {
   if (body === null || body === undefined) return true;
   return !(typeof body === "object" && "locked" in body && body.locked === true);
 }
+
+/**
+ * Methods whose requests may be replayed on a fresh socket.
+ *
+ * A request that dies before response headers may still have been received
+ * and processed upstream. A replay of an idempotent method is at worst a
+ * repeated read; a replayed POST can double-submit generation work the
+ * upstream already did, so only these methods ever replay.
+ */
+const REPLAY_SAFE_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD", "PUT", "DELETE"]);
+
+function isReplaySafeMethod(method: string): boolean {
+  return REPLAY_SAFE_METHODS.has(method.toUpperCase());
+}
+
+/**
+ * The SSRF gate a stale-socket replay must pass before it dials again.
+ *
+ * A direct dial was resolved and validated on this hop already. A pool/
+ * relay-owned dial skipped the local resolve (the pool resolves the target
+ * itself), so without this gate its replay would be the one dial in the
+ * request that never faced the SSRF policy locally. The lookup stays advisory
+ * for the pool itself but is binding for the replay: when it cannot bless the
+ * target (blocked range, or a resolver that cannot answer), the replay is
+ * skipped and the original stale-socket error stands.
+ */
+async function replayPassesSsrf(
+  url: URL,
+  signal: AbortSignal,
+  resolveFn: (hostname: string, signal: AbortSignal) => Promise<readonly string[]>,
+  policy: SsrfPolicy,
+  poolDialsTarget: boolean,
+): Promise<boolean> {
+  if (!poolDialsTarget) return true;
+  try {
+    const addresses = await resolveFn(url.hostname, signal);
+    validateResolvedAddresses(addresses, policy);
+    return addresses.length > 0;
+  } catch {
+    return false;
+  }
+}
 // Validated fetch — single egress with ProxyAgent support
 interface ValidatedFetchOptions {
   readonly fetchFn?: typeof fetch;
@@ -155,42 +197,64 @@ function dialer(options: ValidatedFetchOptions): typeof fetch {
 }
 
 /**
- * Builds the `undici` dispatcher that routes a dial through a SOCKS5 pool
- * agent. The runtime-native fetch does not support `socks5://` proxies
- * (`UnsupportedProxyProtocol`), so the socks pair drives the transport via
- * undici's dispatcher instead — no node `http`/`https` adapter is involved.
+ * The dialers behind one SOCKS5 pool agent: the pooled dispatcher for the
+ * first attempt and a fresh-socket dispatcher (keep-alive 1 ms) for the one
+ * stale-socket replay. Both wrap the same `SocksProxyAgent`, so the replay
+ * always stays on the pool's egress — only the connection is fresh.
  */
-let socksDispatcherCache: WeakMap<SocksProxyAgent, UndiciAgent> | undefined;
-function socksDispatcherFor(agent: SocksProxyAgent): UndiciAgent {
+export interface SocksDispatchers {
+  /** Pooled dispatcher used for the first attempt. */
+  readonly agent: UndiciAgent;
+  /** Fresh-socket dispatcher used for the single stale-socket replay. */
+  readonly fresh: UndiciAgent;
+}
+
+let socksDispatcherCache: WeakMap<SocksProxyAgent, SocksDispatchers> | undefined;
+/**
+ * Builds (once per socks agent) the dispatcher pair that routes a dial
+ * through a SOCKS5 pool agent. The runtime-native fetch does not support
+ * `socks5://` proxies (`UnsupportedProxyProtocol`), so the socks pair drives
+ * the transport via undici's dispatcher instead — no node `http`/`https`
+ * adapter is involved. Exported for the egress-replay tests, which pin that
+ * a replay swaps the dispatcher instance, never the egress identity.
+ */
+export function socksDispatchersFor(agent: SocksProxyAgent): SocksDispatchers {
   socksDispatcherCache ??= new WeakMap();
-  let dispatcher = socksDispatcherCache.get(agent);
-  if (!dispatcher) {
-    dispatcher = new UndiciAgent({
-      connect: async (opts: Record<string, unknown>) => {
-        const o = opts as {
-          hostname?: string;
-          port?: number | string;
-          family?: number;
-          lookup?: (hostname: string, options: unknown, cb: (err: Error | null, addresses: unknown) => void) => void;
-        };
-        return await agent.connect(
-          {} as never,
-          {
-            host: o.hostname ?? "localhost",
-            port: Number(o.port ?? 80),
-            ...(o.family === undefined ? {} : { family: o.family }),
-            ...(o.lookup === undefined ? {} : { lookup: o.lookup }),
-          } as never,
-        );
-      },
-      // Cap the pooled socket lifetime so a silently-dropped keep-alive
-      // connection is not reused by a later request.
-      keepAliveTimeout: DEFAULT_KEEPALIVE_TIMEOUT_MS,
-      keepAliveMaxTimeout: DEFAULT_KEEPALIVE_TIMEOUT_MS,
-    } as unknown as ConstructorParameters<typeof UndiciAgent>[0]);
-    socksDispatcherCache.set(agent, dispatcher);
+  let pair = socksDispatcherCache.get(agent);
+  if (!pair) {
+    pair = {
+      agent: buildSocksDispatcher(agent, DEFAULT_KEEPALIVE_TIMEOUT_MS),
+      fresh: buildSocksDispatcher(agent, FRESH_SOCKET_KEEPALIVE_TIMEOUT_MS),
+    };
+    socksDispatcherCache.set(agent, pair);
   }
-  return dispatcher;
+  return pair;
+}
+
+function buildSocksDispatcher(agent: SocksProxyAgent, keepAliveTimeoutMs: number): UndiciAgent {
+  return new UndiciAgent({
+    connect: async (opts: Record<string, unknown>) => {
+      const o = opts as {
+        hostname?: string;
+        port?: number | string;
+        family?: number;
+        lookup?: (hostname: string, options: unknown, cb: (err: Error | null, addresses: unknown) => void) => void;
+      };
+      return await agent.connect(
+        {} as never,
+        {
+          host: o.hostname ?? "localhost",
+          port: Number(o.port ?? 80),
+          ...(o.family === undefined ? {} : { family: o.family }),
+          ...(o.lookup === undefined ? {} : { lookup: o.lookup }),
+        } as never,
+      );
+    },
+    // Cap the pooled socket lifetime so a silently-dropped keep-alive
+    // connection is not reused by a later request.
+    keepAliveTimeout: keepAliveTimeoutMs,
+    keepAliveMaxTimeout: keepAliveTimeoutMs,
+  } as unknown as ConstructorParameters<typeof UndiciAgent>[0]);
 }
 
 /**
@@ -263,7 +327,7 @@ async function dial(
   init: RequestInit,
   fetchFn: typeof fetch,
   proxyUrl: string | undefined,
-  dispatcher?: UndiciAgent,
+  socksDispatchers?: SocksDispatchers,
   socksFetch: (input: RequestInfo | URL, init?: UndiciRequestInit) => Promise<Response> = undiciFetch,
   freshSocket = false,
 ): Promise<Response> {
@@ -278,11 +342,14 @@ async function dial(
           : (await new Response(rawBody).arrayBuffer()).byteLength;
     headers.set("content-length", String(bytes));
   }
-  if (dispatcher !== undefined) {
+  if (socksDispatchers !== undefined) {
     return await socksFetch(url, {
       ...init,
       headers,
-      dispatcher: freshSocket ? directDispatchers().fresh : dispatcher,
+      // A socks pool owns this dial: the stale-socket replay swaps only the
+      // dispatcher *instance* (fresh sockets) — the egress identity stays
+      // the socks agent.
+      dispatcher: freshSocket ? socksDispatchers.fresh : socksDispatchers.agent,
     });
   }
   return await fetchFn(url, {
@@ -290,8 +357,10 @@ async function dial(
     headers,
     ...(proxyUrl === undefined ? {} : { proxy: proxyUrl }),
     // Fresh-socket replay uses the capped undici dispatcher directly so a
-    // retry never reuses the pooled connection that just died.
-    ...(freshSocket ? { dispatcher: directDispatchers().fresh } : {}),
+    // retry never reuses the pooled connection that just died. Direct dials
+    // only: a proxied dial keeps `proxy` above, and adding a direct
+    // dispatcher here would route the replay around the pool.
+    ...(proxyUrl === undefined && freshSocket ? { dispatcher: directDispatchers().fresh } : {}),
   });
 }
 
@@ -462,19 +531,24 @@ export function createValidatedFetch(options: ValidatedFetchOptions = {}): Valid
           response = await nodeDial(url, requestInit);
         } else {
           try {
-            response = await dial(url, requestInit, fetchFn, proxyUrl, socksAgent ? socksDispatcherFor(socksAgent) : undefined, socksFetch);
+            response = await dial(url, requestInit, fetchFn, proxyUrl, socksAgent ? socksDispatchersFor(socksAgent) : undefined, socksFetch);
           } catch (error) {
             // A pooled keep-alive socket that died before response headers is
             // replayed once on a fresh socket. Only errors that *prove* the
             // socket died qualify; a bare fetch failure (or an abort, or a
             // locked body) is never replayed — the upstream may already hold
-            // that request and a replay would deliver it twice.
+            // that request and a replay would deliver it twice. Only
+            // idempotent methods replay for the same double-delivery reason,
+            // and a pool dial (which skipped the local resolve above) must
+            // pass the SSRF policy before the replay dials again.
             if (
               !requestInit.signal?.aborted &&
+              isReplaySafeMethod(method) &&
               isBodyReplaySafe(requestInit.body) &&
-              isStaleSocketError(error)
+              isStaleSocketError(error) &&
+              (await replayPassesSsrf(url, signal, resolveFn, policy, poolDialsTarget))
             ) {
-              response = await dial(url, requestInit, fetchFn, proxyUrl, socksAgent ? socksDispatcherFor(socksAgent) : undefined, socksFetch, true);
+              response = await dial(url, requestInit, fetchFn, proxyUrl, socksAgent ? socksDispatchersFor(socksAgent) : undefined, socksFetch, true);
             } else {
               throw error;
             }

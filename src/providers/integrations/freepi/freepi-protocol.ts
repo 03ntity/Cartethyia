@@ -88,13 +88,17 @@ export function buildFreepiChatBody(
 
   for (const message of request.messages) {
     if (message.role === "system" || message.role === "developer") {
+      // Mid-conversation system/developer turns must reach the wire as their
+      // own system message, in conversation order. Collecting them into
+      // `systemParts` after the leading system message was already built
+      // silently dropped them.
       const text = message.content.map(textOf).filter((t) => t.length > 0).join("\n\n");
-      if (text.length > 0) systemParts.push(text);
+      if (text.length > 0) messages.push({ role: "system", content: text });
       continue;
     }
     const parts: string[] = [];
     const toolCalls: FreepiToolCall[] = [];
-    let toolResult: { callId: string; text: string } | undefined;
+    const toolResults: Array<{ callId: string; text: string }> = [];
     for (const part of message.content) {
       if (part.kind === "toolCall") {
         toolCalls.push({
@@ -105,14 +109,19 @@ export function buildFreepiChatBody(
         continue;
       }
       if (part.kind === "toolResult") {
-        toolResult = { callId: part.call_id, text: toolResultText(part.content) };
+        toolResults.push({ callId: part.call_id, text: toolResultText(part.content) });
         continue;
       }
       const text = textOf(part);
       if (text.length > 0) parts.push(text);
     }
-    if (toolResult !== undefined) {
-      messages.push({ role: "tool", content: toolResult.text, tool_call_id: toolResult.callId });
+    // One `tool` turn per result, in content order: an assistant turn that ran
+    // parallel calls answers with several results, and keeping only the last
+    // one left every other call unanswered upstream.
+    if (toolResults.length > 0) {
+      for (const result of toolResults) {
+        messages.push({ role: "tool", content: result.text, tool_call_id: result.callId });
+      }
       continue;
     }
     if (parts.length === 0 && toolCalls.length === 0) continue;

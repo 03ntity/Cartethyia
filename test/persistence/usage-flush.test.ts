@@ -47,6 +47,19 @@ test("ignores non-positive deltas", async () => {
   expect(calls).toHaveLength(0);
 });
 
+test("a key evicted by the pending cap counts its accumulated delta as dropped", async () => {
+  const { write } = recordingWrite();
+  const buffer = new UsageFlushBuffer(db, 60_000, write);
+  buffer.enqueue("key-0", 2);
+  buffer.enqueue("key-0", 3);
+  // 5000 more distinct keys push the map past its cap (5000); the oldest key
+  // (key-0, accumulated 5) is evicted, and its delta must appear in the
+  // operator-visible drop accounting rather than vanish.
+  for (let index = 1; index <= 5_000; index += 1) buffer.enqueue(`key-${index}`, 1);
+  expect(buffer.droppedTotal).toBe(5);
+  await buffer.stop();
+});
+
 test("retries a key whose write failed and keeps deltas enqueued during the failure", async () => {
   const failing = new Set(["key-1"]);
   const { calls, write } = recordingWrite(failing);

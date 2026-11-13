@@ -753,7 +753,7 @@ export function createCodexAdapter(
         }),
       };
       const { res, release } = await postUpstreamJson(
-        "https://chatgpt.com/backend-api/codex/responses/compact",
+        joinUrl(chatgptBase, "/backend-api/codex/responses/compact"),
         headers,
         body,
         context,

@@ -19,7 +19,7 @@ export const AWS_REGION_PATTERN = /^[a-z]{2}-[a-z]+-\d{1,2}$/;
  * Maps an auth method onto the `TokenType` header the 1.4.62 client sends.
  *
  * Observed map (`qje`): `api_key → API_KEY`, `external_idp → EXTERNAL_IDP`,
- * `idc → SSO_OIDC`, `machine_token → KIRO_MACHINE_TOKEN`. Google/GitHub/
+ * `idc → SSO_OIDC`. Google/GitHub/
  * Builder-ID sessions send no `TokenType` header. Every surface (dispatch,
  * usage, discovery) must classify the same account identically or the upstream
  * sees one credential as different token types across surfaces.
@@ -59,7 +59,7 @@ export const KIRO_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
  * One Kiro model row.
  *
  * `ctx` and `out` are the model's real limits. Opus 5/4.8/4.7 and Sonnet 5/5.5
- * carry 1M context; the 4.5-era rows and both Haiku rows carry 200k. `auto`
+ * carry 1M context; the 4.5-era rows and Haiku 4.5 carry 200k. `auto`
  * routes upstream and is declared at 1M/32k.
  *
  * The non-Anthropic row is GLM 5 at 200k/64k. GPT 5.5 and the 5.6 rows keep
@@ -116,9 +116,6 @@ export const KIRO_MODELS: readonly ModelDefinition[] = [
   kiroModel({ id: "claude-opus-4.5", ctx: 200_000, out: 64_000, vision: true, reasoning: true, toolCall: true }),
   kiroModel({ id: "claude-sonnet-5", ctx: 1_000_000, out: 128_000, vision: true, reasoning: true, toolCall: true }),
   kiroModel({ id: "claude-sonnet-5.5", ctx: 1_000_000, out: 128_000, vision: true, reasoning: true, toolCall: true }),
-  // 200K, not the 1M the 1M-window models use: Sonnet 4.5 predates it. The
-  // million-token window arrived with Opus 4.6 and the 5.x generation; the 4.5
-  // trio is 200K, and Opus and Haiku here already say so.
   // 1M/128K, not the 200K/64K of the 4.5 row above it: Haiku moved to the
   // million-token window and the doubled output ceiling with the rest of the
   // 5.x generation, and this line had been copied from its predecessor.

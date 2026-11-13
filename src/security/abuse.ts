@@ -9,9 +9,10 @@ export interface ClientIdentity {
 }
 
 /**
- * Decodes the `{banned, count, bannedNow}` tuple the admission script returns.
+ * Decodes the `{banned, count, bannedNow, retryAfterMs}` tuple the admission
+ * script returns.
  *
- * The script is the only producer, so a value that is not three elements or
+ * The script is the only producer, so a value that is not four elements or
  * whose members are not finite numbers means the script/response pair drifted
  * (a desynced deployment, a cluster resharding mid-eval). Reading such a value
  * as a counter would silently admit or reject on garbage, so it throws instead
@@ -636,21 +637,41 @@ export class RedisIpAbuseStore implements IpAbuseStore {
   }
 
   async listBans(): Promise<readonly { identity: string; bannedUntil: number | null }[]> {
-    const keys = await this.redis.keys("cartethyia:ip:ban:*");
+    // `KEYS` blocks Redis for the whole keyspace scan, and one GET per ban is
+    // a round trip per ban. SCAN iterates in bounded cursors and one pipelined
+    // GET per batch keeps the round trips flat (same policy as
+    // `persistence/shared-cache.ts`).
+    const keys: string[] = [];
+    let cursor = "0";
+    do {
+      const [next, batch] = await this.redis.scan(cursor, "MATCH", "cartethyia:ip:ban:*", "COUNT", 500);
+      cursor = next;
+      keys.push(...batch);
+    } while (cursor !== "0");
     const now = Date.now();
     const out: { identity: string; bannedUntil: number | null }[] = [];
-    for (const key of keys) {
-      const value = await this.redis.get(key);
-      const until = Number(value ?? 0);
-      if (!Number.isFinite(until) || until <= now) {
-        await this.redis.del(key);
-        continue;
+    const stale: string[] = [];
+    if (keys.length > 0) {
+      const pipeline = this.redis.pipeline();
+      for (const key of keys) pipeline.get(key);
+      const results = await pipeline.exec();
+      for (let index = 0; index < keys.length; index += 1) {
+        const key = keys[index]!;
+        const [error, value] = results?.[index] ?? [null, null];
+        if (error) throw error;
+        const until = Number(value ?? 0);
+        if (!Number.isFinite(until) || until <= now) {
+          stale.push(key);
+          continue;
+        }
+        out.push({
+          identity: key.slice("cartethyia:ip:ban:".length),
+          bannedUntil: until >= Number.MAX_SAFE_INTEGER - 1 ? null : until,
+        });
       }
-      out.push({
-        identity: key.slice("cartethyia:ip:ban:".length),
-        bannedUntil: until >= Number.MAX_SAFE_INTEGER - 1 ? null : until,
-      });
     }
+    // Expired and malformed markers are cleaned up in one call, as before.
+    if (stale.length > 0) await this.redis.del(...stale);
     return out;
   }
 }

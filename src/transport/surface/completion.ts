@@ -2,7 +2,7 @@ import { GatewayError } from "../../protocol/gateway-error";
 import type { CanonicalEvent, CanonicalRequest, GenerationControls } from "../../protocol/canonical-model";
 import { parseReasoningIntent } from "./dialects";
 import type { SurfaceAdapter, SurfaceInput, SurfaceOutput } from "./adapters";
-import { eventText } from "./adapters";
+import { eventText, lastEventOfType } from "./adapters";
 import { isRecord } from "../../protocol/codecs";
 import { textPart } from "./content-parts";
 import { usageToChatWire, type OpenAiUsage } from "../../providers/provider-usage";
@@ -220,8 +220,8 @@ class CompletionAdapter implements SurfaceAdapter {
 
   encodeOutput(events: readonly CanonicalEvent[], options: CompletionEncodingOptions = {}): SurfaceOutput {
     const model = modelFor(events, options);
-    const terminal = [...events].reverse().find((event) => event.type === "terminal");
-    const usageEvent = [...events].reverse().find((event) => event.type === "usage");
+    const terminal = lastEventOfType(events, "terminal");
+    const usageEvent = lastEventOfType(events, "usage");
     const reason = completionStopReason(terminal);
     const responseUsage = completionUsage(terminal, usageEvent);
     const response = {

@@ -713,6 +713,69 @@ export interface AccountErrorSignals {
   readonly rotateAccount: boolean;
 }
 
+/**
+ * The shared verdict for the buddy family's two refusal surfaces — the policy
+ * block (`11140`) and the channel rejection (`11-128`). Both end in the same
+ * split: a ban is a verdict on the credential and disables the account at once,
+ * a refusal of one request must only stop that request from being retried
+ * verbatim (cooling the account there was the bug that made one malformed
+ * request look like a dead credential).
+ */
+function decidePolicyBlock(
+  result: AccountErrorContext["result"],
+  reason: (prefix: string) => string,
+  buddyBanned: boolean,
+  refusalReason: string,
+): AccountErrorClassification {
+  if (buddyBanned) {
+    return result(
+      "policy_blocked_banned",
+      "disabled",
+      0,
+      null,
+      reason("Account banned by upstream"),
+      // A ban is evidence about the credential even at provider scope, for the
+      // same reason a named revocation is: the message is the evidence. Without
+      // this a stream frame's missing credential detail would leave a banned
+      // account serving.
+      true,
+    );
+  }
+  return result(
+    "policy_blocked_invalid_request",
+    "cooldown",
+    0,
+    null,
+    reason(refusalReason),
+    // Never mutates: a refused request fails identically on every account, so
+    // cooling would burn a healthy credential on the gateway's own fault.
+    false,
+  );
+}
+
+/**
+ * The escalating verdict shared by every rule that cools one (account, model)
+ * pair on the unsupported-model ladder — the Qoder plan gate, the generic
+ * `model-plan-gated` arm, and `model-unsupported`. Cooldowns double per
+ * consecutive report (see {@link unsupportedModelCooldownMs}), and the mutation
+ * is model-scoped: the account keeps serving its other models.
+ */
+export function modelUnreachableEscalating(
+  signals: Pick<AccountErrorSignals, "result" | "reason" | "modelBlockHits" | "origin" | "modelId">,
+  explanation: string,
+): AccountErrorClassification {
+  const cooldownMs = unsupportedModelCooldownMs(signals.modelBlockHits);
+  return signals.result(
+    "model_unreachable",
+    "cooldown",
+    cooldownMs,
+    new Date(Date.now() + cooldownMs),
+    signals.reason(explanation),
+    signals.origin === "upstream" && signals.modelId !== undefined,
+    true,
+  );
+}
+
 const VALIDATION_URL_RE = /https?:\/\/[^\s"'\\]+/;
 
 /**
@@ -1112,34 +1175,11 @@ export function classifyAccountError(
     options?.providerId !== undefined &&
     BUDDY_PROVIDER_IDS.has(options.providerId.toLowerCase());
   if (policyBlock) {
-    if (buddyBanned) {
-      return result(
-        "policy_blocked_banned",
-        "disabled",
-        0,
-        null,
-        reason("Account banned by upstream"),
-        // A ban is evidence about the credential even at provider scope, for
-        // the same reason a named revocation is: the message is the evidence.
-        // Without this a stream frame's missing credential detail would leave a
-        // banned account serving.
-        true,
-      );
-    }
     // Not a ban: the upstream refused this request. The account is fine, so the
     // only correct move is to stop retrying it verbatim. Cooling the account
     // here was the bug that made one malformed request look like a dead
     // credential.
-    return result(
-      "policy_blocked_invalid_request",
-      "cooldown",
-      0,
-      null,
-      reason("Upstream refused this request"),
-      // Never mutates: a malformed body fails identically on every account, so
-      // cooling would burn a healthy credential on the gateway's own fault.
-      false,
-    );
+    return decidePolicyBlock(result, reason, buddyBanned, "Upstream refused this request");
   }
   // These codes are a verdict on the request, not the account. Cooling the
   // account for them burns a healthy credential on a body that will fail the
@@ -1197,28 +1237,12 @@ export function classifyAccountError(
     // Same split as the policy arm above: a ban disables, a channel refusal
     // only stops this request. `11-128` is the request shape, so this branch
     // nearly always takes the refusal path — but it shares the ban test so a
-    // `11140`-shaped body arriving as a channel rejection still disables.
-    if (buddyBanned) {
-      return result(
-        "policy_blocked_banned",
-        "disabled",
-        0,
-        null,
-        reason("Account banned by upstream"),
-        true,
-      );
-    }
-    return result(
-      "policy_blocked_invalid_request",
-      "cooldown",
-      0,
-      null,
-      reason("Provider channel rejection"),
-      // The credential is valid; the upstream refuses this calling channel.
-      // Cooling was the bug: it kept a refused account in the plan, where a
-      // client's retry budget burned healthy siblings for the whole window.
-      false,
-    );
+    // `11140`-shaped body arriving as a channel rejection still disables. On
+    // the refusal path the credential is valid and only the calling channel is
+    // refused. Cooling was the bug: it kept a refused account in the plan,
+    // where a client's retry budget burned healthy siblings for the whole
+    // window.
+    return decidePolicyBlock(result, reason, buddyBanned, "Provider channel rejection");
   }
   // server-side tool (web search, x search, web fetch), not evidence about the
   // credential or the account's quota. Some providers surface it as 403, which
@@ -1518,18 +1542,7 @@ const ACCOUNT_ERROR_RULES: readonly AccountErrorRule[] = [
   {
     name: "model-plan-gated",
     match: (s) => s.quotaSignal && s.providerCode === "112",
-    decide: (s) => {
-      const cooldownMs = unsupportedModelCooldownMs(s.modelBlockHits);
-      return s.result(
-        "model_unreachable",
-        "cooldown",
-        cooldownMs,
-        new Date(Date.now() + cooldownMs),
-        s.reason("Model not included in this account's plan"),
-        s.origin === "upstream" && s.modelId !== undefined,
-        true,
-      );
-    },
+    decide: (s) => modelUnreachableEscalating(s, "Model not included in this account's plan"),
   },
   ...traeRules,
   qoderModelQuotaRule,
@@ -1634,18 +1647,7 @@ const ACCOUNT_ERROR_RULES: readonly AccountErrorRule[] = [
   {
     name: "model-unsupported",
     match: (s) => isUnsupportedModelEvidence(s.statusCode, s.providerCode, s.folded),
-    decide: (s) => {
-      const cooldownMs = unsupportedModelCooldownMs(s.modelBlockHits);
-      return s.result(
-        "model_unreachable",
-        "cooldown",
-        cooldownMs,
-        new Date(Date.now() + cooldownMs),
-        s.reason("Model not supported by this upstream"),
-        s.origin === "upstream" && s.modelId !== undefined,
-        true,
-      );
-    },
+    decide: (s) => modelUnreachableEscalating(s, "Model not supported by this upstream"),
   },
   {
     name: "model-unreachable",

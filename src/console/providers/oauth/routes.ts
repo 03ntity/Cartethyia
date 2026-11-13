@@ -3,12 +3,14 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { encryptCredential, hashSecret } from "../../../security/crypto";
 import type { CartethyiaDatabase } from "../../../persistence/db-handle";
 import type {
+  OAuthDevicePollResult,
   OAuthDeviceStartResult,
   OAuthExchangeResult,
   OAuthLoginClient,
 } from "../../../providers/authentication/oauth-flow-store";
 import { oauthAccountIdentity } from "../../../providers/authentication/oauth-flow-store";
 import type { OAuthDevicePollResponse } from "../catalog/contracts";
+import { nextFreeLabel } from "../catalog/store-helpers";
 import { providerJwtVerification } from "../../../providers/provider-metadata";
 import type { ProviderRegistry } from "../../../providers/provider-registry";
 import { browserAuthorizeRedirectUri } from "../../../config/providers";
@@ -19,7 +21,7 @@ import { Elysia, t, type AnyElysia } from "elysia";
 import { ConsoleDomainError, errorResponse, requireScope } from "../../shared/errors";
 import { generateOAuthState, generatePkcePair } from "../../../providers/authentication/oauth-flow-store";
 import type { OAuthFlowStorage } from "../../../providers/authentication/oauth-flow-store";
-import type { OAuthCallbackListener } from "./callback-listener";
+import { escapeHtml, type OAuthCallbackListener } from "./callback-listener";
 import { validateIssuedAccessToken } from "../../../providers/authentication/jwt-validator";
 import { inlineScriptContentSecurityPolicy } from "../../../security/outbound-headers";
 import type { AccessDecision } from "../../../security/access-control";
@@ -62,11 +64,7 @@ export function nextGeneratedOAuthAccountLabel(
   providerId: string,
   existingLabels: readonly string[],
 ): string {
-  const taken = new Set(existingLabels.map((label) => label.trim().toLowerCase()));
-  for (let n = 1; ; n += 1) {
-    const candidate = `${providerId}-${n}`;
-    if (!taken.has(candidate.toLowerCase())) return candidate;
-  }
+  return nextFreeLabel(`${providerId}-`, existingLabels);
 }
 
 /** Generated labels are display-only and must never become re-login identity. */
@@ -477,16 +475,7 @@ function failurePage(message: string, wantsJson: boolean): Response {
       { status: 400 },
     );
   }
-  const escapedMessage = message.replace(/[&<>"']/g, (character) => {
-    const entities: Record<string, string> = {
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    };
-    return entities[character] ?? character;
-  });
+  const escapedMessage = escapeHtml(message);
   return new Response(
     `<!doctype html><html><body><p>OAuth login failed: ${escapedMessage}</p></body></html>`,
     {
@@ -569,12 +558,6 @@ function createOAuthLoginOperations(config: OAuthLoginConfig) {
           redirectUri,
           ...(parameters === undefined ? {} : { parameters }),
         });
-        // Bind the redirect's loopback port before handing the URL out. The
-        // advertised URI names the operator's own machine, so a login that only
-        // advertises it leaves the browser on a dead page and the code stranded
-        // in the address bar. Registering here is what makes the redirect
-        // deliver itself; a non-loopback redirect (a custom scheme, a remote
-        // host) returns false and keeps the manual path.
         return {
           authorizeUrl: client.buildAuthorizeUrl(prepared),
           state,
@@ -686,17 +669,24 @@ function createOAuthLoginOperations(config: OAuthLoginConfig) {
           providerId,
           a.tenantId,
         );
-        const polled = await client.pollDeviceAuth(deviceAuthId, {
-          providerId,
-          tenantId: a.tenantId,
-          accountLabel: correlation.accountLabel,
-          fetchFn: egress.fetch,
-          ...(correlation.providerState === undefined
-            ? {}
-            : { providerState: correlation.providerState }),
-          ...(correlation.parameters === undefined ? {} : { parameters: correlation.parameters }),
-        });
-        egress.release();
+        let polled: OAuthDevicePollResult;
+        try {
+          polled = await client.pollDeviceAuth(deviceAuthId, {
+            providerId,
+            tenantId: a.tenantId,
+            accountLabel: correlation.accountLabel,
+            fetchFn: egress.fetch,
+            ...(correlation.providerState === undefined
+              ? {}
+              : { providerState: correlation.providerState }),
+            ...(correlation.parameters === undefined ? {} : { parameters: correlation.parameters }),
+          });
+        } finally {
+          // The pool slot is only needed for the poll request itself, and a
+          // thrown poll must release it exactly like `startDevice` does — a
+          // leak here would permanently inflate the pool's inflight count.
+          egress.release();
+        }
         if (polled.status === "pending")
           return {
             status: "pending",

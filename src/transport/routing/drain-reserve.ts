@@ -112,18 +112,3 @@ export function isInReserve(
   if (fraction === undefined) return false;
   return fraction * 100 <= reservePct;
 }
-
-/**
- * True when a reserved account has healed above the reclaim threshold and may be
- * reclaimed to full priority.
- */
-export function isReclaimReady(
-  windows: readonly ProviderQuotaWindow[] | undefined,
-  reservePct: number,
-  reclaimAbovePct: number,
-): boolean {
-  if (reservePct <= 0 || reclaimAbovePct <= reservePct) return false;
-  const fraction = remainingFraction(windows);
-  if (fraction === undefined) return false;
-  return fraction * 100 >= reclaimAbovePct;
-}

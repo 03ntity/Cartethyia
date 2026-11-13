@@ -11,8 +11,8 @@ import * as http2 from "node:http2";
 import type { TLSSocket } from "node:tls";
 import { GatewayError } from "../../protocol/gateway-error";
 import type { Http2BidiEndReason, Http2BidiOpenOptions, ValidatedHttp2BidiStream } from "../bidi";
+import { HTTP2_CONNECT_TIMEOUT_MS } from "./dial";
 
-export const HTTP2_CONNECT_TIMEOUT_MS = 15_000;
 /** Read-idle bound after which a bidi stream is declared dead. */
 export const HTTP2_READ_IDLE_MS = 120_000;
 /** Buffered inbound bytes before a bidi stream is refused as unbounded. */

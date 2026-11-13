@@ -106,10 +106,9 @@ function normalizeQoderReset(resetsAt: string | null): string | null {
 /**
  * Reads one Qoder account's quota.
  *
- * A degenerate body — both quota objects missing, or `isQuotaExceeded` with a
- * zero remaining *and* a zero total — is reported as an error rather than as a
- * zero balance. "No quota" parks the account; "could not read the quota" does
- * not, and those two are not the same claim.
+ * A degenerate body — both quota objects missing — is reported as an error
+ * rather than as a zero balance. "No quota" parks the account; "could not
+ * read the quota" does not, and those two are not the same claim.
  */
 /** Records an unreadable body where an operator can act on it, not as an error. */
 function logQoderQuotaMiss(detail: string): void {
@@ -176,17 +175,12 @@ export async function fetchQoderQuota(
   // unreadable body. Only a response with *both* quota objects absent is
   // unreadable, and it is logged rather than returned — never as an error,
   // which would cool the account.
-  const degenerate = bothMissing;
-  if (degenerate) {
+  if (bothMissing) {
     // A body we cannot trust is not a zero balance, and it is not a failed
     // read either: `error` is what flags the account `quota_fetch_failed` and
     // cools it, so a shape we simply do not recognise would park a working
     // account. Logged instead of returned.
-    logQoderQuotaMiss(
-      bothMissing
-        ? "Qoder quota response carried no quota objects."
-        : "Qoder reported quota exceeded with a zero total; not read as a balance.",
-    );
+    logQoderQuotaMiss("Qoder quota response carried no quota objects.");
     return { source: "qoder", plan: null, windows: [], error: null };
   }
 

@@ -10,7 +10,8 @@ const DEEPSEEK_PROVIDER_ID = "deepseek" as const;
  * source — it is the floor that keeps these models listed when discovery has not
  * run or the endpoint does not answer.
  *
- * Only two rows are needed; retired and alias ids are omitted. `deepseek-v4.1-flash`
+ * Only the rows still served live are listed; retired and alias ids are
+ * omitted. `deepseek-v4.1-flash`
  * replaces `v4-flash` and `v4-flash-vision-exp` routes to it upstream.
  * `v4-pro-max` and `v4-pro-none` are
  * likewise routing aliases of `deepseek-v4-pro`, not models of their own.
@@ -34,7 +35,7 @@ export const DEEPSEEK_MODELS: readonly ModelDefinition[] = [
     // The wire default for `messages` is `/messages`, but this provider's base
     // already ends at `/anthropic`, so the default would compose to
     // `/anthropic/messages`. DeepSeek publishes the versioned path, so the row
-    // declares it — the same reason the Anthropic rows above do.
+    // declares it — the same reason the Anthropic rows in `anthropic.ts` do.
     endpoint: "/v1/messages",
     reasoning: true,
     toolCall: true,

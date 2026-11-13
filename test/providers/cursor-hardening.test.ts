@@ -1,11 +1,10 @@
 /**
  * Cursor Run hardening, adapted from oh-my-pi.
  *
- * The four tool-loop failures these lock down: a model-not-found retried five
- * times, an HTTP/2 block retried as HTTP/2, a completed tool call re-sent after
- * a checkpoint, and a step that waits out its heartbeats after the server has
- * already counted every call. Plus the drain and settlement primitives that
- * make both exits of a stream safe.
+ * The tool-loop failures these lock down: a model-not-found retried five
+ * times, an HTTP/2 block retried as HTTP/2, and a step that waits out its
+ * heartbeats after the server has already counted every call. Plus the drain
+ * and settlement primitives that make both exits of a stream safe.
  */
 import { describe, expect, test } from "bun:test";
 import { GatewayError } from "../../src/protocol/gateway-error";
@@ -68,16 +67,16 @@ describe("Cursor checkpoint / tool count", () => {
     cp.pendingCallIds.add("a");
     cp.pendingCallIds.add("b");
     cp.completedCallIds.add("a");
-    const r = reconcileToolCount(cp, 2);
-    expect(r.endStep).toBe(true);
-    expect(r.resend).toEqual(["b"]);
+    expect(reconcileToolCount(cp, 2)).toBe(true);
   });
 
-  test("calls the server already counted are never re-submitted", () => {
+  test("a step stays open while dispatched calls exceed the server's count", () => {
     const cp = createCheckpointState();
+    cp.dispatchedCount = 3;
     cp.pendingCallIds.add("a");
     cp.completedCallIds.add("a");
-    expect(reconcileToolCount(cp, 1).resend).toEqual([]);
+    expect(reconcileToolCount(cp, 1)).toBe(false);
+    expect(reconcileToolCount(cp, 3)).toBe(true);
   });
 
   test("a quiet Run names its checkpoint, step and preceding kinds", () => {

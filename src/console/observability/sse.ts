@@ -14,8 +14,6 @@ type SseSetup = (sender: SseSender) => () => void;
 
 import { TEXT_ENCODER, buildSseEventFrame as formatSseFrame } from "../../protocol/sse-frame";
 
-export { formatSseFrame };
-
 /**
  * Heartbeat cadence. The listener idles at 60s, so a comment frame every 25s
  * keeps SSE connections alive through proxies and idle-timeout sweeps.

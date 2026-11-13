@@ -19,12 +19,11 @@ import type {
   OAuthExchangeResult,
   OAuthImportInput,
 } from "../../authentication/oauth-flow-store";
+import { FREEPI_BASE_URL, FREEPI_CONSENT_VERSION } from "./freepi-realm";
 
 const FREEPI_DEVICE_START_PATH = "/auth/github/device";
 const FREEPI_CONSENT_PATH = "/auth/consent";
 const FREEPI_TOKEN_PATH = "/auth/token";
-const FREEPI_BASE_URL = "https://api.freepi.ai";
-const FREEPI_CONSENT_VERSION = "4";
 
 export class FreepiOAuthClient extends OAuthClient {
   readonly supportsDeviceCode = true;
