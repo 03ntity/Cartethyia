@@ -1,8 +1,9 @@
 /**
  * Inflight accounting behind `NetworkPoolSelector`: local counters, the
  * distributed Redis admit/release scripts, and the weighted/round-robin/
- * random pool selection scan. Cooldown reads live in `selector-cooldowns.ts`;
- * shared constants and key helpers in `selector-shared.ts`.
+ * random pool selection scan. Cooldown reads live in `selector-cooldowns.ts`,
+ * the batched cooldown pre-check in `selector-failure-report.ts`; shared
+ * constants and key helpers in `selector-shared.ts`.
  *
  * `PoolInflightBackend` is the slice of the selector these functions need —
  * the class in `selector.ts` supplies it, so the state maps and the
@@ -34,10 +35,8 @@ import {
   poolInflightTtlSeconds,
   providerInflightStateKey,
 } from "./selector-shared";
-import {
-  providerCooldownStates,
-  type PoolCooldownBackend,
-} from "./selector-cooldowns";
+import { type PoolCooldownBackend } from "./selector-cooldowns";
+import { providerCooldownStates } from "./selector-failure-report";
 
 /** The selector surface inflight accounting and selection read. */
 export interface PoolInflightBackend {

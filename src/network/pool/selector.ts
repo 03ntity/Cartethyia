@@ -8,8 +8,9 @@
  * - `selector-shared.ts` — constants, key helpers, capacity/weight derivation.
  * - `selector-inflight.ts` — local/Redis inflight counters and the selection
  *   scan (`tryAcquireAvailablePool`).
- * - `selector-cooldowns.ts` — provider cooldown/block markers and the batched
- *   failure-report reads (`getSelectionFailure`, `getPoolListSnapshot`).
+ * - `selector-cooldowns.ts` — provider cooldown/block markers.
+ * - `selector-failure-report.ts` — the batched reads: the selection-failure
+ *   report, the pool-list snapshot, and the admission cooldown pre-check.
  * - `scripts.ts` — Redis scripts + key builders.
  * - `state.ts` — local inflight/rotation/cooldown state.
  */
@@ -35,13 +36,15 @@ import {
   readFlagProviderBlocked,
   readFlagProviderCooldown,
   readGetPoolCooldowns,
-  readGetPoolListSnapshot,
-  readGetSelectionFailure,
   readHydrateProviderCooldown,
   readIsProviderCooldown,
   type PoolCooldownState,
-  type PoolSelectionFailure,
 } from "./selector-cooldowns";
+import {
+  readGetPoolListSnapshot,
+  readGetSelectionFailure,
+  type PoolSelectionFailure,
+} from "./selector-failure-report";
 
 export { PROVIDER_BLOCK_MS };
 export type { PoolRotation, ProxyCooldownEntry, PoolSelectionFailure };
