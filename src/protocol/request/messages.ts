@@ -15,8 +15,8 @@ import {
   THINKING_STRIPPED_SAMPLING_CONTROLS,
   ensureMaxTokensForThinking,
   isThinkingEnabled,
+  normalizeWireMaxTokens,
 } from "../../protocol/translation/capabilities";
-import { normalizeWireMaxTokens } from "../../protocol/translation/normalize";
 import { resolveWireMaxTokens, WIRE_TOKEN_BOUNDS } from "../../protocol/translation/quirks";
 import {
   isClaudeBillingHeaderText,

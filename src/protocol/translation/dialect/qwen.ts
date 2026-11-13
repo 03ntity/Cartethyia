@@ -11,8 +11,31 @@
  * The scanner recovers complete blocks into canonical tool calls and leaves the
  * rest as text, mirroring the DSML/OMP scanners used for other families.
  */
-import type { InbandScanner, InbandScanResult } from "./inband";
 import { MarkupStreamParser } from "../../markup-stream-parser";
+
+/**
+ * In-band tool-call scanner contract.
+ *
+ * Some model families emit tool calls as markup inside the text stream instead
+ * of structured `tool_calls`: DeepSeek DSML blocks, Qwen tool-call JSON blocks,
+ * OMP hex-marked envelopes. Each is a pluggable codec; the chat decoder selects
+ * one by dialect id (see `response/chat.ts`).
+ */
+export interface InbandToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: string;
+}
+
+export interface InbandScanResult {
+  readonly text: string;
+  readonly calls: readonly InbandToolCall[];
+}
+
+export interface InbandScanner {
+  push(chunk: string): InbandScanResult;
+  flush(): InbandScanResult;
+}
 
 const OPEN_TAG = "<tool_call>";
 const CLOSE_TAG = "</tool_call>";

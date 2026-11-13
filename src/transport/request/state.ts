@@ -6,8 +6,18 @@ import type { PreparedProxyRequest } from "./preparer";
 import type { PayloadCaptureState, TelemetryPayloadCapture } from "../../observability/payload-capture";
 import type { TelemetryPayloadDepth, TelemetryPayloadMode } from "../../console/settings/contracts";
 import { log } from "../../observability/logger";
-import type { InFlightSnapshot } from "./inflight";
 import { fastPathname } from "../pathname";
+
+/**
+ * The live "in flight" snapshot shape, shared by the store, the console live
+ * domain, and the dashboard. Derived from this store's own `liveControllers`
+ * map — the single registry that already owns a request's lifetime — so the
+ * gauge cannot disagree with what is actually running.
+ */
+export interface InFlightSnapshot {
+  readonly inFlight: number;
+  readonly uniqueIps: number;
+}
 
 export interface ProxyRequestOutcome {
   readonly status: "completed" | "failed" | "cancelled" | "truncated";

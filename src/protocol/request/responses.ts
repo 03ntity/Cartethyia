@@ -4,8 +4,7 @@
 import type { CanonicalRequest } from "../canonical-model";
 import { clampToolCallId, isRecord } from "../codecs";
 import { markLatestBreakpoint } from "../../protocol/translation/cache-controls";
-import { pickWireSupportedControls } from "../../protocol/translation/capabilities";
-import { normalizeGenerationControls } from "../../protocol/translation/normalize";
+import { normalizeGenerationControls, pickWireSupportedControls } from "../../protocol/translation/capabilities";
 import { resolveWireMaxTokens } from "../../protocol/translation/quirks";
 import type { DialectPolicy } from "../../protocol/translation/dialect/types";
 import type { ThinkingConfig } from "../../protocol/translation/dialect/thinking-ladder";
