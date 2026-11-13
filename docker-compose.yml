@@ -48,6 +48,42 @@ services:
     networks:
       - cartethyia
 
+  # Optional PgBouncer for full mode — the only pooler this stack standardizes
+  # on. PostgreSQL is never bundled, so a full-mode operator points DATABASE_URL
+  # at their own server; starting `docker compose --profile full up` places a
+  # transaction-mode PgBouncer in front of it instead. The values mirror the
+  # audited 1-2 GB VPS reference: the server pool caps at 12 — more than a
+  # 1-vCPU box can use, and a hard ceiling on idle/peak backend RAM. Point the
+  # app's DATABASE_URL at pgbouncer:6432 (credentials must equal DB_USER /
+  # DB_PASSWORD below; the image derives its userlist from them). Without the
+  # profile nothing changes: `docker compose up` starts only app and redis.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.24.1-p0
+    profiles: ["full"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6432:6432"
+    environment:
+      DB_HOST: ${PGBOUNCER_DB_HOST:?set PGBOUNCER_DB_HOST in .env to your PostgreSQL host}
+      DB_PORT: ${PGBOUNCER_DB_PORT:-5432}
+      DB_NAME: ${PGBOUNCER_DB_NAME:-cartethyia}
+      DB_USER: ${PGBOUNCER_DB_USER:?set PGBOUNCER_DB_USER in .env to the PostgreSQL role}
+      DB_PASSWORD: ${PGBOUNCER_DB_PASSWORD:?set PGBOUNCER_DB_PASSWORD in .env}
+      LISTEN_PORT: "6432"
+      POOL_MODE: transaction
+      AUTH_TYPE: scram-sha-256
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "12"
+      MIN_POOL_SIZE: "2"
+      RESERVE_POOL_SIZE: "5"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "6432"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - cartethyia
+
 volumes:
   redisdata:
   cartethyia-data:
