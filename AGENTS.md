@@ -177,6 +177,11 @@ its real boundary when practical: a gateway request, browser surface, provider
 flow, isolated migration, or installer lifecycle. Do not claim a check passed
 when it was not run.
 
+Do not poll for npm registry propagation after a publish. Registry caches may
+take minutes to reflect a new version; verify once, report the result, and move
+on. If the publish call succeeded but the registry has not caught up, say so
+and leave the verification to a later check.
+
 ## Documentation
 
 Use `documentation/installation.md` for installation and local/server setup.
