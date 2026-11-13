@@ -16,7 +16,9 @@ import {
   createSqliteDatabase,
 } from "../../src/persistence/db-sqlite";
 import { providerAccounts, providers } from "../../src/persistence/schema";
-import { RoutingEngine } from "../../src/transport/routing/router";
+import {
+  RoutingEngine,
+} from "../../src/transport/routing/routing-engine";
 import type { RouteCandidate, RouteSnapshot } from "../../src/transport/routing/route-model";
 import { clearQuotaCacheForTests } from "../../src/providers/quota/cache";
 import { persistQuotaSnapshot } from "../../src/providers/quota/snapshot";

@@ -34,7 +34,9 @@ import type {
 import type { ProviderAdapter, ProviderDispatchContext, ProviderDispatchTarget, WebSearchOutcome, WebSearchResult } from "../../src/providers/provider-contracts";
 import { parseProviderId } from "../../src/providers/provider-contracts";
 import { ProxyRequestPreparer } from "../../src/transport/request/preparer";
-import { RoutingEngine } from "../../src/transport/routing/router";
+import {
+  RoutingEngine,
+} from "../../src/transport/routing/routing-engine";
 import { ApiKeyAdmissionService } from "../../src/security/admission/service";
 import { InMemoryAdmissionCounterStore } from "../../src/security/admission/in-memory-store";
 import { ProxyRequestStateStore } from "../../src/transport/request/state";

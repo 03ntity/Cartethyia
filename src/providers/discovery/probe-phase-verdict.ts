@@ -4,7 +4,9 @@
  */
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import type { CanonicalEvent, UsageRecord, WireFamily } from "../../protocol/canonical-model";
-import { classifyUpstreamFailure } from "../../protocol/failure-policy";
+import {
+  classifyUpstreamFailure,
+} from "../../protocol/failure-classify";
 import { terminalFailure } from "../../transport/dispatch/attempt-finalize";
 import { recordAccountFailure, recordAccountSuccess } from "../operations/account-health-service";
 import { GatewayError } from "../../protocol/gateway-error";

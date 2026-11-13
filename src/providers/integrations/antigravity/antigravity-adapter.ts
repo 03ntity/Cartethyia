@@ -11,7 +11,9 @@ import { GatewayError } from "../../../protocol/gateway-error";
 import { firstUserText } from "../../../protocol/canonical-model";
 import { decodeSseEvents } from "../../../protocol/sse-decoder";
 import { geminiInlineImages, imageAspectRatio, imageCreatedSeconds } from "../../../protocol/image-generation";
-import { mapUpstreamHttpError } from "../../../protocol/failure-policy";
+import {
+  mapUpstreamHttpError,
+} from "../../../protocol/upstream-errors";
 import { isRecord } from "../../../protocol/codecs";
 import { createHash, randomUUID } from "node:crypto";
 import { toCanonicalStopReason } from "../../../protocol/response/gemini";

@@ -14,7 +14,9 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { getDb } from "../../src/persistence/boot";
 import { models, networkPools, providerPoolAccounts, providers } from "../../src/persistence/schema";
-import { createDatabaseSnapshotBuilder } from "../../src/transport/routing/route-catalog";
+import {
+  createDatabaseSnapshotBuilder,
+} from "../../src/transport/routing/route-catalog-repository";
 import { dbDescribe, requireDatabase } from "../helpers/database";
 import { createWorld, type GatewayWorld } from "../helpers/fixtures";
 

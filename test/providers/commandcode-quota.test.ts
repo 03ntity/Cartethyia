@@ -3,7 +3,9 @@ import { fetchCommandCodeQuota } from "../../src/providers/integrations/commandc
 import { totalRemainingCredit } from "../../src/providers/quota/quota-contracts";
 import { createDefaultProviderRegistry } from "../../src/providers/default-registry";
 import { fetchProviderQuota } from "../../src/providers/quota/quota-support";
-import { EligibilityEvaluator } from "../../src/transport/routing/router";
+import {
+  EligibilityEvaluator,
+} from "../../src/transport/routing/candidate-evaluation";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

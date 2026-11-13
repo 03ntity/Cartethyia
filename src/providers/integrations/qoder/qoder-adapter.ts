@@ -24,7 +24,9 @@ import {
 } from "../../provider-contracts";
 import { abortGatewayError, createUpstreamDeadlineLifecycle } from "../../operations/upstream-deadline";
 import { getQoderVersion } from "../../operations/client-versions";
-import { mapUpstreamHttpError } from "../../../protocol/failure-policy";
+import {
+  mapUpstreamHttpError,
+} from "../../../protocol/upstream-errors";
 import { QODER_CN_MODEL_CONFIGS, QODER_INTL_MODEL_CONFIGS } from "./qoder-catalog";
 import { isQoderVirtualModel, qoderDispatchModelId } from "./qoder-virtual";
 import { isQoderPat, qoderOAuthAuth, qoderSessionId, resolveQoderAuth } from "./qoder-auth";

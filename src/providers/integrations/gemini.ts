@@ -2,7 +2,9 @@
 // (per-model `:generateContent`/`:streamGenerateContent` paths, `contents`/
 // `candidates` shapes, `x-goog-api-key`) — non-OpenAI wire; stays bespoke.
 import { GatewayError } from "../../protocol/gateway-error";
-import { mapUpstreamHttpError } from "../../protocol/failure-policy";
+import {
+  mapUpstreamHttpError,
+} from "../../protocol/upstream-errors";
 import type { CanonicalEvent, CanonicalRequest } from "../../protocol/canonical-model";
 import { readCredentialSecret, assertWireFamily, type ImageGenerationOutcome, type ProviderDispatchTarget, type ProviderAdapter, type ProviderDispatchContext, type WebSearchOutcome } from "../provider-contracts";
 import type { ModelDefinition } from "../provider-model-definition";

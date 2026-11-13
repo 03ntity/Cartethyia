@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { BUNDLED_PROVIDER_METADATA, providerServiceKinds } from "../../src/providers/provider-metadata";
 import { SERVICE_KINDS } from "../../src/protocol/canonical-model";
-import { buildCapabilityProfile } from "../../src/transport/routing/route-catalog";
+import {
+  buildCapabilityProfile,
+} from "../../src/transport/routing/route-catalog-helpers";
 import { sanitizeProviderResponse } from "../../src/console/providers/catalog/provider-operations";
 
 describe("provider service taxonomy", () => {

@@ -23,11 +23,15 @@ import { DEFAULT_PROVIDER_MAX_INFLIGHT } from "../../src/persistence/schema";
 import { defaultSkipProxy } from "../../src/console/providers/detail/store";
 import { DEFAULT_PROXY_SKIP_PROVIDER_IDS } from "../../src/providers/provider-metadata";
 import { buildClaudeCliUserAgent } from "../../src/providers/operations/custom-cli-headers";
-import { resolveRouteUserAgent } from "../../src/transport/routing/route-catalog";
+import {
+  resolveRouteUserAgent,
+} from "../../src/transport/routing/route-catalog-helpers";
 import { InMemoryAdmissionController } from "../../src/transport/routing/admission";
 import { capacityExhaustedError } from "../../src/transport/routing/route-model";
 import { reasonToGatewayError } from "../../src/security/admission/reasons";
-import { isRetryableFailure } from "../../src/protocol/failure-policy";
+import {
+  isRetryableFailure,
+} from "../../src/protocol/failure-classify";
 import { GatewayError } from "../../src/protocol/gateway-error";
 import type { RouteCandidate } from "../../src/transport/routing/route-model";
 

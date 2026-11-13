@@ -29,7 +29,11 @@ import { GatewayError } from "../../../protocol/gateway-error";
 import { applyParamQuirks } from "../../../protocol/translation/quirks";
 import { buildClaudeMessagesRequest, filterClaudeCustomHeaders, resolveClaudeMessagesApiKey } from "../shared/claude-messages";
 import { sendClaudeMessagesRequest } from "../../../protocol/upstream/send-claude-messages";
-import { classifyUpstreamError, upstreamErrorIdentifier, upstreamMessageAsIs } from "../../../protocol/failure-policy";
+import {
+  classifyUpstreamError,
+  upstreamErrorIdentifier,
+  upstreamMessageAsIs,
+} from "../../../protocol/upstream-errors";
 import { isRecord } from "../../../protocol/codecs";
 import type { CanonicalEvent, CanonicalRequest } from "../../../protocol/canonical-model";
 import { parseJwt } from "../../authentication/jwt-validator";

@@ -23,10 +23,14 @@ import type { OAuthTokenRefresher } from "../providers/authentication/oauth-refr
 import { oauthRefreshSweep } from "../workers/oauth-refresh-sweep";
 import { accountIdentitySweep } from "../workers/account-identity-sweep";
 import { pushStructuredConsoleLog } from "../observability/log-ring";
-import { createDatabaseSnapshotBuilder } from "../transport/routing/route-catalog";
+import {
+  createDatabaseSnapshotBuilder,
+} from "../transport/routing/route-catalog-repository";
 import { DrizzleProviderCatalogStore } from "../console/providers/catalog/store";
 import { InMemoryRouteSnapshotService } from "../transport/routing/route-model";
-import { RoutingEngine } from "../transport/routing/router";
+import {
+  RoutingEngine,
+} from "../transport/routing/routing-engine";
 import { RedisAdmissionController } from "../transport/routing/admission";
 import { admissionKey } from "../transport/routing/admission";
 import { ApiKeyAdmissionService } from "../security/admission/service";

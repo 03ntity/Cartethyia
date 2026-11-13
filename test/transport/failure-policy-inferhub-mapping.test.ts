@@ -22,8 +22,10 @@ import {
   classifyUpstreamError,
   upstreamErrorIdentifier,
   statusToGatewayErrorCode,
+} from "../../src/protocol/upstream-errors"
+import {
   parseRetryAfter,
-} from "../../src/protocol/failure-policy";
+} from "../../src/protocol/upstream-parsing";
 
 /** InferHub's error envelope: `{ error: { code, message } }`. */
 function inferhubBody(code: string): unknown {

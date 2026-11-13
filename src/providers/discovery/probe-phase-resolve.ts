@@ -24,7 +24,9 @@ import {
 } from "./probe-wire";
 import { OpenAICompatibleAdapter } from "../adapters/compatible-adapter";
 import { resolveByokWireProfile } from "../operations/byok-wire-profile";
-import { buildCapabilityProfile } from "../../transport/routing/route-catalog";
+import {
+  buildCapabilityProfile,
+} from "../../transport/routing/route-catalog-helpers";
 import { GatewayError } from "../../protocol/gateway-error";
 import type { ModelDefinition } from "../provider-model-definition";
 import type { ProviderAdapter, ProviderId } from "../provider-contracts";

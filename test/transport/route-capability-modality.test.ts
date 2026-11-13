@@ -14,7 +14,9 @@
  * exists to protect. Both directions are pinned here.
  */
 import { describe, expect, test } from "bun:test";
-import { buildCapabilityProfile } from "../../src/transport/routing/route-catalog";
+import {
+  buildCapabilityProfile,
+} from "../../src/transport/routing/route-catalog-helpers";
 
 /** A canonical-codec provider with no bespoke wire. */
 const QODER = "qoder";
@@ -103,7 +105,9 @@ describe("buildCapabilityProfile input modalities", () => {
  * The cache itself is a `BoundedLruMap` at the same 4096-entry cap; the size
  * test pins that the bound holds under insertions beyond it.
  */
-import { capabilityProfileCacheSize } from "../../src/transport/routing/route-catalog";
+import {
+  capabilityProfileCacheSize,
+} from "../../src/transport/routing/route-catalog-helpers";
 
 describe("capability profile memo", () => {
   const row = (modalities: unknown) => ({

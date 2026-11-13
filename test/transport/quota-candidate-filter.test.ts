@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { filterCandidateQuotaWindows, EligibilityEvaluator } from "../../src/transport/routing/router";
+import {
+  filterCandidateQuotaWindows,
+  EligibilityEvaluator,
+} from "../../src/transport/routing/candidate-evaluation";
 import type { ProviderQuotaWindow } from "../../src/providers/quota/quota-contracts";
 import type { RouteCandidate } from "../../src/transport/routing/route-model";
 

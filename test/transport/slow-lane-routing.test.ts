@@ -7,7 +7,9 @@
  * slow candidate must not jump ahead of a fresh one.
  */
 import { describe, expect, test } from "bun:test";
-import { EligibilityEvaluator } from "../../src/transport/routing/router";
+import {
+  EligibilityEvaluator,
+} from "../../src/transport/routing/candidate-evaluation";
 import { sharedClaudeSlowLanes } from "../../src/providers/integrations/claude/claude-slow-lane";
 import type { RouteCandidate } from "../../src/transport/routing/route-model";
 

@@ -16,7 +16,7 @@ import {
   isRetryableFailure,
   MIN_RETRY_BUDGET_MS,
   sleep,
-} from "../../protocol/failure-policy";
+} from "../../protocol/failure-classify";
 import { resolveRouteMaxAttempts } from "../../config/timeouts";
 import type { OAuthTokenRefresher } from "../../providers/authentication/oauth-refresh-service";
 import type { OAuthRefreshService } from "../../providers/authentication/oauth-refresh-service";

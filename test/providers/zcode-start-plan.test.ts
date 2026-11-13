@@ -3,9 +3,16 @@ import { ZcodeStartPlanOAuthClient } from "../../src/providers/integrations/zcod
 import { ZCODE_START_PLAN_PROVIDER_ID } from "../../src/providers/integrations/zcode-start-plan/provider";
 import { oauthIdentityFingerprint } from "../../src/console/providers/oauth/routes";
 import { createDefaultProviderRegistry } from "../../src/providers/default-registry";
-import { EligibilityEvaluator } from "../../src/transport/routing/router";
+import {
+  EligibilityEvaluator,
+} from "../../src/transport/routing/candidate-evaluation";
 import { classifyAccountError } from "../../src/providers/operations/account-error-classification";
-import { classifyUpstreamFailure, mapUpstreamHttpError } from "../../src/protocol/failure-policy";
+import {
+  classifyUpstreamFailure,
+} from "../../src/protocol/failure-classify"
+import {
+  mapUpstreamHttpError,
+} from "../../src/protocol/upstream-errors";
 import { encodeResponsesEvents } from "../../src/transport/surface/responses/encode";
 import { withFrozenTime } from "../helpers/clock";
 import type { CanonicalRequest, CanonicalEvent } from "../../src/protocol/canonical-model";

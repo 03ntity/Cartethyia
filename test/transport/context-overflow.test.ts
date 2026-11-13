@@ -13,7 +13,9 @@
  * a bare phrase — see the fourth case for why.
  */
 import { describe, expect, test } from "bun:test";
-import { mapUpstreamHttpError } from "../../src/protocol/failure-policy";
+import {
+  mapUpstreamHttpError,
+} from "../../src/protocol/upstream-errors";
 
 /** The upstream body verbatim: numeric `code`, prose-only overflow. */
 function overflowBody(): string {

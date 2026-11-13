@@ -24,28 +24,32 @@ import { GatewayError } from "../../src/protocol/gateway-error";
 import {
   classifyTerminalCategory,
   classifyTerminalOutcome,
-  classifyUpstreamError,
   classifyUpstreamFailure,
-  extractHtmlTitle,
-  extractUpstreamMessage,
   fallbackRetryDelayMs,
   isClientCancellation,
+  isRetryableFailure,
+} from "../../src/protocol/failure-classify"
+import {
+  classifyUpstreamError,
+  extractHtmlTitle,
+  extractUpstreamMessage,
   isContextLengthFailure,
   isUpstreamQueued,
   mapUpstreamHttpError,
   queueRetryAfterMs,
-  isRetryableFailure,
+  statusToGatewayErrorCode,
+  upstreamErrorIdentifier,
+  upstreamProviderCode,
+  upstreamRequestId,
+} from "../../src/protocol/upstream-errors"
+import {
   parseAbsoluteResetTimestamp,
   parseProviderResetDuration,
   parseRateLimitReset,
   parseResetAfterMs,
   parseRetryAfter,
   parseUpstreamBackoff,
-  statusToGatewayErrorCode,
-  upstreamErrorIdentifier,
-  upstreamProviderCode,
-  upstreamRequestId,
-} from "../../src/protocol/failure-policy";
+} from "../../src/protocol/upstream-parsing";
 
 const MAX_COOLDOWN_MS = 24 * 3600 * 1000;
 const MINUTE_MS = 60_000;
@@ -2229,7 +2233,7 @@ describe("upstream error passthrough (message as-is, no generalized 502)", () =>
   });
 
   test("extractUpstreamMessageText ignores code identifiers", async () => {
-    const { extractUpstreamMessageText } = await import("../../src/protocol/failure-policy");
+    const { extractUpstreamMessageText } = await import("../../src/protocol/upstream-errors");
     expect(extractUpstreamMessageText({ code: "permission_error" })).toBe("");
     expect(extractUpstreamMessageText({ code: 4026, message: "context too long" })).toBe("context too long");
     expect(extractUpstreamMessageText({ code: "6004", msg: "resets at 12:00" })).toBe("resets at 12:00");

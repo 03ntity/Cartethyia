@@ -21,7 +21,9 @@ import { GatewayError } from "../../src/protocol/gateway-error";
 import { getDb } from "../../src/persistence/boot";
 import { providerAccounts } from "../../src/persistence/schema";
 import { eq } from "drizzle-orm";
-import { createDatabaseSnapshotBuilder } from "../../src/transport/routing/route-catalog";
+import {
+  createDatabaseSnapshotBuilder,
+} from "../../src/transport/routing/route-catalog-repository";
 import { InMemoryRouteSnapshotService } from "../../src/transport/routing/route-model";
 import { createWorld, type GatewayWorld } from "../helpers/fixtures";
 import { requireDatabase } from "../helpers/database";

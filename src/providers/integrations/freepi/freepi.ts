@@ -19,7 +19,9 @@ import {
   type ProviderDispatchTarget,
   type ProviderId,
 } from "../../provider-contracts";
-import { mapUpstreamHttpError } from "../../../protocol/failure-policy";
+import {
+  mapUpstreamHttpError,
+} from "../../../protocol/upstream-errors";
 import { abortGatewayError, createUpstreamDeadlineLifecycle } from "../../operations/upstream-deadline";
 import { mapChatFinishReason } from "../shared/cli-client-kit";
 import { usageFromProvider } from "../../provider-usage";

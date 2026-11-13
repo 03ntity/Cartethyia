@@ -1,5 +1,7 @@
 import { GatewayError } from "../../protocol/gateway-error";
-import { mapUpstreamHttpError } from "../../protocol/failure-policy";
+import {
+  mapUpstreamHttpError,
+} from "../../protocol/upstream-errors";
 import { usageFromProvider } from "../provider-usage";
 import type { CanonicalEvent, CanonicalRequest } from "../../protocol/canonical-model";
 import type { ProviderDispatchTarget, ProviderAdapter, ProviderDispatchContext } from "../provider-contracts";

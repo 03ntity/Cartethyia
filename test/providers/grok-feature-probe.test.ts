@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { CanonicalEvent } from "../../src/protocol/canonical-model";
-import { classifyUpstreamFailure } from "../../src/protocol/failure-policy";
+import {
+  classifyUpstreamFailure,
+} from "../../src/protocol/failure-classify";
 import { GatewayError } from "../../src/protocol/gateway-error";
 import { classifyAccountError } from "../../src/providers/operations/account-health-service";
 import {

@@ -33,7 +33,7 @@ import {
   isUpstreamQueued,
   queueRetryAfterMs,
   upstreamErrorIdentifier,
-} from "../../../protocol/failure-policy";
+} from "../../../protocol/upstream-errors";
 import { QODER_PROVIDER_ID } from "./qoder-realm";
 
 export interface QoderSseEvent {

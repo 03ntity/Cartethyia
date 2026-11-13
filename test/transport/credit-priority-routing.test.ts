@@ -7,7 +7,9 @@
  * accounts stay routed and are only ordered after unknown/positive.
  */
 import { describe, expect, test } from "bun:test";
-import { RoutingEngine } from "../../src/transport/routing/router";
+import {
+  RoutingEngine,
+} from "../../src/transport/routing/routing-engine";
 import { sharedClaudeSlowLanes } from "../../src/providers/integrations/claude/claude-slow-lane";
 import type { RouteCandidate, RouteSnapshot } from "../../src/transport/routing/route-model";
 import type { ProviderQuotaWindow } from "../../src/providers/quota/quota-contracts";

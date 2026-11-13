@@ -1,7 +1,9 @@
 // Attempt completion bookkeeping: one home for everything every dispatch attempt ends with.
 import { GatewayError, publicGatewayErrorBody } from "../../protocol/gateway-error";
 import type { UsageRecord } from "../../protocol/canonical-model";
-import { classifyUpstreamFailure } from "../../protocol/failure-policy";
+import {
+  classifyUpstreamFailure,
+} from "../../protocol/failure-classify";
 import type { AdmissionLease } from "../../security/admission/contracts";
 import type { CartethyiaDatabase } from "../../persistence/db-handle";
 import type { TelemetryBatchBuffer } from "../../observability/telemetry-buffer";

@@ -4,7 +4,9 @@ import {
   detectRemoteCliToolId,
   type CliClientProbe,
 } from "../../src/security/cli-client-fingerprint";
-import { cliMappingSourceKeys } from "../../src/transport/routing/route-catalog";
+import {
+  cliMappingSourceKeys,
+} from "../../src/transport/routing/route-catalog-helpers";
 
 const probe = (userAgent?: string): CliClientProbe =>
   userAgent === undefined ? {} : { userAgent };

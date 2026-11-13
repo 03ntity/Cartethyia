@@ -18,7 +18,9 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../src/persistence/boot";
 import { consoleSettings, tenants } from "../../src/persistence/schema";
-import { createDatabaseSnapshotBuilder } from "../../src/transport/routing/route-catalog";
+import {
+  createDatabaseSnapshotBuilder,
+} from "../../src/transport/routing/route-catalog-repository";
 import { dbDescribe, requireDatabase } from "../helpers/database";
 import { createWorld, type GatewayWorld } from "../helpers/fixtures";
 

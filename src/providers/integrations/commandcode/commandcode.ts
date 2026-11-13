@@ -8,7 +8,7 @@ import {
   extractUpstreamMessage,
   mapUpstreamHttpError,
   upstreamErrorIdentifier,
-} from "../../../protocol/failure-policy";
+} from "../../../protocol/upstream-errors";
 import { postUpstreamJson } from "../../../protocol/upstream/post-json";
 import type { CanonicalEvent, CanonicalRequest, CanonicalStopReason, ContentPart, UsageRecord } from "../../../protocol/canonical-model";
 import { isRecord, readNumber, readString, resolveImageSource, splitDataUrl } from "../../../protocol/codecs";

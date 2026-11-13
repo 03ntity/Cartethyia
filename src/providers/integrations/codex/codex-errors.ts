@@ -10,7 +10,7 @@ import {
   extractUpstreamMessage,
   upstreamErrorIdentifier,
   upstreamRequestId,
-} from "../../../protocol/failure-policy";
+} from "../../../protocol/upstream-errors";
 import { parseRetryAfter } from "../../../protocol/upstream-parsing";
 import { tryParseJsonObject } from "../../../protocol/codecs";
 

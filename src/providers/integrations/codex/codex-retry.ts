@@ -14,7 +14,7 @@
 import {
   MIN_RETRY_BUDGET_MS,
   sleep as defaultSleep,
-} from "../../../protocol/failure-policy";
+} from "../../../protocol/failure-classify";
 import { parseUpstreamBackoff } from "../../../protocol/upstream-parsing";
 
 /**

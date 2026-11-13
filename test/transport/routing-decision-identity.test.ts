@@ -10,7 +10,9 @@
  * (and the plan failed). Decisions must be distinct per candidate.
  */
 import { describe, expect, test } from "bun:test";
-import { RoutingEngine } from "../../src/transport/routing/router";
+import {
+  RoutingEngine,
+} from "../../src/transport/routing/routing-engine";
 import type { RouteCandidate, RouteSnapshot } from "../../src/transport/routing/route-model";
 
 function poolCandidate(poolId: string, extra: Record<string, unknown> = {}): RouteCandidate {

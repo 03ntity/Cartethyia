@@ -16,7 +16,9 @@
  */
 import { describe, expect, test } from "bun:test";
 import { providerHasAdapterUserAgent, BUNDLED_PROVIDER_METADATA } from "../../src/providers/provider-metadata";
-import { resolveRouteUserAgent } from "../../src/transport/routing/route-catalog";
+import {
+  resolveRouteUserAgent,
+} from "../../src/transport/routing/route-catalog-helpers";
 
 describe("route User-Agent is only offered where the adapter reads it", () => {
   test("Command Code is flagged as owning its own User-Agent", () => {

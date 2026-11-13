@@ -22,7 +22,7 @@ import {
   fallbackRetryDelayMs,
   MIN_RETRY_BUDGET_MS,
   sleep as abortableSleep,
-} from "../../protocol/failure-policy";
+} from "../../protocol/failure-classify";
 
 // ─── Public types ──────────────────────────────────────────────────────────
 

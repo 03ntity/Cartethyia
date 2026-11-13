@@ -9,7 +9,7 @@ import {
   extractHtmlTitle,
   upstreamErrorIdentifier,
   upstreamMessageAsIs,
-} from "../../protocol/failure-policy";
+} from "../../protocol/upstream-errors";
 import { applyRouteUserAgent, type ProviderDispatchTarget, type ProviderId, type ProviderDispatchContext } from "../provider-contracts";
 import { BaseProviderAdapter } from "./base-adapter";
 import { encodeWireRequest, decodeWireResponse, decodeWireStream } from "../../protocol/registry";

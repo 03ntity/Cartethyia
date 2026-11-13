@@ -12,7 +12,9 @@
  *   block the sibling family.
  */
 import { beforeEach, describe, expect, test } from "bun:test";
-import { RoutingEngine } from "../../src/transport/routing/router";
+import {
+  RoutingEngine,
+} from "../../src/transport/routing/routing-engine";
 import type { RouteCandidate, RouteSnapshot } from "../../src/transport/routing/route-model";
 import type { ProviderQuotaWindow } from "../../src/providers/quota/quota-contracts";
 import { clearQuotaCacheForTests, setCachedQuota } from "../../src/providers/quota/cache";

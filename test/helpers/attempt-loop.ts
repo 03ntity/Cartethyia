@@ -3,7 +3,9 @@ import type { AdmissionLease } from "../../src/security/admission/contracts";
 import type { AttemptLeaseSource } from "../../src/transport/dispatch/leases";
 import type { ProxyRequestState } from "../../src/transport/request/state";
 import type { RouteCandidate, Reservation, RoutePlan } from "../../src/transport/routing/route-model";
-import type { RoutingEngine } from "../../src/transport/routing/router";
+import {
+  RoutingEngine,
+} from "../../src/transport/routing/routing-engine";
 import type { ProviderId, ResolvedCredential } from "../../src/providers/provider-contracts";
 
 export async function prepareAttempt(candidate: RouteCandidate) {

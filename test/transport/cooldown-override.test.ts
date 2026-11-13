@@ -19,9 +19,13 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../src/persistence/boot";
 import { consoleSettings, providerAccounts } from "../../src/persistence/schema";
-import { createDatabaseSnapshotBuilder } from "../../src/transport/routing/route-catalog";
+import {
+  createDatabaseSnapshotBuilder,
+} from "../../src/transport/routing/route-catalog-repository";
 import { InMemoryRouteSnapshotService } from "../../src/transport/routing/route-model";
-import { RoutingEngine } from "../../src/transport/routing/router";
+import {
+  RoutingEngine,
+} from "../../src/transport/routing/routing-engine";
 import { dbDescribe, requireDatabase } from "../helpers/database";
 import { createWorld, type GatewayWorld } from "../helpers/fixtures";
 

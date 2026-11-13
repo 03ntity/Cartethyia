@@ -7,7 +7,9 @@ import type { PoolRotation, PoolSelectionFailure } from "../../network/pool/sele
 import type { NetworkPoolSelector } from "../../network/pool/selector";
 import type { ValidatedNetworkBindingFactory } from "../../network/egress/factory";
 import type { RouteCandidate as RouteCandidate, Reservation, RoutePlan } from "../routing/route-model";
-import type { RoutingEngine } from "../routing/router";
+import {
+  RoutingEngine,
+} from "../routing/routing-engine";
 
 export interface AttemptLeases {
   readonly lease: AdmissionLease;

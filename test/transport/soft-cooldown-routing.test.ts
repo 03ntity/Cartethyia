@@ -12,7 +12,12 @@
  * healthy accounts.
  */
 import { describe, expect, test } from "bun:test";
-import { EligibilityEvaluator, RoutingEngine } from "../../src/transport/routing/router";
+import {
+  EligibilityEvaluator,
+} from "../../src/transport/routing/candidate-evaluation"
+import {
+  RoutingEngine,
+} from "../../src/transport/routing/routing-engine";
 import type { RouteCandidate, RouteSnapshot } from "../../src/transport/routing/route-model";
 
 function candidate(id: string, extra: Record<string, unknown> = {}): RouteCandidate {

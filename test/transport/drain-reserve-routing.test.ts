@@ -5,7 +5,9 @@
  * routed, only the order changes.
  */
 import { describe, expect, test } from "bun:test";
-import { RoutingEngine } from "../../src/transport/routing/router";
+import {
+  RoutingEngine,
+} from "../../src/transport/routing/routing-engine";
 import type { RouteCandidate, RouteSnapshot } from "../../src/transport/routing/route-model";
 import type { ProviderQuotaWindow } from "../../src/providers/quota/quota-contracts";
 import { drainScore, isInReserve, remainingFraction } from "../../src/transport/routing/drain-reserve";

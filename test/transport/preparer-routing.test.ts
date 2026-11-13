@@ -3,7 +3,9 @@ import { createAuthorizationSnapshot, type ResolvedApiKey } from "../../src/secu
 import type { ApiKeyAdmissionService } from "../../src/security/admission/service";
 import { ProxyRequestPreparer } from "../../src/transport/request/preparer";
 import { InMemoryRouteSnapshotService, type RouteSnapshot } from "../../src/transport/routing/route-model";
-import { RoutingEngine } from "../../src/transport/routing/router";
+import {
+  RoutingEngine,
+} from "../../src/transport/routing/routing-engine";
 
 function nativePreparer(snapshot: RouteSnapshot): ProxyRequestPreparer {
   return new ProxyRequestPreparer({

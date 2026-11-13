@@ -10,7 +10,7 @@ import { applyRouteUserAgent, type ProviderDispatchContext } from "../../provide
 import { abortGatewayError, createUpstreamDeadlineLifecycle } from '../../providers/operations/upstream-deadline';
 import { mapClaudeHttpError } from '../messages-errors';
 import { isRecord, toolAliasesFor } from '../codecs';
-import { upstreamMessageAsIs, MAX_UPSTREAM_ERROR_BYTES } from '../failure-policy';
+import { upstreamMessageAsIs, MAX_UPSTREAM_ERROR_BYTES } from '../upstream-errors';
 import { parseClaudeSseStream, claudeResponseToEvents } from '../response/messages';
 
 export async function* sendClaudeMessagesRequest(

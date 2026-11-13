@@ -5,7 +5,12 @@ import type { VisionHandoffCall, VisionHandoffResult } from "../vision-handoff";
 import type { CallerIdentity } from "../../security/access-control";
 import type { RouteCandidate as RouteCandidate, InMemoryRouteSnapshotService, RoutePlan, RouteSnapshot } from "../routing/route-model";
 import type { RouteContinuationAffinity } from "../routing/route-model";
-import { resolveAliasTarget, type RoutingEngine } from "../routing/router";
+import {
+  resolveAliasTarget,
+} from "../routing/alias-resolution"
+import type {
+  RoutingEngine,
+} from "../routing/routing-engine";
 import { projectForRoute, routeCapabilitiesFor, deriveRequiredCapabilities } from "../../protocol/translation/capabilities";
 import type { RequiredCapability } from "../../protocol/translation/capabilities";
 import { isModelAllowed, type ResolvedApiKey } from "../../security/api-key-auth";
