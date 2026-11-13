@@ -1,7 +1,7 @@
 /**
  * Account reads for the catalog store: list queries, id/ownership probes,
  * per-provider counts, and usage aggregation. Extracted from
- * `store-accounts.ts`; the credential writes live in `store-account-mutations.ts`
+ * the reads live here; the credential writes live in `store-account-mutations.ts`
  * and the pool-as-account reads in `store-pool-accounts.ts`. Every function
  * takes the shared `StoreAccountContext` the owning
  * `DrizzleProviderCatalogStore` builds.
@@ -23,7 +23,7 @@ import {
 } from "./store-helpers";
 import { listPoolAccounts, listAllPoolAccounts } from "./store-pool-accounts";
 import type { OwnedProviderAccountRef, ProviderAccountResponse } from "./contracts";
-import type { ProviderAccountRow, StoreAccountContext } from "./store-account-types";
+import type { ProviderAccountRow, StoreAccountContext } from "./store-contexts";
 
 /**
  * Today's per-account usage for a concrete id set. Scoped to those ids so

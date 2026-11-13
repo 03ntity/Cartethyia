@@ -20,7 +20,7 @@ import type {
   BuddyGrowthTaskLedgerEntry,
   ProviderAccountBulkActionResult,
 } from "./contracts";
-import type { StoreOperationsContext } from "./store-account-types";
+import type { StoreOperationsContext } from "./store-contexts";
 import { ownsAccount } from "./store-account-queries";
 
 export async function listAccountHealthEventsRow(

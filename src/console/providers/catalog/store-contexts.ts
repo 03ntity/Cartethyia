@@ -32,7 +32,7 @@ export interface StoreAccountContext {
 export interface StoreOperationsContext extends StoreAccountContext {
   readonly redis: RedisClient | undefined;
   /**
-   * `ownsAccount` is implemented in `store-accounts.ts` and injected so the
+   * `ownsAccount` is implemented in `store-account-queries.ts` and injected so the
    * operations module never re-derives the ownership predicate.
    */
   readonly ownsAccount: (

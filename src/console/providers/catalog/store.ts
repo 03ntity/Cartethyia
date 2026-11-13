@@ -39,7 +39,7 @@ import type {
 } from "./contracts";
 import { ProviderProbingService, type ProbeOutboundResolver } from "../../../providers/discovery/probing-service";
 import { DEFAULT_ENDPOINT_BY_WIRE_FAMILY } from "./catalog-projections";
-import type { StoreAccountContext, StoreModelContext, StoreOperationsContext, StoreProviderContext } from "./store-account-types";
+import type { StoreAccountContext, StoreModelContext, StoreOperationsContext, StoreProviderContext } from "./store-contexts";
 import {
   getOwnedAccount,
   listAccountAuthStates,

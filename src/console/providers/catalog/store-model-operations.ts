@@ -3,7 +3,7 @@
  * manual registration, enable/disable, metadata edits, deletion, the
  * provider-wide probe, and discovery/commit. Extracted from `store.ts`;
  * the provider rows live in `store-provider-records.ts` and the account
- * operations in `store-accounts.ts`/`store-operations.ts`. Every function
+ * operations in `store-account-queries.ts`/`store-operations.ts`. Every function
  * takes the shared `StoreModelContext` the owning
  * `DrizzleProviderCatalogStore` builds.
  */
@@ -25,7 +25,7 @@ import type {
   SetModelEnabledRequest,
   UpdateModelMetadataRequest,
 } from "./contracts";
-import type { StoreModelContext } from "./store-account-types";
+import type { StoreModelContext } from "./store-contexts";
 
 /**
  * Every enabled-and-disabled model row the tenant can see, grouped by

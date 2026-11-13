@@ -2,7 +2,7 @@
  * Provider-row CRUD for the catalog store: tenant and global provider
  * reads, creates, updates, and deletes. Extracted from `store.ts`; the
  * model operations live in `store-model-operations.ts` and the account
- * operations in `store-accounts.ts`/`store-operations.ts`. Every function
+ * operations in `store-account-queries.ts`/`store-operations.ts`. Every function
  * takes the shared `StoreProviderContext` the owning
  * `DrizzleProviderCatalogStore` builds.
  */
@@ -16,7 +16,7 @@ import { validateCompatibilityProfile } from "./contracts";
 import type { ProviderRecord } from "./contracts";
 import { mapProviderRow } from "./catalog-projections";
 import { bumpCatalogRevision } from "../../../providers/operations/provider-catalog-service";
-import type { StoreProviderContext } from "./store-account-types";
+import type { StoreProviderContext } from "./store-contexts";
 
 export async function listProviders(
   ctx: StoreProviderContext,

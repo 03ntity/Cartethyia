@@ -1,6 +1,6 @@
 /**
  * Account credential writes for the catalog store: label generation, single
- * and batch create, update, and reorder. Extracted from `store-accounts.ts`;
+ * and batch create, update, and reorder. These are the account write module of
  * the account reads live in `store-account-queries.ts`. Every function takes
  * the shared `StoreAccountContext` the owning `DrizzleProviderCatalogStore`
  * builds.
@@ -22,7 +22,7 @@ import type {
   ProviderAccountResponse,
   UpdateProviderAccountRequest,
 } from "./contracts";
-import type { DbOrTx, DbTx, StoreAccountContext } from "./store-account-types";
+import type { DbOrTx, DbTx, StoreAccountContext } from "./store-contexts";
 import {
   emptyUsage,
   mapAccountRow,

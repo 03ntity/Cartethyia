@@ -2,7 +2,7 @@
  * Pool-as-account reads and projection for the catalog store: the egress
  * rows ip-scoped providers materialize as account equivalents, plus the
  * owning pool's live health fields and per-pool token usage. Extracted from
- * `store-accounts.ts`; every function takes the shared `StoreAccountContext`
+ * `store-account-queries.ts`; every function takes the shared `StoreAccountContext`
  * the owning `DrizzleProviderCatalogStore` builds.
  */
 import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
@@ -15,7 +15,7 @@ import {
   usageTotalsFromRow,
 } from "./store-helpers";
 import type { ProviderAccountResponse, ProviderAccountTokenUsage } from "./contracts";
-import type { StoreAccountContext } from "./store-account-types";
+import type { StoreAccountContext } from "./store-contexts";
 
 /**
  * Pool-as-account rows for one provider. Only providers whose rate limit
