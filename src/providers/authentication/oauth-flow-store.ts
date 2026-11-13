@@ -5,6 +5,8 @@ import { base64url, decodeJwt } from "jose";
 import { asRecord as record, asTrimmedString as nonEmptyTrimmedString } from "../../shared/coerce";
 import type { RedisClient } from "../../persistence/redis";
 import { TtlCache } from "../../persistence/ttl-cache";
+import type { FetchLike } from "../provider-contracts";
+export type { FetchLike };
 
 // Shared OAuth client-protocol kit: the provider-agnostic `OAuthLoginClient`
 // generic token-response parsing helpers, and tenant-scoped device-flow correlation.
@@ -93,14 +95,6 @@ export interface OAuthDeviceFlowContext {
    */
   readonly fetchFn?: FetchLike | undefined;
 }
-
-/**
- * Minimal fetch surface accepted by the OAuth flow contracts: the plain fetch
- * call signature. Single owner of this shape — `oauth-client.ts` re-exports it
- * instead of restating it. (The quota lane's `FetchLike` in `quota-contracts`
- * is `typeof fetch`, a deliberately wider shape — see `kiro-quota.ts`.)
- */
-export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export type OAuthDevicePollResult =
   /**

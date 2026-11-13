@@ -1,6 +1,6 @@
 import type {
   AccountErrorRule,
-} from "../account-error-classification";
+} from "../account-error-contracts";
 
 /**
  * Inception's per-minute limit window (1 minute).

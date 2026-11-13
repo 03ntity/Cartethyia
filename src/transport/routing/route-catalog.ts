@@ -31,7 +31,7 @@ import { DEFAULT_PROXY_SKIP_PROVIDER_IDS } from "../../providers/provider-metada
 import { buildClaudeCliUserAgent } from "../../providers/operations/custom-cli-headers";
 import { isBundledProviderId } from "../../providers/provider-contracts";
 import type { ServiceKind, WireFamily } from "../../protocol/canonical-model";
-import { BoundedLruMap } from "./bounded-lru";
+import { BoundedLruMap } from "../../shared/bounded-lru";
 import { providerHasAdapterUserAgent, providerUsesBespokeWire } from "../../providers/provider-metadata";
 
 const CLAUDE_MODEL_FAMILIES = new Set(["opus", "sonnet", "haiku", "fable", "mythos"]);

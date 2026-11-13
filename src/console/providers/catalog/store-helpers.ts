@@ -10,13 +10,20 @@ import {
   firstNonEmptyString as firstString,
   tryParseJson as safeParseJson,
 } from "../../../shared/coerce";
-import type { CredentialMode, ModelCatalogEntry, ModelWarning } from "./contracts";
+import type {
+  CredentialMode,
+  ModelCatalogEntry,
+  ModelWarning,
+  ProviderAccountResponse,
+  ProviderAccountTokenUsage,
+} from "./contracts";
 import {
   FALLBACK_CONTEXT_LIMIT,
   FALLBACK_OUTPUT_LIMIT,
 } from "../../../providers/provider-model-definition";
 import { modelsDevCatalog } from "../../../providers/discovery/models-dev-catalog";
 import { models } from "../../../persistence/schema";
+import type * as schema from "../../../persistence/schema";
 /** Field names a pasted OAuth credential may carry its access token under. */
 const OAUTH_ACCESS_FIELDS = ["accessToken", "access_token", "access", "token"] as const;
 /** Field names a pasted OAuth credential may carry its refresh token under. */
@@ -424,4 +431,122 @@ export function mapModelRow(
     ...(parseWarningMetadata(row.warningMetadata) ?? {}),
     sourceUpdatedAt: row.sourceUpdatedAt?.toISOString() ?? null,
   } satisfies ModelCatalogEntry;
+}
+
+/**
+ * Projects one usage aggregate row (today's telemetry group or a lifetime
+ * `telemetry_usage_totals` row) into the console's token-usage shape. Missing
+ * or NULL aggregates read as zero; `totalTokens` is always input + output.
+ * Shared by the account and pool usage paths, which previously carried two
+ * copies of this projection.
+ */
+export function usageTotalsFromRow(row: {
+  readonly requests: number | string | null;
+  readonly errors: number | string | null;
+  readonly inputTokens: number | string | null;
+  readonly outputTokens: number | string | null;
+} | undefined): ProviderAccountTokenUsage {
+  const inputTokens = Number(row?.inputTokens ?? 0);
+  const outputTokens = Number(row?.outputTokens ?? 0);
+  return {
+    requests: Number(row?.requests ?? 0),
+    errors: Number(row?.errors ?? 0),
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+  };
+}
+
+/** The zeroed usage shape every account/pool row falls back to. */
+export const emptyUsage: ProviderAccountTokenUsage = {
+  requests: 0,
+  errors: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  totalTokens: 0,
+};
+
+/**
+ * The owning pool's provider cooldown markers, filtered to the ones still in
+ * force and shaped like `NetworkPoolResponse.providerCooldowns`. Expired
+ * markers are skipped — a spent window is not a reason to flag the row.
+ */
+export function activePoolProviderCooldowns(
+  markers: Record<string, { until: number; reason: string; blocked?: boolean }>,
+): { providerId: string; until: string; reason: string; blocked: boolean }[] {
+  const now = Date.now();
+  const active: { providerId: string; until: string; reason: string; blocked: boolean }[] = [];
+  for (const [providerId, marker] of Object.entries(markers)) {
+    if (marker.until <= now) continue;
+    active.push({
+      providerId,
+      until: new Date(marker.until).toISOString(),
+      reason: marker.reason,
+      blocked: marker.blocked === true,
+    });
+  }
+  return active;
+}
+
+/**
+ * Projects one `provider_accounts` row plus its today/lifetime usage into the
+ * console's account shape. Pure: the caller has already resolved usage
+ * aggregates and the inflight reading; this only maps stored columns.
+ */
+export function mapAccountRow(
+  row: typeof schema.providerAccounts.$inferSelect,
+  usage: {
+    readonly today: ProviderAccountTokenUsage;
+    readonly allTime: ProviderAccountTokenUsage;
+    readonly inflight?: number | undefined;
+  },
+): ProviderAccountResponse {
+  const authState =
+    row.authState !== null && typeof row.authState === "object" && !Array.isArray(row.authState)
+      ? (row.authState as Record<string, unknown>)
+      : undefined;
+  const rawCredentialMode = authState?.["credentialMode"];
+  const credentialMode: CredentialMode | undefined =
+    rawCredentialMode === "auto" || rawCredentialMode === "jwt" || rawCredentialMode === "api_key"
+      ? rawCredentialMode
+      : undefined;
+  const tokenExpiresAt =
+    typeof authState?.["tokenExpiresAt"] === "string" ? authState["tokenExpiresAt"] : undefined;
+  const jwtIssuer =
+    typeof authState?.["jwtIssuer"] === "string" ? authState["jwtIssuer"] : undefined;
+  const authMethod =
+    typeof authState?.["authMethod"] === "string" ? authState["authMethod"] : undefined;
+  const accountEmail = asStoredText(row.accountEmail) ?? undefined;
+  const accountName =
+    typeof authState?.["accountName"] === "string" && authState["accountName"].trim().length > 0
+      ? authState["accountName"].trim()
+      : undefined;
+  return {
+    id: row.id,
+    providerId: row.providerId,
+    tenantId: row.tenantId,
+    label: row.label,
+    ...(accountEmail === undefined ? {} : { accountEmail }),
+    ...(accountName === undefined ? {} : { accountName }),
+    credentialKind: row.credentialKind,
+    ...(credentialMode === undefined ? {} : { credentialMode }),
+    ...(tokenExpiresAt === undefined ? {} : { tokenExpiresAt }),
+    ...(jwtIssuer === undefined ? {} : { jwtIssuer }),
+    ...(authMethod === undefined ? {} : { authMethod }),
+    status: row.status,
+    ...(usage.inflight === undefined ? {} : { inflight: usage.inflight }),
+    usageToday: usage.today,
+    usageAllTime: usage.allTime,
+    consecutiveFailures: row.consecutiveFailures,
+    ...(row.lastSuccessAt ? { lastSuccessAt: row.lastSuccessAt.toISOString() } : {}),
+    ...(row.lastError ? { lastError: row.lastError } : {}),
+    ...(row.lastErrorCategory ? { lastErrorCategory: row.lastErrorCategory } : {}),
+    ...(row.lastErrorAt ? { lastErrorAt: row.lastErrorAt.toISOString() } : {}),
+    ...(row.cooldownUntil ? { cooldownUntil: row.cooldownUntil.toISOString() } : {}),
+    ...(liveModelCooldowns(row.modelCooldowns) ?? {}),
+    ...(row.lastRecoveredAt ? { lastRecoveredAt: row.lastRecoveredAt.toISOString() } : {}),
+    createdAt: row.createdAt.toISOString(),
+    sortIndex: row.sortIndex,
+    ...(row.staticToken ? { staticToken: true } : {}),
+  };
 }

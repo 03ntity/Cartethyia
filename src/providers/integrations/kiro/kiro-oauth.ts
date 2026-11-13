@@ -21,20 +21,21 @@
  *  * AWS SSO OIDC answers camelCase JSON, not the snake_case form-urlencoded
  *    every other provider in this gateway speaks, so its responses are parsed
  *    separately rather than through the shared token parser.
+ *
+ * The shared `auth_state` contract and its helpers live in
+ * `kiro-auth-shared.ts`; the AWS SSO OIDC wire (client registration, device
+ * authorization, CreateToken, refresh grant) lives in `kiro-oidc.ts`. This
+ * module owns the flow orchestration and the vendor's own social service.
  */
 import {
-  decodeJwtPayload,
-  devicePollBackoff,
   generateOAuthState,
   generatePkcePair,
   nonEmptyString,
   nonEmptyTrimmedString,
-  parseDeviceAuthStart,
   readJsonResponse,
   record,
 } from "../../authentication/oauth-flow-store";
 import type {
-  FetchLike,
   OAuthAuthorizeRequest,
   OAuthCodeExchangeContext,
   OAuthDeviceFlowContext,
@@ -51,176 +52,59 @@ import type {
 import { OAuthDeviceFlow } from "../../authentication/oauth-device-flow";
 import {
   buildKiroAmzUserAgent,
-  buildKiroSsoAmzUserAgent,
-  buildKiroSsoUserAgent,
   buildKiroUserAgent,
   getKiroVersion,
 } from "../../operations/client-versions";
 import { deriveApiKeyMachineId, deriveOAuthMachineId, normalizeMachineId } from "./kiro-machine-id";
-import { KIRO_MANAGEMENT_HOST_TEMPLATE, AWS_REGION_PATTERN, KIRO_DEFAULT_REGION } from "./kiro-catalog";
-import { fetchKiroQuota } from "./kiro-quota";
+import { KIRO_MANAGEMENT_HOST_TEMPLATE, KIRO_DEFAULT_REGION } from "./kiro-catalog";
 import { TtlCache } from "../../../persistence/ttl-cache";
+import {
+  KIRO_AUTH_SERVICE,
+  KIRO_DEFAULT_START_URL,
+  KIRO_SOCIAL_PORTAL,
+  KIRO_SOCIAL_REDIRECT_URI,
+  assertAwsRegion,
+  authStateOf,
+  enrichKiroLabel,
+  kiroAccountLabel,
+  kiroDefaultLabel,
+  normalizeRegion,
+  parseKiroAuthState,
+  resolveKiroProfileArn,
+  safeJson,
+  validateMicrosoftTokenEndpoint,
+} from "./kiro-auth-shared";
+import type { KiroAuthMethod, KiroAuthState } from "./kiro-auth-shared";
+import {
+  exchangeKiroIdcCode,
+  kiroOidcAuthorizeUrl,
+  oidcAuthorizeRedirectUri,
+  parseKiroOidcRegistration,
+  pollKiroDeviceFlow,
+  refreshKiroOidcTokens,
+  registerKiroOidcClient,
+  startKiroDeviceFlow,
+} from "./kiro-oidc";
+import type { DeviceFlowRegistration } from "./kiro-oidc";
 
-/** Auth methods this integration supports, as stored on the account. */
-export type KiroAuthMethod =
-  | "builder-id"
-  | "idc"
-  | "google"
-  | "github"
-  | "imported"
-  | "external_idp"
-  | "api_key";
+// The account-side contract and its helpers are owned by kiro-auth-shared.ts;
+// re-exported here so existing consumers of this module keep resolving.
+export {
+  KIRO_AUTH_SERVICE,
+  KIRO_DEFAULT_LABELS,
+  KIRO_DEFAULT_START_URL,
+  KIRO_SOCIAL_PORTAL,
+  KIRO_SOCIAL_REDIRECT_URI,
+  assertAwsRegion,
+  kiroAccountLabel,
+  kiroDefaultLabel,
+  normalizeRegion,
+  parseKiroAuthState,
+  validateMicrosoftTokenEndpoint,
+} from "./kiro-auth-shared";
+export type { KiroAuthMethod, KiroAuthState } from "./kiro-auth-shared";
 
 const DEFAULT_REGION: string = KIRO_DEFAULT_REGION;
-
-/** The vendor's own sign-in and refresh service for the social families. */
-export const KIRO_AUTH_SERVICE = "https://prod.us-east-1.auth.desktop.kiro.dev" as const;
-
-/** The web portal that offers the merged social/OIDC sign-in. */
-export const KIRO_SOCIAL_PORTAL = "https://app.kiro.dev" as const;
-
-/**
- * Redirect URI the vendor's identity provider allowlists. It is a custom
- * scheme, not a loopback address: the authorization code is shown to the
- * operator rather than delivered to a local listener. The 1.4.62 IDE uses
- * `kiro://kiro.oauth/callback` (observed in the agent bundle).
- */
-export const KIRO_SOCIAL_REDIRECT_URI = "kiro://kiro.oauth/callback" as const;
-
-/** Scopes the OIDC client registration requests (observed in the 1.4.62 IDE). */
-const KIRO_SCOPES = [
-  "codewhisperer:completions",
-  "codewhisperer:analysis",
-  "codewhisperer:conversations",
-  "codewhisperer:transformations",
-  "codewhisperer:taskassist",
-] as const;
-
-/** Grant types the OIDC client registration declares. */
-const KIRO_GRANT_TYPES = [
-  "authorization_code",
-  "refresh_token",
-] as const;
-
-/** Loopback redirect the 1.4.62 IDE registers for the IdC/Builder-ID flow. */
-const KIRO_LOOPBACK_REDIRECT_URI = "http://127.0.0.1/oauth/callback" as const;
-
-/**
- * Client name the OIDC registration presents.
- *
- * The registration is the first request a new account makes, so it identifies as
- * the vendor's own IDE rather than as this gateway.
- */
-const KIRO_OIDC_CLIENT_NAME = "Kiro IDE" as const;
-
-/** Organization entry point the IdC/Builder-ID flow starts from by default. */
-export const KIRO_DEFAULT_START_URL = "https://view.awsapps.com/start" as const;
-
-/** Microsoft login hosts an enterprise token endpoint may point at. */
-const MICROSOFT_TOKEN_HOSTS = new Set([
-  "login.microsoftonline.com",
-  "login.microsoft.com",
-  "login.windows.net",
-]);
-
-/**
- * The account-side configuration carried in `auth_state`.
- *
- * `machineId` is part of it because it is derived once from the credential and
- * must not move afterwards: a refresh rotates the refresh token, and a device id
- * derived per request from the rotating material would make one account appear
- * to be a different machine on every refresh.
- */
-export interface KiroAuthState {
-  readonly authMethod: KiroAuthMethod;
-  readonly region: string;
-  readonly profileArn?: string;
-  /** Identity Center organization URL, when the account came from one. */
-  readonly startUrl?: string;
-  /** OIDC client id from the IdC/Builder-ID client registration. */
-  readonly clientId?: string;
-  /** Enterprise identity-provider token endpoint. */
-  readonly tokenEndpoint?: string;
-  /** Enterprise identity-provider scopes. */
-  readonly scope?: string;
-  /** Frozen device identity presented in the User-Agent. */
-  readonly machineId?: string;
-}
-
-/** Rejects a region that is not an AWS region before it reaches a URL. */
-export function assertAwsRegion(region: string): string {
-  if (!AWS_REGION_PATTERN.test(region)) {
-    throw new Error("Kiro region must be a valid AWS region");
-  }
-  return region;
-}
-
-/** Normalizes a stored region, falling back to the default. */
-export function normalizeRegion(value: unknown): string {
-  const region = typeof value === "string" ? value.trim() : "";
-  return AWS_REGION_PATTERN.test(region) ? region : DEFAULT_REGION;
-}
-
-/** Reads the account's `auth_state` back into a typed value. */
-export function parseKiroAuthState(value: unknown): KiroAuthState | undefined {
-  const raw = record(value);
-  if (raw === undefined) return undefined;
-  const authMethod = nonEmptyString(raw["authMethod"]);
-  if (authMethod === undefined || !isKiroAuthMethod(authMethod)) return undefined;
-  const profileArn = nonEmptyTrimmedString(raw["profileArn"]);
-  const startUrl = nonEmptyTrimmedString(raw["startUrl"]);
-  const clientId = nonEmptyTrimmedString(raw["clientId"]);
-  const tokenEndpoint = nonEmptyTrimmedString(raw["tokenEndpoint"]);
-  const scope = nonEmptyTrimmedString(raw["scope"]);
-  const machineId = normalizeMachineId(raw["machineId"]);
-  return {
-    authMethod,
-    region: normalizeRegion(raw["region"]),
-    ...(profileArn === undefined ? {} : { profileArn }),
-    ...(startUrl === undefined ? {} : { startUrl }),
-    ...(clientId === undefined ? {} : { clientId }),
-    ...(tokenEndpoint === undefined ? {} : { tokenEndpoint }),
-    ...(scope === undefined ? {} : { scope }),
-    ...(machineId === undefined ? {} : { machineId }),
-  };
-}
-
-function isKiroAuthMethod(value: string): value is KiroAuthMethod {
-  return (
-    value === "builder-id" ||
-    value === "idc" ||
-    value === "google" ||
-    value === "github" ||
-    value === "imported" ||
-    value === "external_idp" ||
-    value === "api_key"
-  );
-}
-
-/** The `auth_state` object to persist for one flow. */
-function authStateOf(state: KiroAuthState): Readonly<Record<string, unknown>> {
-  return { ...state };
-}
-
-/**
- * Headers every AWS SSO OIDC request carries.
- *
- * The login flow and the token refresh hit the same `oidc.{region}.amazonaws.com`
- * host, so they must look identical: registering bare and then refreshing with a
- * full SDK User-Agent describes two different clients holding one client id,
- * which is a stronger signal than either shape alone.
- */
-function ssoOidcHeaders(): Record<string, string> {
-  return {
-    "content-type": "application/json",
-    accept: "application/json",
-    connection: "close",
-    "amz-sdk-request": "attempt=1; max=4",
-    "amz-sdk-invocation-id": crypto.randomUUID(),
-    "user-agent": buildKiroSsoUserAgent(),
-    "x-amz-user-agent": buildKiroSsoAmzUserAgent(),
-  };
-}
 
 /**
  * Headers for the vendor's own sign-in and refresh service.
@@ -245,116 +129,6 @@ function socialServiceHeaders(machineId?: string): Record<string, string> {
 }
 
 /**
- * Validates an enterprise identity-provider token endpoint.
- *
- * The endpoint comes from imported JSON and receives the account's refresh
- * token, so it is restricted to the Microsoft login hosts rather than trusted
- * as given.
- */
-export function validateMicrosoftTokenEndpoint(raw: unknown): string {
-  const endpoint = typeof raw === "string" ? raw.trim() : "";
-  if (endpoint.length === 0) throw new Error("token_endpoint is required");
-  let parsed: URL;
-  try {
-    parsed = new URL(endpoint);
-  } catch {
-    throw new Error("token_endpoint must be a valid URL");
-  }
-  if (parsed.protocol !== "https:") throw new Error("token_endpoint must use https");
-  if (!MICROSOFT_TOKEN_HOSTS.has(parsed.hostname.toLowerCase())) {
-    throw new Error("token_endpoint must be a Microsoft login endpoint");
-  }
-  return parsed.toString();
-}
-
-/** Best-effort display label for a credential. */
-export function kiroAccountLabel(accessToken: string | undefined): string | undefined {
-  const payload = accessToken === undefined ? undefined : decodeJwtPayload(accessToken);
-  if (payload === undefined) return undefined;
-  for (const key of ["email", "preferred_username", "upn", "sub"]) {
-    const value = nonEmptyTrimmedString(payload[key]);
-    if (value !== undefined) return value;
-  }
-  return undefined;
-}
-
-/**
- * Falls back to an informative per-family label when the token carries no
- * readable identity (the social access token is opaque, not a JWT). The
- * console otherwise labels every Kiro account "kiro".
- */
-export function kiroDefaultLabel(authMethod: KiroAuthMethod): string {
-  switch (authMethod) {
-    case "google":
-      return "Google account";
-    case "github":
-      return "GitHub account";
-    case "builder-id":
-      return "AWS Builder ID";
-    case "idc":
-      return "IAM Identity Center";
-    case "external_idp":
-      return "Enterprise IdP";
-    case "imported":
-      return "Imported Kiro session";
-    case "api_key":
-      return "Kiro API key";
-  }
-}
-
-/**
- * Every stock fallback label `kiroDefaultLabel` can produce. The quota refresh
- * sweep may adopt an upstream-reported identity (an email from `GetUsageLimits`)
- * over any label in this set — those are generated defaults, never an operator's
- * rename — but leaves anything else alone.
- */
-export const KIRO_DEFAULT_LABELS: ReadonlySet<string> = new Set(
-  (
-    ["google", "github", "builder-id", "idc", "external_idp", "imported", "api_key"] as const
-  ).map(kiroDefaultLabel),
-);
-
-/**
- * Best-effort account-label enrichment for a completed sign-in.
- *
- * Called only when {@link kiroAccountLabel} found no identity in the access
- * token — the opaque ones (social, Builder-ID/IdC, imported) — so the usage
- * surface is asked for the account email instead, the same call the quota
- * sweep makes. The call is guarded: a failure keeps the family `fallback`
- * rather than failing a login that already succeeded.
- */
-async function enrichKiroLabel(
-  accessToken: string,
-  authState: KiroAuthState,
-  fallback: string,
-  fetchFn: FetchLike,
-): Promise<string> {
-  try {
-    const quota = await fetchKiroQuota(accessToken, fetchFn, { auth_state: authStateOf(authState) });
-    const accountLabel = quota.accountLabel;
-    if (accountLabel !== undefined && accountLabel.trim().length > 0) return accountLabel;
-  } catch {
-    // keep the family fallback
-  }
-  return fallback;
-}
-
-/** Credentials the client registration minted and refresh must replay. */
-interface DeviceFlowRegistration {
-  readonly clientId: string;
-  readonly clientSecret: string;
-  readonly region: string;
-  readonly startUrl: string;
-  readonly authMethod: "builder-id" | "idc";
-  /**
-   * Redirect URI sent on authorize + CreateToken. The registration body itself
-   * always declares {@link KIRO_LOOPBACK_REDIRECT_URI} (no port); AWS SSO OIDC
-   * accepts a loopback authorize URI that adds a port (RFC 8252).
-   */
-  readonly redirectUri: string;
-}
-
-/**
  * How long an IdC/Builder-ID registration is kept for a pending phase-2 code
  * exchange. The second browser leg follows the phase-1 redirect immediately;
  * an abandoned login must not retain its client secret beyond this window.
@@ -370,10 +144,10 @@ const OIDC_REGISTRATION_MAX_PENDING = 64;
  * The 1.4.62 IDE migrated every AWS family to the OAuth 2.0 authorization-code
  * flow with PKCE: it registers a public client against AWS SSO OIDC, opens a
  * loopback listener on `http://127.0.0.1/oauth/callback`, and exchanges the code
-  * with `CreateToken`. The social families (Google/GitHub) use the vendor's own
-  * sign-in portal with a loopback redirect. The device-code flow (RFC 8628) is
-  * offered against the same AWS SSO OIDC service for Builder-ID / Identity
-  * Center. The import, enterprise, and API-key paths are unchanged.
+ * with `CreateToken`. The social families (Google/GitHub) use the vendor's own
+ * sign-in portal with a loopback redirect. The device-code flow (RFC 8628) is
+ * offered against the same AWS SSO OIDC service for Builder-ID / Identity
+ * Center. The import, enterprise, and API-key paths are unchanged.
  */
 export class KiroOAuthClient extends OAuthDeviceFlow {
   override readonly supportsDeviceCode = true;
@@ -489,39 +263,7 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
    * so `pollDeviceAuth` can replay it at the token endpoint.
    */
   override async startDeviceAuth(context?: OAuthDeviceFlowContext): Promise<OAuthDeviceStartResult> {
-    const parameters = context?.parameters ?? {};
-    const authMethod = parameters["authMethod"] === "idc" ? "idc" : "builder-id";
-    const region = normalizeRegion(parameters["region"]);
-    const startUrl = nonEmptyTrimmedString(parameters["startUrl"]) ?? KIRO_DEFAULT_START_URL;
-    assertAwsRegion(region);
-    const registration = await this.#registerClient(region, startUrl, authMethod);
-
-    const response = await this.fetchFn(
-      `https://oidc.${region}.amazonaws.com/device_authorization`,
-      {
-        method: "POST",
-        headers: ssoOidcHeaders(),
-        body: JSON.stringify({
-          clientId: registration.clientId,
-          clientSecret: registration.clientSecret,
-          startUrl,
-        }),
-        signal: AbortSignal.timeout(15_000),
-      },
-    );
-    const payload = record(await readJsonResponse(response, "kiro device authorization")) ?? {};
-    const start = parseDeviceAuthStart(payload, { intervalSeconds: 5, expiresInSeconds: 600 });
-    if (start === undefined) {
-      throw new Error("Kiro device authorization returned an invalid response");
-    }
-    return {
-      verificationUri: start.verificationUriComplete ?? start.verificationUri,
-      userCode: start.userCode,
-      deviceAuthId: start.deviceCode,
-      intervalSeconds: start.intervalSeconds,
-      expiresInSeconds: start.expiresInSeconds,
-      providerState: JSON.stringify(registration),
-    };
+    return startKiroDeviceFlow(this.fetchFn, context?.parameters ?? {});
   }
 
   /** Polls the AWS SSO OIDC token endpoint for the device grant result. */
@@ -529,76 +271,7 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
     deviceAuthId: string,
     context?: OAuthDeviceFlowContext,
   ): Promise<OAuthDevicePollResult> {
-    let registration: DeviceFlowRegistration;
-    try {
-      registration = JSON.parse(context?.providerState ?? "") as DeviceFlowRegistration;
-    } catch {
-      return { status: "failed", reason: "unknown device authorization" };
-    }
-    if (!registration.clientId || !registration.clientSecret || !registration.region) {
-      return { status: "failed", reason: "unknown device authorization" };
-    }
-    const region = assertAwsRegion(registration.region);
-    let response: Response;
-    try {
-      response = await this.fetchFor(context)(`https://oidc.${region}.amazonaws.com/token`, {
-        method: "POST",
-        headers: ssoOidcHeaders(),
-        body: JSON.stringify({
-          clientId: registration.clientId,
-          clientSecret: registration.clientSecret,
-          deviceCode: deviceAuthId,
-          grantType: "urn:ietf:params:oauth:grant-type:device_code",
-        }),
-        signal: AbortSignal.timeout(15_000),
-      });
-    } catch (error) {
-      return { status: "failed", reason: error instanceof Error ? error.message : "Kiro device polling failed" };
-    }
-    const payload = record(await response.json().catch(() => undefined)) ?? {};
-    if (response.status === 400 || response.status === 428) {
-      const err = typeof payload.error === "string" ? payload.error : "";
-      const verdict = devicePollBackoff(err, payload.interval);
-      if (verdict !== undefined) return verdict;
-      return { status: "failed", reason: err || `device polling failed (${response.status})` };
-    }
-    const access = nonEmptyString(payload["accessToken"]);
-    if (!response.ok || access === undefined) {
-      const detail = nonEmptyString(payload["error_description"]) ?? nonEmptyString(payload["error"]);
-      return {
-        status: "failed",
-        reason: detail ?? `Kiro device polling failed (${response.status})`,
-      };
-    }
-    const refresh = nonEmptyString(payload["refreshToken"]) ?? "";
-    const profileArn = nonEmptyString(payload["profileArn"]);
-    const authState: KiroAuthState = {
-      authMethod: registration.authMethod,
-      region,
-      ...(profileArn === undefined ? {} : { profileArn }),
-      startUrl: registration.startUrl,
-      clientId: registration.clientId,
-      machineId: deriveOAuthMachineId(refresh),
-    };
-    const label =
-      kiroAccountLabel(access) ??
-      (await enrichKiroLabel(
-        access,
-        authState,
-        kiroDefaultLabel(registration.authMethod),
-        this.fetchFor(context),
-      ));
-    return {
-      status: "complete",
-      result: {
-        access,
-        refresh,
-        expiresAt: this.#expiry(payload["expiresIn"]),
-        accountLabel: label,
-        auth_state: authStateOf(authState),
-        client_secret: registration.clientSecret,
-      },
-    };
+    return pollKiroDeviceFlow(this.fetchFor(context), deviceAuthId, context?.providerState);
   }
 
   async prepareAuthorize(request: OAuthAuthorizeRequest): Promise<OAuthAuthorizeRequest> {
@@ -657,10 +330,10 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
     // in the process Map or restored from the pending flow's providerState.
     const registration =
       (state === undefined ? undefined : this.#registrationByState.get(state)) ??
-      parseRegistration(context?.providerState);
+      parseKiroOidcRegistration(context?.providerState);
     if (registration !== undefined) {
       if (state !== undefined) this.#registrationByState.delete(state);
-      return this.#exchangeIdcCode(code, codeVerifier, registration.redirectUri, registration);
+      return exchangeKiroIdcCode(this.fetchFn, code, codeVerifier, registration.redirectUri, registration);
     }
     const params = context?.parameters ?? {};
     const loginOption = params["login_option"];
@@ -678,9 +351,8 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
         throw new Error(`Kiro ${loginOption} callback missing issuer_url or idc_region`);
       }
       const region = normalizeRegion(idcRegion);
-      assertAwsRegion(region);
       const authMethod = loginOption === "awsidc" ? "idc" : "builder-id";
-      const registered = await this.#registerClient(region, issuerUrl, authMethod);
+      const registered = await registerKiroOidcClient(this.fetchFn, region, issuerUrl, authMethod);
       const authorizeRedirect = oidcAuthorizeRedirectUri(redirectUri);
       const phase2: DeviceFlowRegistration = { ...registered, redirectUri: authorizeRedirect };
       const pkce = generatePkcePair();
@@ -689,17 +361,8 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
       // code exchange keys off that new state, not the portal's.
       const continueState = generateOAuthState();
       this.#registrationByState.set(continueState, phase2);
-      const authorizeParams = new URLSearchParams({
-        response_type: "code",
-        client_id: phase2.clientId,
-        redirect_uri: authorizeRedirect,
-        scopes: KIRO_SCOPES.join(","),
-        state: continueState,
-        code_challenge: pkce.codeChallenge,
-        code_challenge_method: "S256",
-      });
       throw new KiroOidcPendingError(
-        `https://oidc.${region}.amazonaws.com/authorize?${authorizeParams.toString()}`,
+        kiroOidcAuthorizeUrl(region, phase2.clientId, authorizeRedirect, continueState, pkce.codeChallenge),
         pkce.codeVerifier,
         JSON.stringify(phase2),
         continueState,
@@ -711,61 +374,6 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
       throw new Error("Kiro enterprise sign-in must be imported — use Import credential");
     }
     return this.exchangeSocialCode(code, codeVerifier, redirectUri, loginOption);
-  }
-
-  /** Exchanges an IdC/Builder-ID authorization code via AWS SSO OIDC CreateToken. */
-  async #exchangeIdcCode(
-    code: string,
-    codeVerifier: string,
-    redirectUri: string,
-    registration: DeviceFlowRegistration,
-  ): Promise<OAuthExchangeResult> {
-    const response = await this.fetchFn(`https://oidc.${registration.region}.amazonaws.com/token`, {
-      method: "POST",
-      headers: ssoOidcHeaders(),
-      body: JSON.stringify({
-        clientId: registration.clientId,
-        clientSecret: registration.clientSecret,
-        grantType: "authorization_code",
-        code,
-        redirectUri,
-        codeVerifier,
-      }),
-    });
-    const payload = record(await readJsonResponse(response, "kiro IdC token exchange")) ?? {};
-    const access = nonEmptyString(payload["accessToken"]);
-    if (access === undefined) {
-      const detail = nonEmptyString(payload["error_description"]) ?? nonEmptyString(payload["error"]);
-      throw new Error(`Kiro IdC token exchange omitted accessToken${detail === undefined ? "" : `: ${detail}`}`);
-    }
-    const refresh = nonEmptyString(payload["refreshToken"]) ?? "";
-    const reported = nonEmptyString(payload["profileArn"]);
-    const profileArn =
-      reported ?? (await this.resolveProfileArn(access, registration.region, registration.authMethod));
-    const authState: KiroAuthState = {
-      authMethod: registration.authMethod,
-      region: registration.region,
-      ...(profileArn === undefined ? {} : { profileArn }),
-      startUrl: registration.startUrl,
-      clientId: registration.clientId,
-      machineId: deriveOAuthMachineId(refresh),
-    };
-    const label =
-      kiroAccountLabel(access) ??
-      (await enrichKiroLabel(
-        access,
-        authState,
-        kiroDefaultLabel(registration.authMethod),
-        this.fetchFn,
-      ));
-    return {
-      access,
-      refresh,
-      expiresAt: this.#expiry(payload["expiresIn"]),
-      accountLabel: label,
-      auth_state: authStateOf(authState),
-      client_secret: registration.clientSecret,
-    };
   }
 
   /** Exchanges a social authorization code for tokens. */
@@ -889,7 +497,7 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
     const isIdc = options.clientId !== undefined && options.clientSecret !== undefined;
     const region = normalizeRegion(options.region);
     const refreshed = isIdc
-      ? await this.#refreshOidc(trimmed, {
+      ? await refreshKiroOidcTokens(this.fetchFn, trimmed, {
           clientId: options.clientId ?? "",
           clientSecret: options.clientSecret ?? "",
           region,
@@ -1055,45 +663,7 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
     region = DEFAULT_REGION,
     authMethod?: KiroAuthMethod,
   ): Promise<string | undefined> {
-    if (authMethod === "builder-id") return undefined;
-    const safeRegion = assertAwsRegion(normalizeRegion(region));
-    try {
-      const host = KIRO_MANAGEMENT_HOST_TEMPLATE.replace("{region}", safeRegion);
-      const response = await this.fetchFn(`${host}/Get-Profile`, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${accessToken}`,
-          "content-type": "application/x-amz-json-1.0",
-          "x-amz-target": "KiroControlPlaneBearerService.GetProfile",
-          accept: "application/json",
-          connection: "close",
-          "amz-sdk-request": "attempt=1; max=1",
-          "amz-sdk-invocation-id": crypto.randomUUID(),
-        },
-        body: JSON.stringify({}),
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (!response.ok) return undefined;
-      const payload = record(await response.json().catch(() => undefined));
-      const profile = record(payload?.["profile"]);
-      const arn = nonEmptyTrimmedString(profile?.["arn"] ?? profile?.["profileArn"]);
-      if (arn !== undefined) return arn;
-      const profiles = payload?.["profiles"];
-      if (Array.isArray(profiles)) {
-        let fallback: string | undefined;
-        for (const entry of profiles) {
-          const p = record(entry);
-          const value = nonEmptyTrimmedString(p?.["arn"] ?? p?.["profileArn"]);
-          if (value === undefined) continue;
-          if (value.includes(`:${safeRegion}:`)) return value;
-          fallback ??= value;
-        }
-        return fallback;
-      }
-      return undefined;
-    } catch {
-      return undefined;
-    }
+    return resolveKiroProfileArn(this.fetchFn, accessToken, region, authMethod);
   }
 
   /**
@@ -1147,7 +717,8 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
       if (clientId === undefined || clientSecret === undefined) {
         throw new Error("Kiro IdC refresh is missing its client registration");
       }
-      const refreshed = await this.#refreshOidc(
+      const refreshed = await refreshKiroOidcTokens(
+        this.fetchFn,
         refreshToken,
         {
           clientId,
@@ -1184,75 +755,6 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
       refresh: refreshed.refresh,
       expiresAt: refreshed.expiresAt,
       ...(nextState === undefined ? {} : { auth_state: authStateOf(nextState) }),
-    };
-  }
-
-  /**
-   * Registers an OIDC client for the IdC/Builder-ID authorization-code flow.
-   *
-   * `clientName` and `User-Agent` identify this as the vendor's own IDE client.
-   * The registration is the first request a brand-new account ever makes, so it
-   * is the one most likely to be looked at: a client name no shipped build uses,
-   * or a missing User-Agent, is a shape the real client never produces.
-   *
-   * The 1.4.62 IDE registers a public client with `authorization_code` grant and
-   * the loopback redirect, and declares the issuer (the start URL) so the
-   * authorization server knows which organization/portal this client belongs to.
-   */
-  async #registerClient(
-    region: string,
-    startUrl: string,
-    authMethod: "builder-id" | "idc",
-    redirectUri = KIRO_LOOPBACK_REDIRECT_URI,
-  ): Promise<DeviceFlowRegistration> {
-    const response = await this.fetchFn(`https://oidc.${region}.amazonaws.com/client/register`, {
-      method: "POST",
-      headers: ssoOidcHeaders(),
-      body: JSON.stringify({
-        clientName: KIRO_OIDC_CLIENT_NAME,
-        clientType: "public",
-        scopes: [...KIRO_SCOPES],
-        grantTypes: [...KIRO_GRANT_TYPES],
-        redirectUris: [redirectUri],
-        issuerUrl: startUrl,
-      }),
-    });
-    const payload = record(await readJsonResponse(response, "kiro client registration")) ?? {};
-    const clientId = nonEmptyString(payload["clientId"]);
-    const clientSecret = nonEmptyString(payload["clientSecret"]);
-    if (clientId === undefined || clientSecret === undefined) {
-      throw new Error("Kiro client registration omitted credentials");
-    }
-    return { clientId, clientSecret, region, startUrl, authMethod, redirectUri };
-  }
-
-  /** Refreshes through the regional AWS SSO OIDC token endpoint. */
-  async #refreshOidc(
-    refreshToken: string,
-    registration: Omit<DeviceFlowRegistration, "redirectUri">,
-    signal?: AbortSignal,
-  ): Promise<{ readonly access: string; readonly refresh: string; readonly expiresAt: Date; readonly profileArn?: string }> {
-    const region = assertAwsRegion(registration.region);
-    const response = await this.fetchFn(`https://oidc.${region}.amazonaws.com/token`, {
-      method: "POST",
-      headers: ssoOidcHeaders(),
-      body: JSON.stringify({
-        clientId: registration.clientId,
-        clientSecret: registration.clientSecret,
-        refreshToken,
-        grantType: "refresh_token",
-      }),
-      ...(signal === undefined ? {} : { signal }),
-    });
-    const payload = record(await readJsonResponse(response, "kiro token refresh")) ?? {};
-    const access = nonEmptyString(payload["accessToken"]);
-    if (access === undefined) throw new Error("Kiro token refresh omitted accessToken");
-    const profileArn = nonEmptyString(payload["profileArn"]);
-    return {
-      access,
-      refresh: nonEmptyString(payload["refreshToken"]) ?? refreshToken,
-      expiresAt: this.#expiry(payload["expiresIn"]),
-      ...(profileArn === undefined ? {} : { profileArn }),
     };
   }
 
@@ -1310,62 +812,6 @@ export class KiroOidcPendingError extends Error {
     this.codeVerifier = codeVerifier;
     this.providerState = providerState;
     this.continueState = continueState;
-  }
-}
-
-/**
- * Authorize/token redirect for AWS SSO OIDC after a portless registration.
- *
- * Registration always declares `http://127.0.0.1/oauth/callback`. RFC 8252 lets
- * the authorize step add a port on that same host; swapping the host to
- * `localhost` (or any other name) is answered `Invalid redirectUri provided`.
- * Port is taken from the console's loopback callback when present.
- */
-function oidcAuthorizeRedirectUri(loopbackCallback: string): string {
-  let port = "3128";
-  if (loopbackCallback.length > 0) {
-    try {
-      const parsed = new URL(loopbackCallback);
-      if (parsed.port.length > 0) port = parsed.port;
-    } catch {
-      // keep the Kiro browser default port
-    }
-  }
-  return `http://127.0.0.1:${port}/oauth/callback`;
-}
-
-/** Restores a {@link DeviceFlowRegistration} from pending-flow providerState. */
-function parseRegistration(providerState: string | undefined): DeviceFlowRegistration | undefined {
-  if (providerState === undefined || providerState.length === 0) return undefined;
-  const parsed = safeJson(providerState);
-  const root = record(parsed);
-  if (root === undefined) return undefined;
-  const clientId = nonEmptyString(root["clientId"]);
-  const clientSecret = nonEmptyString(root["clientSecret"]);
-  const region = nonEmptyString(root["region"]);
-  const startUrl = nonEmptyString(root["startUrl"]);
-  const authMethod = root["authMethod"] === "idc" || root["authMethod"] === "builder-id"
-    ? root["authMethod"]
-    : undefined;
-  const redirectUri = nonEmptyString(root["redirectUri"]) ?? KIRO_LOOPBACK_REDIRECT_URI;
-  if (
-    clientId === undefined ||
-    clientSecret === undefined ||
-    region === undefined ||
-    startUrl === undefined ||
-    authMethod === undefined
-  ) {
-    return undefined;
-  }
-  return { clientId, clientSecret, region, startUrl, authMethod, redirectUri };
-}
-
-/** Parses JSON without throwing. */
-function safeJson(value: string): unknown {
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return undefined;
   }
 }
 

@@ -1,6 +1,6 @@
 import type {
   AccountErrorRule,
-} from "../account-error-classification";
+} from "../account-error-contracts";
 
 /**
  * Perch's `turn_rate_limited` window. The upstream does not state a reset and

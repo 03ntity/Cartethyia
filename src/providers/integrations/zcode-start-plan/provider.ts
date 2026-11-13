@@ -24,11 +24,10 @@ import type { ModelDefinition } from "../../provider-model-definition";
 import { catalogRows } from "../shared/catalog-rows";
 import { getOrCreateInstallId } from "../shared/install-id";
 import { resolveInboundSessionId } from "../../operations/session-resolution";
-import { assertCredentialKind, assertWireFamily } from "../../provider-contracts";
 import type { ProviderAdapter, ProviderDispatchContext, ProviderDispatchTarget } from "../../provider-contracts";
 import { GatewayError } from "../../../protocol/gateway-error";
 import { applyParamQuirks } from "../../../protocol/translation/quirks";
-import { buildClaudeMessagesRequest, filterClaudeCustomHeaders } from "../shared/claude-messages";
+import { buildClaudeMessagesRequest, filterClaudeCustomHeaders, resolveClaudeMessagesApiKey } from "../shared/claude-messages";
 import { mapClaudeHttpError } from "../../../protocol/messages-errors";
 import { isRecord } from "../../../protocol/codecs";
 import { classifyUpstreamError, upstreamErrorIdentifier, upstreamMessageAsIs } from "../../../transport/failure-policy";
@@ -205,20 +204,7 @@ export class ZcodeStartPlanAdapter implements ProviderAdapter {
     candidate: ProviderDispatchTarget,
     context: ProviderDispatchContext,
   ): AsyncIterable<CanonicalEvent> {
-    if (candidate.wire_family !== "messages") {
-      assertWireFamily(candidate, "messages", "zcode-start messages leg");
-    }
-    if (context.credential.credential_kind !== "api_key") {
-      assertCredentialKind(context.credential, "api_key", "zcode-start");
-    }
-    if (context.credential.secret === undefined || context.credential.secret.length === 0) {
-      throw new GatewayError(
-        "invalid_request",
-        400,
-        "zcode-start: plan JWT is missing a secret value (request {requestId}). Wrong key, right door — check the credential 🔑",
-      );
-    }
-    const planJwt = new TextDecoder().decode(context.credential.secret);
+    const planJwt = resolveClaudeMessagesApiKey(candidate, context, "zcode-start messages leg", "zcode-start", "plan JWT");
     const sessionId = resolveInboundSessionId(context, request) ?? `session_${randomUUID().replace(/-/g, "").slice(0, 32)}`;
     const deviceMid = await getOrCreateInstallId("zcode-start-plan");
     const accountUuid = jwtUserId(context.credential);

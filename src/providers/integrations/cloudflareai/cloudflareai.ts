@@ -16,7 +16,6 @@
  *    protocol at the `/anthropic` path suffix, including `thinking_delta`
  *    blocks, so the Messages leg is built directly.
  */
-import { assertWireFamily } from "../../provider-contracts";
 import type {
   ProviderAdapter,
   ProviderDispatchContext,
@@ -24,7 +23,7 @@ import type {
 } from "../../provider-contracts";
 import type { CanonicalEvent, CanonicalRequest } from "../../../protocol/canonical-model";
 import { GatewayError } from "../../../protocol/gateway-error";
-import { buildClaudeMessagesRequest, filterClaudeCustomHeaders } from "../shared/claude-messages";
+import { buildClaudeMessagesRequest, filterClaudeCustomHeaders, assertClaudeMessagesWireFamily } from "../shared/claude-messages";
 import { sendClaudeMessagesRequest } from "../../../protocol/upstream/send-claude-messages";
 import { applyParamQuirks } from "../../../protocol/translation/quirks";
 import { decodeCloudflareAiGatewayCredential } from "../../../security/credential-codec";
@@ -93,9 +92,7 @@ class CloudflareAiGatewayAdapter implements ProviderAdapter {
     candidate: ProviderDispatchTarget,
     context: ProviderDispatchContext,
   ): AsyncIterable<CanonicalEvent> {
-    if (candidate.wire_family !== "messages") {
-      assertWireFamily(candidate, "messages", "cloudflareai");
-    }
+    assertClaudeMessagesWireFamily(candidate, "cloudflareai");
     const { token, baseUrl } = cloudflareEnvelope(context);
     const outbound = buildClaudeMessagesRequest({
       request: applyParamQuirks(request, candidate.provider_id),

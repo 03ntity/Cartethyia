@@ -1,7 +1,7 @@
 import type {
   AccountErrorRule,
   AccountErrorSignals,
-} from "../account-error-classification";
+} from "../account-error-contracts";
 
 /**
  * Trae answers `4013 "AI service is not available in the current region now."`

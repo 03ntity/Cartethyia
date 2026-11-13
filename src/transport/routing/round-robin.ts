@@ -1,6 +1,6 @@
 // Round-robin rotation state and its bounded per-key LRU.
 import type { RouteCandidate } from "./route-model";
-import { BoundedLruMap } from "./bounded-lru";
+import { BoundedLruMap } from "../../shared/bounded-lru";
 
 export class RoundRobinState {
   private idx = 0;

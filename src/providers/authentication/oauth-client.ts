@@ -21,8 +21,9 @@ import type {
 import { oauthAccountIdentity } from "./oauth-flow-store";
 import type { OAuthTokenRefreshResult, OAuthTokenRefresher } from "./oauth-refresh-service";
 
-/** Minimal fetch surface accepted by the generic OAuth client. */
-import type { FetchLike } from "./oauth-flow-store";
+// `FetchLike` lives in `provider-contracts.ts`; re-exported here so OAuth
+// client call sites keep a single import site.
+import type { FetchLike } from "../provider-contracts";
 export type { FetchLike };
 
 /** Normalized token shape returned by provider token endpoints. */

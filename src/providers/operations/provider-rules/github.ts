@@ -1,6 +1,6 @@
 import type {
   AccountErrorRule,
-} from "../account-error-classification";
+} from "../account-error-contracts";
 
 /**
  * Checks whether an upstream body indicates Copilot is not licensed.

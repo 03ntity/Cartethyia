@@ -16,7 +16,7 @@ import { resolvePromptCacheKey } from "../../providers/operations/session-resolu
 import { reasoningEffortFromIntent } from "../../protocol/reasoning";
 import { isWebSearchTool } from "../../protocol/translation/search";
 import { parseResponsesResponseToEvents, decodeResponsesSseStream } from "../response/responses";
-import { repairToolArguments } from "../../transport/surface/chat/encode";
+import { repairToolArguments } from "../tool-repair-args";
 
 const RESPONSES_CACHEABLE_BLOCK_TYPES: ReadonlySet<string> = new Set([
   "input_text",

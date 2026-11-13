@@ -3,7 +3,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { GatewayError } from "../protocol/gateway-error";
 import type { SsrfPolicy } from "../config/network";
-import { BoundedLruMap } from "../transport/routing/bounded-lru";
+import { BoundedLruMap } from "../shared/bounded-lru";
 import {
   cidrContainsAddress,
   ipv4ToNumberStrict,

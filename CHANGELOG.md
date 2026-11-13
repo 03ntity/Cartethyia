@@ -10,6 +10,57 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Routing: pool candidates no longer share routing decisions.** `plan()`
+  decisions are keyed per candidate identity, so candidates that share one
+  `provider:model` admission bucket (pool fan-out) no longer inherit a
+  cooling sibling's decision — which could misroute requests onto a soaking
+  pool.
+- **Egress: stale-socket replay stays on the owning dispatcher.** A request
+  that died on a stale keep-alive socket now replays through a fresh instance
+  of the same pool/proxy dispatcher (never direct), runs the SSRF address
+  validation before any pool replay, and is restricted to idempotent methods
+  so a POST is never double-submitted.
+- **Gemini: hosted tools survive alongside function tools.** `googleSearch` /
+  web-search grounding is no longer silently dropped when a request also
+  declares function tools.
+- **Logs: secrets are scrubbed at the sink.** Authorization headers, API keys,
+  and JWT-shaped values are redacted before reaching pino stdout or the
+  console log ring; the redaction contract now matches what the code does.
+- **Backup: decompression is bounded.** A crafted backup that expands past
+  the limit fails with a clean error instead of exhausting memory.
+- **Console CLI tools: user config files are no longer corrupted.**
+  `readJsonFile` parses strictly first and strips trailing commas only as a
+  fallback; an unparseable file fails loudly instead of being overwritten.
+  The codex injector rejects quotes/newlines in interpolated values (TOML
+  injection). `pollDevice` releases its pool slot on throw, and
+  `/auth/change-password` records lockout failures like login.
+- **Providers:** freepi mid-conversation system turns and parallel tool
+  results reach the wire and its quota percents are computed correctly; Claude
+  `custom_headers` are honored; codex `compact()` honors `chatgpt_base_url`;
+  trae `cn` realm auth invalidation works and realm matching is
+  case-insensitive; the grok quota probe keeps the header verdict on non-JSON
+  429 bodies; github/kiro credential and registration maps are bounded; the
+  provider registry no longer serves a stale adapter after a BYOK edit during
+  a lazy load; kiro context-window scaling uses the routed model id;
+  commandcode keeps a stable per-conversation session id; and the default
+  gateway API key cannot be banned.
+- **Cursor:** per-Run state maps are torn down on every terminal path, and
+  the workspace tool executor resolves symlinks before containment checks
+  (closes a symlink escape).
+
+### Changed
+
+- **Performance:** hot-path dedup and caching across protocol codecs,
+  routing, network egress, console stores, and provider integrations — a
+  single think-tag scanner, batched pool cooldown reads, per-candidate sort
+  keys, shared Gemini-wire / OAuth / catalog / session helpers, bounded
+  caches, and async fs on console request paths.
+- **Internal:** large-scale dead-code removal and module dedup from a
+  12-agent audit of `src/`; no operator-facing behavior change beyond the
+  fixes above.
+
 ## [2.8.1] - 2026-11-13
 
 ### Added

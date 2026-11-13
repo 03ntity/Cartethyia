@@ -13,7 +13,7 @@
 import type { WireFamily } from "../../canonical-model";
 import { DEFAULT_DIALECT_POLICIES, DIALECT_RULES } from "./rules";
 import type { DialectId, DialectPolicy } from "./types";
-import { BoundedLruMap } from "../../../transport/routing/bounded-lru";
+import { BoundedLruMap } from "../../../shared/bounded-lru";
 
 /** Known dialect ids, for validating loose DB/string overrides. */
 const KNOWN_DIALECT_IDS = new Set<string>(Object.keys(DEFAULT_DIALECT_POLICIES));

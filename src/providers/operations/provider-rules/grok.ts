@@ -1,4 +1,4 @@
-import type { AccountErrorSignals } from "../account-error-classification";
+import type { AccountErrorSignals } from "../account-error-contracts";
 
 /**
  * xAI Grok Build's free tier resets on a rolling 24-hour window, so its

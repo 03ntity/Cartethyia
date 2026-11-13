@@ -28,6 +28,7 @@ import {
 } from "./qoder-native-identity-store";
 import type { NativeIdentityRecord } from "../../../persistence/schema";
 import { log } from "../../../observability/logger";
+import { checkinDayKey } from "../../../shared/time";
 
 /** Structural fetch bound; Bun's own fetch type carries extra host props. */
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -114,7 +115,7 @@ function asState(state: string, today: string, lastClaimedAt: unknown): { active
   if (status === "CLAIMED") {
     const stamp = asNumber(lastClaimedAt);
     if (stamp !== null) {
-      const day = new Date(stamp * 1000).toISOString().slice(0, 10);
+      const day = checkinDayKey(new Date(stamp * 1000));
       claimedToday = day === today;
     }
   }
@@ -321,7 +322,7 @@ async function legacySashCheckin(args: {
   readonly now?: () => Date;
 }): Promise<{ state: DailyCheckinState; credit: number; streakDays: number } | null> {
   const { base, credential, fetcher } = args;
-  const today = (args.now?.() ?? new Date()).toISOString().slice(0, 10);
+  const today = checkinDayKey(args.now?.() ?? new Date());
   let statusResponse: Response;
   try {
     statusResponse = await fetcher(`${base}${CHECKIN_STATUS_PATH}`, {

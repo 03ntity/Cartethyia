@@ -13,7 +13,7 @@
  * byte, and nothing is allocated.
  */
 
-import { evictOldestEntry } from "../../transport/routing/bounded-lru";
+import { evictOldestEntry } from "../../shared/bounded-lru";
 
 /** Running totals for one pool. */
 interface PoolByteTotals {

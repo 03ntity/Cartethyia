@@ -5,6 +5,12 @@ import type { ConsoleAccessResolver } from "../auth/access";
 import type { AuditRecorder } from "../auth/audit-recorder";
 import { type QuotaRefreshDeps } from "../../providers/quota/refresh";
 import type { AccountTestEgressDeps } from "./account-test-egress";
+import { DAILY_CHECKIN_PROVIDER_IDS } from "../../workers/daily-checkin";
+
+/** Daily check-in only exists on the buddy billing facade; everything else 400s with intent. */
+export function supportsAccountCheckin(providerId: string): boolean {
+  return (DAILY_CHECKIN_PROVIDER_IDS as readonly string[]).includes(providerId);
+}
 
 /**
  * Dependencies shared by the tenant-scoped and global-admin account/quota route

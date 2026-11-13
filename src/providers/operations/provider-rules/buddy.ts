@@ -10,7 +10,7 @@ import type {
   AccountErrorClassification,
   AccountErrorRule,
   AccountErrorSignals,
-} from "../account-error-classification";
+} from "../account-error-contracts";
 
 /** The wording an upstream uses when it restricted the account, not the request. */
 export function banWording(lower: string): boolean {

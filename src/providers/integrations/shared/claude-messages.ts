@@ -21,6 +21,14 @@ import {
   filterProviderCustomHeaders,
 } from "../../../protocol/codecs";
 import { isProtectedHeader } from "../../../security/outbound-headers";
+import { GatewayError } from "../../../protocol/gateway-error";
+import {
+  assertCredentialKind,
+  assertWireFamily,
+  type ProviderDispatchContext,
+  type ProviderDispatchTarget,
+  type ResolvedCredential,
+} from "../../provider-contracts";
 
 // Claude-wire custom-header validation
 
@@ -83,6 +91,73 @@ export function filterClaudeCustomHeaders(
     return filterProviderCustomHeaders(stripped, CLAUDE_CUSTOM_HEADER_EXTRA_ALLOWED);
   }
   return filterProviderCustomHeaders(input, CLAUDE_CUSTOM_HEADER_EXTRA_ALLOWED);
+}
+
+// API-key Messages dispatch preamble
+
+/**
+ * Asserts the candidate speaks the Messages wire. Every bearer adapter runs
+ * this first so a chat/responses candidate never reaches the Claude builder.
+ */
+export function assertClaudeMessagesWireFamily(
+  candidate: ProviderDispatchTarget,
+  providerLabel: string,
+): void {
+  assertWireFamily(candidate, "messages", providerLabel);
+}
+
+/**
+ * Asserts the resolved credential is an `api_key` account. The Claude Messages
+ * adapters are operator-key traffic only — an OAuth-bound credential reaching
+ * one of them is a routing bug, not a token to try.
+ */
+export function assertClaudeMessagesApiKeyCredential(
+  credential: ResolvedCredential,
+  providerLabel: string,
+): void {
+  assertCredentialKind(credential, "api_key", providerLabel);
+}
+
+/**
+ * Decodes the credential secret for a Messages adapter. The shared builder
+ * never sees raw bytes; adapters hand it a string. Missing or empty secrets
+ * are a caller bug (`invalid_request`/400), not an upstream refusal.
+ */
+export function readClaudeMessagesApiKeySecret(
+  credential: ResolvedCredential,
+  providerLabel: string,
+  noun = "API key",
+): string {
+  if (credential.secret === undefined || credential.secret.length === 0) {
+    throw new GatewayError(
+      "invalid_request",
+      400,
+      `${providerLabel}: ${noun} is missing a secret value (request {requestId}). Wrong key, right door — check the key 🔑`,
+    );
+  }
+  return new TextDecoder().decode(credential.secret);
+}
+
+/**
+ * The full preamble every bearer Messages adapter runs before building the
+ * outbound request: wire family, credential kind, and the decoded secret.
+ * Returns the secret string ready for `buildClaudeMessagesRequest`.
+ *
+ * `wireLabel`/`kindLabel` are the provider labels the original call sites
+ * passed to `assertWireFamily`/`assertCredentialKind`; they differ when a
+ * provider names its Messages leg ("zro messages leg") but checks the plain
+ * provider id for credentials.
+ */
+export function resolveClaudeMessagesApiKey(
+  candidate: ProviderDispatchTarget,
+  context: ProviderDispatchContext,
+  wireLabel: string,
+  kindLabel = wireLabel,
+  noun = "API key",
+): string {
+  assertClaudeMessagesWireFamily(candidate, wireLabel);
+  assertClaudeMessagesApiKeyCredential(context.credential, kindLabel);
+  return readClaudeMessagesApiKeySecret(context.credential, kindLabel, noun);
 }
 
 // API-key Messages request pre-flight

@@ -17,7 +17,7 @@ import {
   REASONING_EFFORT_LADDER,
   type ReasoningEffortLevel,
 } from "../thinking";
-import { BoundedLruMap } from "../../../transport/routing/bounded-lru";
+import { BoundedLruMap } from "../../../shared/bounded-lru";
 
 /** How a reasoning effort is transported on the wire. */
 export type ThinkingControlMode =

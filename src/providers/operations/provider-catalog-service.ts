@@ -20,7 +20,7 @@ import { GATEWAY_USER_AGENT } from "./gateway-user-agent";
 import { isIP } from "node:net";
 import { isAddressAllowed } from "../../network/ssrf";
 import type { SsrfPolicy } from "../../config/network";
-import { BoundedLruMap } from "../../transport/routing/bounded-lru";
+import { BoundedLruMap } from "../../shared/bounded-lru";
 
 /**
  * Revision of the compiled provider catalog, and the last one materialized.

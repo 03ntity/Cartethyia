@@ -1,8 +1,8 @@
 import type {
   AccountErrorRule,
   AccountErrorSignals,
-} from "../account-error-classification";
-import { modelUnreachableEscalating } from "../account-error-classification";
+} from "../account-error-contracts";
+import { modelUnreachableEscalating } from "../account-error-contracts";
 
 /**
  * Qoder's quota verdicts (`110` billing-daily-count, pricing-url refusals)

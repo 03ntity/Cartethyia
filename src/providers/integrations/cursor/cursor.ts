@@ -16,24 +16,20 @@
 // match a tool the current request declared; anything else is answered
 // `rejected` so the model can continue without the gateway ever touching a
 // filesystem or a shell on the caller's behalf.
+
 import { GatewayError } from "../../../protocol/gateway-error";
 import { asRecord as recordOf } from "../../../shared/coerce";
 import type {
   CanonicalEvent,
   CanonicalRequest,
   CanonicalStopReason,
-  ContentPart,
   UsageRecord,
 } from "../../../protocol/canonical-model";
-import { resolveImageSource, splitDataUrl } from "../../../protocol/codecs";
-import { IMAGE_CLAMP_MAX_BYTES } from "../../../protocol/image-clamp";
 import type { ProviderAdapter, ProviderDispatchContext, ProviderDispatchTarget } from "../../provider-contracts";
 import { readCredentialSecret } from "../../provider-contracts";
 import type { Http2BidiEndReason } from "../../../network/bidi";
-import type { ProviderContinuationScope } from "../../provider-contracts";
 import { CURSOR_PROVIDER_ID, RUN_IDLE_TTL_MS, isAllowedAgentHost } from "./cursor-shared";
 import {
-  CURSOR_MCP_NAMESPACE as MCP_NAMESPACE,
   buildAllowlistPrecheckResult,
   buildCancelAction,
   buildExecStreamClose,
@@ -51,7 +47,6 @@ import {
   liveUserText,
   systemPromptFrom,
   toolDescriptorsFor,
-  type CursorImageInput,
   type CursorToolDescriptor,
 } from "./cursor-request";
 import { decodeServerMessages, isRetryableOpenFailure, openRetryDelayMs, openCursorRunWithFallback } from "./cursor-http2";
@@ -67,19 +62,45 @@ import {
   reconcileToolCount,
   wireTraceEnabled,
   CURSOR_WIRE_TRACE_MAX,
-  type CursorCheckpointState,
   type CursorFrameShape,
 } from "./cursor-hardening";
 import { cursorRunSessions } from "./cursor-session-manager";
-import type { CursorContinuationScope, CursorRunSession } from "./cursor-session-manager";
+import type { CursorRunSession } from "./cursor-session-manager";
 import { fetchCursorRunOrigin } from "./cursor-catalog";
 import { defaultParameterValues, fetchCursorModels } from "./cursor-catalog";
-import type { CursorModelInfo } from "./cursor-catalog";
-import { decodeStructEntriesToJson } from "./protocol/struct";
 import { encodeMessage } from "./protocol/messages";
 import { executeNativeTool, resolveExecFrame } from "./cursor-exec";
-import { fnv1a32 } from "../shared/hash";
-import { TtlCache } from "../../../persistence/ttl-cache";
+import { collectImages } from "./cursor-images";
+import {
+  rosterCacheForTests,
+  rosterCacheGet,
+  rosterCachePeek,
+  rosterCacheSet,
+} from "./cursor-roster";
+import type { CursorModelInfo } from "./cursor-catalog";
+import {
+  CURSOR_MAX_OPEN_RETRIES,
+  isCompleteToolHistoryReplay,
+  missingToolCallIds,
+  nonEmptyStringOf,
+  readExecutableMcpCall,
+  readPendingToolResult,
+  sessionScope,
+  structuredCursorFailure,
+  toolCallIds,
+  usageFromTurnEnded,
+  type PendingToolResult,
+} from "./cursor-run-support";
+import {
+  RunFrameStream,
+  isRunStreamEnd,
+  type CursorRunFrameState,
+  type RunFrame,
+} from "./cursor-run-frames";
+
+// Public surface preserved: tests and callers import these from cursor.ts.
+export { RunFrameStream } from "./cursor-run-frames";
+export { rosterCacheForTests };
 
 /**
  * Client-heartbeat cadence for every Cursor Run.
@@ -90,9 +111,6 @@ import { TtlCache } from "../../../persistence/ttl-cache";
  * answers; a shorter one is traffic the upstream does not ask for.
  */
 const CURSOR_HEARTBEAT_INTERVAL_MS = 5_000;
-
-/** Bounded open retries for connection/deadline failures (donor policy). */
-const CURSOR_MAX_OPEN_RETRIES = 5;
 
 /** Heartbeats with no semantic frame before a Run is declared quiet. */
 const CURSOR_QUIET_BEATS = 48; // 48 × 5s = 240s (donor quiet window)
@@ -158,46 +176,6 @@ function cursorRunGoneError(): GatewayError {
   );
 }
 
-/**
- * How long one account's model roster is reused for `parameters` lookups.
- *
- * A Run needs the model's declared default parameter tuple, but the roster is
- * per-account and moves rarely, so it is fetched once and cached rather than on
- * every dispatch.
- */
-const CURSOR_ROSTER_TTL_MS = 300_000;
-/**
- * credential → roster for the parameter lookup.
- *
- * Keyed by an FNV-1a digest of the credential rather than the raw token so a
- * long-lived map does not hold live credentials as keys. Bounded by
- * `ROSTER_CACHE_MAX` with LRU eviction: the TTL is only checked on read, so
- * without a cap rotated tokens would grow the map without bound. Implemented
- * by the canonical `TtlCache` in LRU mode — re-setting moves the entry to the
- * newest position, and the cap evicts the least-recently-used entry.
- */
-const ROSTER_CACHE_MAX = 1024;
-const rosterCache = new TtlCache<{ roster: readonly CursorModelInfo[] }>({
-  ttlMs: CURSOR_ROSTER_TTL_MS,
-  maxEntries: ROSTER_CACHE_MAX,
-  lru: true,
-});
-
-function rosterCacheSet(credential: string, roster: readonly CursorModelInfo[]): void {
-  const key = String(fnv1a32(credential));
-  rosterCache.set(key, { roster });
-}
-
-/**
- * Test-only access to the roster cache (cap/eviction/TTL behavior is covered
- * by `test/providers/cursor-roster-cache.test.ts` without a full dispatch).
- */
-export const rosterCacheForTests = {
-  size: (): number => rosterCache.size,
-  set: rosterCacheSet,
-  get: (credential: string): { roster: readonly CursorModelInfo[] } | undefined =>
-    rosterCache.get(String(fnv1a32(credential))),
-};
 /** Client-heartbeat cadence the Cursor edge expects (donor `heartbeatMs`). */
 const CURSOR_HEARTBEAT_INTERVAL_OVERRIDE = (() => {
   const raw = process.env.CARTETHYIA_CURSOR_HEARTBEAT_MS?.trim();
@@ -206,403 +184,11 @@ const CURSOR_HEARTBEAT_INTERVAL_OVERRIDE = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
 })();
 
-/** Image MIME types Cursor accepts in `selected_images`. */
-const ALLOWED_IMAGE_MIME_TYPES: Record<string, true> = {
-  "image/png": true,
-  "image/jpeg": true,
-  "image/webp": true,
-  "image/gif": true,
-};
-
-/** Largest image payload accepted, matching the shared pre-send clamp. */
-const MAX_IMAGE_BYTES = IMAGE_CLAMP_MAX_BYTES;
-
-/** Identifies an allowed image payload from its magic bytes. */
-function sniffImageMime(bytes: Uint8Array): string | undefined {
-  if (bytes.byteLength >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
-    return "image/png";
-  }
-  if (bytes.byteLength >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
-    return "image/jpeg";
-  }
-  if (
-    bytes.byteLength >= 6 &&
-    bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38
-  ) {
-    return "image/gif";
-  }
-  if (
-    bytes.byteLength >= 12 &&
-    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
-    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
-  ) {
-    return "image/webp";
-  }
-  return undefined;
-}
-
-function base64ToBytes(data: string): Uint8Array | undefined {
-  try {
-    const binary = atob(data);
-    const out = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) out[index] = binary.charCodeAt(index);
-    return out;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Validates one decoded image payload.
- *
- * The MIME type is verified by sniffing and only then compared against the
- * declared type: a caller-supplied `content-type` or data-URL media type is a
- * claim, and sending bytes the upstream will reject — or bytes that are not an
- * image at all — fails the whole request rather than being dropped silently.
- */
-function finishImage(bytes: Uint8Array): CursorImageInput {
-  const sniffed = sniffImageMime(bytes);
-  const mimeType = sniffed;
-  if (mimeType === undefined || ALLOWED_IMAGE_MIME_TYPES[mimeType] !== true) {
-    throw new GatewayError(
-      "invalid_request",
-      400,
-      "Cursor accepts PNG, JPEG, WebP and GIF image input only (request {requestId}). Check the shape of what you sent — then resend 🪞",
-    );
-  }
-  if (bytes.byteLength > MAX_IMAGE_BYTES) {
-    throw new GatewayError(
-      "invalid_request",
-      400,
-      `Cursor image input exceeds the ${MAX_IMAGE_BYTES}-byte limit (request {requestId}). We love long reads, but not that long 📚`,
-    );
-  }
-  return { data: bytes, mimeType };
-}
-
-/** Reads one canonical image part into Cursor `selected_images` bytes. */
-async function resolveImageInput(
-  part: Extract<ContentPart, { kind: "image" }>,
-  context: ProviderDispatchContext,
-): Promise<CursorImageInput> {
-  const source = resolveImageSource(part.payload);
-  const url = source?.url;
-  if (url === undefined) {
-    throw new GatewayError(
-      "invalid_request",
-      400,
-      "Cursor image input requires inline image data or an HTTPS image URL",
-    );
-  }
-  const dataUrl = splitDataUrl(url);
-  if (dataUrl !== undefined) {
-    const bytes = base64ToBytes(dataUrl.data);
-    if (bytes === undefined) {
-      throw new GatewayError("invalid_request", 400, "Cursor image attachment is not valid base64 (request {requestId}). Check the shape of what you sent — then resend 🪞");
-    }
-    return finishImage(bytes);
-  }
-  const parsed = new URL(url);
-  if (parsed.protocol !== "https:") {
-    throw new GatewayError(
-      "invalid_request",
-      400,
-      "Cursor image URLs must be HTTPS; private and non-TLS sources are not fetched (request {requestId}). Check the shape of what you sent — then resend 🪞",
-    );
-  }
-  const fetcher = context.outbound_attachment_fetch;
-  if (fetcher === undefined) {
-    throw new GatewayError(
-      "invalid_request",
-      400,
-      "Cursor has no validated egress to fetch this image URL (request {requestId}). All roads blocked — time to find a new route 🗺️",
-    );
-  }
-  // Redirects are not followed: reject the response rather than letting a
-  // public URL redirect the attachment fetch to a private address.
-  const response = await fetcher(url, {
-    method: "GET",
-    redirect: "manual",
-    signal: context.abort_signal,
-  });
-  if (!response.ok) {
-    throw new GatewayError(
-      "invalid_request",
-      400,
-      `Cursor could not fetch this image URL (${response.status})`,
-    );
-  }
-  const body = new Uint8Array(await response.arrayBuffer());
-  if (body.byteLength > MAX_IMAGE_BYTES) {
-    throw new GatewayError(
-      "invalid_request",
-      400,
-      `Cursor image input exceeds the ${MAX_IMAGE_BYTES}-byte limit (request {requestId}). We love long reads, but not that long 📚`,
-    );
-  }
-  return finishImage(body);
-}
-
-/** Collects every canonical image part of a request into Cursor images. */
-async function collectImages(
-  request: CanonicalRequest,
-  context: ProviderDispatchContext,
-): Promise<CursorImageInput[]> {
-  const images: CursorImageInput[] = [];
-  for (const message of request.messages) {
-    for (const part of message.content) {
-      if (part.kind !== "image") continue;
-      images.push(await resolveImageInput(part, context));
-    }
-  }
-  return images;
-}
-
-function usageFromTurnEnded(turnEnded: Record<string, unknown>): UsageRecord {
-  const count = (value: unknown): number =>
-    typeof value === "number" && Number.isFinite(value) ? value : 0;
-  const input = count(turnEnded["input_tokens"]);
-  const output = count(turnEnded["output_tokens"]);
-  const cacheRead = count(turnEnded["cache_read"]);
-  return {
-    input_tokens: input,
-    cached_input_tokens: cacheRead,
-    cache_write_tokens: count(turnEnded["cache_write"]),
-    uncached_input_tokens: Math.max(0, input - cacheRead),
-    output_tokens: output,
-    reasoning_tokens: count(turnEnded["reasoning_tokens"]),
-    estimated_cost: null,
-    total_tokens: input + output,
-  };
-}
-
-function nonEmptyStringOf(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-/**
- * Reads one inbound `mcp_args` request.
- *
- * Returns `undefined` for anything that is not an executable call. Cursor's own
- * host tools arrive under their own server identifiers (or none at all) and are
- * never executed here — refusing them is what keeps a model's request from
- * turning into a shell command on the gateway's host.
- */
-function readExecutableMcpCall(
-  mcpArgs: Record<string, unknown>,
-  descriptors: readonly CursorToolDescriptor[],
-): { toolName: string; arguments: string } | undefined {
-  if (nonEmptyStringOf(mcpArgs["provider_identifier"]) !== MCP_NAMESPACE) return undefined;
-  const toolName = nonEmptyStringOf(mcpArgs["tool_name"]);
-  if (toolName === undefined) return undefined;
-  if (!descriptors.some((descriptor) => descriptor.toolName === toolName)) return undefined;
-  return { toolName, arguments: decodeMcpArguments(mcpArgs) };
-}
-
-/**
- * Decodes Cursor's `McpArgs.args` — a `map<string, google.protobuf.Value>`
- * carried as repeated map-entry messages — into a canonical arguments string.
- */
-function decodeMcpArguments(mcpArgs: Record<string, unknown>): string {
-  const entries = mcpArgs["args"];
-  const raw = Array.isArray(entries)
-    ? entries.filter((entry): entry is Uint8Array => entry instanceof Uint8Array)
-    : [];
-  if (raw.length === 0) return "{}";
-  try {
-    return JSON.stringify(decodeStructEntriesToJson(raw));
-  } catch {
-    return "{}";
-  }
-}
-
-/** One image-bearing block of a tool result, ready for `McpToolResultContentItem`. */
-interface ResultImage {
-  readonly data: Uint8Array;
-  readonly mimeType: string;
-}
-
-/** Reads the images out of one canonical tool result. */
-function resultImages(part: Extract<ContentPart, { kind: "toolResult" }>): ResultImage[] {
-  if (typeof part.content === "string") return [];
-  const images: ResultImage[] = [];
-  for (const child of part.content) {
-    if (child.kind !== "image") continue;
-    const source = resolveImageSource(child.payload);
-    const url = source?.url;
-    if (url === undefined) continue;
-    const dataUrl = splitDataUrl(url);
-    if (dataUrl === undefined) continue;
-    const bytes = base64ToBytes(dataUrl.data);
-    if (bytes === undefined) continue;
-    const mimeType = sniffImageMime(bytes) ?? dataUrl.mediaType;
-    if (ALLOWED_IMAGE_MIME_TYPES[mimeType] !== true) continue;
-    if (bytes.byteLength > MAX_IMAGE_BYTES) continue;
-    images.push({ data: bytes, mimeType });
-  }
-  return images;
-}
-
 /** One Run's live state while this adapter is pumping it. */
 interface RunHandle {
   readonly transport: CursorRunTransport;
   readonly write: (message: Uint8Array) => Promise<void>;
   close(reason?: string): void;
-}
-
-/** The donor's per-Run stream state, kept across a Run's request legs. */
-interface CursorRunFrameState {
-  readonly completion: ReturnType<typeof createRunCompletion>;
-  readonly checkpoint: CursorCheckpointState;
-  /** Frame kinds since the last checkpoint, for the "went quiet" error. */
-  kindsSinceCheckpoint: string[];
-  /** Heartbeats since the last semantic frame; a quiet Run must not hang. */
-  quietBeats: number;
-  /** `tool_call_completed` frames the edge reported for this step. */
-  serverToolCount: number;
-  /** The transport this Run was opened on. */
-  transport: "http2" | "http1";
-  /** Attempt number, for the structured terminal error. */
-  attempt: number;
-}
-
-/** One decoded server frame, ready for pump consumption. */
-type RunFrame = Record<string, unknown>;
-
-/**
- * The reader's end-of-stream marker: every enumeration over the frame queue
- * resolves `done` here, so a pump nested across requests finalizes on the
- * same signal the raw reader produced.
- */
-interface RunStreamEnd {
-  readonly __streamEnd: Http2BidiEndReason;
-  readonly failure: GatewayError | undefined;
-}
-
-function isRunStreamEnd(item: unknown): item is RunStreamEnd {
-  return typeof item === "object" && item !== null && "__streamEnd" in item;
-}
-
-type RunFrameItem = RunFrame | RunStreamEnd;
-
-function isHeartbeatFrame(item: unknown): boolean {
-  if (item === null || typeof item !== "object" || isRunStreamEnd(item)) return false;
-  const update = (item as RunFrame)["interaction_update"];
-  if (update === null || typeof update !== "object") return false;
-  return "heartbeat" in (update as Record<string, unknown>);
-}
-
-/**
- * One Run's shared frame queue.
- *
- * A single read loop decodes `AgentServerMessage` frames for the Run's whole
- * lifetime, independent of any single request. A pump subscribes for the leg
- * it serves; when that request ends, frames keep queueing (the reader and the
- * client-heartbeat cadence both stay alive), and the Run's next leg drains
- * them. Without this, a request that ends between the tool call and its
- * answer disposed the body reader and the heartbeat timer, leaving the Cursor
- * edge fed by nothing and the turn waiting on a result nobody could deliver.
- *
- * Exported for unit tests of the queue bound; production code reaches it only
- * through `#startReader`.
- */
-export class RunFrameStream {
-  private items: RunFrameItem[] = [];
-  private waiters: Array<{
-    resolve: (result: IteratorResult<RunFrameItem>) => void;
-    reject: (error: unknown) => void;
-  }> = [];
-  private closed = false;
-  private subscribers = 0;
-
-  /** Bounds the gap between legs: heartbeats are droppable, semantics are not. */
-  private static readonly MAX_IDLE_ITEMS = 2_048;
-
-  push(message: RunFrame): void {
-    if (this.closed) return;
-    if (this.subscribers === 0 && this.items.length >= RunFrameStream.MAX_IDLE_ITEMS) {
-      // An idle Run only accumulates keepalives; drop them first so a bounded
-      // queue survives a long tool-result gap without losing real frames.
-      while (this.items.length >= RunFrameStream.MAX_IDLE_ITEMS && isHeartbeatFrame(this.items[0])) {
-        this.items.shift();
-      }
-      if (this.items.length >= RunFrameStream.MAX_IDLE_ITEMS) {
-        // The gap carried more semantic frames than the queue can hold.
-        // Dropping real frames silently would corrupt the turn, so the stream
-        // ends in an error instead and the pump surfaces it: the bound above
-        // is real in both directions.
-        this.end(
-          { kind: "remote-error", error: new Error("Cursor Run frame queue overflowed") },
-          new GatewayError(
-            "platform_unavailable",
-            502,
-            "Cursor Run produced more frames than the gateway can buffer between tool legs (request {requestId}). The upstream came back empty-handed — retry 🌙",
-            { providerId: CURSOR_PROVIDER_ID },
-            "upstream",
-          ),
-        );
-        return;
-      }
-    }
-    this.items.push(message);
-    this.#drain();
-  }
-
-  end(reason: Http2BidiEndReason, failure: GatewayError | undefined): void {
-    if (this.closed) return;
-    this.closed = true;
-    this.items.push({ __streamEnd: reason, failure });
-    this.#drain();
-  }
-
-  subscribe(): AsyncIterableIterator<RunFrameItem> {
-    this.subscribers += 1;
-    const self = this;
-    const next = async (): Promise<IteratorResult<RunFrameItem>> => {
-      const front = self.items.shift();
-      if (front !== undefined) return { done: false, value: front };
-      if (self.closed) {
-        self.#release();
-        return { done: true, value: undefined };
-      }
-      return await new Promise<IteratorResult<RunFrameItem>>((resolve, reject) => {
-        self.waiters.push({ resolve, reject });
-      });
-    };
-    const releaseOnReturn = (): Promise<IteratorResult<RunFrameItem>> => {
-      self.#release();
-      self.#flushWaiters({ done: true, value: undefined });
-      return Promise.resolve({ done: true, value: undefined });
-    };
-    const iterator: AsyncIterableIterator<RunFrameItem> = {
-      next,
-      return: releaseOnReturn,
-      [Symbol.asyncIterator](): AsyncIterableIterator<RunFrameItem> {
-        return iterator;
-      },
-    };
-    return iterator;
-  }
-
-  #release(): void {
-    this.subscribers = Math.max(0, this.subscribers - 1);
-  }
-
-  /** Resolves parked consumers with queued items, in order. */
-  #drain(): void {
-    while (this.waiters.length > 0 && this.items.length > 0) {
-      const waiter = this.waiters.shift();
-      waiter?.resolve({ done: false, value: this.items.shift() as RunFrameItem });
-    }
-    if (this.closed && this.items.length === 0) {
-      this.#flushWaiters({ done: true, value: undefined });
-    }
-  }
-
-  #flushWaiters(result: IteratorResult<RunFrameItem>): void {
-    for (const waiter of this.waiters) waiter.resolve(result);
-    this.waiters = [];
-  }
 }
 
 class CursorAdapter implements ProviderAdapter {
@@ -1184,11 +770,10 @@ class CursorAdapter implements ProviderAdapter {
     credential: string,
     context: ProviderDispatchContext,
   ): Promise<readonly CursorModelInfo[]> {
-    const key = String(fnv1a32(credential));
     // Peek first: `get` deletes expired entries, but the stale roster must
     // survive as the fallback when the refetch fails (see the catch below).
-    const stale = rosterCache.peek(key);
-    const cached = rosterCache.get(key);
+    const stale = rosterCachePeek(credential);
+    const cached = rosterCacheGet(credential);
     if (cached !== undefined) return cached.roster;
     try {
       const roster = await fetchCursorModels({
@@ -1719,33 +1304,6 @@ class CursorAdapter implements ProviderAdapter {
   }
 }
 
-/** Attaches the donor's structured failure shape to a terminal GatewayError. */
-function structuredCursorFailure(
-  failure: GatewayError,
-  classification: ReturnType<typeof classifyCursorFailure>,
-  state: CursorRunFrameState | undefined,
-  runId: string,
-): GatewayError {
-  const checkpoint = state?.checkpoint;
-  const quiet = classification.kind === "quiet" ? cursorQuietError(checkpoint) : undefined;
-  const detail = quiet?.message ?? failure.message;
-  return new GatewayError(
-    failure.code,
-    failure.status,
-    `Cursor ${classification.kind}: ${detail} (attempt ${(state?.attempt ?? 0) + 1}/${CURSOR_MAX_OPEN_RETRIES + 1}, ` +
-      `transport ${state?.transport ?? "unknown"}, checkpoint ${checkpoint?.index ?? 0}, run ${runId})`,
-    {
-      ...failure.details,
-      providerId: CURSOR_PROVIDER_ID,
-      cursorFailureKind: classification.kind,
-      retryable: classification.retryable,
-      checkpointIndex: checkpoint?.index ?? 0,
-      checkpointStreak: checkpoint?.streak ?? 0,
-    },
-    failure.origin,
-  );
-}
-
 /** RequestContext Cursor receives in reply to a context probe. */
 function probeContextFor(descriptors: readonly CursorToolDescriptor[]): Record<string, unknown> {
   return {
@@ -1760,103 +1318,6 @@ function probeContextFor(descriptors: readonly CursorToolDescriptor[]): Record<s
     rules_info_complete: true,
     env_info_complete: true,
   };
-}
-
-/**
- * The continuation scope of one dispatch.
- *
- * Derived from the route's own account identity plus the caller's tenant and API
- * key. A route with no account cannot scope a continuation, and a Run that
- * cannot be scoped must not be held open across requests at all.
- */
-function sessionScope(context: ProviderDispatchContext): CursorContinuationScope {
-  const scope: ProviderContinuationScope | undefined = context.continuation_scope;
-  return {
-    tenantId: scope?.tenantId ?? "",
-    apiKeyId: scope?.apiKeyId ?? "",
-    providerId: CURSOR_PROVIDER_ID,
-    providerAccountId: scope?.providerAccountId ?? context.credential.account_id ?? "",
-  };
-}
-
-/** One tool result the client sent back for a call this process is holding. */
-interface PendingToolResult {
-  readonly callId: string;
-  readonly text: string;
-  readonly isError: boolean;
-  readonly images: readonly ResultImage[];
-}
-
-/**
- * Reads the tool results this request wants delivered to a held Run.
- *
- * Only ids in the `call_cursor_<run-id>_<exec-id>` shape are considered: any
- * other id is the client's own, belongs to a different provider's conversation,
- * and must not be sent to Cursor.
- */
-function readPendingToolResult(
-  request: CanonicalRequest,
-  _context: ProviderDispatchContext,
-): PendingToolResult[] | undefined {
-  const results: PendingToolResult[] = [];
-  for (const message of request.messages) {
-    for (const part of message.content) {
-      if (part.kind !== "toolResult") continue;
-      if (!part.call_id.startsWith("call_cursor_")) continue;
-      const text =
-        typeof part.content === "string"
-          ? part.content
-          : part.content.map((child) => (child.kind === "text" ? child.text : "")).join("\n");
-      results.push({
-        callId: part.call_id,
-        text,
-        isError: part.is_error === true,
-        images: resultImages(part),
-      });
-    }
-  }
-  return results.length > 0 ? results : undefined;
-}
-
-/** Every `toolCall` call id the conversation carries, in one scan. */
-function toolCallIds(request: CanonicalRequest): Set<string> {
-  const calledIds = new Set<string>();
-  for (const message of request.messages) {
-    for (const part of message.content) {
-      if (part.kind === "toolCall") calledIds.add(part.call_id);
-    }
-  }
-  return calledIds;
-}
-
-/**
- * Marks a request as a complete conversation replay rather than a tail
- * continuation: every `call_cursor_*` tool result it carries is answered by a
- * `toolCall` block in the same conversation. That is the shape a client gets
- * when it resends its recorded transcript — a gateway restart between legs or
- * an evicted Run — and the only shape safe to rebase into a fresh Run, where
- * the recorded exchange travels as history.
- *
- * The matching `toolCall` may live anywhere in the conversation, not only in
- * the trailing assistant turn: Claude Code resends the full transcript, which
- * contains several earlier `call_cursor_*` rounds. A scan that accepted only
- * one trailing assistant/tool pair refused those complete replays with
- * "no longer pending" even though every result was paired and none was live
- * (mirrors `isCompleteContinuationReplay` in the preparer).
- */
-function isCompleteToolHistoryReplay(
-  calledIds: ReadonlySet<string>,
-  pending: readonly PendingToolResult[],
-): boolean {
-  return pending.every((item) => calledIds.has(item.callId));
-}
-
-/** The `call_cursor_*` result ids with no matching `toolCall` in the conversation. */
-function missingToolCallIds(
-  calledIds: ReadonlySet<string>,
-  pending: readonly PendingToolResult[],
-): string[] {
-  return pending.filter((item) => !calledIds.has(item.callId)).map((item) => item.callId);
 }
 
 export function createCursorAdapter(): ProviderAdapter {

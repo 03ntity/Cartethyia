@@ -17,16 +17,14 @@
 // The quota collector probes that same `/v1/models` surface, and model
 // discovery owns the entitlement truth.
 
-import { assertCredentialKind, assertWireFamily } from "../../provider-contracts";
 import type { ProviderAdapter, ProviderDispatchContext, ProviderDispatchTarget } from "../../provider-contracts";
 import type { ModelDefinition } from "../../provider-model-definition";
 import { catalogRows } from "../shared/catalog-rows";
 import type { ProviderModelDiscovery } from "../../discovery/discovery-types";
 import type { FetchLike, ProviderQuotaResult } from "../../quota/quota-contracts";
 import type { CanonicalEvent, CanonicalRequest } from "../../../protocol/canonical-model";
-import { GatewayError } from "../../../protocol/gateway-error";
 import { applyParamQuirks } from "../../../protocol/translation/quirks";
-import { buildClaudeMessagesRequest, filterClaudeCustomHeaders } from "../shared/claude-messages";
+import { buildClaudeMessagesRequest, filterClaudeCustomHeaders, resolveClaudeMessagesApiKey } from "../shared/claude-messages";
 import { sendClaudeMessagesRequest } from "../../../protocol/upstream/send-claude-messages";
 
 export const ZRO_PROVIDER_ID = "zro" as const;
@@ -130,20 +128,7 @@ export class ZroMessagesAdapter implements ProviderAdapter {
     candidate: ProviderDispatchTarget,
     context: ProviderDispatchContext,
   ): AsyncIterable<CanonicalEvent> {
-    if (candidate.wire_family !== "messages") {
-      assertWireFamily(candidate, "messages", "zro messages leg");
-    }
-    if (context.credential.credential_kind !== "api_key") {
-      assertCredentialKind(context.credential, "api_key", "zro");
-    }
-    if (context.credential.secret === undefined || context.credential.secret.length === 0) {
-      throw new GatewayError(
-        "invalid_request",
-        400,
-        "zro: API key is missing a secret value (request {requestId}). Wrong key, right door — check the key 🔑",
-      );
-    }
-    const apiKey = new TextDecoder().decode(context.credential.secret);
+    const apiKey = resolveClaudeMessagesApiKey(candidate, context, "zro messages leg", "zro");
     const customHeaders = filterClaudeCustomHeaders({
       ...context.credential.custom_headers,
     });

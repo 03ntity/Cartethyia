@@ -12,9 +12,9 @@
 // for operator-supplied headers, so they are layered onto the built headers
 // at this call site instead.
 import type { CanonicalEvent, CanonicalRequest } from "../../../protocol/canonical-model";
-import { readCredentialSecret, assertWireFamily, type ProviderDispatchTarget, type ProviderAdapter, type ProviderDispatchContext } from "../../provider-contracts";
+import { readCredentialSecret, type ProviderDispatchTarget, type ProviderAdapter, type ProviderDispatchContext } from "../../provider-contracts";
 import { providerBaseUrl } from "../../provider-metadata";
-import { buildClaudeMessagesRequest } from "../shared/claude-messages";
+import { buildClaudeMessagesRequest, assertClaudeMessagesWireFamily } from "../shared/claude-messages";
 import { sendClaudeMessagesRequest } from "../../../protocol/upstream/send-claude-messages";
 import { ANTHROPIC_BETA_CAPABILITIES } from "../claude/claude-betas";
 
@@ -95,9 +95,7 @@ class AgentRouterAdapter implements ProviderAdapter {
     candidate: ProviderDispatchTarget,
     context: ProviderDispatchContext,
   ): AsyncIterable<CanonicalEvent> {
-    if (candidate.wire_family !== "messages") {
-      assertWireFamily(candidate, "messages", "agentrouter");
-    }
+    assertClaudeMessagesWireFamily(candidate, "agentrouter");
     const apiKey = readCredentialSecret(context.credential, "AgentRouter API key is required");
 
     // Endpoint resolution stays provider-specific: an absolute candidate path

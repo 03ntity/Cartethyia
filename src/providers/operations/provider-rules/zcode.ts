@@ -4,7 +4,7 @@
  * model.
  */
 import { resolveAccountQuotaCooldownMs } from "../../../config/cooldowns";
-import type { AccountErrorRule } from "../account-error-classification";
+import type { AccountErrorRule } from "../account-error-contracts";
 
 /** The model name a Start Plan refusal named in its message, if any. */
 function refusedTrialModel(statusCode: number | null, message: string): string | undefined {

@@ -12,7 +12,7 @@
  * - a non-positive capacity is rejected at construction.
  */
 import { describe, expect, test } from "bun:test";
-import { BoundedLruMap } from "../../src/transport/routing/bounded-lru";
+import { BoundedLruMap } from "../../src/shared/bounded-lru";
 
 describe("BoundedLruMap", () => {
   test("inserting past capacity evicts the least-recently-used entry", () => {

@@ -14,11 +14,9 @@
  */
 import type { ModelDefinition } from "../provider-model-definition";
 import type { CanonicalEvent, CanonicalRequest } from "../../protocol/canonical-model";
-import { GatewayError } from "../../protocol/gateway-error";
-import { buildClaudeMessagesRequest, filterClaudeCustomHeaders } from "./shared/claude-messages";
+import { buildClaudeMessagesRequest, filterClaudeCustomHeaders, assertClaudeMessagesWireFamily, assertClaudeMessagesApiKeyCredential, readClaudeMessagesApiKeySecret } from "./shared/claude-messages";
 import { sendClaudeMessagesRequest } from "../../protocol/upstream/send-claude-messages";
 import { applyParamQuirks } from "../../protocol/translation/quirks";
-import { assertCredentialKind, assertWireFamily } from "../provider-contracts";
 import type { ProviderDispatchTarget, ProviderAdapter, ProviderDispatchContext, ProviderId } from "../provider-contracts";
 import { providerBaseUrl } from "../provider-metadata";
 
@@ -58,23 +56,9 @@ export class AnthropicApiKeyAdapter implements ProviderAdapter {
     candidate: ProviderDispatchTarget,
     context: ProviderDispatchContext,
   ): AsyncIterable<CanonicalEvent> {
-    if (candidate.wire_family !== "messages") {
-      assertWireFamily(candidate, "messages", this.provider_id);
-    }
-    if (context.credential.credential_kind !== "api_key") {
-      assertCredentialKind(context.credential, "api_key", this.provider_id);
-    }
-    if (
-      context.credential.secret === undefined ||
-      context.credential.secret.length === 0
-    ) {
-      throw new GatewayError(
-        "invalid_request",
-        400,
-        `${this.provider_id}: API key is missing a secret value (request {requestId}). Wrong key, right door — check the credential 🔑`,
-      );
-    }
-    const apiKey = new TextDecoder().decode(context.credential.secret);
+    assertClaudeMessagesWireFamily(candidate, this.provider_id);
+    assertClaudeMessagesApiKeyCredential(context.credential, this.provider_id);
+    const apiKey = readClaudeMessagesApiKeySecret(context.credential, this.provider_id);
     const customHeaders = filterClaudeCustomHeaders({
       ...this.customHeaders,
       ...context.credential.custom_headers,

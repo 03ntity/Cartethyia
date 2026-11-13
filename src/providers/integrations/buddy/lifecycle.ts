@@ -1,4 +1,5 @@
 import { asCoercedNumber as sharedAsNumber, asRecord as sharedAsRecord } from "../../../shared/coerce";
+import { checkinDayKey as sharedCheckinDayKey } from "../../../shared/time";
 import { providerBaseUrl, BUDDY_PROVIDER_IDS } from "../../provider-metadata";
 import { sleep } from "../../../shared/sleep";
 import { QODER_CHECKIN_PROVIDER_IDS } from "../qoder/qoder-checkin";
@@ -416,8 +417,13 @@ export async function fetchDailyCheckin(args: {
   };
 }
 
+/**
+ * Calendar-day key shared with `workers/daily-checkin.ts` and the qoder
+ * check-in; the definition lives in `shared/time.ts` so all once-a-day
+ * ledgers bucket on the same UTC boundary.
+ */
 export function checkinDayKey(now: Date = new Date()): string {
-  return now.toISOString().slice(0, 10);
+  return sharedCheckinDayKey(now);
 }
 
 // ── buddy-growth-shared ──────────────────────────────────────────

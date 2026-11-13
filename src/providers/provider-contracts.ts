@@ -104,6 +104,16 @@ export type OutboundFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+/**
+ * Minimal fetch surface the OAuth lane accepts. Structurally identical to
+ * {@link OutboundFetch}; the alias exists so OAuth call sites keep their own
+ * name. Single owner: this file — `oauth-flow-store.ts` and
+ * `authentication/oauth-client.ts` re-export it rather than restate it. (The
+ * quota lane's `FetchLike` in `quota-contracts` is `typeof fetch`, a
+ * deliberately wider shape — see `quota/quota-contracts.ts`.)
+ */
+export type FetchLike = OutboundFetch;
+
 /** Fetch capability that validates DNS answers and redirects before each request. */
 export type ValidatedOutboundFetch = OutboundFetch;
 

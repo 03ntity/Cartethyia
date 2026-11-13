@@ -1,7 +1,6 @@
 // Hybrid: the Messages-wire leg (`InferhubMessagesAdapter`, Claude Messages
 // envelope + Bearer auth + breakpoint cache stamping) is a non-OpenAI wire and
 // stays bespoke; the chat leg is a declarative spec row.
-import { assertCredentialKind, assertWireFamily } from "../provider-contracts";
 import type { ProviderDispatchTarget, ProviderAdapter, ProviderDispatchContext } from "../provider-contracts";
 import type { ModelDefinition } from "../provider-model-definition";
 import type { ProviderModelDiscovery } from "../discovery/discovery-types";
@@ -11,9 +10,8 @@ import { createApiKeyAdapter, type ApiKeyProviderSpec } from "../configured-prov
 import type { FetchLike, ProviderQuotaResult } from "../quota/quota-contracts";
 import { probeApiKeyConnectivity } from "../quota/quota-support";
 import type { CanonicalEvent, CanonicalRequest, ContentPart } from "../../protocol/canonical-model";
-import { GatewayError } from "../../protocol/gateway-error";
 import { applyParamQuirks } from "../../protocol/translation/quirks";
-import { buildClaudeMessagesRequest, filterClaudeCustomHeaders } from "./shared/claude-messages";
+import { buildClaudeMessagesRequest, filterClaudeCustomHeaders, resolveClaudeMessagesApiKey } from "./shared/claude-messages";
 import { resolveInboundSessionId } from "../operations/session-resolution";
 import { isRecord } from "../../protocol/codecs";
 import { sendClaudeMessagesRequest } from "../../protocol/upstream/send-claude-messages";
@@ -326,16 +324,7 @@ export class InferhubMessagesAdapter implements ProviderAdapter {
     candidate: ProviderDispatchTarget,
     context: ProviderDispatchContext,
   ): AsyncIterable<CanonicalEvent> {
-    if (candidate.wire_family !== "messages") {
-      assertWireFamily(candidate, "messages", "inferhub messages leg");
-    }
-    if (context.credential.credential_kind !== "api_key") {
-      assertCredentialKind(context.credential, "api_key", "inferhub");
-    }
-    if (context.credential.secret === undefined || context.credential.secret.length === 0) {
-      throw new GatewayError("invalid_request", 400, "inferhub: API key is missing a secret value (request {requestId}). Wrong key, right door — check the key 🔑");
-    }
-    const apiKey = new TextDecoder().decode(context.credential.secret);
+    const apiKey = resolveClaudeMessagesApiKey(candidate, context, "inferhub messages leg", "inferhub");
     const customHeaders = filterClaudeCustomHeaders({
       ...context.credential.custom_headers,
     });

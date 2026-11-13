@@ -1,4 +1,4 @@
-// Bounded LRU map: the one shared implementation for routing-layer caches.
+// Bounded LRU map: the one shared implementation for bounded caches.
 
 /**
  * Evicts the oldest-inserted entry while `map.size > cap`. The shared
@@ -22,11 +22,10 @@ export function evictOldestEntry<K>(map: Map<K, unknown>, cap: number): void {
  * tail = MRU), which `Map` maintains for free — so eviction is one
  * `keys().next()` and no bookkeeping arrays.
  *
- * The routing layer previously hand-rolled this shape twice (round-robin
- * state, capability profiles) with subtly different code. One implementation
- * means the bound is provable once: the map's size can never exceed
- * `capacity`, and every entry is reachable through the normal `Map` API the
- * callers already use.
+ * Routing, network, protocol, and provider caches used to hand-roll this
+ * shape with subtly different code. One implementation means the bound is
+ * provable once: the map's size can never exceed `capacity`, and every entry
+ * is reachable through the normal `Map` API the callers already use.
  */
 export class BoundedLruMap<K, V> extends Map<K, V> {
   private readonly capacity: number;
