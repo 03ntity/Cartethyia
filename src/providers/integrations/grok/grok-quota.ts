@@ -13,6 +13,7 @@ import {
 } from "./grok-ratelimit";
 import type { GrokRateLimitProbe } from "./grok-ratelimit";
 import { storedGrokRateLimit } from "./grok-ratelimit-store";
+import { readJsonOrNull } from "../shared/cli-client-kit";
 import type { QuotaCollectionContext } from "../../quota/quota-support";
 
 const BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
@@ -154,16 +155,11 @@ async function fetchUser(
   accessToken: string,
   fetcher: FetchLike,
 ): Promise<Record<string, unknown> | null> {
-  try {
-    const response = await fetcher(USER_URL, {
-      headers: { ...xaiHeaders(accessToken), accept: "application/json" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) return null;
-    return record((await response.json()) as unknown);
-  } catch {
-    return null;
-  }
+  const parsed = await readJsonOrNull(fetcher, USER_URL, {
+    headers: { ...xaiHeaders(accessToken), accept: "application/json" },
+    timeoutMs: 10_000,
+  });
+  return record(parsed);
 }
 
 /**

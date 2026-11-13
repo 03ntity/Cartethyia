@@ -16,6 +16,7 @@
  */
 import type { ModelDefinition } from "../../provider-model-definition";
 import { isRecord } from "../../../protocol/codecs";
+import { readJsonOrNull } from "../shared/cli-client-kit";
 import { boundedUpstreamArray, boundedUpstreamNumber, sanitizeUpstreamLabel } from "../../provider-sanitize";
 import { modelsDevCatalog } from "../../discovery/models-dev-catalog";
 import type { DiscoveryInput } from "../../discovery/discovery-types";
@@ -121,16 +122,12 @@ export async function discoverKiloModels(
 ): Promise<readonly ModelDefinition[] | null> {
   const { accessToken } = decodeKiloCredential(input.credential);
   const fetcher = input.fetcher ?? fetch;
-  const timeoutSignal = AbortSignal.timeout(15_000);
-  const signal =
-    input.signal === undefined ? timeoutSignal : AbortSignal.any([input.signal, timeoutSignal]);
   try {
-    const response = await fetcher(KILO_MODELS_URL, {
+    const payload = await readJsonOrNull<unknown>(fetcher, KILO_MODELS_URL, {
       headers: { accept: "application/json", authorization: `Bearer ${accessToken}` },
-      signal,
+      timeoutMs: 15_000,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
-    if (!response.ok) return null;
-    const payload: unknown = await response.json();
     if (!isRecord(payload)) return null;
     const entries = boundedUpstreamArray(payload.data);
     if (!entries) return null;

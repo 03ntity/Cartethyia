@@ -13,31 +13,62 @@ import { GatewayError } from "../../../protocol/gateway-error";
 import type { FetchLike, ProviderQuotaResult } from "../../quota/quota-contracts";
 
 /**
- * One authenticated GET returning a JSON object, or `null` when the endpoint
- * is unreachable, answers non-2xx, or returns a non-object body. The caller
- * decides what `null` means for its surface (quota collectors report an
- * unknown balance rather than cooling the account).
+ * Options for {@link readJsonOrNull}: request headers, the per-request timeout
+ * (defaults to 15 seconds), and an optional caller abort signal composed with
+ * the timeout.
  */
-export async function readJsonOk(
+export interface ReadJsonOptions {
+  readonly headers?: Record<string, string>;
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * One authenticated GET whose parsed JSON body is the result, or `null` when
+ * the request fails, the endpoint answers non-2xx, or the body is not JSON.
+ * This is the fetch-and-null shape every integration used to re-implement and
+ * drift (the shared-probing header documents that class of bug); new surfaces
+ * call this instead of copying the try/catch ladder. The caller decides what
+ * `null` means for its surface.
+ */
+export async function readJsonOrNull<T = unknown>(
   fetcher: FetchLike,
   url: string | URL,
-  headers: Record<string, string>,
-): Promise<Record<string, unknown> | null> {
+  options: ReadJsonOptions = {},
+): Promise<T | null> {
+  const { headers = {}, timeoutMs = 15_000, signal } = options;
   try {
     const res = await fetcher(url, {
       method: "GET",
       headers,
-      signal: AbortSignal.timeout(15_000),
+      signal:
+        signal === undefined
+          ? AbortSignal.timeout(timeoutMs)
+          : AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
     });
     if (!res.ok) return null;
     try {
-      return (await res.json()) as Record<string, unknown>;
+      return (await res.json()) as T;
     } catch {
       return null;
     }
   } catch {
     return null;
   }
+}
+
+/**
+ * One authenticated GET returning a JSON object, or `null` when the endpoint
+ * is unreachable, answers non-2xx, or returns a non-object body. The caller
+ * decides what `null` means for its surface (quota collectors report an
+ * unknown balance rather than cooling the account).
+ */
+export function readJsonOk(
+  fetcher: FetchLike,
+  url: string | URL,
+  headers: Record<string, string>,
+): Promise<Record<string, unknown> | null> {
+  return readJsonOrNull<Record<string, unknown>>(fetcher, url, { headers });
 }
 
 /**

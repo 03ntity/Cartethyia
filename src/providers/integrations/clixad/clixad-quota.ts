@@ -10,6 +10,7 @@
 
 import type { FetchLike, ProviderQuotaResult, ProviderQuotaWindow } from "../../quota/quota-contracts";
 import { cleanError, number, percentWindow, text } from "../../quota/quota-contracts";
+import { readJsonOrNull } from "../shared/cli-client-kit";
 import type { QuotaCollectionContext } from "../../quota/quota-support";
 
 async function readWallet(
@@ -18,23 +19,12 @@ async function readWallet(
   fetcher: FetchLike,
 ): Promise<Record<string, unknown> | null> {
   if (!token) return null;
-  return fetcher(`${baseUrl}/v1/wallet`, {
-    method: "GET",
+  return readJsonOrNull<Record<string, unknown>>(fetcher, `${baseUrl}/v1/wallet`, {
     headers: {
       accept: "application/json",
       authorization: `Bearer ${token}`,
     },
-    signal: AbortSignal.timeout(15_000),
-  })
-    .then(async (res) => {
-      if (!res.ok) return null;
-      try {
-        return (await res.json()) as Record<string, unknown>;
-      } catch {
-        return null;
-      }
-    })
-    .catch(() => null);
+  });
 }
 
 /** Next midnight UTC, for the free-tier reset window. */

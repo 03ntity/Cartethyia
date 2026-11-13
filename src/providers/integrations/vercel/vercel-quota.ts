@@ -18,32 +18,10 @@ import {
   number,
   unsupportedQuota,
 } from "../../quota/quota-contracts";
+import { readJsonOrNull } from "../shared/cli-client-kit";
 import type { QuotaCollectionContext } from "../../quota/quota-support";
 
 const VERCEL_CREDITS_URL = "https://ai-gateway.vercel.sh/v1/credits";
-
-function readCredits(
-  credential: string,
-  fetcher: FetchLike,
-): Promise<Record<string, unknown> | null> {
-  return fetcher(VERCEL_CREDITS_URL, {
-    method: "GET",
-    headers: {
-      authorization: `Bearer ${credential}`,
-      accept: "application/json",
-    },
-    signal: AbortSignal.timeout(15_000),
-  })
-    .then(async (res) => {
-      if (!res.ok) return null;
-      try {
-        return (await res.json()) as Record<string, unknown>;
-      } catch {
-        return null;
-      }
-    })
-    .catch(() => null);
-}
 
 /** Reads the Vercel AI Gateway credit balance and returns a normalized result. */
 export async function fetchVercelQuota(
@@ -52,7 +30,16 @@ export async function fetchVercelQuota(
   _context?: QuotaCollectionContext,
 ): Promise<ProviderQuotaResult> {
   try {
-    const credits = await readCredits(credential, fetcher);
+    const credits = await readJsonOrNull<Record<string, unknown>>(
+      fetcher,
+      VERCEL_CREDITS_URL,
+      {
+        headers: {
+          authorization: `Bearer ${credential}`,
+          accept: "application/json",
+        },
+      },
+    );
     if (!credits) {
       return unsupportedQuota("vercel");
     }

@@ -21,6 +21,7 @@
  */
 import type { ModelDefinition } from "../../provider-model-definition";
 import { isRecord } from "../../../protocol/codecs";
+import { readJsonOrNull } from "../shared/cli-client-kit";
 import { boundedUpstreamArray, boundedUpstreamNumber, sanitizeUpstreamLabel } from "../../provider-sanitize";
 import { modelsDevCatalog } from "../../discovery/models-dev-catalog";
 import type { DiscoveryInput } from "../../discovery/discovery-types";
@@ -175,9 +176,6 @@ export async function discoverGithubModels(
   const credential = parseGithubCredential(input.credential);
   const { access, apiHost, profile } = credential;
   const fetcher = input.fetcher ?? fetch;
-  const timeoutSignal = AbortSignal.timeout(15_000);
-  const signal =
-    input.signal === undefined ? timeoutSignal : AbortSignal.any([input.signal, timeoutSignal]);
   try {
     // The reference client stamps its Copilot identity on `/models` too
     // (`_mixinHeaders` covers the Models request type): session + machine ids.
@@ -203,9 +201,11 @@ export async function discoverGithubModels(
     const discoveryHost = profile === "opencode-copilot"
       ? githubCopilotApiHostForProfile(profile, copilotGitHubDomain())
       : apiHost;
-    const response = await fetcher(`https://${discoveryHost}/models`, { headers, signal });
-    if (!response.ok) return null;
-    const payload: unknown = await response.json();
+    const payload = await readJsonOrNull<unknown>(fetcher, `https://${discoveryHost}/models`, {
+      headers,
+      timeoutMs: 15_000,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
     if (!isRecord(payload)) return null;
     const entries = boundedUpstreamArray(payload.data);
     if (!entries) return null;
