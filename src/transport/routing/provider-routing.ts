@@ -38,7 +38,7 @@ export function resolveProviderRouting(
  * Rotates one same-rank run according to the provider routing strategy.
  * `roundRobinFor` supplies the per-key rotation state owned by the engine.
  */
-export function reorderRun(
+function reorderRun(
   run: RouteCandidate[],
   settings: ProviderRoutingSetting | undefined,
   tid: string | null,

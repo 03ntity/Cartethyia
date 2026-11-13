@@ -64,7 +64,7 @@ function hasSqliteDialect(database: unknown): boolean {
  * chosen from the env would emit `jsonb_each_text` into SQLite and fail; the
  * handle's session is the authority, exactly as `mergeJson` already treats it.
  */
-export function isSqliteDatabase(database: unknown): boolean {
+function isSqliteDatabase(database: unknown): boolean {
   return hasSqliteDialect(database);
 }
 

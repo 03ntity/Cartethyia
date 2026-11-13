@@ -22,7 +22,7 @@ import { nodeTlsOptions, tlsProfileOf, type TlsProfile, type TlsProfileConfig } 
  * the TTL (both fields) keeps a dead socket from being reused; a fresh dial
  * is also replayed once when a pooled socket dies before response headers.
  */
-export const DEFAULT_KEEPALIVE_TIMEOUT_MS = 4_000;
+const DEFAULT_KEEPALIVE_TIMEOUT_MS = 4_000;
 /** Fresh-socket retry agent: keep-alive effectively disabled (1 ms). */
 const FRESH_SOCKET_KEEPALIVE_TIMEOUT_MS = 1;
 

@@ -236,7 +236,7 @@ function parseCount(raw: string): number {
  * a 413. When it does match, the numbers are returned so the error can quote
  * them: a client that compacts on overflow needs to know how far it overshot.
  */
-export function proseOverflowLimit(text: string): { used: number; maximum: number } | undefined {
+function proseOverflowLimit(text: string): { used: number; maximum: number } | undefined {
   const match = PROSE_OVERFLOW_PATTERN.exec(text);
   if (!match) return undefined;
   const used = parseCount(match[1]!);
@@ -327,27 +327,6 @@ export function isUpstreamQueued(body: unknown): boolean {
   return false;
 }
 
-/** The error a queued upstream request becomes: retryable, with its wait. */
-export function upstreamQueuedError(
-  providerId: string,
-  retryAfterMs: number | undefined,
-  detail: string,
-): GatewayError {
-  return new GatewayError(
-    "upstream_queued",
-    503,
-    detail.length > 0
-      ? detail
-      : "The upstream has queued this request (request {requestId}); retry after the stated interval. You're in line — no cuts 💛",
-    {
-      providerId,
-      reason: "upstream-queued",
-      ...(retryAfterMs === undefined ? {} : { retryAfterMs, cooldownMs: retryAfterMs }),
-    },
-    "upstream",
-  );
-}
-
 /**
  * Canonical status→code mapping for upstream HTTP failures.
  *
@@ -382,7 +361,7 @@ export function extractHtmlTitle(html: string): string {
 }
 
 /** The public bound on an upstream message surface. */
-export const MAX_UPSTREAM_MESSAGE_LENGTH = 500;
+const MAX_UPSTREAM_MESSAGE_LENGTH = 500;
 
 /**
  * Extracts the upstream's own text from an error body, "as-is".

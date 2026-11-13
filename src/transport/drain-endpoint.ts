@@ -43,7 +43,7 @@ export function isLoopbackPeer(peer: string | null): boolean {
 }
 
 /** Constant-time token comparison; length mismatch short-circuits safely. */
-export function tokenMatches(provided: string | null, expected: string): boolean {
+function tokenMatches(provided: string | null, expected: string): boolean {
   if (provided === null) return false;
   const a = Buffer.from(provided, "utf-8");
   const b = Buffer.from(expected, "utf-8");

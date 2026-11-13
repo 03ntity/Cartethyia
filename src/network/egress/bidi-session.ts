@@ -14,9 +14,9 @@ import type { Http2BidiEndReason, Http2BidiOpenOptions, ValidatedHttp2BidiStream
 import { HTTP2_CONNECT_TIMEOUT_MS } from "./dial";
 
 /** Read-idle bound after which a bidi stream is declared dead. */
-export const HTTP2_READ_IDLE_MS = 120_000;
+const HTTP2_READ_IDLE_MS = 120_000;
 /** Buffered inbound bytes before a bidi stream is refused as unbounded. */
-export const HTTP2_MAX_BUFFERED_BYTES = 64 * 1024 * 1024;
+const HTTP2_MAX_BUFFERED_BYTES = 64 * 1024 * 1024;
 /**
  * Session memory ceiling for one HTTP/2 session.
  *
@@ -26,7 +26,7 @@ export const HTTP2_MAX_BUFFERED_BYTES = 64 * 1024 * 1024;
  * megabytes and the caller holds those bytes anyway, so the default only adds
  * a failure mode.
  */
-export const HTTP2_SESSION_MAX_MEMORY_MB = 256;
+const HTTP2_SESSION_MAX_MEMORY_MB = 256;
 
 class Http2BidiSession implements ValidatedHttp2BidiStream {
   private status = 0;
