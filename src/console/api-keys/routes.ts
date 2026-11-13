@@ -10,9 +10,22 @@ import { literalUnion } from "../shared/elysia-schema";
 import { errorResponse } from "../shared/errors";
 import { parseRequest } from "./contracts";
 import { popupImageBytes } from "./share-popup-image";
-import { createApiKeyOperations } from "./operations";
+import { createKeyOperations } from "./key-operations";
+import { createShareOperations } from "./share-operations";
 
-export { createApiKeyOperations } from "./operations";
+/**
+ * Composes the tenant-scoped key lifecycle factory: validation, credential
+ * rotation, share links, shared-key listing, and ban handling, split across
+ * `key-operations.ts` (listing, create/update/delete, ban), `share-operations.ts`
+ * (share links, regeneration, shared-key surface), and `family-cache.ts`
+ * (family-wide cache/admission invalidation, driven from the first two).
+ */
+export function createApiKeyOperations(config: ApiKeyConfig) {
+  return {
+    ...createKeyOperations(config),
+    ...createShareOperations(config),
+  };
+}
 
 const apiKeyBody = t.Object({
   enabled: t.Optional(t.Boolean()),
