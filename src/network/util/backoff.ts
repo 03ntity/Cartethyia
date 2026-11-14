@@ -10,7 +10,7 @@
  *   `network/util/retry.ts` (idempotent lookups): additive jitter keeps the
  *   mean delay near the bound while still desynchronizing a herd.
  * - "full" — `random() * bound`, the AWS-style full jitter used by
- *   `protocol/failure-policy.ts` `fallbackRetryDelayMs` for candidate
+ *   `protocol/failure-classify.ts` `fallbackRetryDelayMs` for candidate
  *   failover, where the first retry should land anywhere inside the window.
  */
 

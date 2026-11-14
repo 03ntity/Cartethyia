@@ -124,7 +124,6 @@ interface ProductionAppDeps {
   readonly telemetryBuffer: TelemetryBatchBuffer;
   readonly resolveOAuthRefresher: (providerId: string) => Promise<OAuthTokenRefresher | undefined>;
   readonly oauthRefreshService: OAuthRefreshService;
-  /** Graduated strikes for repeated invalid-model requests. */
   /**
    * The console control plane. Optional so reduced compositions (route-only
    * shell, console stubs) stay valid; production always mounts it. Without
