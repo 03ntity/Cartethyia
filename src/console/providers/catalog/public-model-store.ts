@@ -215,8 +215,20 @@ export class PublicModelCatalogStore {
       // it - the same rule the console model picker applies. A no-auth
       // provider with nothing configured is not "set", so it stays hidden
       // until the operator adds an account.
+      //
+      // Exception: a credential-less provider (`requires_account = false`) is
+      // routable for every tenant without an account, so a key whose allowlist
+      // names its models explicitly must see them listed. `isModelAllowed`
+      // below still restricts the listing to the named models.
+      const explicitlyAllowlisted =
+        row.providerRequiresAccount === false &&
+        snapshot.model_access_mode !== "blacklist" &&
+        snapshot.model_list != null &&
+        (Array.isArray(snapshot.model_list) ? snapshot.model_list.length : (snapshot.model_list as ReadonlySet<string>).size) > 0;
       const listed =
-        tenantId === null ? row.providerRequiresAccount === false : activeProviderIds.has(row.providerId);
+        tenantId === null
+          ? row.providerRequiresAccount === false
+          : activeProviderIds.has(row.providerId) || explicitlyAllowlisted;
       if (!listed) continue;
       const qualified = `${row.providerId}/${row.modelId}`;
       // The prefix test is deliberately gone from this path: `(prefixMatch ||
