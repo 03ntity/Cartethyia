@@ -10,7 +10,7 @@ import { InjectSystemPromptDialog } from "../../src/components/InjectSystemPromp
 import { queryKeys } from "../../src/data/query-keys";
 import { createTestQueryClient, mount, type Mounted } from "../helpers/render";
 import { registerDom } from "../helpers/dom";
-import type { TenantSystemPrompts } from "../../../src/console/system-prompt/contracts";
+import type { TenantSystemPrompts } from "../../../src/protocol/system-prompt-contracts";
 import type { ProviderResponse } from "../../src/data/contracts";
 
 registerDom();
