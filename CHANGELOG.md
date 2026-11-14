@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [2.8.2] - 2026-11-14
+
 ### Fixed
 
 - **Routing: pool candidates no longer share routing decisions.** `plan()`
