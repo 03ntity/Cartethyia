@@ -49,11 +49,9 @@ RUN test -f migrations/full-postgres/0000_baseline.sql \
     && test -f migrations/lite-sqlite3/0000_baseline.sql \
     && test -f migrations/full-postgres/0001_allow_multiple_shared_keys_per_ip.sql \
     && test -f migrations/lite-sqlite3/0001_allow_multiple_shared_keys_per_ip.sql
-# Vendored native SDK (TuringShield) — must be present for the compiled binary
-# to resolve the bundle at runtime via CARTETHYIA_PACKAGE_ROOT.
-COPY vendor ./vendor
-RUN test -f vendor/turing-sdk/build/Release/turing_sdk.node \
-    && test -f vendor/turing-sdk/build/Release/TuringShieldSDK.dll
+# Vendored .proto files under vendor/proto are cross-check references for the
+# inline protobufjs schemas — nothing in src imports them, so the image does
+# not ship vendor/ at all.
 RUN bun run build:aot && bun run build:binary --outfile /build/dist/cartethyia
 
 # ---------------------------------------------------------------------------
@@ -97,7 +95,6 @@ RUN test -f /app/migrations/full-postgres/0000_baseline.sql \
     && test -f /app/migrations/lite-sqlite3/0001_allow_multiple_shared_keys_per_ip.sql
 COPY --from=builder --chown=cartethyia:cartethyia /build/dist/dashboard ./dist/dashboard
 COPY --chmod=755 docker-entrypoint.sh ./entrypoint.sh
-COPY --from=builder --chown=cartethyia:cartethyia /build/vendor ./vendor
 COPY --from=builder --chown=cartethyia:cartethyia /build/dist/cartethyia ./cartethyia
 
 # AOT prewarm keeps first boot fast; the binary reads this instead of

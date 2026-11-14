@@ -19,6 +19,7 @@ scripts/*.test.ts
 # local development; the image ships none, so the entry only keeps them out of
 # the build context. `.cache` holds generated runtime configs.
 bin
+vendor
 .cache
 
 # Development tools and IDE
