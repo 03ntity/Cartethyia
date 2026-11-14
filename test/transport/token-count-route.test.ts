@@ -109,14 +109,7 @@ dbDescribe("count_tokens on a route without a counter", () => {
     expect(body.error.code).toBe("invalid_request");
   });
 
-  // Skipped: this assertion is deterministic in isolation but fails under the
-  // full suite run — the telemetry finalizer's async enqueue races the shared
-  // test pool, and a row can miss the 5s poll under load. The behavior it
-  // covers (a terminal telemetry row with observed latency) is exercised by
-  // `test/observability/telemetry-buffer.test.ts` and the usage aggregation
-  // suites; the estimate path itself is covered by the 200/input_tokens
-  // assertions above.
-  test.skip("an estimated count still writes exactly one telemetry row with observed latency", async () => {
+  test("an estimated count still writes exactly one telemetry row with observed latency", async () => {
     await gateway.setRoutes([
       {
         providerId: chat.providerId,
@@ -131,21 +124,30 @@ dbDescribe("count_tokens on a route without a counter", () => {
     const requestId = response.headers.get("x-request-id");
     expect(requestId).not.toBeNull();
 
-    // The buffer flushes on a timer; the drain loop empties it fully.
-    await gateway.telemetryBuffer.flush();
-
+    // The finalizer enqueues its row asynchronously after the response is
+    // already on the wire, so a single flush-and-query races it under load.
+    // Drain repeatedly until the row lands; the deadline only absorbs
+    // scheduler delay, and a missing row still fails the test.
     const pool = await getTestPool();
-    const result = await pool.query<{
-      status: string;
-      http_status: number | null;
-      endpoint: string | null;
-      input_tokens: number | null;
-      estimated_cost_usd: string | null;
-      latency_ms: number | null;
-    }>(
-      "select status, http_status, endpoint, input_tokens, estimated_cost_usd, latency_ms from telemetry_events where request_id = $1",
-      [requestId],
-    );
+    const fetchRow = () =>
+      pool.query<{
+        status: string;
+        http_status: number | null;
+        endpoint: string | null;
+        input_tokens: number | null;
+        estimated_cost_usd: string | null;
+        latency_ms: number | null;
+      }>(
+        "select status, http_status, endpoint, input_tokens, estimated_cost_usd, latency_ms from telemetry_events where request_id = $1",
+        [requestId],
+      );
+    let result = await fetchRow();
+    for (let waited = 0; result.rowCount === 0 && waited < 10_000; waited += 250) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await gateway.telemetryBuffer.flush();
+      result = await fetchRow();
+    }
+
     // Exactly one row: the finalizer runs once (no `afterResponse` double-write).
     expect(result.rowCount).toBe(1);
     const row = result.rows[0]!;
@@ -158,5 +160,5 @@ dbDescribe("count_tokens on a route without a counter", () => {
     // The latency histogram blind spot: the row now carries a real latency.
     expect(row.latency_ms).not.toBeNull();
     expect(Number(row.latency_ms)).toBeGreaterThanOrEqual(0);
-  });
+  }, 15_000);
 });
