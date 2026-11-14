@@ -92,8 +92,9 @@ own wire says so on its metadata, not in the enum.
 combos, provider routing, and pool routing. A console mutation calls `invalidate()`,
 which bumps the revision and drops the cache. The next request rebuilds. The
 mutation itself does not wait for the thirteen database reads a rebuild issues
-(providers, models, accounts, aliases, combos, provider and pool routing
-settings, disabled models, and the two CLI mapping tables, plus pool settings).
+(providers, models, accounts, aliases, combos, provider routing, pool routing,
+pool accounts, disabled models, the two CLI mapping tables, pool settings, and
+tenant settings).
 
 `RoutingEngine` turns a requested model into a `RoutePlan`. A bare name matches
 `model_id`. A `provider/model` name matches both. Alias and combo lookup happen
@@ -106,7 +107,6 @@ for the per-key slot table that merges into the same resolver.
 
 | Status | Eligible | Reason |
 | --- | --- | --- |
-| locked | no | `locked` |
 | disabled | no | `disabled` |
 | model cooldown | no | `model_cooldown` |
 | hard cooldown | no | `cooldown_hard` |
@@ -202,6 +202,6 @@ not push state into the gateway by any other path.
 
 ## What is intentionally absent
 
-- Fusion combos. Existing rows become `fallback` on restore (`src/console/backup/validate.ts:120-121`).
+- Fusion combos. Existing rows become `fallback` on restore (`src/console/backup/validate.ts:79`).
 - A `native` wire family and a `degraded` health status.
 - Per-request rows in Postgres. The file log is the source for those reads.

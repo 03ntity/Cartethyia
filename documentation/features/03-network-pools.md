@@ -115,7 +115,7 @@ typed so the caller can tell a dead proxy from a bad handshake —
 hosted relay front door is recorded as the protocol it actually speaks. A
 serverless host that cannot answer CONNECT at all — `isRelayHost` recognizes
 `*.vercel.app`, `*.workers.dev`, `*.netlify.app`, `*.deno.dev` — carries a
-`relayEndpoint` instead, and `src/network/outbound-fetch.ts` sends the
+`relayEndpoint` instead, and `src/network/egress/fetch.ts` sends the
 `x-relay-target`/`x-relay-path` contract to it. carte-bridge, the retired
 `bridge` kind with its own `x-bridge-*` contract, is gone; backup restore maps
 any legacy `bridge` pool to `https`.
@@ -134,7 +134,7 @@ use rather than at boot. Console-side endpoint validation is
 `validateEndpoint` in `src/console/routing/pools/contracts.ts`.
 
 `src/network/util/retry.ts` is the *outbound* retry policy. It is distinct from the
-routing failover loop in `router.ts` — one decides whether to re-dial a
+routing failover loop in `routing-engine.ts` — one decides whether to re-dial a
 connection, the other whether to try another candidate.
 
 ## Metering
@@ -187,7 +187,7 @@ straight off the selector.
 | Selection or cooldown behaviour | `src/network/pool/selector.ts`, then `state.ts` |
 | Transport or relay fallback | `src/network/pool/agent.ts`, `src/network/egress/fetch.ts` |
 | SSRF rules | `src/network/ssrf.ts`, `validateEndpoint` in `pools/contracts.ts` |
-| Byte metering | `src/network/pool/byte-accounting.ts` |
+| Byte metering | `src/network/pool/accounting.ts` |
 | Console routes | `src/console/routing/pools/routes.ts` |
 | Schema | `networkPools`, `poolRoutingSettings` in `src/persistence/schema.ts` |
 

@@ -188,30 +188,32 @@ reopens them. Exact strings live in the owning code, not here:
 
 - **Official identity prompts** — `cb` sends the CodeBuddy Code prompt,
   matching the official client instead of a neutral stand-in
-  (`codebuddy/provider.ts`).
+  (`codebuddy/index.ts`).
 - **DSH channel-identity scrub** — `scrubBuddyChannelIdentity`
-  (`buddy-chat-shared.ts`) rewrites DeepSeek Harness role identities to the
+  (`chat-channel.ts`) rewrites DeepSeek Harness role identities to the
   CodeBuddy identity, zero-width-space tolerant.
 - **Message-id wire format** — CLI and all of CodeBuddy stay 32-hex; the turn
-  key and B3/W3C trace ids are always hex (`buddy-conversation-headers.ts`).
+  key and B3/W3C trace ids are always hex (`headers.ts`,
+  `buddyConversationHeaders`).
 - **CLI request markers** — the CLI identity keeps `x-requested-with` +
   `x-codebuddy-request` but drops browser *transport* headers and the device
   token (`codebuddy/shared.ts`).
+- **`/console/chat/completions` channel fallback** — the intl CLI profile
+  retries once on the console chat endpoint after a `11128` channel-check 400,
+  matching the donor (`codebuddy/index.ts` `channelFallbackPath`,
+  `compatible-adapter.ts`).
 - **No stainless fingerprint on chat.** The CLI's chat transport is axios, not
   the OpenAI Node SDK, so `x-stainless-*` headers are deliberately absent from
-  CLI chat (`buddy-cli-headers.ts`). Do not "restore" them — the donor's own
-  CLI does not send them on this path.
+  CLI chat (`headers.ts`, `buddyCliHeaders`). Do not "restore" them — the
+  donor's own CLI does not send them on this path.
 
 Known open conflicts with the donor, **not** changed — do not flip without the
 owner's go-ahead or live evidence:
 
-- **`11140` semantics** — donor: account restriction → auto-disable; Cartethyia:
-  content-policy (403, not credential invalidation).
-- **`/console/chat/completions` fallback** — donor retries once there on a
-  `11128` channel-check error; Cartethyia has no URL-level fallback.
-- **WorkBuddy UA token** — donor uses the brand string `WorkBuddy AI`; Cartethyia
-  uses the wire token `workbuddy-ai`, which it verified is what passes (the brand
-  string drew `403 · 11140`).
+- **`11140` semantics** — both gateways now read the verdict, not the bare
+  status: restriction wording in `displayMsg`/`actions` auto-disables the
+  account, while a bare content-policy 403 ("did not pass the safety review")
+  never flips credentials (`operations/provider-rules/buddy.ts`).
 - **Client version pins** — Cartethyia's are auto-discovered and usually newer
   than the donor's static pins; never downgrade from the donor.
 
@@ -225,7 +227,7 @@ Buddy accounts have three check-in paths and they must not race:
 - **Sweep ride-along** (`src/workers/quota-refresh-sweep.ts`) — the sweep
   drains the queue past the usual freshness gate, so a queued claim does not
   wait for the next scheduled refresh.
-- **Manual** (dashboard button → `src/console/quota/account-quota-tenant.ts`)
+- **Manual** (dashboard button → `src/console/quota/account-quota-actions.ts`)
   — bypasses `markCheckinAttempted` on the inbound call but stamps it on the
   way out, so a manual claim still blocks the automatic paths from a second
   attempt in the same window.

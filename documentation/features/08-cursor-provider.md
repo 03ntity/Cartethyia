@@ -108,7 +108,7 @@ symptom the stability exists to avoid.
 ## Known gaps
 
 - Quota collector exists (`src/providers/integrations/cursor/cursor-quota.ts`,
-  registered in `default-registry.ts`): it reads `/auth/usage` and
+  registered in `src/providers/registry/capabilities-agentic.ts`): it reads `/auth/usage` and
   `/api/usage-summary`. It was absent at the time this doc was first written;
   it is present now.
 - The catalog is live discovery only — the roster is per-account and per-plan,

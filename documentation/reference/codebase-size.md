@@ -10,8 +10,9 @@ de-bloat refactor, tracked or not). The backend is `src/`; the frontend is
 | Frontend | 181 | 47,494 | 45,080 |
 | **Total** | **768** | **207,196** | **196,063** |
 
-Source lines count physical lines in tracked `.ts/.tsx/.js/.jsx` files under
-those directories, matching the script below. Nonblank lines omit
+Source lines count physical lines in tracked files under those directories,
+matching the script below (`.ts/.tsx/.js/.jsx` plus the stray stylesheet and
+SQL assets the dashboard carries). Nonblank lines omit
 empty or whitespace-only lines but still include comments. Tests, generated
 assets, dependencies, scripts, migrations outside `src/`, and documentation
 are not included. These are repository-size estimates, not language-aware

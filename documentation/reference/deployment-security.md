@@ -39,7 +39,7 @@ Cartethyia ships protections that require no extra tooling:
 | `CARTETHYIA_DATA_DIR` | Data directory for SQLite (Lite), payloads, install id. Keep on a persistent volume. |
 | `CARTETHYIA_INSTALL_ID_DIR` | Stable install identity directory; only hosters who need cross-restart identity touch it. |
 | `CARTETHYIA_DISABLED_TASKS` | Comma-separated list to disable background tasks (e.g. `zcode-gift-claim`). |
-| Request hardening | `maxRequestBodySize` (8 MiB) bounds ingress allocation before validation; `idleTimeout` (60s) caps keep-alive abuse / Slowloris. |
+| Request hardening | `maxRequestBodySize` (16 MiB, `CARTETHYIA_SERVER_MAX_BODY_BYTES`) bounds ingress allocation before validation; `idleTimeout` (60s) caps keep-alive abuse / Slowloris. |
 | Admission & quota | Per-key concurrency/RPM/token budgets enforced before dispatch; provider max-inflight enforced per account. Rejections are fast (no upstream call). |
 | Abuse detection | `src/security/abuse.ts` rate-limits and temporarily bans abusive client addresses on failure patterns, independent of provider health. |
 | Console session | Session cookie + CSRF protection; never accepts credentials from the dashboard bundle. |
@@ -280,6 +280,9 @@ The repository ships a `Dockerfile`:
   `cartethyia-data:/app/data`, depends on `redis`, `restart: unless-stopped`.
 - `redis` service: `redis:7.4.2-alpine`, **bound to `127.0.0.1:6379`** on the
   host, with a healthcheck.
+- `pgbouncer` service: opt-in under the `full` profile
+  (`docker compose --profile full up`), transaction mode, server pool capped at
+  12 (`DEFAULT_POOL_SIZE`); without the profile it does not start.
 - PostgreSQL is never bundled; Full mode reaches it via `DATABASE_URL`.
 
 ### Hardening beyond the defaults

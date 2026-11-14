@@ -27,16 +27,16 @@ is a real write.
 
 ## Resolution
 
-Everything runs in `resolveAlias` (`src/transport/routing/router.ts:177`) against
+Everything runs in `resolveAlias` (`src/transport/routing/alias-resolution.ts:109`) against
 the merged alias map, and every step is bounded:
 
 1. **Thinking suffix is stripped first**, in `ProxyRequestPreparer`
-   (`src/transport/request/preparer.ts:101`). `model(high)` is a statement about
+   (`src/transport/request/preparer.ts:190`). `model(high)` is a statement about
    the request, not about any one upstream, and it must go before anything
    matches on the name — otherwise alias resolution, the allowlist, the prefix
    check, and routing all see a name that matches nothing, and alias resolution
    swallows its own failure into a silent miss.
-2. **`normalizeAliasKey`** (`router.ts:114`) makes a full model id honor the same
+2. **`normalizeAliasKey`** (`alias-resolution.ts:24`) makes a full model id honor the same
    mapping as the short name. A trailing `[...]` variant is stripped
    (`claude-opus-5[1m]` → `claude-opus-5`), then the family-slot fallback takes
    `claude-opus-5` → `opus`. Both only fire when the full name has no mapping of
@@ -77,7 +77,7 @@ requested name, so an alias cannot be used to reach a model the key may not use.
 
 ## Snapshot
 
-`route-catalog.ts` reads `aliasRows` and `combos` and returns
+`route-catalog-repository.ts` reads `aliasRows` and `combos` and returns
 `snapshot.aliases[tenantId]` and `snapshot.combos[tenantId]`. Both are built into
 one frozen snapshot with the CLI mapping table, provider routing, and pool
 routing; a console mutation calls `invalidate()`, which bumps the revision and
@@ -117,10 +117,10 @@ write that forgets leaves the data plane on the old plan.
 
 | Change | Start here |
 | --- | --- |
-| Name normalisation or chain walk | `normalizeAliasKey`, `resolveAlias` in `src/transport/routing/router.ts` |
-| Candidate matching or ambiguity | `resolveMatchingCandidates`, `candidateMatches` in the same file |
+| Name normalisation or chain walk | `normalizeAliasKey`, `resolveAlias` in `src/transport/routing/alias-resolution.ts` |
+| Candidate matching or ambiguity | `resolveMatchingCandidates` in `alias-resolution.ts`; the candidate index in `src/transport/routing/candidate-index.ts` |
 | Combo expansion | `expandMember` in `resolveMatchingCandidates` |
-| Snapshot compile | `src/transport/routing/route-catalog.ts` |
+| Snapshot compile | `src/transport/routing/route-catalog-repository.ts` |
 | Console | `src/console/routing/model/operations.ts` |
 | Schema | `modelAliases`, `modelCombos` in `src/persistence/schema.ts` |
 

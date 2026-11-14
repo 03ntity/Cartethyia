@@ -96,8 +96,8 @@ presence changes the result as the trigger, then verify its mechanism.
 | Output-limit fields | `WIRE_TOKEN_BOUNDS` / `resolveWireMaxTokens` in `src/protocol/translation/quirks.ts` |
 | Chat body | `canonicalToChatPayload` in `src/protocol/request/chat.ts` |
 | Responses body | `canonicalToResponsesPayload` in `src/protocol/request/responses.ts` |
-| Provider-specific hooks | `buddyPrePayloadCommon` in `src/providers/integrations/buddy/buddy-chat-shared.ts`, and each adapter's `prePayload` |
-| Error mapping/classification | `mapUpstreamHttpError` in `src/protocol/failure-policy.ts` |
+| Provider-specific hooks | `buddyPrePayloadCommon` in `src/providers/integrations/buddy/chat.ts`, and each adapter's `prePayload` |
+| Error mapping/classification | `mapUpstreamHttpError` in `src/protocol/upstream-errors.ts` |
 | `tools` array membership / trim | `clampOpenCodeTools` and `ensureFreeAgentRequest` in `src/providers/integrations/opencode/provider.ts` |
 | Free-tier refusal (403 `FreeTierError`) | the adapter's fingerprint set, not auth — see [`references/opencode-free-tier.md`](references/opencode-free-tier.md) |
 
@@ -205,7 +205,7 @@ it, see it pass. A test that passes both ways proves nothing.
 - Send the same `user-agent` as the failing client so the gateway takes the same
   path.
 - Stop any instance you started.
-- Repeated invalid model requests trip the IP strike window ("Warning n/10 … will temporarily ban this IP"). Keep probe counts low and list `/v1/models` before guessing model ids.
+- Repeated failing requests escalate into a temporary IP ban (`429 rate_limited`, "This address is temporarily banned for too many failed requests"). Keep probe counts low and list `/v1/models` before guessing model ids.
 
 ## Report
 

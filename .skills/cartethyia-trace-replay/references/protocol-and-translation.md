@@ -116,7 +116,8 @@ a corrupt stream must never decode as valid deltas.
 The event vocabulary is small: `message_start`/`response_start`, `content_delta`,
 `tool_call_delta`, `tool_result`, `usage`, `keepalive`, `error`, and exactly one
 `terminal` (`src/protocol/canonical-model.ts`). `canonicalTerminal`
-(`src/protocol/codecs.ts`) is the single builder, so an absent optional is
+(`src/protocol/wire-endpoint.ts`, re-exported by `codecs.ts`) is the single
+builder, so an absent optional is
 omitted rather than emitted as `undefined`. Streamed tool calls keep one id across
 deltas through `src/protocol/tool-identity.ts`, whose `claimFirstEmission`
 is the only gate for call-defining events — a duplicate reaches the client zero
@@ -145,8 +146,8 @@ whose `estimated_cost` is `null`, not `0` — unpriced is not free, and the
 console's `partial` flag depends on that distinction. `repriceUsage`
 (`src/providers/provider-usage.ts`) applies the routed model's catalog rate before the
 record is committed, then the wire converters in the same file
-(`usageToChatWire` :356, `usageToResponsesWire` :384, `usageToMessagesWire`
-:410) render it per surface.
+(`usageToChatWire` :371, `usageToResponsesWire` :399, `usageToMessagesWire`
+:425) render it per surface.
 
 ## Error mapping
 
@@ -184,9 +185,9 @@ and lifecycle violations.
 | New wire family | `canonical-model.ts` (`WIRE_FAMILIES`), `protocol/registry.ts`, a `protocol/request/*` + `protocol/response/*` pair, `capabilities.ts` matrices |
 | Provider rejects a control combination | `protocol/translation/quirks.ts` (one row, only with a proven 400/422) |
 | Output-token floor/ceiling differs per wire | `WIRE_TOKEN_BOUNDS` in `quirks.ts`, then the builder that calls `resolveWireMaxTokens` |
-| Capability not granted to a route | `capabilities.ts` (`routeCapabilitiesFor`, `deriveRequiredCapabilities`) and the snapshot profile in `routing/route-catalog.ts` |
+| Capability not granted to a route | `capabilities.ts` (`routeCapabilitiesFor`, `deriveRequiredCapabilities`) and the snapshot profile in `routing/route-catalog-helpers.ts` (`buildCapabilityProfile`) |
 | Tool-call ids or indexes disagree across frames | `protocol/tool-identity.ts`, then `protocol/translation/tool-repair.ts` |
-| Upstream error lands with the wrong code | `protocol/failure-policy.ts` (`classifyUpstreamError`), plus `protocol/stream-error-frames.ts` for in-stream cases |
+| Upstream error lands with the wrong code | `protocol/failure-classify.ts` (`classifyUpstreamFailure`), plus `protocol/stream-error-frames.ts` for in-stream cases |
 | Public error envelope shape | `protocol/gateway-error.ts`, then `transport/guards/error-lifecycle.ts` |
 | Usage or cost is wrong | decoders → `UsageRecord`; pricing is `repriceUsage` in `providers/provider-usage.ts` |
 | Streaming frames or `[DONE]` | `dispatch/stream-bridge.ts`, then the surface encoder |

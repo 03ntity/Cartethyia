@@ -1,4 +1,4 @@
-# ﻿# Archived research
+# Archived research
 
 Notes use one global sequence, ordered by the date of the documented event or
 observation. Dates use `YYYY-MM-DD`. When an older note has no explicit
@@ -21,16 +21,20 @@ or foundational notes stay at this root.
 
 | Folder      | Topic                                                                                                                                                      | Notes      |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| `qoder/`    | Qoder research (root: audit statis artifact + COSY signing; `live/`: wire reference, payload limits, model matrix, tool-calling, credits — hasil nyata) | 10 files   |
-| `copilot/`  | Copilot capability/context/auto routing                                                                                                                    | 4 findings |
+| `qoder/`    | Qoder research — model matrix, COSY identity runs, Desktop 0.5.7 chat-surface evidence; older notes consolidated in `archive/qoder-research-archive-2026-11-11.zip` | 5 files + 1 zip |
+| `copilot/`  | Copilot capability/context/auto routing + wire audits                                                                                                       | 6 findings |
 | `kiro/`     | Kiro 1.4.62 wire protocol + live verification + IDE/CLI unpack                                                                                             | 3 files    |
-| `opencode/` | OpenCode free-tier wire/gate/sentinel + egress/TLS measurements (merged), desktop 2.2.5 binary evidence                                                    | 2 files    |
+| `opencode/` | OpenCode free-tier wire/gate/sentinel + egress/TLS measurements (merged), desktop 2.2.5 binary evidence, vision handoff                                     | 3 files    |
 | `buddy/`    | Buddy family (CodeBuddy intl/CN + WorkBuddy desktop) — chat dispatch headers, device identity, CLI 2.179.2 + desktop app.asar unpack audits, 1:1 wire gaps | 6 files    |
 | `cursor/`   | Cursor Run protocol + entitlement + agent CLI 2026.11.05 wire audit (hosts, endpoint inventory, headers)                                                   | 2 files    |
 | `grok/`     | Grok Build CLI 1.0.70 binary unpack — endpoint, headers, payload, quota                                                                                    | 1 file     |
 | `trae/`     | Trae IDE 3.6.13 unpack — endpoint inventory (chat/agent/commercial), auth headers, wire verification vs adapter                                            | 2 files   |
 | `freebuff/` | Freebuff Desktop 0.0.201 unpack — OAuth code flow, session admission/catalog, cloud runs (chat) + device gate, ads surface, device-signature spoofing, live probe (ID region, 8/12 sweep) | 1 file    |
 | `deepai/`  | DeepAI Code 0.3.35 desktop unpack + wire audit — DeepAI sign-in (loopback exchange → api_key), API headers (Theos/machine/check-in), T3 Connect Clerk OAuth (PKCE/device grant), relay `/v1` control plane | 2 files   |
+| `antigravity/` | Antigravity wire verification — live probes (2026-11-03)                                                                                                | 1 file     |
+| `clixad/`   | Clixad wire — live verification ledger (2026-11-11)                                                                                                        | 1 file     |
+| `devin/`    | Devin Desktop 3.11.238 audit, adapter proposals, image wire debug, live upstream verification (2026-11-06/07)                                              | 5 files    |
+| `perch/`    | Perch research ledger                                                                                                                                       | 1 file     |
 
 
 ## Root notes
@@ -38,35 +42,28 @@ or foundational notes stay at this root.
 
 | Date       | Topic    | Note                                                                                |
 | ---------- | -------- | ----------------------------------------------------------------------------------- |
-| 2026-10-23 | Routing  | [Request-path census](2026-10-23-routing-request-path-census.md)                    |
-| 2026-10-23 | Routing  | [Layered caching proposal](2026-10-23-routing-layered-caching-proposal.md)          |
-| 2026-10-23 | Trae     | [Agent vs. chat surface](2026-10-23-trae-agent-vs-chat-surface.md)                  |
-| 2026-10-30 | Database | [Share-child row optimization](2026-10-30-database-share-child-row-optimization.md) |
+| 2026-10-23 | Routing  | [Request-path census](../archive/2026-10-23-routing-request-path-census.md)         |
+| 2026-10-23 | Routing  | [Layered caching proposal](../archive/2026-10-23-routing-layered-caching-proposal.md) |
+| 2026-10-23 | Trae     | [Agent vs. chat surface](../archive/2026-10-23-trae-agent-vs-chat-surface.md)       |
 | 2026-11-06 | Trae     | [3.6.13 unpack + wire audit](trae/2026-11-06-trae-3.6.13-unpack-wire-audit.md)     |
 | 2026-11-06 | Cursor   | [agent CLI wire audit](cursor/2026-11-06-cursor-agent-cli-wire-audit.md) — hosts, endpoint inventory, header gap audit vs adapter (x-cursor-checksum gap, timezone/team-id), payloads |
-| 2026-11-11 | DeepAI   | [Live wire verification](deepai/2026-11-11-deepai-code-live-wire-verification.md) — sign-in exchange, models (22), quota (Theos 50/hari), chat hit non-stream + SSE |
+| 2026-11-11 | DeepAI   | [Live wire verification](deepai/2026-11-11-deepai-code-live-wire-verification.md) — sign-in exchange, models (22), quota (Theos 50/day), chat hit non-stream + SSE |
 
 
 ## Qoder findings (`qoder/`)
 
-### Live — hasil nyata (`qoder/live/`)
 
 | Date       | Note                                                                                                        |
 | ---------- | ----------------------------------------------------------------------------------------------------------- |
-| 2026-11-05 | [Wire Reference &amp; Adapter Alignment](qoder/live/2026-11-05-qoder-wire-reference-adapter-alignment.md) — header per permukaan + live capture (CLI/IDE/gRPC/OAuth) + delta audit |
-| 2026-11-05 | [Payload Limits per Surface](qoder/live/2026-11-05-qoder-payload-limits.md) — HTTP ~256K, gRPC ~5.5M–6M |
-| 2026-11-05 | [Model Matrix &amp; Roster Metadata](qoder/live/2026-11-05-qoder-model-matrix.md) — 150/150 pass + roster raw_usage |
-| 2026-11-05 | [Tool-Calling: Probe, Postmortem &amp; Matrix](qoder/live/2026-11-05-qoder-tool-calling.md) |
-| 2026-11-05 | [Credits, claims &amp; identity (incl. 1 Nov deep-dive)](qoder/live/2026-11-05-qoder-credits-claims-identity.md) |
+| 2026-11-05 | [Model Matrix &amp; Roster Metadata](qoder/2026-11-05-qoder-model-matrix.md) — consolidated roster and metadata reference |
+| 2026-11-11 | [All-models COSY identity run (19/19)](qoder/2026-11-11-qoder-cosy-all-models-identity.md) |
+| 2026-11-11 | [Identity distill (19/19, response self-claims)](qoder/2026-11-11-qoder-identity-distill.md) |
+| 2026-11-11 | [Desktop 0.5.7 — chat surface evidence (live)](qoder/2026-11-11-qoder-desktop-0.5.7-chat-surface-evidence.md) |
+| 2026-11-11 | [App 0.5.7 — Chat wire capture (worker, live)](qoder/2026-11-11-qoder-worker-chat-wire-capture.md) |
 
-### Research — audit statis (root)
-
-| Date       | Note                                                                                                        |
-| ---------- | ----------------------------------------------------------------------------------------------------------- |
-| 2026-11-05 | [COSY Signing &amp; Machine Identity](qoder/2026-11-05-qoder-cosy-signing-machine-identity.md) |
-| 2026-11-05 | [Audit — IDE 1.38](qoder/2026-11-05-qoder-ide-1.38-audit.md) |
-| 2026-11-05 | [Audit — CLI 1.1.83](qoder/2026-11-05-qoder-cli-windows-1.1.83-audit.md) |
-| 2026-11-05 | [Audit — NSIS 0.5.3](qoder/2026-11-05-qoder-win-nsis-0.5.3-audit.md) |
+Older Qoder notes (wire reference alignment, payload limits, tool-calling,
+credits/claims, IDE/CLI/NSIS audits) were consolidated into
+[archive/qoder-research-archive-2026-11-11.zip](qoder/archive/qoder-research-archive-2026-11-11.zip).
 
 
 ## Copilot findings (`copilot/`)
@@ -78,6 +75,8 @@ or foundational notes stay at this root.
 | 2026-10-16 | [Chat context and live API probe](copilot/2026-10-16-copilot-context-probe.md)                                    |
 | 2026-10-30 | [Auto routing](copilot/2026-10-30-copilot-auto-routing.md)                                                        |
 | 2026-11-02 | [Auto → Responses 500: tool-argument repair throw](copilot/2026-11-02-copilot-auto-responses-500-repair-throw.md) |
+| 2026-11-03 | [Wire audit — reference VS Code 1.144 vs adapter](copilot/2026-11-03-copilot-not-licensed-wire-audit.md)          |
+| 2026-11-03 | [OpenCode vs Cartethyia — Copilot / Luna (Auto) wire](copilot/2026-11-03-opencode-copilot-comparison.md)          |
 
 
 ## Kiro findings (`kiro/`)
@@ -97,6 +96,7 @@ or foundational notes stay at this root.
 | ---------- | --------------------------------------------------------------------------------------------------- |
 | 2026-11-02 | [Free-tier wire, gate &amp; sentinel (merged reference)](opencode/2026-11-02-opencode-free-tier.md) |
 | 2026-11-02 | [Desktop 2.2.5 binary evidence + replay](opencode/2026-11-02-desktop-2.2.5-binary-evidence.md)      |
+| 2026-11-02 | [Vision handoff on large CLI sessions](opencode/2026-11-02-vision-handoff-large-session.md)         |
 
 
 ## Buddy findings (`buddy/`)

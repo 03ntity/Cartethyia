@@ -18,16 +18,18 @@ Both must pass, in this order, or the request resolves through ordinary aliases:
    a ladder (`src/security/access-control.ts`); the grant is stored explicitly
    and is not implied by `routing:invoke`.
 2. **User-Agent.** `detectRemoteCliToolId` matches `claude-cli/` or
-   `claude-code/` and returns `claude`. A non-matching client is not a remote
-   mapping client, so `allowsCliToolMappings` is false.
+   `claude-code/` and returns `claude`; `codex-tui/` or `codex-cli/` returns
+   `codex` (`src/security/cli-client-fingerprint.ts`). A non-matching client is
+   not a remote mapping client, so `allowsCliToolMappings` is false.
 
 The User-Agent gate exists because several tools send the same short slot. A
 Claude → non-Claude remap would otherwise rewrite a caller that happened to name
 `opus` and steal the real Anthropic alias route. This is routing policy, not a
 security boundary: a client that forges the header looks like Claude Code.
 
-The two gates are evaluated together in `ProxyRequestPreparer.prepare`
-(`src/transport/request/preparer.ts:360`), which then resolves the target with
+The two gates are evaluated together in `ProxyRequestPreparer`'s
+`#resolveAliasAndGateModel` gate (`src/transport/request/preparer.ts:110`,
+called from `prepare`), which then resolves the target with
 `authorization.cliMappingOwnerId ?? authorization.id`. That fallback is how a
 share child inherits its parent's mapping bucket: the child authenticates under
 its own id but reads the parent's routes.
@@ -46,7 +48,7 @@ boundary against the tool registry, not in the database.
 
 ## Snapshot
 
-`route-catalog.ts` joins both tables into `snapshot.cli_aliases`, keyed by
+`route-catalog-repository.ts` joins both tables into `snapshot.cli_aliases`, keyed by
 `${tenantId}:${apiKeyId}` — one bucket per key, so two keys can send the same
 slot to different targets without merging.
 
@@ -63,7 +65,7 @@ CLI aliases are merged *after* ordinary aliases, so within one bucket a CLI row
 wins for the names it covers. `cliMappingSourceKeys()` expands a Claude-family
 alias into the slot names the tool actually sends.
 
-Name normalization in `normalizeAliasKey` (`src/transport/routing/router.ts:114`)
+Name normalization in `normalizeAliasKey` (`src/transport/routing/alias-resolution.ts:24`)
 makes a full model id honor the same mapping as the short slot: a trailing
 `[...]` variant is stripped first (`claude-opus-5[1m]` → `claude-opus-5`), then
 the family-slot fallback takes `claude-opus-5` → `opus`. Both only fire when the
@@ -107,10 +109,10 @@ A mapping to a target with no usable account reaches `plan()` and returns
 | Change | Start here |
 | --- | --- |
 | Recognise another CLI tool | `REMOTE_CLI_TOOL_UA` in `src/security/cli-client-fingerprint.ts`, then `TOOL_REGISTRY` |
-| Which names a slot covers | `cliMappingSourceKeys()` in `src/transport/routing/route-catalog.ts` |
-| Slot normalisation | `normalizeAliasKey` in `src/transport/routing/router.ts` |
+| Which names a slot covers | `cliMappingSourceKeys()` in `src/transport/routing/route-catalog-helpers.ts` |
+| Slot normalisation | `normalizeAliasKey` in `src/transport/routing/alias-resolution.ts` |
 | Persisting a mapping | `src/console/cli-tools/store.ts` |
-| Snapshot compile | `route-catalog.ts` (`enabledMappingBuckets`) |
+| Snapshot compile | `route-catalog-repository.ts` (`enabledMappingBuckets`) |
 | Which key may consume routes | `allowsCliToolMappings` in `src/security/cli-client-fingerprint.ts` |
 
 ## Verify

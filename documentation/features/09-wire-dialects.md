@@ -44,7 +44,7 @@ knob set the codecs read:
   (`reasoning_content` for DeepSeek/chat).
 - `maxTokensField` — `max_tokens` vs `max_completion_tokens`.
 - `stripSpecialTokens` — `"deepseek"` strips DSML/special tokens from streams.
-- `supportsMultipleSystemMessages` — false collapes multiple `system` messages
+- `supportsMultipleSystemMessages` — false collapses multiple `system` messages
   into one (strict chat templates: Qwen Portal / Alibaba / MiniMax).
 - `supportsToolChoice` — false drops `tool_choice` (DeepSeek rejects it).
 - `requiresAssistantContentForToolCalls` — true requires text content on a

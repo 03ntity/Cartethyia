@@ -20,7 +20,9 @@ code from one is not valid in another:
 Authoritative definitions:
 
 - `GatewayErrorCode` union + `GatewayError` class: `src/protocol/gateway-error.ts`
-- Upstream → gateway classification: `src/protocol/failure-policy.ts`
+- Upstream → gateway classification: `src/protocol/upstream-errors.ts`
+  (status table, identifier sets, HTTP mapping) and
+  `src/protocol/failure-classify.ts` (retry policy, terminal categories)
 - Account health decision (categories/cooldowns): `src/providers/operations/account-error-classification.ts`
 - Console domain errors: `src/console/shared/errors.ts`
 - Admission reason → code mapping: `src/security/admission/reasons.ts`
@@ -103,7 +105,7 @@ semantics come from `classifyUpstreamFailure` (the canonical list in §4.5).
 
 | Code | HTTP | Retryable | Meaning | Produced by |
 | --- | --- | --- | --- | --- |
-| `invalid_request` | 400 (also 401/403/404/409/413/422/500 at specific sites) | no | The request is malformed, violates a guard, or carries a bad credential/combination | guards (`body-policy`, `api-key-auth`, `auth-guard`, `drain-endpoint`), surface parsers (`completion.ts`, `messages/encode.ts`, `websearch`, `systemone`, `responses-compact`, `token-count`), console convenience routes (`account-reset`, `export-endpoint`), routing continuation (`router.ts`) |
+| `invalid_request` | 400 (also 401/403/404/409/413/422/500 at specific sites) | no | The request is malformed, violates a guard, or carries a bad credential/combination | guards (`body-policy`, `api-key-auth`, `auth-guard`, `drain-endpoint`), surface parsers (`completion.ts`, `messages/encode.ts`, `websearch`, `systemone`, `responses-compact`, `token-count`), console convenience routes (`account-reset`, `export-endpoint`), routing continuation (`routing-engine.ts`) |
 | `unsupported_media_type` | 415 | no | Payload content-type does not match the endpoint (`body-policy.ts`) | `body-policy.ts` |
 | `capability_unsupported` | 400 | yes | The route does not support a requested capability (reasoning fields, token counting, empty input) | `route-model.ts`, `completion.ts`, `token-count.ts`, `preparer.ts`, `responses/errors.ts` |
 | `unsupported_field` | — | — | Defined in the union but **never constructed** (reserved) | — |
@@ -115,10 +117,10 @@ semantics come from `classifyUpstreamFailure` (the canonical list in §4.5).
 | --- | --- | --- | --- | --- |
 | `ambiguous_model` | 400 | no | Bare model name matches more than one provider owner | `route-model.ts` (`ambiguousModelError`) |
 | `model_not_found` | 404 | yes | Requested model unresolved, alias target missing | `route-model.ts` (`modelNotFoundError`) |
-| `model_not_allowed` | 403 | no | Model diizinkan untuk key ini (allowlist/prefix/denylist) — distinct dari "tidak ada" | `preparer.ts`, admission reasons `model-not-allowed`/`model-denied` |
-| `upstream_not_found` | 404 | no | Upstream 404 (route/resource missing upstream) — not a model verdict | `failure-policy.ts` status table |
+| `model_not_allowed` | 403 | no | Model allowed for this key (allowlist/prefix/denylist) — distinct from "not found" | `preparer.ts`, admission reasons `model-not-allowed`/`model-denied` |
+| `upstream_not_found` | 404 | no | Upstream 404 (route/resource missing upstream) — not a model verdict | `upstream-errors.ts` status table |
 | `accounts_unavailable` | 503 | yes | Model routed but every serving account is unusable (disabled/locked/no healthy candidate) | `route-model.ts` (`accountsUnavailableError`), `auth-guard.ts` (credential store down) |
-| `accounts_rate_limited` | 429 | yes | Every candidate is inside a cooldown window; carries real `retryAfterMs` | `route-model.ts` (`accountsRateLimitedError`), `router.ts` continuation |
+| `accounts_rate_limited` | 429 | yes | Every candidate is inside a cooldown window; carries real `retryAfterMs` | `route-model.ts` (`accountsRateLimitedError`), `routing-engine.ts` continuation |
 | `slug_reserved` | 409 | no | Custom/BYOK provider slug collides with a builtin provider | `provider-contracts.ts` (`parseCustomProviderId`), console provider ops |
 
 ### 3.3 Capacity / admission / quota / pools
@@ -128,12 +130,12 @@ semantics come from `classifyUpstreamFailure` (the canonical list in §4.5).
 | `admission_unavailable` | 503 | yes | Request could not be admitted (peer address unknown, counter store unreachable, corrupted counters) | `guard-errors.ts`, `abuse.ts` |
 | `route_unavailable` | 503 | yes | No eligible route/prep/adapter/binding for the request (internal routing failure, not admission) | `request-context.ts`, `state.ts`, `proxy-request.ts`, native-route exhausted errors |
 | `capacity_exhausted` | 429 | yes | API-key concurrency ceiling (admission `concurrency-limit`) — **not** upstream overload | admission `reasons.ts` |
-| `upstream_overloaded` | 529 (503 passthrough) | yes | Upstream overload (529 / capacity identifiers) — distinct from the key-level `capacity_exhausted` | `failure-policy.ts` classification |
+| `upstream_overloaded` | 529 (503 passthrough) | yes | Upstream overload (529 / capacity identifiers) — distinct from the key-level `capacity_exhausted` | `upstream-errors.ts` classification |
 | `tenant_capacity_exhausted` | 429 | no | Tenant-wide concurrency ceiling hit (admission `tenant-capacity-exhausted`) | admission `reasons.ts` |
 | `provider_capacity_exhausted` | 429 | yes | Every *provider account* in the plan is at its max-inflight — distinct from the key-level `capacity_exhausted` | `route-model.ts` (`capacityExhaustedError`) |
-| `quota_exceeded` | 429 (402 passthrough) | yes | Spend/limit verdict: upstream quota, abuse ban | admission `reasons.ts` (spend), `abuse.ts`, `failure-policy.ts` |
-| `rate_limited` | 429 | yes | Rate-limit murni (rpm/daily/monthly/lifetime token, abuse window, console throttle) — distinct dari spend quota | admission `reasons.ts`, `abuse.ts`, `console-router-guards.ts` |
-| `upstream_queued` | 503 | yes | Upstream accepted the request and queued it (Qoder 403+10605); carries `retryAfterMs` | `failure-policy.ts` (`upstreamQueuedError`) |
+| `quota_exceeded` | 429 (402 passthrough) | yes | Spend/limit verdict: upstream quota, abuse ban | admission `reasons.ts` (spend), `abuse.ts`, `upstream-errors.ts` |
+| `rate_limited` | 429 | yes | Pure rate limiting (rpm/daily/monthly/lifetime token, abuse window, console throttle) — distinct from spend quota | admission `reasons.ts`, `abuse.ts`, `console-router-guards.ts` |
+| `upstream_queued` | 503 | yes | Upstream accepted the request and queued it (Qoder 403+10605); carries `retryAfterMs` | `upstream-errors.ts` (`mapUpstreamHttpError`) |
 | `overloaded` | 503 (529 in telemetry) | **no** (client retries after hint) | Process memory headroom shed (OOM avoidance) | `headroom-guard.ts` |
 | `proxy_pool_capacity_exceeded` | 429 | no | Every pool for the provider is at its concurrency limit | `leases.ts` |
 | `proxy_pool_provider_capacity_exceeded` | 429 | no | Every pool reached the provider's per-proxy limit | `leases.ts` |
@@ -147,26 +149,26 @@ semantics come from `classifyUpstreamFailure` (the canonical list in §4.5).
 
 | Code | HTTP | Retryable | Meaning | Produced by |
 | --- | --- | --- | --- | --- |
-| `authentication_failed` | 401 | yes | Unknown/revoked/expired/mismatched key; upstream auth rejection (401/403 with auth identifiers) | `src/security/api-key-auth.ts`, `export-endpoint.ts`, `boot/app.ts`, `failure-policy.ts` classification |
-| `policy_rejected` | 403 | no | Deterministic policy/content rejection (upstream `11140` content-policy, loopback-only endpoints) | `failure-policy.ts` classification, `export-endpoint.ts`, `boot/app.ts` |
+| `authentication_failed` | 401 | yes | Unknown/revoked/expired/mismatched key; upstream auth rejection (401/403 with auth identifiers) | `src/security/api-key-auth.ts`, `export-endpoint.ts`, `boot/app.ts`, `upstream-errors.ts` classification |
+| `policy_rejected` | 403 | no | Deterministic policy/content rejection (upstream `11140` content-policy, loopback-only endpoints) | `upstream-errors.ts` classification, `export-endpoint.ts`, `boot/app.ts` |
 | `client_router_denied` | 403 | no | Key's client-router denylist blocks the calling client | `auth-guard.ts` |
-| `proxy_auth_required` | 407 | yes | Proxy/upstream demanded proxy authentication | `failure-policy.ts` status table |
+| `proxy_auth_required` | 407 | yes | Proxy/upstream demanded proxy authentication | `upstream-errors.ts` status table |
 
 ### 3.5 Upstream-shaped failures (HTTP status → code)
 
 | Code | HTTP | Retryable | Meaning | Produced by |
 | --- | --- | --- | --- | --- |
-| `context_length_exceeded` | 413 | yes | Upstream reports prompt/context overflow (identifier set or measured prose overflow) | `failure-policy.ts` (`isContextLengthFailure`) |
-| `request_too_large` | 413 | no | 413 from upstream, or body exceeds endpoint byte budget | `failure-policy.ts`, `guard-errors.ts` (`bodyTooLargeError`) |
-| `upstream_conflict` | 409 | no | Upstream 409 / `conflict_error` / `already_exists` | `failure-policy.ts` |
-| `upstream_unprocessable` | 422 | no | Upstream 422 / `unprocessable_entity*` | `failure-policy.ts` |
-| `deadline_exceeded` | 504 | yes | Gateway deadline timer, upstream timeout, first-event timeout, WebSocket receive timeout | `state.ts`, `ssrf.ts`, `empty-stream.ts`, `network/pool/resolver.ts`, `failure-policy.ts` |
-| `transport_unavailable` | 502 | mixed | Upstream transport died mid-response, HTML edge page, WebSocket/HTTP2 failures, missing terminal event, socket drop | `failure-policy.ts`, `empty-stream.ts`, `attempt-finalize.ts`, `network/pool/resolver.ts` |
-| `platform_unavailable` | 502/503 | yes | Upstream 5xx band (502/503/520/522/524/530...), platform deployment failure, invoke kill-switch, readiness dependencies | `failure-policy.ts` classification, `readiness-guard.ts`, `auth-guard.ts`, `relay-deploy.ts` |
-| `transport_closed` | 499 | no (cancel) | "No client left" marker: request cancelled, socket closed, drain abort | `failure-policy.ts` (`sleep`), `attempt-loop.ts`, `attempt-finalize.ts`, `ssrf.ts`, `network/pool/resolver.ts` |
-| `tunnel_setup_failed` | — | — | Pool-health telemetry category (tunnel setup failed); not constructed as a client GatewayError | `network/pool-health-machine.ts` |
-| `tls_rejected` | — | — | Pool-health telemetry category (TLS rejected); not constructed as a client GatewayError | `network/pool-health-machine.ts` |
-| `proxy_unreachable` | — | — | Pool-health fallback category for network-origin failures; used in pool health rows | `network/pool-health-machine.ts` |
+| `context_length_exceeded` | 413 | yes | Upstream reports prompt/context overflow (identifier set or measured prose overflow) | `upstream-errors.ts` (`isContextLengthFailure`) |
+| `request_too_large` | 413 | no | 413 from upstream, or body exceeds endpoint byte budget | `upstream-errors.ts`, `guard-errors.ts` (`bodyTooLargeError`) |
+| `upstream_conflict` | 409 | no | Upstream 409 / `conflict_error` / `already_exists` | `upstream-errors.ts` |
+| `upstream_unprocessable` | 422 | no | Upstream 422 / `unprocessable_entity*` | `upstream-errors.ts` |
+| `deadline_exceeded` | 504 | yes | Gateway deadline timer, upstream timeout, first-event timeout, WebSocket receive timeout | `state.ts`, `ssrf.ts`, `empty-stream.ts`, `network/pool/resolver.ts`, `upstream-errors.ts` |
+| `transport_unavailable` | 502 | mixed | Upstream transport died mid-response, HTML edge page, WebSocket/HTTP2 failures, missing terminal event, socket drop | `upstream-errors.ts`, `empty-stream.ts`, `attempt-finalize.ts`, `network/pool/resolver.ts` |
+| `platform_unavailable` | 502/503 | yes | Upstream 5xx band (502/503/520/522/524/530...), platform deployment failure, invoke kill-switch, readiness dependencies | `upstream-errors.ts` classification, `readiness-guard.ts`, `auth-guard.ts`, `relay-deploy.ts` |
+| `transport_closed` | 499 | no (cancel) | "No client left" marker: request cancelled, socket closed, drain abort | `failure-classify.ts` (`sleep`), `attempt-loop.ts`, `attempt-finalize.ts`, `ssrf.ts`, `network/pool/resolver.ts` |
+| `tunnel_setup_failed` | — | — | Pool-health telemetry category (tunnel setup failed); not constructed as a client GatewayError | `network/pool/health.ts` |
+| `tls_rejected` | — | — | Pool-health telemetry category (TLS rejected); not constructed as a client GatewayError | `network/pool/health.ts` |
+| `proxy_unreachable` | — | — | Pool-health fallback category for network-origin failures; used in pool health rows | `network/pool/health.ts` |
 
 ### 3.6 Lifecycle / internal
 
@@ -182,7 +184,7 @@ semantics come from `classifyUpstreamFailure` (the canonical list in §4.5).
 
 ---
 
-## 4. Upstream classification machinery (`failure-policy.ts`)
+## 4. Upstream classification machinery (`upstream-errors.ts` / `failure-classify.ts`)
 
 This is the single authority that turns an upstream failure into a
 `GatewayError`. Two entry points:
@@ -382,9 +384,9 @@ in use:
 1. **Union + class** — `src/protocol/gateway-error.ts` (`GatewayErrorCode`,
    `PUBLIC_ERROR_DETAIL_KEYS` if new details keys should surface).
 2. **Retry semantics** — add/remove the code in `classifyUpstreamFailure`
-   retryable list (`src/protocol/failure-policy.ts`); if it is upstream-
+   retryable list (`src/protocol/failure-classify.ts`); if it is upstream-
    mapped, also touch `statusToGatewayErrorCode` / `classifyUpstreamError`
-   identifier sets.
+   identifier sets (`src/protocol/upstream-errors.ts`).
 3. **HTTP status mapping** — `CATEGORY_HTTP_STATUS` when the code is a
    terminal category.
 4. **Referenced tests** — the taxonomy is locked by tests; run at minimum
@@ -406,7 +408,8 @@ in use:
 | Concern | File |
 | --- | --- |
 | `GatewayErrorCode` union, class, sanitization, public envelope | `src/protocol/gateway-error.ts` |
-| Upstream status/identifier classification, retry policy, terminal categories | `src/protocol/failure-policy.ts` |
+| Upstream status/identifier classification, HTTP mapping | `src/protocol/upstream-errors.ts` |
+| Retry policy, terminal categories, `sleep` | `src/protocol/failure-classify.ts` |
 | Claude HTTP/stream error mapping | `src/protocol/messages-errors.ts` |
 | OpenAI-family stream error frames | `src/protocol/stream-error-frames.ts` |
 | Codex HTTP error mapping | `src/providers/integrations/codex/codex-errors.ts` |
@@ -416,5 +419,5 @@ in use:
 | Admission reasons → codes | `src/security/admission/reasons.ts` |
 | Console domain errors + handler | `src/console/shared/errors.ts` |
 | Shutdown notice codes | `src/transport/shutdown-notice.ts` |
-| Pool health categories | `src/network/pool-health-machine.ts` |
+| Pool health categories | `src/network/pool/health.ts` |
 | Responses/messages surface error classes | `src/transport/surface/responses/errors.ts`, `src/transport/surface/messages/errors.ts` |

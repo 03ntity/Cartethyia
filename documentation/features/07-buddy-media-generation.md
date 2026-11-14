@@ -2,7 +2,7 @@
 
 Cartethyia routes image and video generation for the Buddy provider family
 through the shared adapter in
-[`buddy-media.ts`](../../src/providers/integrations/buddy/buddy-media.ts).
+[`media.ts`](../../src/providers/integrations/buddy/media.ts).
 CodeBuddy's native image API is a single contract; do not assume the realm
 variants share every endpoint.
 
@@ -57,11 +57,11 @@ under "A desktop client that behaves differently".
 ## Where to change what
 
 - Provider request construction and response parsing:
-  [`src/providers/integrations/buddy/buddy-media.ts`](../../src/providers/integrations/buddy/buddy-media.ts)
+  [`src/providers/integrations/buddy/media.ts`](../../src/providers/integrations/buddy/media.ts)
 - Reusable media CLI:
   [`scripts/tools/media.ts`](../../scripts/tools/media.ts)
 - Provider model paths and metadata:
-  [`src/providers/integrations/buddy/buddy-catalog-shared.ts`](../../src/providers/integrations/buddy/buddy-catalog-shared.ts)
+  [`src/providers/integrations/buddy/catalog.ts`](../../src/providers/integrations/buddy/catalog.ts)
 - Adapter regression tests:
   [`test/providers/buddy-media.test.ts`](../../test/providers/buddy-media.test.ts)
 

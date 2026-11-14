@@ -80,10 +80,10 @@ These are implemented here from scratch, shaped by operating this gateway — no
   dashboard counts that model down independently of the account's own cooldown.
 - **Automatic proxy binding and rotation.** Pools are the egress a request
   leaves through. Candidates can require a pool, and a route's pool strategy
-  (`round_robin` with its own rotation cursor, or weighted least-loaded) decides
-  which one each dispatch takes. Background work — quota refreshes, daily
-  check-ins — rotates egress per account so it spreads across addresses instead
-  of hammering one. See [Network pools](features/03-network-pools.md).
+  (`round_robin` with its own rotation cursor, weighted least-loaded, or
+  random) decides which one each dispatch takes. Background work — quota
+  refreshes, daily check-ins — rotates egress per account so it spreads across
+  addresses instead of hammering one. See [Network pools](features/03-network-pools.md).
 - **Usage floor.** Accounts whose remaining quota sits at or below a provider
   threshold are skipped before they are dialed. See
   [Usage floor](features/04-usage-floor.md).

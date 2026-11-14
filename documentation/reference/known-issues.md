@@ -19,7 +19,8 @@ misattributed to upstream/model behavior.
   argument fragments were orphaned (fixed in `qoder.ts`).
 - Billed gRPC path: the request never sent `tools`; response
   `delta.tool_calls` arrived Struct-wrapped and was dropped; a `tool_use`
-  finish counted as failed → retry/reset (fixed in `qoder-grpc.ts`).
+  finish counted as failed → retry/reset (fixed in `qoder-chat.ts` /
+  `qoder-adapter.ts`, which now carry the billed gRPC path).
 
 **Status: RESOLVED.** Live-verified end-to-end — tool calls stream with full
 arguments, no retry, no reset. The workaround (routing to "populated" slots /
@@ -43,7 +44,7 @@ The failure is intermittent and appears to be a client/opencode quirk with the
 `openai/responses` package while handling reasoning artifacts.
 
 **Workaround.** Use a non-Responses package: `@opencode/ai/providers/anthropic`
-(SDK resmi, verified) or `@opencode/ai/providers/openai-compatible` (verified).
+(official SDK, verified) or `@opencode/ai/providers/openai-compatible` (verified).
 
 **Status.** opencode/client quirk; not a Cartethyia bug. Monitor: if it
 persists on later opencode versions, revisit.

@@ -76,7 +76,8 @@ meaningful when:
   `snapshot.combos[tenantId]?.[resolvedModel]`. A null or wrong tenant id
   yields no combo map, so the requested name is used verbatim and the prefix is
   treated as a provider id — the same failure as above.
-- **a member has more than one slash.** `parseModel` splits on the *first*
+- **a member has more than one slash.** `parseModelReference`
+  (`src/transport/routing/candidate-index.ts`) splits on the *first*
   slash only, so `cline/cline-free/mimo-v2.6-flash` is provider `cline` with
   model `cline-free/mimo-v2.6-flash`. That matches how the catalog stores it,
   but it means a nested-looking id is not a nested route.

@@ -97,8 +97,9 @@ to isolate the trigger, and compare the same request after fixing.
 | `503` | No healthy account upstream, or admission found no route |
 | `504` | Often upstream/gateway timeout; distinguish it from cancellation and transport failure |
 
-Repeated invalid model requests trip the IP strike window ("Warning n/10 … will
-temporarily ban this IP"). Keep probe counts low and list `/v1/models` before
+Repeated failing requests escalate into a temporary IP ban (`429 rate_limited`,
+"This address is temporarily banned for too many failed requests"). Keep probe
+counts low and list `/v1/models` before
 guessing ids.
 
 ### When a 403 survives every payload change, vary the egress IP

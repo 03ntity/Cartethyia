@@ -64,9 +64,9 @@ Two traps, both of them silent:
 3. **Persist it when it is per-model.** A capability that differs per model needs
    a column (see `cartethyia-schema-telemetry`), not a recomputed rule. Add the
    migration to **both** `migrations/full-postgres/` and
-   `migrations/lite-sqlite3/`, and add the file name to the pinned list in
-   `test/persistence/sqlite-baseline.test.ts` — that list is written out, not
-   derived, so a new migration to one backend alone fails there.
+   `migrations/lite-sqlite3/` under the same file name — the parity check in
+   `test/persistence/sqlite-baseline.test.ts` compares the two directories' id
+   lists, so a migration added to one backend alone fails there.
 4. **Surface it.** A capability that reaches the operator needs a wire field and
    a dashboard affordance; a capability that only affects preflight does not.
 

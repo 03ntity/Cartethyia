@@ -34,7 +34,9 @@ forward file in order, on both backends (`src/persistence/db-sqlite.ts`,
 `src/persistence/db-pg.ts`), and gets tables that only a numbered file creates.
 Do not restate the file count here — it grows with every migration and rots
 silently. Read `migrations/full-postgres/` (and `lite-sqlite3/`) instead; the
-one place the list is legitimately written out is the pinned baseline test.
+pinned baseline test (`test/persistence/sqlite-baseline.test.ts`) compares the
+two directories' migration id lists, so a file added to one backend alone fails
+there.
 
 **Treat `0000_baseline.sql` as append-only history.** It is pinned by a content
 hash: `baselineSchemaMarker()` records `sha256` of the file into

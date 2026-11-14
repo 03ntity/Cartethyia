@@ -13,9 +13,9 @@ account health, cooldowns, and pool selection belong to the
 | Layer | Owns | File |
 | --- | --- | --- |
 | Metadata | Identity, base URL, default wire family, service kinds, whether an account is required, JWT verification defaults | `src/providers/provider-metadata.ts` |
-| Spec | Typed provider declarations for compatible API-key contracts | `src/providers/configured-provider.ts`, `src/providers/configured-openai-providers.ts` |
+| Spec | Typed provider declarations for compatible API-key contracts | `src/providers/configured-provider.ts`, `src/providers/bundled-provider-manifest.ts` |
 | Registry | One registration authority; lazy loader cache for adapter, auth, quota, and discovery | `src/providers/provider-registry.ts` |
-| Registration source | Central provider-specific rows plus typed groups for repeated capability shapes | `src/providers/default-registry.ts` |
+| Registration source | Central provider-specific rows plus typed groups for repeated capability shapes | `src/providers/registry/capabilities-*.ts` (composed by `registry/capabilities.ts`, re-exported by `default-registry.ts`) |
 | Adapter | Provider wire bytes | `src/providers/adapters/base-adapter.ts`, `src/providers/adapters/compatible-adapter.ts` |
 | Integration | Per-provider adapter, catalog, OAuth client, quota collector | `src/providers/integrations/<family>/` |
 | Discovery | Live model listing and one-shot probes | `src/providers/discovery/` |
@@ -72,10 +72,10 @@ upstream configuration — region, profile ARN, OAuth client id, token endpoint 
 traveling beside the secret in `ResolvedCredential.auth_state`, because a
 single opaque credential string cannot express both.
 
-Selection is `CredentialResolver` (`provider-credential-resolver.ts`): the
+Selection is `CredentialResolver` (`provider-credentials.ts`): the
 first usable alternative in operator order; decryption and caching live in
 `operations/provider-credential-service.ts`, 5 s TTL keyed on
-`providerId:accountId`. `TokenEnvelope` (`provider-credential-envelope.ts`)
+`providerId:accountId`. `TokenEnvelope` (`provider-credentials.ts`)
 strips one explicitly identified prefix — `Bearer `, `OAuth `, `provider:` —
 so an adapter never emits `Bearer Bearer`; it is separate because adapters
 consume it and the registry imports adapters (the reverse edge would cycle).
@@ -91,7 +91,7 @@ Three auth client shapes:
 Whether a refresher is registered is per-family and deliberate: a grant that is
 absent or dead registers none (a refresh call that always throws turns a
 recoverable 401 into a permanent one — see `kilo`, `qoder`, `openrouter`,
-`zcode`, `cloudflareai`, `alibabacp` in `default-registry.ts`). GitHub is the
+`zcode`, `cloudflareai`, `alibabacp` in `src/providers/registry/capabilities-*.ts`). GitHub is the
 opposite: its Copilot token is short-lived and re-minted, so it registers one.
 Issuers with a JWKS (`grok`, `xai`) declare `issuer`/`jwksUrl`; providers
 without one get registered-claim validation only.
@@ -118,7 +118,7 @@ while leaving operator-owned `enabled` alone.
 `fetchOpenAICompatibleModels`. Per-account catalogs are scoped by the
 credential's plan (`integrations/kiro/kiro-discovery.ts`); static rows are only
 an offline seed. Persisted rows get `source: 'discovered'` or `'auto_free'`
-(`discovery/probing-service.ts`).
+(`discovery/discovery-roster.ts`).
 
 Whether the dashboard offers "Fetch models" is `supportsModelDiscovery`, which
 asks `registry.hasModelDiscovery(providerId)` — not whether it is a custom
@@ -130,7 +130,7 @@ static floor and never resets `enabled`. Catalog presence is not availability �
 ## Quota and health
 
 `QuotaFetcher` (`quota/quota-support.ts`) is a per-provider callback returning
-`ProviderQuotaResult` (`quota-contracts.ts:22`): a plan label and windows with
+`ProviderQuotaResult` (`quota-contracts.ts:27`): a plan label and windows with
 percentages and reset times, resolved lazily through the registry. Each window
 is explicitly `pooled` credit or, by default, an independent quota. Pooled
 balances sum per account before applying a credit/percent floor; independent
@@ -165,7 +165,7 @@ Verified in code only. `bespokeWire` = the adapter frames its own protocol, not 
 | github | Base URL is only a fallback: the real host comes from the Copilot token's `proxy-ep` claim per dispatch. Short-lived token, real refresher. The account label is the GitHub login, read from `api.github.com/user` with a plain user agent — the Copilot client headers draw a 400 there, and a missing login makes every account share one label so the next login replaces the row. The device dialog polls on one timer and waits out `slow_down`; a second poll inside GitHub's interval burns the device code. |
 | antigravity | Google OAuth, but the wire is a Gemini payload wrapped in an agent envelope POSTed to `v1internal:{generate,stream}GenerateContent` — no per-model path. Image generation uses the same envelope with `responseModalities: ["IMAGE"]`; `/v1/search` adds Google Search grounding. |
 | muse | Device-code login yields an OAuth token, exchanged by `POST /muse-code/key` for the `api_key` the backend accepts; the stored `oauth` secret is a `{oauthAccessToken, apiKey}` JSON blob. |
-| meta | A plain developer-dashboard API key, no OAuth (`default-registry.ts`, `meta` row). |
+| meta | A plain developer-dashboard API key, no OAuth (`src/providers/registry/capabilities-*.ts`, `meta` row). |
 | claude / codex | Subscription OAuth on Messages / Responses. Codex also serves websearch; its image path is a Responses `image_generation` tool on a chat carrier, without the chat identity envelope. A catalog row is not an entitlement — a ChatGPT account can reject the tool. |
 | gemini | `x-goog-api-key` header, per-model `:generateContent`/`:streamGenerateContent` paths; not OpenAI-shaped. Image generation uses the same path. |
 | xai / grok | Same issuer and JWKS, different surfaces: `grok` is the free Grok Build CLI proxy, `xai` is the paid API (`provider-metadata.ts`, `grok`/`xai` rows). |
@@ -265,7 +265,7 @@ reference, not the unfiltered model catalog.
 | --- | --- |
 | New provider, family, or catalog row | [Provider-catalog skill](../../.skills/cartethyia-provider-catalog/SKILL.md) |
 | Identity, base URL, default wire, service kinds | `src/providers/provider-metadata.ts` |
-| Wire a bundled provider's adapter/auth/quota/discovery | `src/providers/default-registry.ts` (`PROVIDER_CAPABILITIES`) |
+| Wire a bundled provider's adapter/auth/quota/discovery | `src/providers/registry/capabilities-*.ts` (`PROVIDER_CAPABILITIES`; re-exported by `default-registry.ts`) |
 | One provider's wire behavior | its module under `src/providers/integrations/<family>/` or `src/providers/adapters/` |
 | Standard OpenAI chat/responses provider | add an `ApiKeyProviderSpec`, not an adapter (`configured-provider.ts`); per-account base-URL state via `resolveBaseUrl` (`compatible-adapter.ts`) |
 | Shared HTTP/SSE adapter, registration, caching | `src/providers/adapters/`, `provider-registry.ts` |

@@ -34,8 +34,9 @@ link, not a recovery path. `kind` is `enroll` or `handoff`.
 **Popup.** An optional image and text shown on the public page. The image must
 be one of four raster formats and at most 2 MiB; the check is a database
 constraint (`share_popups_image_mime_check`, `share_popups_image_size_check`) as
-well as `parseSharePopupImage` at the boundary, so an oversized or mislabelled
-upload is rejected before it is stored.
+well as `sniffSharePopupImageMime` and the byte bound in
+`src/console/api-keys/share-popup-image.ts` at the boundary, so an oversized or
+mislabelled upload is rejected before it is stored.
 
 **The auth read does not load image bytes.** The popup is attached after the
 key read, or by a left join on the public share path. Loading it inline would

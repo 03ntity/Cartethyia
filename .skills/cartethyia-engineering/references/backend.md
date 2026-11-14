@@ -42,7 +42,7 @@ authenticated request, `prepare()`, canonical request, `RoutingEngine` plan,
 `completeAttempt`, release. A retryable failure releases the lease and tries the
 next candidate; a terminal one becomes a `GatewayError` and stops.
 
-Retryability is decided in `src/protocol/failure-policy.ts`. A
+Retryability is decided in `src/protocol/failure-classify.ts`. A
 `context_length_exceeded` is retryable: it names how large the prompt was
 against the window *that* candidate offered, so a sibling with more room is
 tried unchanged. Nothing in the loop rewrites the prompt.
@@ -99,7 +99,7 @@ provider metadata, not in `wire_family`. Details:
 
 ## Routing and network
 
-`src/transport/routing/router.ts` plans; `route-model.ts` holds the snapshot
+`src/transport/routing/routing-engine.ts` plans; `route-model.ts` holds the snapshot
 types and `InMemoryRouteSnapshotService`; `admission.ts`/`reservations.ts`
 hold slots and leases; `round-robin.ts` keeps the per-provider cursor. Three
 independently configured strategies: provider, pool, and combo (all `fallback`
@@ -107,7 +107,7 @@ or `round_robin`) — see [network pools](../../../documentation/features/03-net
 [routing aliases and combos](../../../documentation/features/02-routing-aliases-combos.md).
 
 `src/network/` is the egress half: `pool/` selects a pool and accounts bytes,
-`ssrf.ts` rejects disallowed destinations, `retry.ts` is the outbound retry
+`ssrf.ts` rejects disallowed destinations, `util/retry.ts` is the outbound retry
 policy — distinct from the routing failover loop.
 
 ## Security
@@ -173,7 +173,8 @@ transaction commits, a rejected batch is not rewritten per retry, and a
 non-UUID `tenantId` drops the batch. The insert-row mapping is shared with the
 reconciliation backfill via `telemetry-row.ts`. `payload-capture.ts` writes
 gzipped JSON frame files, indexed by `telemetry_payloads` rows naming their
-encoding (`jsonl-file` gzipped, `jsonb-file` pre-compression). Telemetry
+encoding (`jsonl-file`; the legacy `jsonb-file` kind is retired but still
+accepted by the persisted CHECK constraint). Telemetry
 retention prunes expired raw event files without touching the current hour.
 
 ## Console API
@@ -191,7 +192,6 @@ Full surface table: [Console API](../../cartethyia-console-api/references/consol
 | `/cli-tools` | per-key CLI mappings |
 | `/settings/runtime` | tenant preferences |
 | `/backup` | export and restore, re-authenticates |
-| `/studio` | model lab sessions |
 | observability, live, logs, audit | usage, health, log ring, audit |
 
 Backup restore drops columns listed in `LEGACY_DROPPED_COLUMNS`: an old backup
@@ -216,6 +216,6 @@ benchmarks. Client version refresh is deferred until after startup.
 | --- | --- |
 | New client field | `canonical-model.ts`, then both encoders and decoders that must carry it |
 | New provider | a spec in `configured-provider.ts` (standard OpenAI shape) or a family under `integrations/`, then the registry and discovery catalog |
-| Routing rule | `router.ts` and `route-model.ts`, then the snapshot builder |
+| Routing rule | `routing-engine.ts` and `route-model.ts`, then the snapshot builder |
 | Console resource | the domain under `src/console/`, then the dashboard hook that calls it |
 | Schema | `schema.ts`, then the next numbered migration in both `migrations/` directories. Fresh and existing databases both apply the forward files. Do not edit either pinned baseline for an ordinary schema change; the SQLite generator derives from the pinned PostgreSQL baseline, not the accumulated forward migrations |

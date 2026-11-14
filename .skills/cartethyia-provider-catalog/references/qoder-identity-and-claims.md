@@ -4,8 +4,9 @@ Durable knowledge for Qoder account work (both realms — intl and CN): where
 identity comes
 from, which claim surfaces exist, what has been proven dead, and the
 verification order for a new claim path. The full evidence trail lives in
-[`documentation/research/qoder/archive/qoder-research-archive-2026-11-11.zip`](../../../documentation/research/qoder/archive/qoder-research-archive-2026-11-11.zip) (`2026-11-05-qoder-credits-claims-identity.md`)
-and [`documentation/research/qoder/2026-11-05-qoder-cosy-signing-machine-identity.md`](../../../documentation/research/qoder/2026-11-05-qoder-cosy-signing-machine-identity.md).
+[`documentation/research/qoder/archive/qoder-research-archive-2026-11-11.zip`](../../../documentation/research/qoder/archive/qoder-research-archive-2026-11-11.zip)
+(`2026-11-05-qoder-credits-claims-identity.md` and
+`2026-11-05-qoder-cosy-signing-machine-identity.md` inside the archive).
 
 **Two realms** (`src/providers/integrations/qoder/qoder-realm.ts`): intl
 (`api1/api2/api3.qoder.sh`, `openapi.qoder.sh`, client id `e883ade2-…`) and CN
@@ -40,7 +41,8 @@ fixed 64 chars from `randomBytes` (CSPRNG, RFC 7636).
 - Device-login `dt-…`/`drt-…` tokens carry neither user id nor machine id;
   both travel in `auth_state` and every COSY-signed dispatch needs both.
 - A PAT (`pt-…`) is exchanged for a job token (`jt-…`) before COSY signing:
-  `resolveQoderAuth` (`qoder.ts`) is the only exchange authority; re-exchange
+  `resolveQoderAuth` (`qoder-auth.ts`, re-exported by `qoder.ts`) is the only
+  exchange authority; re-exchange
   invalidates the previous `jt-…`, so reuse one identity per process, not one
   per request. The exchange binds machine identity (`machine_id` +
   `machine_token`) like the real client.
@@ -56,7 +58,7 @@ fixed 64 chars from `randomBytes` (CSPRNG, RFC 7636).
 
 ## Signing rules
 
-1. **COSY Bearer** (`qoderSignerFor` in `qoder.ts`) is the scheme for
+1. **COSY Bearer** (`qoderSignerFor` in `qoder-cosy.ts`) is the scheme for
    `/algo/**` inference and model paths, and it has a trap: for a GET, sign the
    **empty string**, not a scrambled `"{}"` body — a `{}`-signed body with no
    content answers 403 `Signature invalid`, and POSTing the scrambled GET body
@@ -68,7 +70,7 @@ fixed 64 chars from `randomBytes` (CSPRNG, RFC 7636).
    leading `/algo` stripped. Headers `X-Request-Id`, `X-Client-Timestamp`,
    `Authorization: Signature <sig>`. Not yet needed by Cartethyia — record, do
    not implement speculatively.
-3. **Go static headers** (`qoderStaticHeaders`): `appcode`, `date`,
+3. **Go static headers** (the static block in `qoder-cosy.ts`): `appcode`, `date`,
    `signature = md5("cosy&<b64secret>&<date>")`. Already proven.
 4. Region endpoints live at
    `GET https://center.qoder.sh/algo/api/v2/service/region/endpoints`

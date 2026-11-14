@@ -35,8 +35,9 @@ contract every provider already sends, and a provider only changes when:
 - a caller passes the flag explicitly.
 
 Leaving it unset leaves every header byte-identical to before the selector
-existed. The header set lives in `buddy-cli-headers.ts` and the selection in
-`buddy-identity.ts`; the per-provider builder is `codebuddyHeaders`.
+existed. The header set and the selection live in `buddy/headers.ts` (the
+`buddy-cli-headers` and `buddy-identity` sections); the per-provider builder is
+`codebuddyHeaders`.
 
 ## Known gap
 
@@ -49,7 +50,7 @@ adopted that yet.
 
 | Concern | File |
 |---|---|
-| Identity selection and `X-User-Id` | `src/providers/integrations/buddy/buddy-identity.ts` |
-| CLI-only headers (agent envelope, SDK fingerprints, trace parent) | `src/providers/integrations/buddy/buddy-cli-headers.ts` |
+| Identity selection and `X-User-Id` | `src/providers/integrations/buddy/headers.ts` (`resolveBuddyIdentity`, `buddyUserId`) |
+| CLI-only headers (agent envelope, SDK fingerprints, trace parent) | `src/providers/integrations/buddy/headers.ts` (`buddyCliHeaders`) |
 | CodeBuddy per-request headers | `src/providers/integrations/buddy/codebuddy/shared.ts` |
-| Conversation and tracing family | `src/providers/integrations/buddy/buddy-conversation-headers.ts` |
+| Conversation and tracing family | `src/providers/integrations/buddy/headers.ts` (`buddyConversationHeaders`) |

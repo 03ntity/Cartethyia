@@ -1,6 +1,6 @@
 # Security Policy
 
-Cartethyia is a self-hosted gateway that proxies credentials, biling, and
+Cartethyia is a self-hosted gateway that proxies credentials, billing, and
 provider traffic. Security bugs in it can expose API keys, tenant data, or
 allow abuse of paid provider accounts — please take responsible disclosure
 seriously.

@@ -86,19 +86,19 @@ and change routing without restarting anything.
 
 <table>
 <tr>
-<td align="center"><img src="documentation/assets/screenshots/overview.png" width="100%" alt="Overview" /><br /><b>Overview</b><br /><sub>Gateway endpoint, remote support, and compression</sub></td>
-<td align="center"><img src="documentation/assets/screenshots/usage.png" width="100%" alt="Usage" /><br /><b>Usage</b><br /><sub>Volume, latency, cached tokens, spend per model</sub></td>
+<td align="center"><img src="documentation/assets/screenshots/overview.webp" width="100%" alt="Overview" /><br /><b>Overview</b><br /><sub>Gateway endpoint, remote support, and compression</sub></td>
+<td align="center"><img src="documentation/assets/screenshots/usage.webp" width="100%" alt="Usage" /><br /><b>Usage</b><br /><sub>Volume, latency, cached tokens, spend per model</sub></td>
 </tr>
 <tr>
-<td align="center"><img src="documentation/assets/screenshots/quota-management.png" width="100%" alt="Quota Management" /><br /><b>Quota Management</b><br /><sub>Per-account quota windows, resets, and availability</sub></td>
-<td align="center"><img src="documentation/assets/screenshots/proxy-pool.png" width="100%" alt="Proxy &amp; Requests" /><br /><b>Proxy &amp; Requests</b><br /><sub>Outbound proxy pools: capacity, latency, and health</sub></td>
+<td align="center"><img src="documentation/assets/screenshots/quota-management.webp" width="100%" alt="Quota Management" /><br /><b>Quota Management</b><br /><sub>Per-account quota windows, resets, and availability</sub></td>
+<td align="center"><img src="documentation/assets/screenshots/proxy-pool.webp" width="100%" alt="Proxy &amp; Requests" /><br /><b>Proxy &amp; Requests</b><br /><sub>Outbound proxy pools: capacity, latency, and health</sub></td>
 </tr>
 <tr>
-<td align="center"><img src="documentation/assets/screenshots/model-lab.png" width="100%" alt="Model Lab" /><br /><b>Model Lab</b><br /><sub>Chat a routed model through the real gateway path</sub></td>
-<td align="center"><img src="documentation/assets/screenshots/cli-tools.png" width="100%" alt="CLI Tools" /><br /><b>CLI Tools</b><br /><sub>Per-CLI model mappings and downloadable config</sub></td>
+<td align="center"><img src="documentation/assets/screenshots/model-lab.webp" width="100%" alt="Model Lab" /><br /><b>Model Lab</b><br /><sub>Chat a routed model through the real gateway path</sub></td>
+<td align="center"><img src="documentation/assets/screenshots/cli-tools.webp" width="100%" alt="CLI Tools" /><br /><b>CLI Tools</b><br /><sub>Per-CLI model mappings and downloadable config</sub></td>
 </tr>
 <tr>
-<td align="center"><img src="documentation/assets/screenshots/customization.png" width="100%" alt="Customization" /><br /><b>Customization</b><br /><sub>Background, transparency, and per-surface blur</sub></td>
+<td align="center"><img src="documentation/assets/screenshots/customization.webp" width="100%" alt="Customization" /><br /><b>Customization</b><br /><sub>Background, transparency, and per-surface blur</sub></td>
 </tr>
 </table>
 
@@ -124,8 +124,8 @@ and change routing without restarting anything.
 
 Generation routes take an opaque body the provider's own adapter shapes —
 whatever a model accepts is what it gets. Images: Gemini, Antigravity, Codex,
-Buddy family. Video: CodeBuddy only (`seedance-2.5`, async task polled to
-completion).
+Buddy family, SenseNova. Video: CodeBuddy only (`seedance-2.5`, async task
+polled to completion).
 
 Embeddings and both audio routes are **passthrough**: admission + accounting,
 body forwarded untouched. No bundled adapter implements them — wire them to a

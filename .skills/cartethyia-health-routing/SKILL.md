@@ -23,7 +23,7 @@ Before changing a status or timeout, trace every reader and branch that uses it.
 
 - A cooldown is not automatically an unhealthy account.
 - Account-wide cooldowns carry a class, defined in `HARD_COOLDOWN_CATEGORIES`
-  (`src/transport/routing/route-catalog.ts`) and projected onto the candidate
+  (`src/transport/routing/route-catalog-repository.ts`) and projected onto the candidate
   as `cooldown_kind` — the health/cooling/lane stamps are typed as
   **`RoutedCandidate`** (`src/transport/routing/route-model.ts`), the shared
   shape `EligibilityEvaluator.evaluate` takes; stamping sites must agree on it
@@ -54,7 +54,7 @@ Before changing a status or timeout, trace every reader and branch that uses it.
 - `model_cooldown` is a hard exclusion per (account, model).
 - **Quota windows are filtered to the requested model's family** before the
   usage-floor and exhausted-window checks (`filterCandidateQuotaWindows` in
-  `src/transport/routing/router.ts`): providers that report per-family windows
+  `src/transport/routing/candidate-evaluation.ts`): providers that report per-family windows
   (Antigravity splits Gemini vs Claude/GPT; Grok uses per-`product:` buckets)
   no longer block every model when one family is exhausted. A Claude
   exhaustion still routes Gemini. Diagnosis note: "quota exhausted" is

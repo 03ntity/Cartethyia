@@ -54,20 +54,25 @@ duplicate managed keys.
 A typical local-Full configuration is:
 
 ```dotenv
+```dotenv
 PORT=12800
 DASHBOARD_DIST=/opt/cartethyia/dist/dashboard
 CARTETHYIA_PACKAGE_ROOT=/opt/cartethyia
 CARTETHYIA_PUBLIC_ORIGIN=https://<domain>
 # Only the local reverse proxy may assert a client IP.
 TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128
+CARTETHYIA_DB_MODE=full
+DATABASE_URL=postgres://cartethyia:<generated>@127.0.0.1:5432/cartethyia
+CARTETHYIA_DATA_DIR=/opt/cartethyia/data
+CARTETHYIA_TELEMETRY_PAYLOAD_DIR=/opt/cartethyia/data/telemetry-payloads
+CARTETHYIA_INSTALL_ID_DIR=/opt/cartethyia/data/.cartethyia
+CARTETHYIA_ENCRYPTION_KEY=<base64 of 32 random bytes>
 ```
 
 **Drain window vs systemd stop budget.** `CARTETHYIA_SHUTDOWN_DRAIN_WINDOW_MS`
 (default 20 000 ms) must fit inside the unit's `TimeoutStopSec=45`: raising the
 drain window past 45 s makes systemd SIGKILL mid-drain, cutting in-flight
 streams anyway. The `update` shutdown path (see below) uses the same budget.
-CARTETHYIA_DB_MODE=full
-DATABASE_URL=postgres://cartethyia:<generated>@127.0.0.1:5432/cartethyia
 CARTETHYIA_DATA_DIR=/opt/cartethyia/data
 CARTETHYIA_TELEMETRY_PAYLOAD_DIR=/opt/cartethyia/data/telemetry-payloads
 CARTETHYIA_INSTALL_ID_DIR=/opt/cartethyia/data/.cartethyia

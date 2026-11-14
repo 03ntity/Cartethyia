@@ -72,9 +72,10 @@ in-flight background refreshes are included in the overview's pending state.
 
 Verify current policy and limits in:
 
-- `src/transport/routing/router.ts` — threshold and exhausted-window decision.
+- `src/transport/routing/candidate-evaluation.ts` — threshold and
+  exhausted-window decision (`creditPriority`).
 - `src/providers/quota/cache.ts` — cache envelope, TTL, retention after failure.
-- `src/console/quota/quota-view.ts` and `account-quota-tenant.ts` — view state
+- `src/console/quota/account-quota.ts` and `account-quota-tenant.ts` — view state
   and cold/background refresh paths.
 - `src/workers/quota-refresh-sweep.ts` and `src/boot/dependencies.ts` — sweep
   bounds and registration.
@@ -85,7 +86,7 @@ Verify current policy and limits in:
 
 | Change | Start here |
 | --- | --- |
-| Threshold evaluation or failover behavior | `EligibilityEvaluator` in `src/transport/routing/router.ts` |
+| Threshold evaluation or failover behavior | `EligibilityEvaluator` in `src/transport/routing/candidate-evaluation.ts` |
 | Persisted setting or route snapshot input | `providerRoutingSettings` in `src/persistence/schema.ts`, then the routing settings store/loader |
 | Quota parsing or accounting windows | `src/providers/quota/` and the provider collector |
 | Cache freshness or failure retention | `src/providers/quota/cache.ts` and its focused tests |
